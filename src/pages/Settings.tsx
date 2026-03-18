@@ -1,9 +1,9 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Sun, Moon, Monitor } from "lucide-react";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { APP_THEMES, useAppSettings, type ColorScheme } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
@@ -41,6 +41,33 @@ export default function Settings() {
           <p className="mb-6 text-sm text-muted-foreground">{t("settings.description")}</p>
 
           <div className="space-y-6">
+            <div>
+              <label className="mb-3 block text-sm font-medium text-foreground">
+                {t("settings.colorScheme")}
+              </label>
+              <div className="flex gap-2">
+                {(["light", "dark", "system"] as ColorScheme[]).map((scheme) => {
+                  const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
+                  const label = t(`settings.colorScheme${scheme.charAt(0).toUpperCase()}${scheme.slice(1)}`);
+                  return (
+                    <button
+                      key={scheme}
+                      type="button"
+                      onClick={() => updateSetting("colorScheme", scheme)}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                        settings.colorScheme === scheme
+                          ? "border-primary bg-primary/10 text-primary font-medium"
+                          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className="mb-3 block text-sm font-medium text-foreground">
                 {t("settings.theme")}

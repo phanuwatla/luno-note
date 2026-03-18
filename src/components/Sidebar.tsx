@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { ChevronDown, ChevronRight, Plus, Search, FileText, FileCode, Folder, FolderOpen, FolderPlus, PanelLeftClose, Copy, ClipboardPaste, Files, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, PanelLeftClose, Copy, ClipboardPaste, Files, Pencil, Trash2 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -115,11 +115,22 @@ function getPreview(content: string, title: string, noContentLabel: string) {
   return text.length > 80 ? text.slice(0, 80) + "…" : text;
 }
 
-function getFileType(note: Note): "txt" | "md" | "unknown" {
+function getFileType(note: Note): "txt" | "md" | "image" | "binary" | "unknown" {
+  if (note.fileType === "image") return "image";
+  if (note.fileType === "binary") return "binary";
   const name = note.fileName?.toLowerCase() || "";
   if (name.endsWith(".txt")) return "txt";
   if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
   return "unknown";
+}
+
+function NoteIcon({ note, active }: { note: Note; active: boolean }) {
+  const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
+  const type = getFileType(note);
+  if (type === "md") return <FileCode className={cls} />;
+  if (type === "image") return <FileImage className={cls} />;
+  if (type === "binary") return <File className={cls} />;
+  return <FileText className={cls} />;
 }
 
 export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, sidebarWidth = 320, isMobile = false, onClose }: SidebarProps) {
@@ -340,11 +351,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               style={{ paddingLeft: `${12 + depth * 12}px` }}
             >
               <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              {getFileType(note) === "md" ? (
-                <FileCode className={`h-3.5 w-3.5 shrink-0 ${activeNoteId === note.id ? "text-primary" : "text-muted-foreground"}`} />
-              ) : (
-                <FileText className={`h-3.5 w-3.5 shrink-0 ${activeNoteId === note.id ? "text-primary" : "text-muted-foreground"}`} />
-              )}
+              <NoteIcon note={note} active={activeNoteId === note.id} />
               <span className={`truncate ${activeNoteId === note.id ? "font-semibold" : "font-medium"}`}>{noteLabel}</span>
             </button>
           </ContextMenuTrigger>
@@ -410,11 +417,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           >
             <div className="mb-1 flex items-baseline justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
-                {getFileType(note) === "md" ? (
-                  <FileCode className={`h-3.5 w-3.5 shrink-0 ${activeNoteId === note.id ? "text-primary" : "text-muted-foreground"}`} />
-                ) : (
-                  <FileText className={`h-3.5 w-3.5 shrink-0 ${activeNoteId === note.id ? "text-primary" : "text-muted-foreground"}`} />
-                )}
+                <NoteIcon note={note} active={activeNoteId === note.id} />
                 <span
                   className={`truncate text-sm ${
                     activeNoteId === note.id ? "font-semibold text-primary" : "font-medium text-foreground"
@@ -676,7 +679,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="no-scrollbar flex-1 overflow-y-auto pb-4">
         {hasTreeView && !query && (
           <div
             onDragOver={(event) => {

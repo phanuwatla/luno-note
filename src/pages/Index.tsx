@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
+import TabBar from "@/components/TabBar";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useTabs } from "@/hooks/useTabs";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle } from "@/lib/fileHandles";
 import { marked } from "marked";
 
 export default function Index() {
-  const { notes, activeNote, activeNoteId, setActiveNoteId, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
+  const { notes, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
+  const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, setActiveTabId } = useTabs();
+  const activeTabNote = notes.find((n) => n.id === activeTabId) ?? null;
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -28,9 +32,9 @@ export default function Index() {
 
   useEffect(() => {
     if (isMobile) {
-      setSidebarOpen(activeNote === null);
+      setSidebarOpen(activeTabNote === null);
     }
-  }, [activeNote, isMobile]);
+  }, [activeTabNote, isMobile]);
 
   const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" }) => {
     const raw = (options?.fileName ?? "").trim();
@@ -128,7 +132,25 @@ export default function Index() {
   const getRelativePath = (folderPath: string, fileName: string) => (folderPath ? `${folderPath}/${fileName}` : fileName);
 
   const scanFolderEntries = useCallback(async (dirHandle: any) => {
-    const entries: Array<{ fileName: string; contentFormat: "plain" | "markdown"; handle: any; folderPath: string; relativePath: string }> = [];
+    const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif"]);
+    const TEXT_EXTS = new Set([
+      ".txt", ".md", ".markdown",
+      ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
+      ".py", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".php", ".swift", ".kt",
+      ".html", ".htm", ".css", ".scss", ".less",
+      ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".ini", ".cfg", ".conf", ".env",
+      ".sh", ".bash", ".zsh", ".fish",
+      ".sql", ".r", ".scala", ".lua", ".vim",
+    ]);
+
+    const entries: Array<{
+      fileName: string;
+      contentFormat: "plain" | "markdown";
+      fileType?: "image" | "binary";
+      handle: any;
+      folderPath: string;
+      relativePath: string;
+    }> = [];
     const folderPaths = new Set<string>();
 
     async function readDir(handle: any, path: string) {
@@ -139,11 +161,24 @@ export default function Index() {
           await readDir(childHandle, subPath);
         } else if (childHandle.kind === "file") {
           const lname = (name as string).toLowerCase();
-          if (!lname.endsWith(".txt") && !lname.endsWith(".md") && !lname.endsWith(".markdown")) continue;
-          const contentFormat: "plain" | "markdown" = lname.endsWith(".txt") ? "plain" : "markdown";
+          const dotIdx = lname.lastIndexOf(".");
+          const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
+
+          let fileType: "image" | "binary" | undefined;
+          let contentFormat: "plain" | "markdown" = "plain";
+
+          if (IMAGE_EXTS.has(ext)) {
+            fileType = "image";
+          } else if (TEXT_EXTS.has(ext)) {
+            contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : "plain";
+          } else {
+            fileType = "binary";
+          }
+
           entries.push({
             fileName: name as string,
             contentFormat,
+            fileType,
             handle: childHandle,
             folderPath: path,
             relativePath: getRelativePath(path, name as string),
@@ -172,12 +207,12 @@ export default function Index() {
         .map((n) => [getRelativePath(n.folderPath || "", n.fileName as string), n] as const),
     );
 
-    const activeNoteRef = activeNoteId ? notes.find((n) => n.id === activeNoteId) : null;
+    const activeNoteRef = activeTabId ? notes.find((n) => n.id === activeTabId) : null;
     const activeRelativePath = activeNoteRef?.fileName
       ? getRelativePath(activeNoteRef.folderPath || "", activeNoteRef.fileName)
       : null;
 
-    const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown"; isLinkedFile: true; folderPath: string }> = [];
+    const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown"; isLinkedFile: true; folderPath: string; fileType?: "image" | "binary" }> = [];
 
     for (const entry of entries) {
       const existing = existingByPath.get(entry.relativePath);
@@ -190,6 +225,19 @@ export default function Index() {
           contentFormat: entry.contentFormat,
           isLinkedFile: true,
           folderPath: entry.folderPath,
+          fileType: entry.fileType,
+        });
+        continue;
+      }
+
+      if (entry.fileType === "image" || entry.fileType === "binary") {
+        nextItems.push({
+          content: "",
+          fileName: entry.fileName,
+          contentFormat: entry.contentFormat,
+          isLinkedFile: true,
+          folderPath: entry.folderPath,
+          fileType: entry.fileType,
         });
         continue;
       }
@@ -223,23 +271,24 @@ export default function Index() {
     );
 
     if (nextNotes.length === 0) {
-      setActiveNoteId(null);
+      setActiveTabId(null);
       return;
     }
 
     if (activeRelativePath) {
       const nextActive = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === activeRelativePath);
       if (nextActive) {
-        setActiveNoteId(nextActive.id);
+        openTab(nextActive.id);
+        removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
         return;
       }
     }
 
-    setActiveNoteId(nextNotes[0].id);
-  }, [activeNoteId, notes, replaceNotes, scanFolderEntries, setActiveNoteId]);
+    removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
+  }, [activeTabId, notes, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes]);
 
   const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" }) => {
-    const normalizedPath = folderPath ?? activeNote?.folderPath ?? "";
+    const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
 
     // If no folder is opened, fallback to normal in-app note creation.
@@ -250,6 +299,7 @@ export default function Index() {
         isLinkedFile: false,
         contentFormat,
       });
+      openTab(note.id);
       return;
     }
 
@@ -273,6 +323,7 @@ export default function Index() {
         isLinkedFile: true,
         contentFormat,
       });
+      openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
     } catch (error) {
       console.error("Create file in folder failed", error);
@@ -282,11 +333,12 @@ export default function Index() {
         isLinkedFile: false,
         contentFormat,
       });
+      openTab(note.id);
     }
   };
 
   const createFolderInFolder = async (folderPath?: string, folderName?: string) => {
-    const normalizedPath = folderPath ?? activeNote?.folderPath ?? "";
+    const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const safeName = (folderName ?? "").trim().replace(/[\\/:*?"<>|]/g, "_") || "untitled-folder";
 
     if (!openedRootDirHandle) return;
@@ -369,12 +421,12 @@ export default function Index() {
       // Keep selection on the renamed folder when possible.
       const parentPath = segments.slice(0, -1).join("/");
       const renamedPath = parentPath ? `${parentPath}/${newFolderName}` : newFolderName;
-      const active = notes.find((n) => n.id === activeNoteId);
+      const active = notes.find((n) => n.id === activeTabId);
       if (active && (active.folderPath || "").startsWith(folderPath)) {
         const suffix = (active.folderPath || "").slice(folderPath.length);
         const newPath = `${renamedPath}${suffix}`.replace(/^\/+/, "");
         const noteWithNewPath = notes.find((n) => n.fileName === active.fileName && n.folderPath === newPath);
-        if (noteWithNewPath) setActiveNoteId(noteWithNewPath.id);
+        if (noteWithNewPath) openTab(noteWithNewPath.id);
       }
 
       await syncFolderFromDisk(openedRootDirHandle);
@@ -664,6 +716,24 @@ export default function Index() {
     };
   }, [openedRootDirHandle, syncFolderFromDisk]);
 
+  // Keep open tabs in sync when notes are deleted (non-folder-sync deletions)
+  useEffect(() => {
+    removeTabsForDeletedNotes(new Set(notes.map((n) => n.id)));
+  }, [notes, removeTabsForDeletedNotes]);
+
+  const openTabNotes = openTabIds.map((id) => notes.find((n) => n.id === id)).filter((n): n is Note => Boolean(n));
+
+  const handleDeleteNote = (id: string): boolean => {
+    closeTab(id, notes.map((n) => n.id));
+    return deleteNote(id);
+  };
+
+  const handleCreateNote = (folderPath?: string): Note => {
+    const note = createNote(folderPath);
+    openTab(note.id);
+    return note;
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Overlay for mobile sidebar */}
@@ -676,9 +746,9 @@ export default function Index() {
         <Sidebar
           notes={notes}
           folderPaths={openedFolderPaths}
-          activeNoteId={activeNoteId}
+          activeNoteId={activeTabId}
           openedFolderName={openedFolderName}
-          onSelect={setActiveNoteId}
+          onSelect={openTab}
           onCreate={createNoteInFolder}
           onCreateFolder={createFolderInFolder}
           onDeleteFile={deleteFileInFolder}
@@ -704,17 +774,25 @@ export default function Index() {
       </div>
 
       {/* Editor area responsive */}
-      <div className="flex-1 flex flex-col md:flex-row">
-        <Editor
-          note={activeNote}
-          onUpdate={updateNote}
-          onDelete={deleteNote}
-          onCreate={createNote}
-          onOpenSidebar={() => setSidebarOpen(true)}
-          isSidebarOpen={sidebarOpen}
-          editorFontSize={settings.editorFontSize}
-          isMobile={isMobile}
+      <div className="flex-1 flex flex-col min-w-0">
+        <TabBar
+          tabs={openTabNotes}
+          activeTabId={activeTabId}
+          onSelectTab={setActiveTabId}
+          onCloseTab={(id) => closeTab(id, notes.map((n) => n.id))}
         />
+        <div className="flex-1 flex flex-col md:flex-row min-h-0">
+          <Editor
+            note={activeTabNote}
+            onUpdate={updateNote}
+            onDelete={handleDeleteNote}
+            onCreate={handleCreateNote}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            isSidebarOpen={sidebarOpen}
+            editorFontSize={settings.editorFontSize}
+            isMobile={isMobile}
+          />
+        </div>
       </div>
     </div>
   );

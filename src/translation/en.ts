@@ -133,6 +133,10 @@ const en = {
     fontPrompt: "Prompt",
     english: "English",
     thai: "Thai",
+    colorScheme: "Color scheme",
+    colorSchemeLight: "Light",
+    colorSchemeDark: "Dark",
+    colorSchemeSystem: "System",
   },
 };
 

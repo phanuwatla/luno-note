@@ -118,6 +118,93 @@
   }
 }
 
+.dark {
+  --background: 222 14% 10%;
+  --foreground: 220 13% 92%;
+
+  --card: 222 14% 12%;
+  --card-foreground: 220 13% 92%;
+
+  --popover: 222 14% 12%;
+  --popover-foreground: 220 13% 92%;
+
+  --primary: 217 91% 62%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 222 14% 16%;
+  --secondary-foreground: 220 13% 92%;
+
+  --muted: 222 14% 16%;
+  --muted-foreground: 215 12% 55%;
+
+  --accent: 217 91% 62%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 0 63% 55%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 220 13% 20%;
+  --input: 220 13% 20%;
+  --ring: 217 91% 62%;
+
+  --sidebar-background: 222 14% 12%;
+  --sidebar-foreground: 220 13% 92%;
+  --sidebar-primary: 217 91% 62%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 222 14% 16%;
+  --sidebar-accent-foreground: 220 13% 92%;
+  --sidebar-border: 220 13% 20%;
+  --sidebar-ring: 217 91% 62%;
+}
+
+.dark:root[data-app-theme='violet'] {
+  --primary: 262 83% 68%;
+  --accent: 262 83% 68%;
+  --ring: 262 83% 68%;
+  --sidebar-primary: 262 83% 68%;
+  --sidebar-ring: 262 83% 68%;
+}
+
+.dark:root[data-app-theme='emerald'] {
+  --primary: 158 60% 45%;
+  --accent: 158 60% 45%;
+  --ring: 158 60% 45%;
+  --sidebar-primary: 158 60% 45%;
+  --sidebar-ring: 158 60% 45%;
+}
+
+.dark:root[data-app-theme='rose'] {
+  --primary: 347 77% 60%;
+  --accent: 347 77% 60%;
+  --ring: 347 77% 60%;
+  --sidebar-primary: 347 77% 60%;
+  --sidebar-ring: 347 77% 60%;
+}
+
+.dark:root[data-app-theme='orange'] {
+  --primary: 25 95% 65%;
+  --accent: 25 95% 65%;
+  --ring: 25 95% 65%;
+  --sidebar-primary: 25 95% 65%;
+  --sidebar-ring: 25 95% 65%;
+}
+
+.dark:root[data-app-theme='slate'] {
+  --primary: 215 16% 55%;
+  --accent: 215 16% 55%;
+  --ring: 215 16% 55%;
+  --sidebar-primary: 215 16% 55%;
+  --sidebar-ring: 215 16% 55%;
+}
+
 .font-mono {
   font-family: 'JetBrains Mono', monospace;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

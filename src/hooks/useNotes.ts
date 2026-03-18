@@ -10,6 +10,7 @@ export interface Note {
   isLinkedFile?: boolean;
   contentFormat?: "plain" | "markdown";
   folderPath?: string;
+  fileType?: "image" | "binary";
 }
 
 const STORAGE_KEY = "notes-app-data";
@@ -80,7 +81,7 @@ export function useNotes() {
     return note;
   }, []);
 
-  const bulkCreateNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown"; folderPath?: string }>) => {
+  const bulkCreateNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown"; folderPath?: string; fileType?: "image" | "binary" }>) => {
     const now = Date.now();
     const newNotes: Note[] = items.map((item) => ({
       id: item.id ?? crypto.randomUUID(),
@@ -92,6 +93,7 @@ export function useNotes() {
       isLinkedFile: item.isLinkedFile,
       contentFormat: item.contentFormat,
       folderPath: item.folderPath,
+      fileType: item.fileType,
     }));
 
     setNotes((prev) => {
@@ -103,7 +105,7 @@ export function useNotes() {
     return newNotes;
   }, []);
 
-  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown"; folderPath?: string }>) => {
+  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown"; folderPath?: string; fileType?: "image" | "binary" }>) => {
     const now = Date.now();
     const newNotes: Note[] = items.map((item) => ({
       id: item.id ?? crypto.randomUUID(),
@@ -115,6 +117,7 @@ export function useNotes() {
       isLinkedFile: item.isLinkedFile,
       contentFormat: item.contentFormat,
       folderPath: item.folderPath,
+      fileType: item.fileType,
     }));
 
     setNotes(() => {

@@ -1,6 +1,7 @@
-import { createContext, createElement, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 export type AppTheme = "blue" | "violet" | "emerald" | "rose" | "orange" | "slate";
+export type ColorScheme = "light" | "dark" | "system";
 
 export interface AppThemeConfig {
   id: AppTheme;
@@ -24,12 +25,14 @@ export interface AppSettings {
   language: "en" | "th";
   fontFamily: "inter" | "system" | "serif" | "mono" | "prompt";
   theme: AppTheme;
+  colorScheme: ColorScheme;
 }
 
 const STORAGE_KEY = "notes-app-settings";
 const FIXED_SIDEBAR_WIDTH = 320;
 
 const VALID_THEMES: AppTheme[] = ["blue", "violet", "emerald", "rose", "orange", "slate"];
+const VALID_COLOR_SCHEMES: ColorScheme[] = ["light", "dark", "system"];
 
 const DEFAULT_SETTINGS: AppSettings = {
   editorFontSize: 15,
@@ -38,6 +41,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: "en",
   fontFamily: "inter",
   theme: "blue",
+  colorScheme: "system",
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -52,16 +56,17 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
       : "inter";
 
   const theme: AppTheme = raw?.theme && VALID_THEMES.includes(raw.theme as AppTheme) ? (raw.theme as AppTheme) : "blue";
+  const colorScheme: ColorScheme = raw?.colorScheme && VALID_COLOR_SCHEMES.includes(raw.colorScheme as ColorScheme) ? (raw.colorScheme as ColorScheme) : "system";
   const confirmBeforeDelete = raw?.confirmBeforeDelete !== false;
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
-    // Keep sidebar width fixed; users are not allowed to resize it.
     sidebarWidth: FIXED_SIDEBAR_WIDTH,
     confirmBeforeDelete,
     language,
     fontFamily,
     theme,
+    colorScheme,
   };
 }
 
@@ -89,6 +94,23 @@ const AppSettingsContext = createContext<AppSettingsContextValue | undefined>(un
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+
+  useEffect(() => {
+    const apply = (dark: boolean) => {
+      document.documentElement.classList.toggle("dark", dark);
+    };
+    if (settings.colorScheme === "dark") {
+      apply(true);
+    } else if (settings.colorScheme === "light") {
+      apply(false);
+    } else {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      apply(mq.matches);
+      const handler = (e: MediaQueryListEvent) => apply(e.matches);
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    }
+  }, [settings.colorScheme]);
 
   const updateSetting = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => {

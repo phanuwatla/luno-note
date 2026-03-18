@@ -135,6 +135,10 @@ const th = {
     fontPrompt: "Prompt",
     english: "English",
     thai: "ไทย",
+    colorScheme: "โหมดสี",
+    colorSchemeLight: "สว่าง",
+    colorSchemeDark: "มืด",
+    colorSchemeSystem: "ตามระบบ",
   },
 };
 

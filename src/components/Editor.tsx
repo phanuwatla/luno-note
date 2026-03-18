@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { Bold, CheckCircle2, CircleDot, Code, File, FileCode, FileText, Heading1, Heading2, ImagePlus, Italic, Languages, Link2, List, ListOrdered, MoreHorizontal, PanelLeftOpen, Plus, Quote, Redo2, Save, Settings, Strikethrough, Trash2, Undo2, Upload } from "lucide-react";
+import { Bold, CheckCircle2, CircleDot, Code, File, FileCode, FileText, Heading1, Heading2, ImagePlus, Italic, Languages, Link2, List, ListOrdered, Monitor, Moon, MoreHorizontal, PanelLeftOpen, Plus, Quote, Redo2, Save, Settings, Strikethrough, Sun, Trash2, Undo2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -182,6 +182,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   const [pendingSaveAction, setPendingSaveAction] = useState<"save" | "saveas" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
+  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
 
@@ -249,7 +250,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   });
 
   useEffect(() => {
-    if (!note || !editor) return;
+    if (!note || !editor || note.fileType) return;
     if (!note.content.trim()) {
       requestAnimationFrame(() => editor.commands.focus("start"));
     }
@@ -777,6 +778,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     if (!note || !canUseNativeFs()) return;
 
     let cancelled = false;
+    let objectUrl: string | null = null;
 
     const hydrateHandle = async () => {
       const storedHandle = await getStoredFileHandle(note.id);
@@ -787,12 +789,19 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       try {
         if (typeof storedHandle.requestPermission === "function") {
           const permission = await storedHandle.requestPermission({ mode: "read" });
-          if (permission !== "granted") {
-            return;
-          }
+          if (permission !== "granted") return;
         }
 
         const file = await storedHandle.getFile();
+
+        if (note.fileType === "image") {
+          objectUrl = URL.createObjectURL(file);
+          if (!cancelled) setImageBlobUrl(objectUrl);
+          return;
+        }
+
+        if (note.fileType === "binary") return;
+
         const text = await file.text();
         const fname = file.name.toLowerCase();
         const format = fname.endsWith(".txt") ? "plain" : "markdown";
@@ -804,17 +813,16 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         }
       } catch (error) {
         console.error("Load linked file failed", error);
-        // If file is missing (NotFoundError) or inaccessible, clear the link
-        if (!cancelled) {
-          await clearLinkedMetadata();
-        }
+        if (!cancelled) await clearLinkedMetadata();
       }
     };
 
+    setImageBlobUrl(null);
     void hydrateHandle();
 
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [note?.id]);
 
@@ -1313,10 +1321,30 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       </div>
       </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
-            <EditorContent editor={editor} />
-          </div>
+        <div className="no-scrollbar flex-1 overflow-y-auto">
+          {note.fileType === "image" ? (
+            <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
+              {imageBlobUrl ? (
+                <img
+                  src={imageBlobUrl}
+                  alt={note.fileName}
+                  className="max-h-full max-w-full rounded-lg object-contain shadow"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{note.fileName}</p>
+              )}
+            </div>
+          ) : note.fileType === "binary" ? (
+            <div className="flex min-h-full w-full flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
+              <File className="h-12 w-12 opacity-30" />
+              <p className="text-sm">{note.fileName}</p>
+              <p className="text-xs opacity-60">ไม่รองรับการพรีวิวไฟล์ประเภทนี้</p>
+            </div>
+          ) : (
+            <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
+              <EditorContent editor={editor} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1441,13 +1469,40 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       </AlertDialog>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="max-h-[86vh] overflow-y-auto rounded-2xl sm:max-w-2xl">
+        <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-2xl">{t("settings.title")}</DialogTitle>
             <DialogDescription>{t("settings.description")}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 py-1">
+          <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 py-1">
+            <div>
+              <label className="mb-3 block text-sm font-medium text-foreground">
+                {t("settings.colorScheme")}
+              </label>
+              <div className="flex gap-2">
+                {(["light", "dark", "system"] as const).map((scheme) => {
+                  const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
+                  const label = t(`settings.colorScheme${scheme.charAt(0).toUpperCase()}${scheme.slice(1)}`);
+                  return (
+                    <button
+                      key={scheme}
+                      type="button"
+                      onClick={() => updateSetting("colorScheme", scheme)}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                        settings.colorScheme === scheme
+                          ? "border-primary bg-primary/10 text-primary font-medium"
+                          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className="mb-3 block text-sm font-medium text-foreground">
                 {t("settings.theme")}
