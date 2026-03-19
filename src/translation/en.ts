@@ -119,6 +119,8 @@ const en = {
   settings: {
     title: "Settings",
     description: "These preferences are stored on this device.",
+    autoSave: "Auto save",
+    autoSaveDescription: "Automatically save note content when changes are made.",
     theme: "Color theme",
     themeBlue: "Blue",
     themeViolet: "Violet",

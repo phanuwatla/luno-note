@@ -1,6 +1,39 @@
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import { Note } from "@/hooks/useNotes";
-import { Bold, CheckCircle2, CircleDot, Code, Download, File, FileCode, FileText, Heading1, Heading2, ImagePlus, Italic, Languages, Link2, List, ListOrdered, Monitor, Moon, MoreHorizontal, PanelLeftOpen, Pause, Play, Plus, Quote, Redo2, Save, Settings, Strikethrough, Sun, Trash2, Undo2, Upload } from "lucide-react";
+import {
+  Bold,
+  CheckCircle2,
+  Circle,
+  Code,
+  Download,
+  File,
+  FileCode,
+  FileText,
+  FileImage,
+  FolderArchive,
+  ImagePlus,
+  Italic,
+  Languages,
+  Link2,
+  List,
+  ListOrdered,
+  Monitor,
+  Moon,
+  MoreHorizontal,
+  ClipboardList,
+  Plus,
+  Undo2,
+  Redo2,
+  Strikethrough,
+  Quote,
+  Upload,
+  Trash2,
+  Settings,
+  Sun,
+  Play,
+  Pause,
+  Save,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -40,6 +73,10 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Heading1Icon } from "@/components/icons/Heading1Icon";
+import { Heading2Icon } from "@/components/icons/Heading2Icon";
+import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
+import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -247,7 +284,6 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     },
     onUpdate: ({ editor: instance }) => {
       if (!note || syncingFromNote.current) return;
-      if (note.contentFormat === "html") return;
       onUpdate(note.id, { content: instance.getHTML() });
     },
   });
@@ -261,8 +297,6 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   useEffect(() => {
     if (!editor) return;
-    if (note?.contentFormat === "html") return;
-
     const nextHtml = toEditorHtml(note?.content ?? "");
     if (editor.getHTML() === nextHtml) return;
 
@@ -495,7 +529,10 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   const canUseNativeFs = canUseNativeFileSystem;
 
+  const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | null>(null);
+
   const getPreferredExtension = () => {
+    if (selectedExtension) return selectedExtension;
     const currentFileName = note?.fileName?.toLowerCase() ?? "";
     if (currentFileName.endsWith(".txt")) return "txt";
     if (currentFileName.endsWith(".md") || currentFileName.endsWith(".markdown")) return "md";
@@ -505,7 +542,8 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   const getSuggestedFileName = () => {
     const safeTitle = (note?.title || "note").trim().replace(/[\\/:*?"<>|]/g, "_") || "note";
-    return `${safeTitle}.${getPreferredExtension()}`;
+    const ext = selectedExtension || getPreferredExtension();
+    return `${safeTitle}.${ext}`;
   };
 
   const getMarkdownFromHtml = (html: string): string => {
@@ -728,16 +766,14 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   const handleExtensionSelected = async (ext: "md" | "txt" | "html") => {
     if (!note) return;
-
+    setSelectedExtension(ext);
     const content = getContentToSave(ext);
     setExtensionDialogOpen(false);
-
     if (pendingSaveAction === "save") {
       await performSave(content, ext);
     } else if (pendingSaveAction === "saveas") {
       await performSaveAs(content, ext);
     }
-
     setPendingSaveAction(null);
   };
 
@@ -805,12 +841,18 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
         const text = await file.text();
         const fname = file.name.toLowerCase();
-        const format = fname.endsWith(".txt") ? "plain" : "markdown";
+        let format: "plain" | "markdown" | "html" = "markdown";
+        if (fname.endsWith(".txt")) format = "plain";
+        else if (fname.endsWith(".html") || fname.endsWith(".htm")) format = "html";
 
         if (!cancelled) {
-          parseAndSetContent(text, format);
+          if (format === "html") {
+            onUpdate(note.id, { content: text, contentFormat: "html" });
+          } else {
+            parseAndSetContent(text, format);
+          }
           updateLinkedMetadata(note.id, file.name);
-          setSavedSnapshot(note.id, format === "plain" ? "txt" : "md", text);
+          setSavedSnapshot(note.id, format === "plain" ? "txt" : format === "html" ? "html" : "md", text);
         }
       } catch (error) {
         console.error("Load linked file failed", error);
@@ -908,10 +950,12 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </div>
           <div className="min-w-0 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              {isSaved ? (
+              {(note.fileType === "image" || note.fileType === "binary") ? (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              ) : isSaved ? (
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
               ) : (
-                <CircleDot className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600" />
               )}
               <span className="sr-only">{saveStatusLabel}</span>
               <span className="block max-w-[126px] truncate">{displayFileName}</span>
@@ -929,21 +973,21 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           <div className={`flex w-fit items-center gap-1 rounded-full border border-border bg-secondary p-1 ${note.contentFormat === "html" ? "hidden" : ""}`}>
               {/* Undo / Redo */}
               <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                disabled={!editor || !editor.can().undo()}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().undo().run()}
-              >
-                <Undo2 className="h-4 w-4" />
-                <span className="sr-only">{t("editor.undo")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.undo")}</TooltipContent>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                    disabled={!editor || !editor.can().undo()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => editor?.chain().focus().undo().run()}
+                  >
+                    <Undo2 className="h-4 w-4" />
+                    <span className="sr-only">{t("editor.undo")}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("editor.undo")}</TooltipContent>
               </Tooltip>
               <Tooltip>
               <TooltipTrigger asChild>
@@ -978,7 +1022,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
               >
-                <Heading1 className="h-4 w-4" />
+                <Heading1Icon className="h-4 w-4" />
                 <span className="sr-only">{t("editor.heading1")}</span>
               </Button>
               </TooltipTrigger>
@@ -996,7 +1040,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
               >
-                <Heading2 className="h-4 w-4" />
+                <Heading2Icon className="h-4 w-4" />
                 <span className="sr-only">{t("editor.heading2")}</span>
               </Button>
               </TooltipTrigger>
@@ -1217,11 +1261,11 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                   </Tooltip>
                   <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
                     <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading1 className="mr-2 h-4 w-4" />
+                      <Heading1Icon className="mr-2 h-4 w-4" />
                       <span>{t("editor.heading1")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading2 className="mr-2 h-4 w-4" />
+                      <Heading2Icon className="mr-2 h-4 w-4" />
                       <span>{t("editor.heading2")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
@@ -1281,10 +1325,12 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
         <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground lg:block lg:justify-self-center lg:self-auto">
           <span className="flex items-center gap-2">
-            {isSaved ? (
+            {(note.fileType === "image" || note.fileType === "binary") ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+            ) : isSaved ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
             ) : (
-              <CircleDot className="h-4 w-4 shrink-0 text-amber-600" />
+              <CircleDotDashedIcon className="h-4 w-4 shrink-0 text-amber-600" />
             )}
             <span className="sr-only">{saveStatusLabel}</span>
             <span className="block max-w-[296px] truncate xl:max-w-[356px]">{displayFileName}</span>
@@ -1294,13 +1340,13 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} md:w-auto md:justify-self-end md:justify-end md:pt-0`}>
           {!isSidebarOpen && (
             <Tooltip>
-            <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onOpenSidebar}>
-              <PanelLeftOpen className="h-4 w-4" />
-              <span className="sr-only">{t("editor.showSidebar")}</span>
-            </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.showSidebar")}</TooltipContent>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onOpenSidebar}>
+                  <Plus className="h-4 w-4" />
+                  <span className="sr-only">{t("editor.showSidebar")}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.showSidebar")}</TooltipContent>
             </Tooltip>
           )}
 
@@ -1418,14 +1464,19 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                 <p className="text-sm text-muted-foreground">{note.fileName}</p>
               )}
             </div>
-          ) : note.fileType === "binary" ? (
+          ) : note.fileType === "binary" || (note.fileName?.toLowerCase()?.endsWith(".zip")) ? (
             <div className="flex min-h-full w-full flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
-              <File className="h-12 w-12 opacity-30" />
+              {note.fileName?.toLowerCase()?.endsWith(".zip") ? (
+                <FolderArchive className="h-12 w-12 opacity-30" />
+              ) : (
+                <File className="h-12 w-12 opacity-30" />
+              )}
               <p className="text-sm">{note.fileName}</p>
               <p className="text-xs opacity-60">{t("editor.previewNotSupported")}</p>
             </div>
           ) : note.contentFormat === "html" ? (
             <HtmlCodeEditor
+              key={note.id}
               value={note.content}
               onChange={(val) => onUpdate(note.id, { content: val })}
               fontSize={editorFontSize}

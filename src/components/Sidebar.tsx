@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { ChevronDown, ChevronRight, Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, PanelLeftClose, Copy, ClipboardPaste, Files, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -117,22 +117,27 @@ function getPreview(content: string, title: string, noContentLabel: string) {
   return text.length > 80 ? text.slice(0, 80) + "…" : text;
 }
 
-function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "unknown" {
+function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
   if (note.fileType === "image") return "image";
   if (note.fileType === "binary") return "binary";
   const name = note.fileName?.toLowerCase() || "";
   if (name.endsWith(".txt")) return "txt";
   if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
   if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
+  if (name.endsWith(".zip")) return "zip";
   return "unknown";
 }
 
 function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   const type = getFileType(note);
+  // Force FolderArchive for .zip files regardless of fileType
+  const name = note.fileName?.toLowerCase() || "";
+  if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
   if (type === "md") return <FileCode className={cls} />;
   if (type === "html") return <FileCode className={cls} />;
   if (type === "image") return <FileImage className={cls} />;
+  if (type === "zip") return <FolderArchive className={cls} />;
   if (type === "binary") return <File className={cls} />;
   return <FileText className={cls} />;
 }
@@ -158,6 +163,25 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [dropTargetFolderPath, setDropTargetFolderPath] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirmTargets, setDeleteConfirmTargets] = useState<Note[]>([]);
+  // State for folder delete confirmation
+  const [deleteFolderConfirmOpen, setDeleteFolderConfirmOpen] = useState(false);
+  const [deleteFolderTargetPath, setDeleteFolderTargetPath] = useState<string | null>(null);
+    const handleDeleteFolderFromContext = (folderPath: string) => {
+      if (confirmBeforeDelete) {
+        setDeleteFolderTargetPath(folderPath);
+        setDeleteFolderConfirmOpen(true);
+      } else {
+        onDeleteFolder?.(folderPath);
+      }
+    };
+
+    const handleDeleteFolderConfirmed = () => {
+      if (deleteFolderTargetPath) {
+        onDeleteFolder?.(deleteFolderTargetPath);
+      }
+      setDeleteFolderConfirmOpen(false);
+      setDeleteFolderTargetPath(null);
+    };
   const dragExpandTimeoutRef = useRef<number | null>(null);
   const { t } = useTranslation();
   const activeNote = useMemo(() => notes.find((n) => n.id === activeNoteId) ?? null, [notes, activeNoteId]);
@@ -300,7 +324,8 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const handleCreateFromDialog = () => {
     const baseName = newFileName.trim();
     const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
-    const fileName = baseName ? `${baseName}.${newFileExt}` : "untitled.txt";
+    // ใช้ extension ที่เลือกเสมอ
+    const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
 
     onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     setCreateFileDialogOpen(false);
@@ -580,7 +605,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <span>{t("sidebar.copyAction")}</span>
           </ContextMenuItem>
           <ContextMenuItem onClick={() => onPasteToFolder?.(node.path)} className="gap-2" disabled={!canPaste}>
-            <ClipboardPaste className="h-4 w-4" />
+            <ClipboardList className="h-4 w-4" />
             <span>{t("sidebar.pasteAction")}</span>
           </ContextMenuItem>
           <ContextMenuItem
@@ -620,7 +645,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <Pencil className="h-4 w-4" />
             <span>{t("sidebar.renameAction")}</span>
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDeleteFolder?.(node.path)} className="gap-2">
+          <ContextMenuItem onClick={() => handleDeleteFolderFromContext(node.path)} className="gap-2">
             <Trash2 className="h-4 w-4" />
             <span>{t("sidebar.deleteFolderAction")}</span>
           </ContextMenuItem>
@@ -645,7 +670,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
         <div className="flex items-center gap-1">
           <Button type="button" variant="ghost" size="icon" onClick={onClose}>
-            <PanelLeftClose className="h-4 w-4" />
+            <Plus className="h-4 w-4" />
             <span className="sr-only">{t("sidebar.hideSidebar")}</span>
           </Button>
           {onOpenFolder && (
@@ -875,6 +900,41 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    {/* Note delete confirmation dialog */}
+    <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
+          <AlertDialogDescription>{t("sidebar.deleteFilesDescription")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+            onClick={handleDeleteConfirmed}
+          >
+            {t("common.delete")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    {/* Folder delete confirmation dialog */}
+    <Dialog open={deleteFolderConfirmOpen} onOpenChange={setDeleteFolderConfirmOpen}>
+      <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("sidebar.deleteFolderAction")}</DialogTitle>
+          <DialogDescription>{t("sidebar.deleteFilesDescription")}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setDeleteFolderConfirmOpen(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="button" variant="destructive" onClick={handleDeleteFolderConfirmed}>
+            {t("common.delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </aside>
   );
 }

@@ -1,0 +1,19 @@
+import React from "react";
+export function CircleEllipsisIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M17 12h.01" />
+      <path d="M12 12h.01" />
+      <path d="M7 12h.01" />
+    </svg>
+  );
+}

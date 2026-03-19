@@ -777,6 +777,7 @@ export default function Index() {
           sidebarWidth={settings.sidebarWidth}
           isMobile={isMobile}
           onClose={() => setSidebarOpen(false)}
+          confirmBeforeDelete={settings.confirmBeforeDelete}
         />
       </div>
 

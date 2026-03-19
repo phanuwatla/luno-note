@@ -26,6 +26,7 @@ export interface AppSettings {
   fontFamily: "inter" | "system" | "serif" | "mono" | "prompt";
   theme: AppTheme;
   colorScheme: ColorScheme;
+  autoSave: boolean;
 }
 
 const STORAGE_KEY = "notes-app-settings";
@@ -42,6 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: "inter",
   theme: "blue",
   colorScheme: "system",
+  autoSave: true,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -67,6 +69,7 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     fontFamily,
     theme,
     colorScheme,
+    autoSave: typeof raw?.autoSave === "boolean" ? raw.autoSave : DEFAULT_SETTINGS.autoSave,
   };
 }
 

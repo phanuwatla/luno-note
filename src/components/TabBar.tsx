@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { X, FileText, FileCode } from "lucide-react";
+import { FileImage, File, FolderArchive } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 
 interface TabBarProps {
@@ -10,6 +11,28 @@ interface TabBarProps {
 }
 
 export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: TabBarProps) {
+    function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
+      if (note.fileType === "image") return "image";
+      if (note.fileType === "binary") return "binary";
+      const name = note.fileName?.toLowerCase() || "";
+      if (name.endsWith(".txt")) return "txt";
+      if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
+      if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
+      if (name.endsWith(".zip")) return "zip";
+      return "unknown";
+    }
+    function NoteIcon({ note, isActive }: { note: Note; isActive: boolean }) {
+      const cls = `h-3.5 w-3.5 shrink-0 opacity-60 ${isActive ? "text-primary" : "text-muted-foreground"}`;
+      const type = getFileType(note);
+      const name = note.fileName?.toLowerCase() || "";
+      if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
+      if (type === "md") return <FileCode className={cls} />;
+      if (type === "html") return <FileCode className={cls} />;
+      if (type === "image") return <FileImage className={cls} />;
+      if (type === "zip") return <FolderArchive className={cls} />;
+      if (type === "binary") return <File className={cls} />;
+      return <FileText className={cls} />;
+    }
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
 
@@ -25,12 +48,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: T
     <div ref={scrollRef} className="no-scrollbar flex items-end overflow-x-auto border-b border-border bg-background">
       {tabs.map((note) => {
         const isActive = note.id === activeTabId;
-        const label =
-          note.fileName ||
-          note.title?.trim() ||
-          "Untitled";
-        const Icon = note.contentFormat === "markdown" || note.contentFormat === "html" ? FileCode : FileText;
-
+        const label = note.fileName || note.title?.trim() || "Untitled";
         return (
           <div
             key={note.id}
@@ -42,7 +60,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: T
             }`}
             onClick={() => onSelectTab(note.id)}
           >
-            <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+            <NoteIcon note={note} isActive={isActive} />
             <span className="min-w-0 truncate">{label}</span>
             <button
               type="button"

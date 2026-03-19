@@ -121,6 +121,8 @@ const th = {
   settings: {
     title: "การตั้งค่า",
     description: "การตั้งค่าเหล่านี้จะถูกบันทึกไว้ในอุปกรณ์นี้",
+    autoSave: "บันทึกอัตโนมัติ",
+    autoSaveDescription: "บันทึกโน้ตโดยอัตโนมัติเมื่อมีการเปลี่ยนแปลงเนื้อหา",
     theme: "สีธีม",
     themeBlue: "น้ำเงิน",
     themeViolet: "ม่วง",
