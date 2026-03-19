@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -14,7 +15,7 @@ interface SidebarProps {
   activeNoteId: string | null;
   openedFolderName?: string | null;
   onSelect: (id: string) => void;
-  onCreate: (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" }) => void;
+  onCreate: (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => void;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void;
   onCopyFile?: (note: Note) => void;
   onCopyFiles?: (notes: Note[]) => void;
@@ -32,6 +33,7 @@ interface SidebarProps {
   onDeleteFiles?: (notes: Note[]) => void;
   onDeleteFolder?: (folderPath: string) => void;
   onOpenFolder?: () => void;
+  confirmBeforeDelete?: boolean;
   sidebarWidth?: number;
   isMobile?: boolean;
   onClose?: () => void;
@@ -115,12 +117,13 @@ function getPreview(content: string, title: string, noContentLabel: string) {
   return text.length > 80 ? text.slice(0, 80) + "…" : text;
 }
 
-function getFileType(note: Note): "txt" | "md" | "image" | "binary" | "unknown" {
+function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "unknown" {
   if (note.fileType === "image") return "image";
   if (note.fileType === "binary") return "binary";
   const name = note.fileName?.toLowerCase() || "";
   if (name.endsWith(".txt")) return "txt";
   if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
+  if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
   return "unknown";
 }
 
@@ -128,12 +131,13 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   const type = getFileType(note);
   if (type === "md") return <FileCode className={cls} />;
+  if (type === "html") return <FileCode className={cls} />;
   if (type === "image") return <FileImage className={cls} />;
   if (type === "binary") return <File className={cls} />;
   return <FileText className={cls} />;
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, sidebarWidth = 320, isMobile = false, onClose }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 320, isMobile = false, onClose }: SidebarProps) {
   const [query, setQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
@@ -142,7 +146,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [renameFileDialogOpen, setRenameFileDialogOpen] = useState(false);
   const [renameFolderDialogOpen, setRenameFolderDialogOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
-  const [newFileExt, setNewFileExt] = useState<"txt" | "md">("txt");
+  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">("txt");
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [lastSelectedNoteId, setLastSelectedNoteId] = useState<string | null>(null);
@@ -152,6 +156,8 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [renameTargetFolderPath, setRenameTargetFolderPath] = useState<string>("");
   const [draggedItem, setDraggedItem] = useState<{ kind: "file" | "folder"; note?: Note; folderPath?: string } | null>(null);
   const [dropTargetFolderPath, setDropTargetFolderPath] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteConfirmTargets, setDeleteConfirmTargets] = useState<Note[]>([]);
   const dragExpandTimeoutRef = useRef<number | null>(null);
   const { t } = useTranslation();
   const activeNote = useMemo(() => notes.find((n) => n.id === activeNoteId) ?? null, [notes, activeNoteId]);
@@ -229,8 +235,21 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
   const handleDeleteFromContext = (note: Note) => {
     const targets = getContextTargetNotes(note);
-    if (targets.length > 1) onDeleteFiles?.(targets);
-    else onDeleteFile?.(targets[0]);
+    if (confirmBeforeDelete) {
+      setDeleteConfirmTargets(targets);
+      setDeleteConfirmOpen(true);
+    } else if (targets.length > 1) {
+      onDeleteFiles?.(targets);
+    } else {
+      onDeleteFile?.(targets[0]);
+    }
+  };
+
+  const handleDeleteConfirmed = () => {
+    if (deleteConfirmTargets.length > 1) onDeleteFiles?.(deleteConfirmTargets);
+    else if (deleteConfirmTargets.length === 1) onDeleteFile?.(deleteConfirmTargets[0]);
+    setDeleteConfirmOpen(false);
+    setDeleteConfirmTargets([]);
   };
 
   const handleDropToFolder = (targetFolderPath: string) => {
@@ -280,7 +299,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
   const handleCreateFromDialog = () => {
     const baseName = newFileName.trim();
-    const contentFormat = newFileExt === "md" ? "markdown" : "plain";
+    const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
     const fileName = baseName ? `${baseName}.${newFileExt}` : "untitled.txt";
 
     onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
@@ -742,11 +761,12 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               <select
                 id="new-file-ext"
                 value={newFileExt}
-                onChange={(e) => setNewFileExt(e.target.value === "md" ? "md" : "txt")}
+                onChange={(e) => setNewFileExt(e.target.value === "md" ? "md" : e.target.value === "html" ? "html" : "txt")}
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="txt">{t("sidebar.fileTypeTxt")}</option>
                 <option value="md">{t("sidebar.fileTypeMd")}</option>
+                <option value="html">{t("sidebar.fileTypeHtml")}</option>
               </select>
             </div>
           </div>

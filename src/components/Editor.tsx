@@ -1,5 +1,6 @@
+import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import { Note } from "@/hooks/useNotes";
-import { Bold, CheckCircle2, CircleDot, Code, File, FileCode, FileText, Heading1, Heading2, ImagePlus, Italic, Languages, Link2, List, ListOrdered, Monitor, Moon, MoreHorizontal, PanelLeftOpen, Plus, Quote, Redo2, Save, Settings, Strikethrough, Sun, Trash2, Undo2, Upload } from "lucide-react";
+import { Bold, CheckCircle2, CircleDot, Code, Download, File, FileCode, FileText, Heading1, Heading2, ImagePlus, Italic, Languages, Link2, List, ListOrdered, Monitor, Moon, MoreHorizontal, PanelLeftOpen, Pause, Play, Plus, Quote, Redo2, Save, Settings, Strikethrough, Sun, Trash2, Undo2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -161,7 +162,7 @@ interface EditorProps {
 }
 
 type SaveSnapshot = {
-  ext: "md" | "txt";
+  ext: "md" | "txt" | "html";
   content: string;
 };
 
@@ -183,6 +184,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
 
@@ -192,7 +194,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   const isLikelyHtml = (text: string) => /<\/?[a-z][\s\S]*>/i.test(text);
   
-  const getContentFormat = (): "plain" | "markdown" => {
+  const getContentFormat = (): "plain" | "markdown" | "html" => {
     if (note?.contentFormat) return note.contentFormat;
     return "markdown";
   };
@@ -245,6 +247,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     },
     onUpdate: ({ editor: instance }) => {
       if (!note || syncingFromNote.current) return;
+      if (note.contentFormat === "html") return;
       onUpdate(note.id, { content: instance.getHTML() });
     },
   });
@@ -258,6 +261,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   useEffect(() => {
     if (!editor) return;
+    if (note?.contentFormat === "html") return;
 
     const nextHtml = toEditorHtml(note?.content ?? "");
     if (editor.getHTML() === nextHtml) return;
@@ -281,11 +285,6 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   }, [editor, editorFontSize]);
 
   useEffect(() => {
-    if (!isMobile) {
-      setMobileToolbarWidth(0);
-      return;
-    }
-
     const updateWidth = () => {
       setMobileToolbarWidth(mobileToolbarAreaRef.current?.clientWidth ?? 0);
     };
@@ -305,9 +304,9 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       observer?.disconnect();
       window.removeEventListener("resize", updateWidth);
     };
-  }, [isMobile]);
+  }, []);
 
-  const shouldUseMobileOverflow = isMobile && mobileToolbarWidth > 0 && mobileToolbarWidth < MOBILE_FULL_TOOLBAR_MIN_WIDTH;
+  const shouldUseMobileOverflow = mobileToolbarWidth > 0 && mobileToolbarWidth < MOBILE_FULL_TOOLBAR_MIN_WIDTH;
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -500,6 +499,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     const currentFileName = note?.fileName?.toLowerCase() ?? "";
     if (currentFileName.endsWith(".txt")) return "txt";
     if (currentFileName.endsWith(".md") || currentFileName.endsWith(".markdown")) return "md";
+    if (currentFileName.endsWith(".html") || currentFileName.endsWith(".htm")) return "html";
     return "txt";
   };
 
@@ -535,12 +535,14 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       .trimEnd();
   };
 
-  const getContentToSave = (targetExt?: "md" | "txt"): string => {
+  const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
     if (!note) return "";
-    const format = targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
+    const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
     const content = note.content;
 
-    if (format === "plain") {
+    if (format === "html") {
+      return note.contentFormat === "html" ? content : (editor?.getHTML() ?? content);
+    } else if (format === "plain") {
       // Already plain text (from textarea), or strip HTML/markdown to plain text
       if (isLikelyHtml(content)) return getPlainTextFromHtml(content);
       // Could be markdown text - strip markdown symbols to plain text too
@@ -559,7 +561,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     }
   };
 
-  const setSavedSnapshot = (noteId: string, ext: "md" | "txt", content: string) => {
+  const setSavedSnapshot = (noteId: string, ext: "md" | "txt" | "html", content: string) => {
     setSavedSnapshotByNoteId((prev) => ({
       ...prev,
       [noteId]: { ext, content },
@@ -593,10 +595,10 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     });
   };
 
-  const downloadMarkdown = (markdown: string, ext: "md" | "txt" = "txt") => {
+  const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" = "txt") => {
     if (!note) return;
 
-    const blobType = ext === "txt" ? "text/plain;charset=utf-8" : "text/markdown;charset=utf-8";
+    const blobType = ext === "txt" ? "text/plain;charset=utf-8" : ext === "html" ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8";
     const blob = new Blob([markdown], { type: blobType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -615,7 +617,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     setSavedSnapshot(note.id, ext, markdown);
   };
 
-  const performSave = async (content: string, ext: "md" | "txt") => {
+  const performSave = async (content: string, ext: "md" | "txt" | "html") => {
     if (!note) return;
 
     const existingHandle = fileHandleByNoteIdRef.current[note.id];
@@ -651,7 +653,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     }
   };
 
-  const performSaveAs = async (content: string, ext: "md" | "txt") => {
+  const performSaveAs = async (content: string, ext: "md" | "txt" | "html") => {
     if (!note) return;
 
     if (!canUseNativeFs()) {
@@ -661,16 +663,15 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
     try {
       const w = window as any;
-      const extDesc = ext === "md" ? "Markdown" : "Text";
-      const extAccept = ext === "md" ? ".md" : ".txt";
+      const extDesc = ext === "md" ? "Markdown" : ext === "html" ? "HTML" : "Text";
+      const extAccept = ext === "md" ? ".md" : ext === "html" ? ".html" : ".txt";
+      const mimeType = ext === "md" ? "text/markdown" : ext === "html" ? "text/html" : "text/plain";
       const handle = await w.showSaveFilePicker({
-        suggestedName: getSuggestedFileName().replace(/\.(md|txt)$/, `.${ext}`),
+        suggestedName: getSuggestedFileName().replace(/\.(md|txt|html)$/, `.${ext}`),
         types: [
           {
             description: `${extDesc} files`,
-            accept: {
-              [ext === "md" ? "text/markdown" : "text/plain"]: [extAccept],
-            },
+            accept: { [mimeType]: [extAccept] },
           },
         ],
       });
@@ -686,7 +687,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         targetNoteId = createdNote.id;
         onUpdate(targetNoteId, {
           content: ext === "txt" ? content : note.content,
-          contentFormat: ext === "txt" ? "plain" : "markdown",
+          contentFormat: ext === "txt" ? "plain" : ext === "html" ? "html" : "markdown",
           isLinkedFile: false,
           fileName: undefined,
         });
@@ -713,7 +714,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     if (!note) return;
 
     const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
-    const ext = getPreferredExtension() as "md" | "txt";
+    const ext = getPreferredExtension() as "md" | "txt" | "html";
     const content = getContentToSave(ext);
 
     if (!existingHandle?.createWritable) {
@@ -725,7 +726,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     await performSave(content, ext);
   };
 
-  const handleExtensionSelected = async (ext: "md" | "txt") => {
+  const handleExtensionSelected = async (ext: "md" | "txt" | "html") => {
     if (!note) return;
 
     const content = getContentToSave(ext);
@@ -859,6 +860,42 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   );
   const saveStatusLabel = isSaved ? t("editor.saveStatusSaved") : t("editor.saveStatusUnsaved");
 
+  const getExportBaseName = () => {
+    const name = note.fileName || note.title?.trim() || t("editor.untitled");
+    const dotIdx = name.lastIndexOf(".");
+    return dotIdx > 0 ? name.slice(0, dotIdx) : name;
+  };
+
+  const handleExportPdf = () => {
+    const content = editor?.getHTML() ?? note.content;
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${displayFileName}</title>` +
+      `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
+      `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
+      `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
+      `</head><body>${content}</body></html>`
+    );
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const handleExportWord = () => {
+    const content = editor?.getHTML() ?? note.content;
+    const html =
+      `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
+      `<head><meta charset="UTF-8"></head><body>${content}</body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${getExportBaseName()}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
       <TooltipProvider delayDuration={420}>
@@ -881,9 +918,15 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
             </span>
           </div>
         </div>
-        <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
-        <div ref={mobileToolbarAreaRef} className={`min-w-0 w-full overflow-x-auto lg:flex-none lg:overflow-visible ${isMobile ? "order-2" : ""}`}>
-          <div className="flex min-w-full items-center gap-1 rounded-full border border-border bg-secondary p-1 md:w-max md:min-w-0 md:gap-1 md:rounded-full md:p-1">
+        <div className="flex flex-col gap-2.5 md:grid md:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center md:gap-3">
+        <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
+          {note.contentFormat === "html" && (
+            <div className="flex w-fit items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <FileCode className="h-4 w-4" />
+              <span>HTML Editor</span>
+            </div>
+          )}
+          <div className={`flex w-fit items-center gap-1 rounded-full border border-border bg-secondary p-1 ${note.contentFormat === "html" ? "hidden" : ""}`}>
               {/* Undo / Redo */}
               <Tooltip>
               <TooltipTrigger asChild>
@@ -1236,7 +1279,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </div>
         </div>
 
-        <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground md:block lg:justify-self-center lg:self-auto">
+        <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground lg:block lg:justify-self-center lg:self-auto">
           <span className="flex items-center gap-2">
             {isSaved ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -1248,7 +1291,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </span>
         </div>
 
-        <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
+        <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} md:w-auto md:justify-self-end md:justify-end md:pt-0`}>
           {!isSidebarOpen && (
             <Tooltip>
             <TooltipTrigger asChild>
@@ -1263,6 +1306,23 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           <div className="ml-auto flex items-center gap-1">
+          {note.contentFormat === "html" && (
+          <Tooltip>
+          <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant={htmlPreviewOpen ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8 rounded-full"
+            onClick={() => setHtmlPreviewOpen((v) => !v)}
+          >
+            {htmlPreviewOpen ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            <span className="sr-only">Preview</span>
+          </Button>
+          </TooltipTrigger>
+          <TooltipContent>{htmlPreviewOpen ? t("editor.hidePreview") : t("editor.showPreview")}</TooltipContent>
+          </Tooltip>
+          )}
           <DropdownMenu>
             <Tooltip>
             <TooltipTrigger asChild>
@@ -1283,6 +1343,29 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               <DropdownMenuItem onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
                 <File className="h-4 w-4" />
                 <span>{t("editor.saveAs")}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <Tooltip>
+            <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full">
+                <Download className="h-4 w-4" />
+                <span className="sr-only">{t("editor.exportFile")}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("editor.exportFile")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
+              <DropdownMenuItem onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                <FileText className="h-4 w-4" />
+                <span>{t("editor.exportPdf")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                <FileCode className="h-4 w-4" />
+                <span>{t("editor.exportWord")}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1321,7 +1404,8 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       </div>
       </div>
 
-        <div className="no-scrollbar flex-1 overflow-y-auto">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <div className={`flex flex-col ${note.contentFormat === "html" ? "flex-1 min-h-0" : "no-scrollbar flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : ""}`}>
           {note.fileType === "image" ? (
             <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
               {imageBlobUrl ? (
@@ -1338,15 +1422,35 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
             <div className="flex min-h-full w-full flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
               <File className="h-12 w-12 opacity-30" />
               <p className="text-sm">{note.fileName}</p>
-              <p className="text-xs opacity-60">ไม่รองรับการพรีวิวไฟล์ประเภทนี้</p>
+              <p className="text-xs opacity-60">{t("editor.previewNotSupported")}</p>
             </div>
+          ) : note.contentFormat === "html" ? (
+            <HtmlCodeEditor
+              value={note.content}
+              onChange={(val) => onUpdate(note.id, { content: val })}
+              fontSize={editorFontSize}
+            />
           ) : (
             <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
               <EditorContent editor={editor} />
             </div>
           )}
         </div>
-      </div>
+        {note.contentFormat === "html" && htmlPreviewOpen && (
+          <div className="flex-1 border-t border-border md:border-t-0 md:border-l overflow-hidden flex flex-col md:w-1/2">
+            <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30">
+              <Play className="h-3 w-3" />
+              <span>Run</span>
+            </div>
+            <iframe
+              className="flex-1 w-full bg-white"
+              srcDoc={note.contentFormat === "html" ? note.content : (editor?.getHTML() ?? note.content)}
+              sandbox="allow-scripts allow-same-origin"
+              title="HTML Preview"
+            />
+          </div>
+        )}
+        </div>
 
       <AlertDialog open={Boolean(alertMessage)} onOpenChange={(open) => !open && setAlertMessage(null)}>
         <AlertDialogContent>
@@ -1366,7 +1470,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
             <DialogTitle>{t("editor.selectFileFormat")}</DialogTitle>
             <DialogDescription>{t("editor.selectFileFormatDesc")}</DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="grid grid-cols-3 gap-3 py-2">
             <button
               type="button"
               onClick={() => void handleExtensionSelected("txt")}
@@ -1384,6 +1488,15 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               <FileCode className="h-8 w-8 text-primary" />
               <span className="text-sm font-semibold">.md</span>
               <span className="text-xs text-muted-foreground">Markdown</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExtensionSelected("html")}
+              className="flex flex-col items-center gap-2.5 rounded-2xl border-2 border-border bg-secondary p-5 hover:border-primary hover:bg-primary/5 transition-colors"
+            >
+              <FileCode className="h-8 w-8 text-primary" />
+              <span className="text-sm font-semibold">.html</span>
+              <span className="text-xs text-muted-foreground">HTML</span>
             </button>
           </div>
         </DialogContent>
@@ -1611,6 +1724,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
       </TooltipProvider>
     </>
   );

@@ -29,7 +29,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: T
           note.fileName ||
           note.title?.trim() ||
           "Untitled";
-        const Icon = note.contentFormat === "markdown" ? FileCode : FileText;
+        const Icon = note.contentFormat === "markdown" || note.contentFormat === "html" ? FileCode : FileText;
 
         return (
           <div

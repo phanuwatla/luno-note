@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
 import TabBar from "@/components/TabBar";
+import Breadcrumb from "@/components/Breadcrumb";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -36,7 +37,7 @@ export default function Index() {
     }
   }, [activeTabNote, isMobile]);
 
-  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" }) => {
+  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
     const raw = (options?.fileName ?? "").trim();
     const safe = raw.replace(/[\\/:*?"<>|]/g, "_");
 
@@ -55,9 +56,15 @@ export default function Index() {
     if (extFromName === "txt") {
       return { fileName: `${base}.txt`, contentFormat: "plain" as const };
     }
+    if (extFromName === "html" || extFromName === "htm") {
+      return { fileName: `${base}.${extFromName}`, contentFormat: "html" as const };
+    }
 
     if (desiredFormat === "markdown") {
       return { fileName: `${base}.md`, contentFormat: "markdown" as const };
+    }
+    if (desiredFormat === "html") {
+      return { fileName: `${base}.html`, contentFormat: "html" as const };
     }
 
     return { fileName: `${base}.txt`, contentFormat: "plain" as const };
@@ -145,7 +152,7 @@ export default function Index() {
 
     const entries: Array<{
       fileName: string;
-      contentFormat: "plain" | "markdown";
+      contentFormat: "plain" | "markdown" | "html";
       fileType?: "image" | "binary";
       handle: any;
       folderPath: string;
@@ -165,12 +172,12 @@ export default function Index() {
           const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
 
           let fileType: "image" | "binary" | undefined;
-          let contentFormat: "plain" | "markdown" = "plain";
+          let contentFormat: "plain" | "markdown" | "html" = "plain";
 
           if (IMAGE_EXTS.has(ext)) {
             fileType = "image";
           } else if (TEXT_EXTS.has(ext)) {
-            contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : "plain";
+            contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : "plain";
           } else {
             fileType = "binary";
           }
@@ -212,7 +219,7 @@ export default function Index() {
       ? getRelativePath(activeNoteRef.folderPath || "", activeNoteRef.fileName)
       : null;
 
-    const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown"; isLinkedFile: true; folderPath: string; fileType?: "image" | "binary" }> = [];
+    const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown" | "html"; isLinkedFile: true; folderPath: string; fileType?: "image" | "binary" }> = [];
 
     for (const entry of entries) {
       const existing = existingByPath.get(entry.relativePath);
@@ -245,7 +252,7 @@ export default function Index() {
       try {
         const file = await entry.handle.getFile();
         const text = await file.text();
-        const content = entry.contentFormat === "plain" ? text : (marked.parse(text, { async: false, gfm: true, breaks: true }) as string);
+        const content = entry.contentFormat === "markdown" ? (marked.parse(text, { async: false, gfm: true, breaks: true }) as string) : text;
         nextItems.push({
           content,
           fileName: entry.fileName,
@@ -287,7 +294,7 @@ export default function Index() {
     removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
   }, [activeTabId, notes, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes]);
 
-  const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" }) => {
+  const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
 
@@ -781,6 +788,7 @@ export default function Index() {
           onSelectTab={setActiveTabId}
           onCloseTab={(id) => closeTab(id, notes.map((n) => n.id))}
         />
+        <Breadcrumb note={activeTabNote} rootFolderName={openedFolderName} />
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
           <Editor
             note={activeTabNote}
