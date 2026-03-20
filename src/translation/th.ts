@@ -57,6 +57,7 @@ const th = {
     strikethrough: "ขีดฆ่า",
     bulletList: "รายการหัวข้อย่อย",
     orderedList: "รายการเรียงลำดับ",
+    checkbox: "ช่องทำเครื่องหมาย",
     code: "โค้ด inline",
     blockquote: "บล็อกคำพูด",
     link: "ลิงก์",

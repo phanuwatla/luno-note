@@ -34,6 +34,7 @@ import {
   Pause,
   Save,
 } from "lucide-react";
+import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -62,6 +63,8 @@ import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle } from "@/lib/fileHandles";
@@ -77,6 +80,7 @@ import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
 import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
 import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
+import { PanelRightCloseIcon } from "./icons/PanelRightCloseIcon";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -227,7 +231,48 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 508;
 
-  const turndown = useMemo(() => new TurndownService({ headingStyle: "atx", bulletListMarker: "-" }), []);
+  const turndown = useMemo(() => {
+    const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
+
+    // Suppress individual taskItem processing – handled wholesale by taskList rule below
+    td.addRule("taskItem", {
+      filter: (node: HTMLElement) =>
+        node.nodeName === "LI" && node.getAttribute("data-type") === "taskItem",
+      replacement: () => "",
+    });
+
+    // Convert Tiptap's <ul data-type="taskList"> to markdown checkboxes
+    td.addRule("taskList", {
+      filter: (node: HTMLElement) =>
+        node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
+      replacement: (_content: string, node: Node) => {
+        const ul = node as HTMLElement;
+        const items = Array.from(ul.querySelectorAll('li[data-type="taskItem"]')).map((li) => {
+          const checked = (li as HTMLElement).getAttribute("data-checked") === "true" ? "x" : " ";
+          const contentDiv = li.querySelector("div");
+          const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : "";
+          return `- [${checked}] ${text}`;
+        });
+        return "\n\n" + items.join("\n") + "\n\n";
+      },
+    });
+
+    // Legacy format: <li class="task-list-item"> (notes saved before this fix)
+    td.addRule("legacyTaskItem", {
+      filter: (node: HTMLElement) =>
+        node.nodeName === "LI" && node.classList.contains("task-list-item"),
+      replacement: (_content: string, node: Node) => {
+        const li = node as HTMLElement;
+        const checkbox = li.querySelector('input[type="checkbox"]');
+        const checked = checkbox ? ((checkbox as HTMLInputElement).checked ? "x" : " ") : " ";
+        const contentSpan = li.querySelector(".task-list-item-content");
+        const text = contentSpan ? contentSpan.textContent?.trim() ?? "" : "";
+        return `- [${checked}] ${text}\n`;
+      },
+    });
+
+    return td;
+  }, []);
 
   const isLikelyHtml = (text: string) => /<\/?[a-z][\s\S]*>/i.test(text);
   
@@ -236,16 +281,91 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     return "markdown";
   };
 
-  const toEditorHtml = (text: string) => {
+  /** Detect if a string is a Tiptap JSON document */
+  const isTiptapJson = (text: string) => text.trimStart().startsWith('{"type":"doc"');
+
+  /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
+  const parseEditorContent = (text: string): string | Record<string, unknown> => {
     if (!text.trim()) return "<h1></h1><p></p>";
-    // Only used for markdown format
-    if (isLikelyHtml(text)) return text;
-    return marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+    if (isTiptapJson(text)) {
+      try { return JSON.parse(text); } catch { /* fall through */ }
+    }
+    return toEditorHtml(text);
+  };
+
+  /** Convert one task-list line/element to a Tiptap taskItem <li> string */
+  const toTaskItemHtml = (isChecked: boolean, text: string) =>
+    `<li data-type="taskItem" data-checked="${isChecked}">` +
+    `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""} style="width:16px;height:16px;"><span></span></label>` +
+    `<div><p>${text}</p></div>` +
+    `</li>`;
+
+  /** Convert a DOM tree's GFM / legacy task list items to Tiptap's native format */
+  const migrateDomTaskLists = (root: HTMLElement) => {
+    // Handle legacy HTML saved before this fix (<li class="task-list-item">)
+    root.querySelectorAll("li.task-list-item").forEach((li) => {
+      const checkbox = li.querySelector('input[type="checkbox"]');
+      const isChecked = checkbox ? (checkbox as HTMLInputElement).checked : false;
+      checkbox?.remove();
+      const contentSpan = li.querySelector(".task-list-item-content");
+      const inner = contentSpan
+        ? (contentSpan as HTMLElement).innerHTML.trim()
+        : (li as HTMLElement).innerHTML.trim();
+      const tpl = document.createElement("template");
+      tpl.innerHTML = toTaskItemHtml(isChecked, inner);
+      li.replaceWith(tpl.content.firstChild!);
+    });
+
+    // Handle marked GFM output (<li> with <input type="checkbox"> child)
+    root.querySelectorAll("li").forEach((li) => {
+      const checkbox = li.querySelector('input[type="checkbox"]');
+      if (!checkbox || li.getAttribute("data-type") === "taskItem") return;
+      const isChecked = (checkbox as HTMLInputElement).checked;
+      checkbox.remove();
+      const inner = (li as HTMLElement).innerHTML.trim();
+      const tpl = document.createElement("template");
+      tpl.innerHTML = toTaskItemHtml(isChecked, inner || "<p></p>");
+      li.replaceWith(tpl.content.firstChild!);
+    });
+
+    // Re-tag any <ul> that now contains taskItems
+    root.querySelectorAll("ul").forEach((ul) => {
+      if (ul.querySelector('li[data-type="taskItem"]')) {
+        ul.setAttribute("data-type", "taskList");
+        ul.removeAttribute("class");
+      }
+    });
+  };
+
+  const toEditorHtml = (text: string): string => {
+    if (!text.trim()) return "<h1></h1><p></p>";
+
+    if (isLikelyHtml(text)) {
+      // Already in Tiptap native format — return as-is
+      if (text.includes('data-type="taskList"') || text.includes("data-type='taskList'")) return text;
+      // Migrate legacy HTML (<li class="task-list-item">) to Tiptap format
+      if (!text.includes("task-list-item")) return text;
+      const temp = document.createElement("div");
+      temp.innerHTML = text;
+      migrateDomTaskLists(temp);
+      return temp.innerHTML;
+    }
+
+    // Let marked handle all markdown → HTML (including GFM task lists with <input type="checkbox">)
+    const html = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+
+    // Post-process: convert marked's GFM checkbox output to Tiptap's native taskList format
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    migrateDomTaskLists(temp);
+    return temp.innerHTML;
   };
 
   const editor = useEditor({
     extensions: [
       StarterKit,
+      TaskList,
+      TaskItem,
       Link.configure({
         openOnClick: false,
         autolink: true,
@@ -274,17 +394,18 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         emptyNodeClass: "is-empty",
       }),
     ],
-    content: toEditorHtml(note?.content ?? ""),
+    content: parseEditorContent(note?.content ?? ""),
     editorProps: {
       attributes: {
         style: `font-size:${editorFontSize}px;`,
         class:
-          "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6",
+          "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6" +
+          " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-2 [&_ul[data-type='taskList']_li_label_input]:h-3 [&_ul[data-type='taskList']_li_label_input]:w-3 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0",
       },
     },
     onUpdate: ({ editor: instance }) => {
       if (!note || syncingFromNote.current) return;
-      onUpdate(note.id, { content: instance.getHTML() });
+      onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
     },
   });
 
@@ -297,11 +418,18 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
   useEffect(() => {
     if (!editor) return;
-    const nextHtml = toEditorHtml(note?.content ?? "");
-    if (editor.getHTML() === nextHtml) return;
+    const noteContent = note?.content ?? "";
+    const parsed = parseEditorContent(noteContent);
+
+    // For JSON content, compare by JSON string to avoid spurious re-renders
+    if (isTiptapJson(noteContent)) {
+      if (JSON.stringify(editor.getJSON()) === noteContent) return;
+    } else {
+      if (editor.getHTML() === parsed) return;
+    }
 
     syncingFromNote.current = true;
-    editor.commands.setContent(nextHtml);
+    editor.commands.setContent(parsed as string);
     syncingFromNote.current = false;
   }, [editor, note?.id, note?.content]);
 
@@ -312,7 +440,8 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         attributes: {
           style: `font-size:${editorFontSize}px;`,
           class:
-            "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6",
+            "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6" +
+            " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-[3px] [&_ul[data-type='taskList']_li_label_input]:h-4 [&_ul[data-type='taskList']_li_label_input]:w-4 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0",
         },
       },
     });
@@ -578,13 +707,14 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
     const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
     const content = note.content;
 
+    // For JSON-stored notes, always use the live editor HTML as the source for export
+    const htmlContent = isTiptapJson(content) ? (editor?.getHTML() ?? "") : content;
+
     if (format === "html") {
       return note.contentFormat === "html" ? content : (editor?.getHTML() ?? content);
     } else if (format === "plain") {
-      // Already plain text (from textarea), or strip HTML/markdown to plain text
-      if (isLikelyHtml(content)) return getPlainTextFromHtml(content);
-      // Could be markdown text - strip markdown symbols to plain text too
-      const stripped = content
+      if (isLikelyHtml(htmlContent)) return getPlainTextFromHtml(htmlContent);
+      const stripped = htmlContent
         .replace(/^#{1,6}\s+/gm, "")       // headings
         .replace(/\*\*(.+?)\*\*/g, "$1")   // bold
         .replace(/\*(.+?)\*/g, "$1")       // italic
@@ -594,8 +724,9 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
         .replace(/\[(.+?)\]\(.+?\)/g, "$1"); // links
       return stripped;
     } else {
-      // For markdown, convert HTML back to markdown
-      return getMarkdownFromHtml(content);
+      // For markdown, convert HTML back to markdown using turndown rules
+      if (isLikelyHtml(htmlContent)) return getMarkdownFromHtml(htmlContent);
+      return htmlContent;
     }
   };
 
@@ -962,7 +1093,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
             </span>
           </div>
         </div>
-        <div className="flex flex-col gap-2.5 md:grid md:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center md:gap-3">
+        <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
           {note.contentFormat === "html" && (
             <div className="flex w-fit items-center gap-1.5 text-sm font-medium text-muted-foreground">
@@ -1106,6 +1237,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
 
               {!shouldUseMobileOverflow && <div className="hidden h-4 w-px bg-border md:block" />}
 
+
               {/* Lists */}
               <Tooltip>
               <TooltipTrigger asChild>
@@ -1140,6 +1272,23 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               </Button>
               </TooltipTrigger>
               <TooltipContent>{t("editor.orderedList")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+              <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("taskList") ? "bg-primary/15 text-primary" : ""}`}
+                disabled={!editor}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editor?.chain().focus().toggleTaskList().run()}
+              >
+                <ListTodoIcon className="h-4 w-4" />
+                <span className="sr-only">{t("editor.checkbox")}</span>
+              </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.checkbox")}</TooltipContent>
               </Tooltip>
 
               {!isMobile && <div className="hidden h-4 w-px bg-border md:block" />}
@@ -1272,6 +1421,10 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                       <Strikethrough className="mr-2 h-4 w-4" />
                       <span>{t("editor.strikethrough")}</span>
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <ListTodoIcon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.checkbox")}</span>
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Link2 className="mr-2 h-4 w-4" />
                       <span>{t("editor.link")}</span>
@@ -1337,12 +1490,12 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </span>
         </div>
 
-        <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} md:w-auto md:justify-self-end md:justify-end md:pt-0`}>
+        <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
           {!isSidebarOpen && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onOpenSidebar}>
-                  <Plus className="h-4 w-4" />
+                  <PanelRightCloseIcon className="h-4 w-4" />
                   <span className="sr-only">{t("editor.showSidebar")}</span>
                 </Button>
               </TooltipTrigger>
@@ -1516,12 +1669,12 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       </AlertDialog>
 
       <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
-        <DialogContent className="sm:max-w-xs rounded-2xl">
+        <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle>{t("editor.selectFileFormat")}</DialogTitle>
             <DialogDescription>{t("editor.selectFileFormatDesc")}</DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-3 gap-3 py-2">
+          <div className="grid gap-3 py-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
             <button
               type="button"
               onClick={() => void handleExtensionSelected("txt")}

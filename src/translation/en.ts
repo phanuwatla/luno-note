@@ -55,6 +55,7 @@ const en = {
     strikethrough: "Strikethrough",
     bulletList: "Bullet list",
     orderedList: "Ordered list",
+    checkbox: "Checkbox",
     code: "Inline code",
     blockquote: "Blockquote",
     link: "Link",

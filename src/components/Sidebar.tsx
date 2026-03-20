@@ -1,5 +1,6 @@
 import { Note } from "@/hooks/useNotes";
-import { ChevronDown, ChevronRight, Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive } from "lucide-react";
+import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
+import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface SidebarProps {
@@ -670,7 +673,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
         <div className="flex items-center gap-1">
           <Button type="button" variant="ghost" size="icon" onClick={onClose}>
-            <Plus className="h-4 w-4" />
+            <PanelRightOpenIcon className="h-4 w-4" />
             <span className="sr-only">{t("sidebar.hideSidebar")}</span>
           </Button>
           {onOpenFolder && (

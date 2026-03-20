@@ -29,6 +29,23 @@ function saveNotes(notes: Note[]) {
 }
 
 function deriveTitleFromContent(content: string): string {
+  // Handle Tiptap JSON format
+  if (content.trimStart().startsWith('{"type":"doc"')) {
+    try {
+      const doc = JSON.parse(content);
+      const extractText = (node: any): string => {
+        if (node.type === "text") return node.text || "";
+        if (node.content) return node.content.map(extractText).join("");
+        return "";
+      };
+      const firstBlock = doc.content?.[0];
+      const title = firstBlock ? extractText(firstBlock).trim() : "";
+      return title;
+    } catch {
+      return "";
+    }
+  }
+
   const hasHtml = /<\/?[a-z][\s\S]*>/i.test(content);
   let text = content;
 
