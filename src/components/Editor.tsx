@@ -1635,7 +1635,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               fontSize={editorFontSize}
             />
           ) : (
-            <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
+            <div className="flex min-h-full w-full flex-col overflow-y-auto px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
               <EditorContent editor={editor} />
             </div>
           )}
