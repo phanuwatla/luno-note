@@ -1027,6 +1027,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   }
 
   const displayFileName = note.fileName || `${note.title?.trim() || t("editor.untitled")}`;
+  // const [fileInfoOpen, setFileInfoOpen] = useState(false);
   const savedSnapshot = savedSnapshotByNoteId[note.id];
   const isSaved = Boolean(
     savedSnapshot && getContentToSave(savedSnapshot.ext) === savedSnapshot.content,
@@ -1079,7 +1080,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
             <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">NOTES+</p>
             <p className="text-xs text-muted-foreground">{t("editor.mobileWritingMode")}</p>
           </div>
-          <div className="min-w-0 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+          <div className="min-w-0 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground relative">
             <span className="flex items-center gap-1.5">
               {(note.fileType === "image" || note.fileType === "binary") ? (
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
@@ -1089,7 +1090,21 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                 <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600" />
               )}
               <span className="sr-only">{saveStatusLabel}</span>
-              <span className="block max-w-[126px] truncate">{displayFileName}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <span className="block max-w-[126px] truncate cursor-pointer" tabIndex={0}>{displayFileName}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64 rounded-xl px-0 py-2 absolute right-[-0.8rem] top-full z-50 mt-2">
+                  <div className="px-4 py-2 text-sm">
+                    <div><b>Name:</b> {note.fileName || t("editor.untitled")}</div>
+                    <div><b>Type:</b> {note.fileType || "-"}</div>
+                    <div><b>Format:</b> {note.contentFormat || "-"}</div>
+                    {note.fileName && <div><b>Extension:</b> {note.fileName.split('.').pop()}</div>}
+                    {note.isLinkedFile && <div><b>Linked File:</b> Yes</div>}
+                    {note.folderPath && <div><b>Folder:</b> {note.folderPath}</div>}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </span>
           </div>
         </div>
@@ -1101,7 +1116,9 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               <span>HTML Editor</span>
             </div>
           )}
-          <div className={`flex w-fit items-center gap-1 rounded-full border border-border bg-secondary p-1 ${note.contentFormat === "html" ? "hidden" : ""}`}>
+          {/* Hide toolbar if not txt or md */}
+          {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (
+            <div className={`flex w-fit items-center gap-1 rounded-full border border-border bg-secondary p-1`}>
               {/* Undo / Redo */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1473,10 +1490,11 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               <TooltipContent>{t("editor.fixLanguage")}</TooltipContent>
               </Tooltip>
               )}
-          </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground lg:block lg:justify-self-center lg:self-auto">
+        <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground relative lg:block lg:justify-self-center lg:self-auto">
           <span className="flex items-center gap-2">
             {(note.fileType === "image" || note.fileType === "binary") ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -1486,9 +1504,24 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
               <CircleDotDashedIcon className="h-4 w-4 shrink-0 text-amber-600" />
             )}
             <span className="sr-only">{saveStatusLabel}</span>
-            <span className="block max-w-[296px] truncate xl:max-w-[356px]">{displayFileName}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <span className="block max-w-[296px] truncate xl:max-w-[356px] cursor-pointer" tabIndex={0}>{displayFileName}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 rounded-xl px-0 py-2 absolute right-[-1rem] top-full z-50 mt-2">
+                <div className="px-4 py-2 text-sm">
+                  <div><b>Name:</b> {note.fileName || t("editor.untitled")}</div>
+                  <div><b>Type:</b> {note.fileType || "-"}</div>
+                  <div><b>Format:</b> {note.contentFormat || "-"}</div>
+                  {note.fileName && <div><b>Extension:</b> {note.fileName.split('.').pop()}</div>}
+                  {note.isLinkedFile && <div><b>Linked File:</b> Yes</div>}
+                  {note.folderPath && <div><b>Folder:</b> {note.folderPath}</div>}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </span>
         </div>
+      {/* File Info Dropdown now handled inline above */}
 
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
           {!isSidebarOpen && (

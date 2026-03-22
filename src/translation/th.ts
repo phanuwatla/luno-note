@@ -76,6 +76,7 @@ const th = {
     invalidLinkUrl: "กรุณาระบุ URL ของลิงก์ให้ถูกต้อง",
     invalidImageUrl: "กรุณาระบุ URL ของรูปภาพให้ถูกต้อง",
     invalidImageFile: "กรุณาเลือกไฟล์รูปภาพที่ถูกต้อง",
+    insertTable: "แทรกตาราง",
     moreTools: "เครื่องมือเพิ่มเติม",
     saveStatusSaved: "บันทึกแล้ว",
     saveStatusUnsaved: "ยังไม่ได้บันทึก",

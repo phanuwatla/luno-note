@@ -74,6 +74,7 @@ const en = {
     invalidLinkUrl: "Please enter a valid link URL.",
     invalidImageUrl: "Please enter a valid image URL.",
     invalidImageFile: "Please choose a valid image file.",
+    insertTable: "Insert table",
     moreTools: "More tools",
     saveStatusSaved: "Saved",
     saveStatusUnsaved: "Unsaved changes",
