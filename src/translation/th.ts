@@ -49,6 +49,9 @@ const th = {
   },
   editor: {
     undo: "เลิกทำ",
+    splitTab: "แยกแท็บ",
+    closeTab: "ปิดแท็บ",
+    closeSplit: "ปิด Split",
     redo: "ทำซ้ำ",
     heading1: "หัวข้อ 1",
     heading2: "หัวข้อ 2",

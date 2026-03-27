@@ -33,6 +33,7 @@ import {
   Play,
   Pause,
   Save,
+  X
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -58,6 +59,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { docxToHtml } from "@/lib/docxUtils";
 import { EditorContent, useEditor } from "@tiptap/react";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
@@ -193,13 +195,14 @@ const TH_TO_EN_KEYMAP: Record<string, string> = Object.entries(EN_TO_TH_KEYMAP).
 
 interface EditorProps {
   note: Note | null;
-  onUpdate: (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat">>) => void;
+  onUpdate: (id: string, patch: Partial<Note>) => void;
   onDelete: (id: string) => boolean;
   onCreate?: (folderPath?: string) => Note;
   onOpenSidebar?: () => void;
   isSidebarOpen?: boolean;
   editorFontSize?: number;
   isMobile?: boolean;
+  onCloseSplit?: () => void; // เพิ่ม prop สำหรับปิด split
 }
 
 type SaveSnapshot = {
@@ -207,7 +210,60 @@ type SaveSnapshot = {
   content: string;
 };
 
-export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false }: EditorProps) {
+export default function Editor(props: EditorProps & { notes?: any[] }) {
+  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, onCloseSplit } = props;
+    const [importDocxDialogOpen, setImportDocxDialogOpen] = useState(false);
+    const docxInputRef = useRef<HTMLInputElement>(null);
+    // Handle docx import
+    const handleImportDocx = async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const html = await docxToHtml(file);
+        let updated = false;
+        // กรณี note ปัจจุบัน
+        if (note) {
+          onUpdate(note.id, { content: html, contentFormat: "html", fileType: undefined });
+          updated = true;
+        }
+        // กรณีสร้าง note ใหม่
+        else if (onCreate) {
+          const newNote = onCreate();
+          onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
+          updated = true;
+        }
+        // กรณี openfolder หรือ note ถูกสร้างจากไฟล์ในระบบ: ค้นหา note ที่ fileName ตรงกับไฟล์ docx แล้ว update ซ้ำ
+        if (!updated && file.name) {
+          // ลองค้นหา notes จาก props (ถ้ามี)
+          if (typeof window !== 'undefined') {
+            let notesArr = [];
+            if ((window as any).notesPlusNotes) {
+              notesArr = (window as any).notesPlusNotes;
+            } else if ((window as any).notes) {
+              notesArr = (window as any).notes;
+            } else if (typeof (window as any).getNotes === 'function') {
+              notesArr = (window as any).getNotes();
+            }
+            const found = notesArr.find((n: any) => n.fileName === file.name);
+            if (found) {
+              onUpdate(found.id, { content: html, contentFormat: "html", fileType: undefined });
+              updated = true;
+            }
+          }
+        }
+        // fallback: ถ้า notes ถูกส่งมาทาง props
+        if (!updated && Array.isArray((props as any).notes)) {
+          const found = (props as any).notes.find((n: any) => n.fileName === file.name);
+          if (found) {
+            onUpdate(found.id, { content: html, contentFormat: "html", fileType: undefined });
+          }
+        }
+      } catch (e) {
+        setAlertMessage("นำเข้า docx ไม่สำเร็จ: " + (e as Error).message);
+      }
+      setImportDocxDialogOpen(false);
+      event.target.value = "";
+    };
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
@@ -1003,12 +1059,24 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   if (!note) {
     return (
       <>
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground">
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground relative">
           <p className="text-sm">{t("editor.selectOrCreate")}</p>
           <Button type="button" className="gap-2" onClick={() => onCreate?.()}>
             <Plus className="h-4 w-4" />
             {t("sidebar.newNote")}
           </Button>
+          {/* ปุ่มปิด split เฉพาะ editor ฝั่งขวา */}
+          {onCloseSplit && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" size="icon" variant="ghost" className="absolute top-2 right-2" onClick={onCloseSplit}>
+                  <span className="sr-only">ปิด split</span>
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5L13 13M13 5L5 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>ปิด split</TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <AlertDialog open={Boolean(alertMessage)} onOpenChange={(open) => !open && setAlertMessage(null)}>
@@ -1073,7 +1141,8 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
   return (
     <>
       <TooltipProvider delayDuration={420}>
-      <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="flex min-h-0 flex-1 flex-col bg-background relative">
+        {/* ...ปุ่ม close split เดิมถูกลบออก... */}
         <div className="border-b border-border px-3 py-3 sm:px-4 md:px-6">
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3 md:hidden">
           <div>
@@ -1524,7 +1593,7 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
       {/* File Info Dropdown now handled inline above */}
 
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
-          {!isSidebarOpen && (
+          {!onCloseSplit && !isSidebarOpen && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onOpenSidebar}>
@@ -1599,8 +1668,31 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
                 <FileCode className="h-4 w-4" />
                 <span>{t("editor.exportWord")}</span>
               </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setImportDocxDialogOpen(true)} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                  <FileImage className="h-4 w-4" />
+                  <span>Import docx</span>
+                </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <input ref={docxInputRef} type="file" accept=".docx" className="hidden" onChange={handleImportDocx} />
+          <Dialog open={importDocxDialogOpen} onOpenChange={setImportDocxDialogOpen}>
+            <DialogContent className="sm:max-w-md rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>นำเข้าไฟล์ docx</DialogTitle>
+                <DialogDescription>เลือกไฟล์ docx เพื่อแปลงเป็น HTML และแก้ไขใน Editor</DialogDescription>
+              </DialogHeader>
+              <div className="py-1">
+                <Button type="button" onClick={() => docxInputRef.current?.click()}>
+                  เลือกไฟล์ docx
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setImportDocxDialogOpen(false)}>
+                  {t("common.cancel")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Tooltip>
           <TooltipTrigger asChild>
           <Button
@@ -1622,15 +1714,27 @@ export default function Editor({ note, onUpdate, onDelete, onCreate, onOpenSideb
           </TooltipTrigger>
           <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-          <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={() => setSettingsOpen(true)}>
-            <Settings className="h-4 w-4" />
-            <span className="sr-only">{t("common.settings")}</span>
-          </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("common.settings")}</TooltipContent>
-          </Tooltip>
+          {!onCloseSplit && (
+            <Tooltip>
+            <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={() => setSettingsOpen(true)}>
+              <Settings className="h-4 w-4" />
+              <span className="sr-only">{t("common.settings")}</span>
+            </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("common.settings")}</TooltipContent>
+            </Tooltip>
+          )}
+          {onCloseSplit && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onCloseSplit} aria-label={t("editor.closeSplit")}> 
+                  <X className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.closeSplit")}</TooltipContent>
+            </Tooltip>
+          )}
           </div>
         </div>
       </div>

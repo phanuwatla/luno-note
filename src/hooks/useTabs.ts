@@ -34,7 +34,7 @@ export function useTabs() {
         const idx = currentTabs.indexOf(id);
         syncedSetActiveTabId(next[Math.min(idx, next.length - 1)]);
       } else {
-        syncedSetActiveTabId(allNoteIds.find((nid) => nid !== id) ?? null);
+        syncedSetActiveTabId(null);
       }
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);

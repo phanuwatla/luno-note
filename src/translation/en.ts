@@ -47,6 +47,9 @@ const en = {
   },
   editor: {
     undo: "Undo",
+    splitTab: "Split tab",
+    closeTab: "Close tab",
+    closeSplit: "Close split",
     redo: "Redo",
     heading1: "Heading 1",
     heading2: "Heading 2",

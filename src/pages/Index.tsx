@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
+import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
 import type { Note } from "@/hooks/useNotes";
@@ -12,6 +13,8 @@ import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle } f
 import { marked } from "marked";
 
 export default function Index() {
+  // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
+  const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
   const { notes, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
   const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, setActiveTabId } = useTabs();
   const activeTabNote = notes.find((n) => n.id === activeTabId) ?? null;
@@ -22,6 +25,8 @@ export default function Index() {
   const [openedRootDirHandle, setOpenedRootDirHandle] = useState<any | null>(null);
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
+  // เพิ่ม state สำหรับ split tab (id ของ note ที่แยก)
+  const [splitTabId, setSplitTabId] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
@@ -788,19 +793,72 @@ export default function Index() {
           activeTabId={activeTabId}
           onSelectTab={setActiveTabId}
           onCloseTab={(id) => closeTab(id, notes.map((n) => n.id))}
+          onSplitTab={(id) => {
+            // ถ้า split อยู่แล้วและกดซ้ำ ให้ toggle ปิด split
+            setSplitTabId(prev => prev === id ? null : id);
+          }}
         />
         <Breadcrumb note={activeTabNote} rootFolderName={openedFolderName} />
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
-          <Editor
-            note={activeTabNote}
-            onUpdate={updateNote}
-            onDelete={handleDeleteNote}
-            onCreate={handleCreateNote}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            isSidebarOpen={sidebarOpen}
-            editorFontSize={settings.editorFontSize}
-            isMobile={isMobile}
-          />
+          {/* ถ้า splitTabId มีค่า ให้ render editor 2 pane ซ้าย-ขวา */}
+          {splitTabId && splitTabId !== activeTabId ? (
+            <div className="flex flex-1 min-h-0 flex-row w-full">
+              <div
+                className="min-w-0 border-r border-border overflow-auto"
+                style={{ width: splitLeftWidth ? splitLeftWidth : "50%", minWidth: 120 }}
+              >
+                <Editor
+                  note={activeTabNote}
+                  onUpdate={updateNote}
+                  onDelete={handleDeleteNote}
+                  onCreate={handleCreateNote}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  isSidebarOpen={sidebarOpen}
+                  editorFontSize={settings.editorFontSize}
+                  isMobile={isMobile}
+                />
+              </div>
+              <SplitResizer
+                onResize={delta => {
+                  setSplitLeftWidth(prev => {
+                    // ถ้า prev ยังไม่เคย set ให้ใช้ 50% ของ container
+                    const container = document.querySelector(".flex.flex-1.min-h-0.flex-row.w-full");
+                    const total = container instanceof HTMLElement ? container.offsetWidth : 0;
+                    let base = prev ?? (total ? total / 2 : 400);
+                    let next = base + delta;
+                    // จำกัดขนาดขั้นต่ำ/สูงสุด
+                    if (next < 120) next = 120;
+                    if (total && next > total - 120) next = total - 120;
+                    return next;
+                  });
+                }}
+              />
+              <div className="min-w-0 overflow-auto flex-1">
+                <Editor
+                  note={notes.find(n => n.id === splitTabId) ?? null}
+                  onUpdate={updateNote}
+                  onDelete={handleDeleteNote}
+                  onCreate={handleCreateNote}
+                  onOpenSidebar={() => setSidebarOpen(true)}
+                  isSidebarOpen={sidebarOpen}
+                  editorFontSize={settings.editorFontSize}
+                  isMobile={isMobile}
+                  onCloseSplit={() => setSplitTabId(null)}
+                />
+              </div>
+            </div>
+          ) : (
+            <Editor
+              note={activeTabNote}
+              onUpdate={updateNote}
+              onDelete={handleDeleteNote}
+              onCreate={handleCreateNote}
+              onOpenSidebar={() => setSidebarOpen(true)}
+              isSidebarOpen={sidebarOpen}
+              editorFontSize={settings.editorFontSize}
+              isMobile={isMobile}
+            />
+          )}
         </div>
       </div>
     </div>

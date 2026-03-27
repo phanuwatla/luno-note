@@ -197,14 +197,16 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const hasTreeView = useMemo(() => notes.some((n) => n.folderPath !== undefined) || folderPaths.length > 0, [notes, folderPaths]);
 
   const filtered = useMemo(
-    () =>
-      query
-        ? notes.filter(
-            (n) =>
-              n.title.toLowerCase().includes(query.toLowerCase()) ||
-              n.content.toLowerCase().includes(query.toLowerCase()),
-          )
-        : notes,
+    () => {
+      if (!query) return notes;
+      const q = query.toLowerCase();
+      return notes.filter((n) => {
+        const titleMatch = n.title?.toLowerCase().includes(q);
+        const fileNameMatch = n.fileName?.toLowerCase().includes(q);
+        const contentMatch = n.content?.toLowerCase().includes(q);
+        return titleMatch || fileNameMatch || contentMatch;
+      });
+    },
     [notes, query],
   );
 
@@ -679,6 +681,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           {onOpenFolder && (
             <Button type="button" variant="ghost" size="icon" onClick={onOpenFolder} title={t("sidebar.openFolder")}>
               <FolderOpen className="h-4 w-4" />
+              {/* eslint-disable-next-line react/jsx-no-undef */}
               <span className="sr-only">{t("sidebar.openFolder")}</span>
             </Button>
           )}

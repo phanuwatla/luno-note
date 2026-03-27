@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { docxToHtml } from "@/lib/docxUtils";
 
 export interface Note {
   id: string;
@@ -98,27 +99,51 @@ export function useNotes() {
     return note;
   }, []);
 
-  const bulkCreateNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" }>) => {
+  const bulkCreateNotes = useCallback(async (items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" }>) => {
     const now = Date.now();
-    const newNotes: Note[] = items.map((item) => ({
-      id: item.id ?? crypto.randomUUID(),
-      title: deriveTitleFromContent(item.content),
-      content: item.content,
-      createdAt: now,
-      updatedAt: now,
-      fileName: item.fileName,
-      isLinkedFile: item.isLinkedFile,
-      contentFormat: item.contentFormat,
-      folderPath: item.folderPath,
-      fileType: item.fileType,
-    }));
-
+    const newNotes: Note[] = [];
+    for (const item of items) {
+      // If .docx file, convert to HTML
+      if (item.fileName?.toLowerCase().endsWith('.docx') && typeof window !== 'undefined' && typeof File !== 'undefined' && item.content instanceof ArrayBuffer) {
+        try {
+          // Create a File object from ArrayBuffer if possible (depends on how you read files)
+          const file = new File([item.content], item.fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+          const html = await docxToHtml(file);
+          newNotes.push({
+            id: item.id ?? crypto.randomUUID(),
+            title: deriveTitleFromContent(html),
+            content: html,
+            createdAt: now,
+            updatedAt: now,
+            fileName: item.fileName,
+            isLinkedFile: item.isLinkedFile,
+            contentFormat: 'html',
+            folderPath: item.folderPath,
+            // fileType intentionally omitted
+          });
+          continue;
+        } catch (e) {
+          // fallback: treat as binary
+        }
+      }
+      newNotes.push({
+        id: item.id ?? crypto.randomUUID(),
+        title: deriveTitleFromContent(item.content),
+        content: item.content,
+        createdAt: now,
+        updatedAt: now,
+        fileName: item.fileName,
+        isLinkedFile: item.isLinkedFile,
+        contentFormat: item.contentFormat,
+        folderPath: item.folderPath,
+        fileType: item.fileType,
+      });
+    }
     setNotes((prev) => {
       const updated = [...newNotes, ...prev];
       saveNotes(updated);
       return updated;
     });
-
     return newNotes;
   }, []);
 

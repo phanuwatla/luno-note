@@ -1,16 +1,22 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { X, FileText, FileCode } from "lucide-react";
 import { FileImage, File, FolderArchive } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
+
+import { Columns2Icon } from "@/components/icons/Columns2Icon";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface TabBarProps {
   tabs: Note[];
   activeTabId: string | null;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
+  onSplitTab?: (id: string) => void;
 }
 
-export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: TabBarProps) {
+export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onSplitTab }: TabBarProps) {
+  const { t } = useTranslation();
     function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
       if (note.fileType === "image") return "image";
       if (note.fileType === "binary") return "binary";
@@ -45,38 +51,65 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: T
   if (tabs.length === 0) return null;
 
   return (
-    <div ref={scrollRef} className="no-scrollbar flex items-end overflow-x-auto border-b border-border bg-background">
-      {tabs.map((note) => {
-        const isActive = note.id === activeTabId;
-        const label = note.fileName || note.title?.trim() || "Untitled";
-        return (
-          <div
-            key={note.id}
-            ref={isActive ? activeTabRef : null}
-            className={`group flex min-w-0 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 py-2 text-sm transition-colors ${
-              isActive
-                ? "bg-background text-foreground border-b-2 border-b-primary"
-                : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-            }`}
-            onClick={() => onSelectTab(note.id)}
-          >
-            <NoteIcon note={note} isActive={isActive} />
-            <span className="min-w-0 truncate">{label}</span>
-            <button
-              type="button"
-              className="ml-0.5 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-foreground/10 group-hover:opacity-100 data-[active=true]:opacity-60"
-              data-active={isActive}
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseTab(note.id);
-              }}
-              aria-label="Close tab"
+    <TooltipProvider delayDuration={420}>
+      <div ref={scrollRef} className="no-scrollbar flex items-end overflow-x-auto border-b border-border bg-background">
+        {tabs.map((note) => {
+          const isActive = note.id === activeTabId;
+          const label = note.fileName || note.title?.trim() || "Untitled";
+          return (
+            <div
+              key={note.id}
+              ref={isActive ? activeTabRef : null}
+              className={`group flex min-w-0 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 py-2 text-sm transition-colors ${
+                isActive
+                  ? "bg-background text-foreground border-b-2 border-b-primary"
+                  : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+              }`}
+              onClick={() => onSelectTab(note.id)}
             >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        );
-      })}
-    </div>
+              <NoteIcon note={note} isActive={isActive} />
+              <span className="min-w-0 truncate">{label}</span>
+              {/* ปุ่มแยกแท็บ (Split) */}
+              {onSplitTab && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="ml-0.5 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-primary/10 group-hover:opacity-100"
+                      tabIndex={-1}
+                      onClick={e => {
+                        e.stopPropagation();
+                        onSplitTab(note.id);
+                      }}
+                      aria-label={t("editor.splitTab")}
+                    >
+                      <Columns2Icon className="h-3 w-3 text-primary" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("editor.splitTab")}</TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="ml-0.5 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-foreground/10 group-hover:opacity-100 data-[active=true]:opacity-60"
+                    data-active={isActive}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(note.id);
+                    }}
+                    aria-label={t("editor.closeTab")}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("editor.closeTab")}</TooltipContent>
+              </Tooltip>
+            </div>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }
