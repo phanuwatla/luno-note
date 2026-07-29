@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { APP_THEMES, useAppSettings, type ColorScheme } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -36,9 +37,9 @@ export default function Settings() {
           </Button>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-5 md:p-6">
-          <h1 className="mb-1 text-2xl font-semibold">{t("settings.title")}</h1>
-          <p className="mb-6 text-sm text-muted-foreground">{t("settings.description")}</p>
+        <div className="rounded-2xl border border-border bg-card p-6 md:p-7">
+          <h1 className="mb-1 text-2xl font-semibold leading-normal pt-1">{t("settings.title")}</h1>
+          <p className="mb-6 text-sm text-muted-foreground leading-relaxed">{t("settings.description")}</p>
 
           <div className="space-y-6">
             <div>
@@ -72,7 +73,7 @@ export default function Settings() {
               <label className="mb-3 block text-sm font-medium text-foreground">
                 {t("settings.theme")}
               </label>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2.5 p-1">
                 {APP_THEMES.map((th) => (
                   <button
                     key={th.id}
@@ -97,15 +98,15 @@ export default function Settings() {
                 </label>
               </div>
 
-              <select
-                id="language"
-                value={settings.language}
-                onChange={(e) => updateSetting("language", e.target.value === "th" ? "th" : "en")}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="en">{t("settings.english")}</option>
-                <option value="th">{t("settings.thai")}</option>
-              </select>
+              <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
+                <SelectTrigger id="language" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">{t("settings.english")}</SelectItem>
+                  <SelectItem value="th">{t("settings.thai")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
@@ -115,18 +116,18 @@ export default function Settings() {
                 </label>
               </div>
 
-              <select
-                id="fontFamily"
-                value={settings.fontFamily}
-                onChange={(e) => updateSetting("fontFamily", e.target.value as "inter" | "system" | "serif" | "mono" | "prompt")}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="inter">{t("settings.fontInter")}</option>
-                <option value="system">{t("settings.fontSystem")}</option>
-                <option value="serif">{t("settings.fontSerif")}</option>
-                <option value="mono">{t("settings.fontMono")}</option>
-                <option value="prompt">{t("settings.fontPrompt")}</option>
-              </select>
+              <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
+                <SelectTrigger id="fontFamily" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
+                  <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
+                  <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
+                  <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
+                  <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
@@ -136,18 +137,39 @@ export default function Settings() {
                 </label>
                 <span className="text-xs text-muted-foreground">{settings.editorFontSize}px</span>
               </div>
-              <select
-                id="editorFontSize"
-                value={settings.editorFontSize}
-                onChange={(e) => updateSetting("editorFontSize", Number(e.target.value))}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {FONT_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}px
-                  </option>
-                ))}
-              </select>
+              <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
+                <SelectTrigger id="editorFontSize" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {FONT_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}px
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+                <div>
+                  <label htmlFor="autoSave" className="text-sm font-medium text-foreground">
+                    {t("settings.autoSave")}
+                  </label>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("settings.autoSaveDescription")}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {settings.autoSave ? t("settings.enabled") : t("settings.disabled")}
+                  </span>
+                  <Switch
+                    id="autoSave"
+                    checked={settings.autoSave}
+                    onCheckedChange={(checked) => updateSetting("autoSave", checked)}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>

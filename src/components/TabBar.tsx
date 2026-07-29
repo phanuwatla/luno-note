@@ -75,7 +75,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onS
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="ml-0.5 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-primary/10 group-hover:opacity-100"
+                      className="ml-0.5 rounded-sm p-1 opacity-70 transition-opacity hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100"
                       tabIndex={-1}
                       onClick={e => {
                         e.stopPropagation();
@@ -93,7 +93,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onS
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    className="ml-0.5 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-foreground/10 group-hover:opacity-100 data-[active=true]:opacity-60"
+                    className="ml-0.5 rounded-sm p-1 opacity-70 transition-opacity hover:bg-foreground/10 md:opacity-0 md:group-hover:opacity-100 data-[active=true]:opacity-90"
                     data-active={isActive}
                     onClick={(e) => {
                       e.stopPropagation();

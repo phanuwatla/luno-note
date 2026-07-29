@@ -173,6 +173,11 @@ export default function Index() {
           await readDir(childHandle as FileSystemDirectoryHandle, subPath);
         } else if (childHandle.kind === "file") {
           const lname = name.toLowerCase();
+          // Filter out temporary swap files (.crswap, .tmp, .swp, etc.)
+          if (lname.endsWith(".crswap") || lname.includes(".crswap") || lname.endsWith(".tmp") || lname.endsWith(".swp") || lname.startsWith(".")) {
+            continue;
+          }
+
           const dotIdx = lname.lastIndexOf(".");
           const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
 

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
 import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -840,16 +841,16 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               <label htmlFor="new-file-ext" className="mb-2 block text-sm font-medium text-foreground">
                 {t("sidebar.fileExtensionLabel")}
               </label>
-              <select
-                id="new-file-ext"
-                value={newFileExt}
-                onChange={(e) => setNewFileExt(e.target.value === "md" ? "md" : e.target.value === "html" ? "html" : "txt")}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="txt">{t("sidebar.fileTypeTxt")}</option>
-                <option value="md">{t("sidebar.fileTypeMd")}</option>
-                <option value="html">{t("sidebar.fileTypeHtml")}</option>
-              </select>
+              <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v === "md" ? "md" : v === "html" ? "html" : "txt")}>
+                <SelectTrigger id="new-file-ext" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
+                  <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
+                  <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

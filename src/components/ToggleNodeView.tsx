@@ -64,20 +64,20 @@ export default function ToggleNodeView({ node, updateAttributes }: ToggleNodeVie
   };
 
   return (
-    <NodeViewWrapper as="details" className="group" open={isOpen} onToggle={handleToggle}>
+    <NodeViewWrapper as="details" className="group my-0 py-0" open={isOpen} onToggle={handleToggle}>
       <summary
         style={{ listStyleType: "none" }}
-        className="flex items-center gap-1.5 pl-2 pr-0 py-1 font-normal text-foreground transition-colors duration-150"
+        className="flex items-center pl-0 pr-0 py-0 min-h-[28px] font-normal text-foreground transition-colors duration-150"
       >
         <button
           type="button"
           onPointerDown={(event) => event.preventDefault()}
           onClick={handleIconClick}
           data-state={isOpen ? "checked" : "unchecked"}
-          className="-ml-0.5 h-4 w-4 shrink-0 rounded-sm bg-transparent ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center transition-transform duration-150 text-primary"
+          className="w-6 h-7 shrink-0 rounded-sm bg-transparent ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center transition-transform duration-150 text-foreground"
           aria-label={isOpen ? t("editor.toggleCollapse") : t("editor.toggleExpand")}
         >
-          <span className={`${isOpen ? "rotate-90" : ""} inline-block h-5 w-5 text-current`}>
+          <span className={`${isOpen ? "rotate-90" : ""} inline-block h-4 w-4 text-current`}>
             <svg viewBox="0 0 10 10" className="h-full w-full fill-current" aria-hidden>
               <path d="M3 2.5 L7 5 L3 7.5 Z" />
             </svg>
@@ -101,13 +101,13 @@ export default function ToggleNodeView({ node, updateAttributes }: ToggleNodeVie
           }}
           onClick={(event) => event.stopPropagation()}
           placeholder={title ? undefined : t("editor.startWriting")}
-          className="flex-1 min-w-0 bg-transparent border-none p-0 text-left text-inherit outline-none focus:outline-none placeholder:text-muted-foreground/40 font-normal"
+          className="flex-1 min-w-0 bg-transparent border-none p-0 text-left text-inherit outline-none focus:outline-none placeholder:text-muted-foreground/40 font-normal h-7 leading-7"
           spellCheck={false}
           autoComplete="off"
         />
       </summary>
-      <div className="py-2 pl-7">
-        <NodeViewContent as="div" className="min-h-[2rem]" />
+      <div className="pl-6 py-0">
+        <NodeViewContent as="div" className="min-h-[1.75rem]" />
       </div>
     </NodeViewWrapper>
   );

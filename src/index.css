@@ -116,24 +116,44 @@
   --hl-keyword: #374151;
 }
 
-:root[data-app-font='inter'] {
+:root[data-app-font='inter'],
+:root[data-app-font='inter'] ::marker,
+:root[data-app-font='inter'] ol,
+:root[data-app-font='inter'] li {
   --app-font-family: 'Inter', sans-serif;
+  font-family: 'Inter', sans-serif;
 }
 
-:root[data-app-font='system'] {
+:root[data-app-font='system'],
+:root[data-app-font='system'] ::marker,
+:root[data-app-font='system'] ol,
+:root[data-app-font='system'] li {
   --app-font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-:root[data-app-font='serif'] {
+:root[data-app-font='serif'],
+:root[data-app-font='serif'] ::marker,
+:root[data-app-font='serif'] ol,
+:root[data-app-font='serif'] li {
   --app-font-family: Georgia, 'Times New Roman', serif;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
-:root[data-app-font='mono'] {
+:root[data-app-font='mono'],
+:root[data-app-font='mono'] ::marker,
+:root[data-app-font='mono'] ol,
+:root[data-app-font='mono'] li {
   --app-font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-:root[data-app-font='prompt'] {
+:root[data-app-font='prompt'],
+:root[data-app-font='prompt'] ::marker,
+:root[data-app-font='prompt'] ol,
+:root[data-app-font='prompt'] li {
   --app-font-family: 'Prompt', sans-serif;
+  font-family: 'Prompt', sans-serif;
 }
 
 @layer base {
@@ -143,6 +163,16 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--app-font-family);
+  }
+  ::marker,
+  ol::marker,
+  ul::marker,
+  li::marker,
+  ol,
+  ul,
+  li,
+  .ProseMirror {
+    font-family: var(--app-font-family) !important;
   }
 }
 
@@ -263,4 +293,35 @@
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* Custom TaskList Checkbox - Transparent background in dark/light mode */
+ul[data-type="taskList"] li label input[type="checkbox"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background-color: transparent !important;
+  border: 1.5px solid hsl(var(--muted-foreground) / 0.5);
+  border-radius: 3px;
+  cursor: pointer;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+ul[data-type="taskList"] li label input[type="checkbox"]:hover {
+  border-color: hsl(var(--primary));
+}
+
+ul[data-type="taskList"] li label input[type="checkbox"]:checked {
+  background-color: hsl(var(--primary)) !important;
+  border-color: hsl(var(--primary)) !important;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/></svg>') !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: 11px 11px !important;
 }

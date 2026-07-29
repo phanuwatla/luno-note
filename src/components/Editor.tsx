@@ -29,6 +29,7 @@ import {
   Redo2,
   Strikethrough,
   Quote,
+  Smile,
   Upload,
   Trash2,
   Settings,
@@ -39,9 +40,11 @@ import {
   X
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -91,6 +94,25 @@ import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
 import { PanelRightCloseIcon } from "./icons/PanelRightCloseIcon";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
+
+const EMOJI_LIST = [
+  "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
+  "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😋", "😜", "🤪",
+  "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏", "😒", "😞", "😔",
+  "😟", "😕", "🥺", "😢", "😭", "😤", "😠", "😡", "🤯", "😳",
+  "🥵", "🥶", "😱", "😨", "🤔", "🤗", "🤫", "🤥", "😶", "😬",
+  "🙄", "😯", "😮", "😴", "👍", "👎", "👏", "🙌", "👐", "🤲",
+  "🤝", "🙏", "✍️", "💪", "👊", "✊", "🤛", "🤜", "👋", "🖐️",
+  "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞", "🤟", "🤘", "🤙",
+  "👈", "👉", "👆", "👇", "☝️", "❤️", "🧡", "💛", "💚", "💙",
+  "💜", "🖤", "🤍", "🤎", "💔", "❣️", "💕", "💞", "💓", "💗",
+  "💖", "💘", "💝", "✨", "🌟", "⭐", "💫", "🔥", "💥", "⚡",
+  "🌈", "☀️", "🌙", "☁️", "❄️", "🎉", "🎊", "🏆", "🎯", "💯",
+  "✅", "❌", "⚠️", "📌", "📍", "🚩", "🔔", "💡", "📝", "📄",
+  "📁", "📂", "📅", "📆", "📊", "📈", "📉", "🔍", "🔎", "🔒",
+  "🔓", "🔑", "📦", "✉️", "📧", "💼", "📱", "💻", "⌨️", "🖥️",
+  "📷", "🎥", "🎬", "🎨", "🚀", "🛸", "⏰", "⏱️", "☕", "🍺"
+];
 
 const EN_TO_TH_KEYMAP: Record<string, string> = {
   "`": "_",
@@ -203,6 +225,34 @@ export function getToggleButtonMode(selection: { empty: boolean }): "wrap" | "in
   return selection.empty ? "insert" : "wrap";
 }
 
+export function handleToggleClick(editor: Editor | null) {
+  if (!editor) return;
+  const { from, to, empty } = editor.state.selection;
+  const selectedText = empty ? "" : editor.state.doc.textBetween(from, to, " ", " ").trim();
+
+  if (selectedText) {
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: "toggle",
+        attrs: { title: selectedText },
+        content: [{ type: "paragraph" }],
+      })
+      .run();
+  } else {
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: "toggle",
+        attrs: { title: "" },
+        content: [{ type: "paragraph" }],
+      })
+      .run();
+  }
+}
+
 export const Toggle = TiptapNode.create({
   name: "toggle",
   group: "block",
@@ -232,6 +282,7 @@ export const Toggle = TiptapNode.create({
             open: Boolean((element as HTMLDetailsElement).open),
           };
         },
+        contentElement: "div",
       },
     ];
   },
@@ -325,6 +376,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       setImportDocxDialogOpen(false);
       event.target.value = "";
     };
+  const autoSaveDiskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
@@ -346,7 +398,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
 
-  const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 508;
+  const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
 
   const turndown = useMemo(() => {
     const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
@@ -374,17 +426,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       },
     });
 
-    // Legacy format: <li class="task-list-item"> (notes saved before this fix)
-    td.addRule("legacyTaskItem", {
-      filter: (node: HTMLElement) =>
-        node.nodeName === "LI" && node.classList.contains("task-list-item"),
+    // Preserve Tiptap <details><summary>title</summary>...<details> in markdown
+    td.addRule("toggle", {
+      filter: (node: HTMLElement) => node.nodeName === "DETAILS",
       replacement: (_content: string, node: TurndownService.Node) => {
-        const li = node as HTMLElement;
-        const checkbox = li.querySelector('input[type="checkbox"]');
-        const checked = checkbox ? ((checkbox as HTMLInputElement).checked ? "x" : " ") : " ";
-        const contentSpan = li.querySelector(".task-list-item-content");
-        const text = contentSpan ? contentSpan.textContent?.trim() ?? "" : "";
-        return `- [${checked}] ${text}\n`;
+        const el = node as HTMLElement;
+        const summary = el.querySelector("summary");
+        const title = summary?.textContent?.trim() || "";
+        const isOpen = el.hasAttribute("open");
+
+        const div = el.querySelector("div");
+        let innerHtml = "";
+        if (div) {
+          innerHtml = div.innerHTML;
+        } else {
+          const clone = el.cloneNode(true) as HTMLElement;
+          clone.querySelector("summary")?.remove();
+          innerHtml = clone.innerHTML;
+        }
+
+        const innerMarkdown = td.turndown(innerHtml).trim();
+        const bodyContent = innerMarkdown || "<p></p>";
+
+        return `\n\n<details${isOpen ? " open" : ""}><summary>${title}</summary><div>\n\n${bodyContent}\n\n</div></details>\n\n`;
       },
     });
 
@@ -413,7 +477,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   /** Convert one task-list line/element to a Tiptap taskItem <li> string */
   const toTaskItemHtml = (isChecked: boolean, text: string) =>
     `<li data-type="taskItem" data-checked="${isChecked}">` +
-    `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""} style="width:16px;height:16px;"><span></span></label>` +
+    `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
     `<div><p>${text}</p></div>` +
     `</li>`;
 
@@ -454,28 +518,48 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
+  const prepareDomForEditor = (root: HTMLElement) => {
+    migrateDomTaskLists(root);
+
+    root.querySelectorAll("details").forEach((details) => {
+      const summary = details.querySelector("summary");
+      const title = summary?.textContent?.trim() || "";
+      summary?.remove();
+
+      let div = details.querySelector(":scope > div");
+      if (!div) {
+        div = document.createElement("div");
+        while (details.firstChild) {
+          div.appendChild(details.firstChild);
+        }
+        details.appendChild(div);
+      }
+
+      const newSummary = document.createElement("summary");
+      newSummary.textContent = title;
+      details.insertBefore(newSummary, details.firstChild);
+    });
+  };
+
   const toEditorHtml = (text: string): string => {
     if (!text.trim()) return "<h1></h1><p></p>";
 
+    const temp = document.createElement("div");
     if (isLikelyHtml(text)) {
-      // Already in Tiptap native format — return as-is
-      if (text.includes('data-type="taskList"') || text.includes("data-type='taskList'")) return text;
-      // Migrate any legacy or GFM HTML (checkbox inputs / old task-list-item) to Tiptap format
-      const temp = document.createElement("div");
       temp.innerHTML = text;
-      migrateDomTaskLists(temp);
-      return temp.innerHTML;
+    } else {
+      temp.innerHTML = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
     }
 
-    // Let marked handle all markdown → HTML (including GFM task lists with <input type="checkbox">)
-    const html = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
-
-    // Post-process: convert marked's GFM checkbox output to Tiptap's native taskList format
-    const temp = document.createElement("div");
-    temp.innerHTML = html;
-    migrateDomTaskLists(temp);
+    prepareDomForEditor(temp);
     return temp.innerHTML;
   };
+
+  const EDITOR_CLASSES =
+    "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90";
+
+  const scheduleAutoSaveDiskRef = useRef<(() => void) | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -515,16 +599,54 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     editorProps: {
       attributes: {
         style: `font-size:${editorFontSize}px;`,
-        class:
-          "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6" +
-          " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-2 [&_ul[data-type='taskList']_li_label_input]:h-3 [&_ul[data-type='taskList']_li_label_input]:w-3 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90",
+        class: EDITOR_CLASSES,
       },
     },
     onUpdate: ({ editor: instance }) => {
       if (!note || syncingFromNote.current) return;
+      if (!settings.autoSave) return;
       onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
+      scheduleAutoSaveDiskRef.current?.();
     },
   });
+
+  const saveLinkedFileToDisk = useCallback(async () => {
+    if (!note || !editor || !settings.autoSave) return;
+    const existingHandle = fileHandleByNoteIdRef.current[note.id];
+    if (!existingHandle?.createWritable) return;
+
+    try {
+      const ext = getPreferredExtension() as "md" | "txt" | "html";
+      const content = getContentToSave(ext);
+      await performSave(content, ext, true);
+    } catch {
+      /* ignore background disk save errors */
+    }
+  }, [note, editor, settings.autoSave]);
+
+  const scheduleAutoSaveDisk = useCallback(() => {
+    if (autoSaveDiskTimeoutRef.current) {
+      clearTimeout(autoSaveDiskTimeoutRef.current);
+    }
+    autoSaveDiskTimeoutRef.current = setTimeout(() => {
+      void saveLinkedFileToDisk();
+    }, 400);
+  }, [saveLinkedFileToDisk]);
+
+  useEffect(() => {
+    scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
+  }, [scheduleAutoSaveDisk]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+      }
+      if (note && editor && settings.autoSave) {
+        void saveLinkedFileToDisk();
+      }
+    };
+  }, [note?.id, editor, settings.autoSave, saveLinkedFileToDisk]);
 
   useEffect(() => {
     if (!note || !editor || note.fileType) return;
@@ -556,9 +678,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       editorProps: {
         attributes: {
           style: `font-size:${editorFontSize}px;`,
-          class:
-            "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6" +
-            " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-[3px] [&_ul[data-type='taskList']_li_label_input]:h-4 [&_ul[data-type='taskList']_li_label_input]:w-4 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90",
+          class: EDITOR_CLASSES,
         },
       },
     });
@@ -1000,7 +1120,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSavedSnapshot(note.id, ext, markdown);
   };
 
-  const performSave = async (content: string, ext: "md" | "txt" | "html") => {
+  const performSave = async (content: string, ext: "md" | "txt" | "html", isSilent = false) => {
     if (!note) return;
 
     const existingHandle = fileHandleByNoteIdRef.current[note.id];
@@ -1009,7 +1129,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     try {
       const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
       if (permission !== "granted") {
-        downloadMarkdown(content, ext);
+        if (!isSilent) downloadMarkdown(content, ext);
         return;
       }
 
@@ -1019,10 +1139,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       await setStoredFileHandle(note.id, existingHandle);
       const savedFile = await existingHandle.getFile();
       updateLinkedMetadata(note.id, savedFile.name);
-      toast({
-        title: t("editor.saveToastTitle"),
-        description: t("editor.saveToastSuccess", { file: savedFile.name }),
-      });
+      if (!isSilent) {
+        toast({
+          title: t("editor.saveToastTitle"),
+          description: t("editor.saveToastSuccess", { file: savedFile.name }),
+        });
+      }
       setSavedSnapshot(note.id, ext, content);
     } catch (error) {
       console.error("Save to existing file failed", error);
@@ -1030,7 +1152,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if ((error as Error)?.name === "NotFoundError" || (error as Error)?.name === "NotAllowedError") {
         await clearLinkedMetadata();
       }
-      downloadMarkdown(content, ext);
+      if (!isSilent) downloadMarkdown(content, ext);
     }
   };
 
@@ -1315,7 +1437,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <DropdownMenuTrigger asChild>
                   <span className="block max-w-[126px] truncate cursor-pointer" tabIndex={0}>{displayFileName}</span>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64 rounded-xl px-0 py-2 absolute right-[-0.8rem] top-full z-50 mt-2">
+                <DropdownMenuContent align="end" sideOffset={4} className="w-64 rounded-xl px-0 py-2">
                   <div className="px-4 py-2 text-sm">
                     <div><b>Name:</b> {note.fileName || t("editor.untitled")}</div>
                     <div><b>Type:</b> {note.fileType || "-"}</div>
@@ -1339,7 +1461,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           )}
           {/* Hide toolbar if not txt or md */}
           {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (
-            <div className={`flex w-fit items-center gap-1 rounded-full border border-border bg-secondary p-1`}>
+            <div className={`flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1`}>
               {/* Undo / Redo */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1376,7 +1498,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <TooltipContent>{t("editor.redo")}</TooltipContent>
               </Tooltip>
 
-              <div className="hidden h-4 w-px bg-border md:block" />
+              <div className="h-4 w-px shrink-0 bg-border/60" />
 
               {/* Headings */}
               <>
@@ -1397,7 +1519,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </TooltipTrigger>
               <TooltipContent>{t("editor.heading1")}</TooltipContent>
               </Tooltip>
-              {!shouldUseMobileOverflow && (
               <Tooltip>
               <TooltipTrigger asChild>
               <Button
@@ -1415,10 +1536,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </TooltipTrigger>
               <TooltipContent>{t("editor.heading2")}</TooltipContent>
               </Tooltip>
-              )}
               </>
 
-              {!shouldUseMobileOverflow && <div className="hidden h-4 w-px bg-border md:block" />}
+              <div className="h-4 w-px shrink-0 bg-border/60" />
 
               {/* Inline formats */}
               <Tooltip>
@@ -1473,7 +1593,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <TooltipContent>{t("editor.strikethrough")}</TooltipContent>
               </Tooltip>
 
-              {!shouldUseMobileOverflow && <div className="hidden h-4 w-px bg-border md:block" />}
+              <div className="h-4 w-px shrink-0 bg-border/60" />
 
 
               {/* Lists */}
@@ -1529,7 +1649,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <TooltipContent>{t("editor.checkbox")}</TooltipContent>
               </Tooltip>
 
-              {!isMobile && <div className="hidden h-4 w-px bg-border md:block" />}
+              <div className="h-4 w-px shrink-0 bg-border/60" />
 
               {/* Code / Blockquote */}
               <>
@@ -1542,7 +1662,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("toggle") ? "bg-primary/15 text-primary" : ""}`}
                 disabled={!editor}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().insertContent({ type: "toggle", content: [{ type: "paragraph" }] }).run()}
+                onClick={() => handleToggleClick(editor)}
               >
                 <ChevronsDownUp className="h-4 w-4" />
                 <span className="sr-only">{t("editor.toggle")}</span>
@@ -1585,8 +1705,53 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <TooltipContent>{t("editor.blockquote")}</TooltipContent>
               </Tooltip>
               </>
-              {!shouldUseMobileOverflow && (
-              <>
+
+              {/* Emoji Picker */}
+              <Popover>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                        disabled={!editor}
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        <Smile className="h-4 w-4" />
+                        <span className="sr-only">{t("editor.emoji")}</span>
+                      </Button>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("editor.emoji")}</TooltipContent>
+                </Tooltip>
+                <PopoverContent align="start" className="w-72 rounded-xl p-3 shadow-lg">
+                  <div className="text-xs font-semibold text-muted-foreground mb-2 px-1">
+                    {t("editor.insertEmoji")}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 max-h-56 overflow-y-auto pr-1 select-none no-scrollbar">
+                    {EMOJI_LIST.map((emoji, index) => (
+                      <button
+                        key={`${emoji}-${index}`}
+                        type="button"
+                        className="h-8 w-8 text-lg rounded-lg hover:bg-muted focus:bg-muted flex items-center justify-center transition-colors cursor-pointer"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (editor) {
+                            editor.chain().focus().insertContent(emoji).run();
+                          }
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <div className="h-4 w-px shrink-0 bg-border/60" />
+
+              {/* Link & Image */}
               <Tooltip>
               <TooltipTrigger asChild>
               <Button
@@ -1640,80 +1805,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              </>
-              )}
-
-              {shouldUseMobileOverflow && (
-                <DropdownMenu>
-                  <Tooltip>
-                  <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
-                      disabled={!editor}
-                      onMouseDown={(e) => e.preventDefault()}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                      <span className="sr-only">{t("editor.moreTools")}</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("editor.moreTools")}</TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
-                    <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading1Icon className="mr-2 h-4 w-4" />
-                      <span>{t("editor.heading1")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading2Icon className="mr-2 h-4 w-4" />
-                      <span>{t("editor.heading2")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Strikethrough className="mr-2 h-4 w-4" />
-                      <span>{t("editor.strikethrough")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <ListTodoIcon className="mr-2 h-4 w-4" />
-                      <span>{t("editor.checkbox")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => editor?.chain().focus().insertContent({ type: "toggle", content: [{ type: "paragraph" }] }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Plus className="mr-2 h-4 w-4" />
-                      <span>{t("editor.toggle")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Link2 className="mr-2 h-4 w-4" />
-                      <span>{t("editor.link")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      <span>{t("editor.insertImageByUrl")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        rememberSelection();
-                        imageInputRef.current?.click();
-                      }}
-                      className="mx-1 cursor-pointer rounded-lg px-4 py-2"
-                    >
-                      <Upload className="mr-2 h-4 w-4" />
-                      <span>{t("editor.uploadImage")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Languages className="mr-2 h-4 w-4" />
-                      <span>{t("editor.fixLanguage")}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
-              {!shouldUseMobileOverflow && <div className="hidden h-4 w-px bg-border md:block" />}
 
               {/* Fix Language */}
-              {!shouldUseMobileOverflow && (
               <Tooltip>
               <TooltipTrigger asChild>
               <Button
@@ -1731,7 +1824,74 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </TooltipTrigger>
               <TooltipContent>{t("editor.fixLanguage")}</TooltipContent>
               </Tooltip>
-              )}
+
+              <div className="h-4 w-px shrink-0 bg-border/60" />
+
+              {/* 3-Dots More Tools Menu */}
+              <DropdownMenu>
+                <Tooltip>
+                <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                    disabled={!editor}
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span className="sr-only">{t("editor.moreTools")}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("editor.moreTools")}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" sideOffset={4} className="w-56 rounded-xl px-0 py-2">
+                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Heading2Icon className="mr-2 h-4 w-4" />
+                    <span>{t("editor.heading2")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Strikethrough className="mr-2 h-4 w-4" />
+                    <span>{t("editor.strikethrough")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <ListOrdered className="mr-2 h-4 w-4" />
+                    <span>{t("editor.numberedList")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Code className="mr-2 h-4 w-4" />
+                    <span>{t("editor.inlineCode")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleBlockquote().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Quote className="mr-2 h-4 w-4" />
+                    <span>{t("editor.blockquote")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Link2 className="mr-2 h-4 w-4" />
+                    <span>{t("editor.link")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <ImagePlus className="mr-2 h-4 w-4" />
+                    <span>{t("editor.insertImageByUrl")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      rememberSelection();
+                      imageInputRef.current?.click();
+                    }}
+                    className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    <span>{t("editor.uploadImage")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <Languages className="mr-2 h-4 w-4" />
+                    <span>{t("editor.fixLanguage")}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : null}
         </div>
@@ -2107,13 +2267,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </AlertDialog>
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl">{t("settings.title")}</DialogTitle>
-            <DialogDescription>{t("settings.description")}</DialogDescription>
+        <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl p-6 sm:p-7 sm:max-w-2xl">
+          <DialogHeader className="pt-1 pb-1">
+            <DialogTitle className="text-2xl font-semibold leading-normal pt-1">{t("settings.title")}</DialogTitle>
+            <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
           </DialogHeader>
 
-          <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 py-1">
+          <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 px-2 py-1.5">
             <div>
               <label className="mb-3 block text-sm font-medium text-foreground">
                 {t("settings.colorScheme")}
@@ -2145,7 +2305,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <label className="mb-3 block text-sm font-medium text-foreground">
                 {t("settings.theme")}
               </label>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2.5 p-1">
                 {APP_THEMES.map((th) => (
                   <button
                     key={th.id}
@@ -2167,33 +2327,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <label htmlFor="modal-language" className="mb-2 block text-sm font-medium text-foreground">
                 {t("settings.language")}
               </label>
-              <select
-                id="modal-language"
-                value={settings.language}
-                onChange={(e) => updateSetting("language", e.target.value === "th" ? "th" : "en")}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="en">{t("settings.english")}</option>
-                <option value="th">{t("settings.thai")}</option>
-              </select>
+              <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
+                <SelectTrigger id="modal-language" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">{t("settings.english")}</SelectItem>
+                  <SelectItem value="th">{t("settings.thai")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
               <label htmlFor="modal-fontFamily" className="mb-2 block text-sm font-medium text-foreground">
                 {t("settings.fontFamily")}
               </label>
-              <select
-                id="modal-fontFamily"
-                value={settings.fontFamily}
-                onChange={(e) => updateSetting("fontFamily", e.target.value as "inter" | "system" | "serif" | "mono" | "prompt")}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="inter">{t("settings.fontInter")}</option>
-                <option value="system">{t("settings.fontSystem")}</option>
-                <option value="serif">{t("settings.fontSerif")}</option>
-                <option value="mono">{t("settings.fontMono")}</option>
-                <option value="prompt">{t("settings.fontPrompt")}</option>
-              </select>
+              <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
+                <SelectTrigger id="modal-fontFamily" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
+                  <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
+                  <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
+                  <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
+                  <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
@@ -2203,18 +2363,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </label>
                 <span className="text-xs text-muted-foreground">{settings.editorFontSize}px</span>
               </div>
-              <select
-                id="modal-editorFontSize"
-                value={settings.editorFontSize}
-                onChange={(e) => updateSetting("editorFontSize", Number(e.target.value))}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {FONT_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}px
-                  </option>
-                ))}
-              </select>
+              <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
+                <SelectTrigger id="modal-editorFontSize" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {FONT_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}px
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+                <div>
+                  <label htmlFor="modal-autoSave" className="text-sm font-medium text-foreground">
+                    {t("settings.autoSave")}
+                  </label>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("settings.autoSaveDescription")}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {settings.autoSave ? t("settings.enabled") : t("settings.disabled")}
+                  </span>
+                  <Switch
+                    id="modal-autoSave"
+                    checked={settings.autoSave}
+                    onCheckedChange={(checked) => updateSetting("autoSave", checked)}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>
