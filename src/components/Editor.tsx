@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps, react-refresh/only-export-components */
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import { Note } from "@/hooks/useNotes";
 import {
@@ -63,7 +64,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { docxToHtml } from "@/lib/docxUtils";
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
-import { mergeAttributes, Node } from "@tiptap/core";
+import { mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
@@ -73,7 +74,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
-import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle } from "@/lib/fileHandles";
+import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, ExtendedFileSystemHandle } from "@/lib/fileHandles";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -198,7 +199,11 @@ const TH_TO_EN_KEYMAP: Record<string, string> = Object.entries(EN_TO_TH_KEYMAP).
   {} as Record<string, string>,
 );
 
-export const Toggle = Node.create({
+export function getToggleButtonMode(selection: { empty: boolean }): "wrap" | "insert" {
+  return selection.empty ? "insert" : "wrap";
+}
+
+export const Toggle = TiptapNode.create({
   name: "toggle",
   group: "block",
   content: "block+",
@@ -255,7 +260,7 @@ interface EditorProps {
   isSidebarOpen?: boolean;
   editorFontSize?: number;
   isMobile?: boolean;
-  rootDirHandle?: any;
+  rootDirHandle?: FileSystemDirectoryHandle | null;
   onCloseSplit?: () => void; // เพิ่ม prop สำหรับปิด split
 }
 
@@ -264,7 +269,7 @@ type SaveSnapshot = {
   content: string;
 };
 
-export default function Editor(props: EditorProps & { notes?: any[] }) {
+export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit } = props;
     const [importDocxDialogOpen, setImportDocxDialogOpen] = useState(false);
     const [previewHtml, setPreviewHtml] = useState("");
@@ -291,15 +296,16 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
         if (!updated && file.name) {
           // ลองค้นหา notes จาก props (ถ้ามี)
           if (typeof window !== 'undefined') {
-            let notesArr = [];
-            if ((window as any).notesPlusNotes) {
-              notesArr = (window as any).notesPlusNotes;
-            } else if ((window as any).notes) {
-              notesArr = (window as any).notes;
-            } else if (typeof (window as any).getNotes === 'function') {
-              notesArr = (window as any).getNotes();
+            const win = window as unknown as Record<string, unknown>;
+            let notesArr: Note[] = [];
+            if (Array.isArray(win.notesPlusNotes)) {
+              notesArr = win.notesPlusNotes as Note[];
+            } else if (Array.isArray(win.notes)) {
+              notesArr = win.notes as Note[];
+            } else if (typeof win.getNotes === 'function') {
+              notesArr = (win.getNotes as () => Note[])();
             }
-            const found = notesArr.find((n: any) => n.fileName === file.name);
+            const found = notesArr.find((n: Note) => n.fileName === file.name);
             if (found) {
               onUpdate(found.id, { content: html, contentFormat: "html", fileType: undefined });
               updated = true;
@@ -307,8 +313,8 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
           }
         }
         // fallback: ถ้า notes ถูกส่งมาทาง props
-        if (!updated && Array.isArray((props as any).notes)) {
-          const found = (props as any).notes.find((n: any) => n.fileName === file.name);
+        if (!updated && Array.isArray(notes)) {
+          const found = notes.find((n: Note) => n.fileName === file.name);
           if (found) {
             onUpdate(found.id, { content: html, contentFormat: "html", fileType: undefined });
           }
@@ -322,7 +328,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
-  const fileHandleByNoteIdRef = useRef<Record<string, any>>({});
+  const fileHandleByNoteIdRef = useRef<Record<string, FileSystemFileHandle>>({});
   const editorSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -356,7 +362,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     td.addRule("taskList", {
       filter: (node: HTMLElement) =>
         node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
-      replacement: (_content: string, node: Node) => {
+      replacement: (_content: string, node: TurndownService.Node) => {
         const ul = node as HTMLElement;
         const items = Array.from(ul.querySelectorAll('li[data-type="taskItem"]')).map((li) => {
           const checked = (li as HTMLElement).getAttribute("data-checked") === "true" ? "x" : " ";
@@ -372,7 +378,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     td.addRule("legacyTaskItem", {
       filter: (node: HTMLElement) =>
         node.nodeName === "LI" && node.classList.contains("task-list-item"),
-      replacement: (_content: string, node: Node) => {
+      replacement: (_content: string, node: TurndownService.Node) => {
         const li = node as HTMLElement;
         const checkbox = li.querySelector('input[type="checkbox"]');
         const checked = checkbox ? ((checkbox as HTMLInputElement).checked ? "x" : " ") : " ";
@@ -840,10 +846,10 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     if (!resolvedPath) return null;
 
     const segments = resolvedPath.split("/").filter(Boolean);
-    let current: any = rootDirHandle;
+    let current: FileSystemDirectoryHandle | FileSystemFileHandle | null = rootDirHandle;
 
     for (const segment of segments) {
-      if (!current) return null;
+      if (!current || !("getDirectoryHandle" in current)) return null;
       try {
         current = await current.getDirectoryHandle(segment, { create: false });
       } catch {
@@ -855,7 +861,8 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
       }
     }
 
-    return current;
+    if (!current || !("getFile" in current)) return null;
+    return current as FileSystemFileHandle;
   };
 
   const fileToDataUrl = async (file: File) => {
@@ -1000,12 +1007,10 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     if (!existingHandle?.createWritable) return;
 
     try {
-      if (typeof existingHandle.requestPermission === "function") {
-        const permission = await existingHandle.requestPermission({ mode: "readwrite" });
-        if (permission !== "granted") {
-          downloadMarkdown(content, ext);
-          return;
-        }
+      const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
+      if (permission !== "granted") {
+        downloadMarkdown(content, ext);
+        return;
       }
 
       const writable = await existingHandle.createWritable();
@@ -1022,7 +1027,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     } catch (error) {
       console.error("Save to existing file failed", error);
       // If file is missing, clear the link and fallback to download
-      if ((error as any)?.name === "NotFoundError" || (error as any)?.name === "NotAllowedError") {
+      if ((error as Error)?.name === "NotFoundError" || (error as Error)?.name === "NotAllowedError") {
         await clearLinkedMetadata();
       }
       downloadMarkdown(content, ext);
@@ -1038,7 +1043,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     }
 
     try {
-      const w = window as any;
+      const w = window as unknown as { showSaveFilePicker: (options?: unknown) => Promise<FileSystemFileHandle> };
       const extDesc = ext === "md" ? "Markdown" : ext === "html" ? "HTML" : "Text";
       const extAccept = ext === "md" ? ".md" : ext === "html" ? ".html" : ".txt";
       const mimeType = ext === "md" ? "text/markdown" : ext === "html" ? "text/html" : "text/plain";
@@ -1121,22 +1126,20 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     const linkedHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
 
     if (linkedHandle) {
-      const removeFn = linkedHandle.remove;
-      if (typeof removeFn !== "function") {
+      const extLinkedHandle = linkedHandle as ExtendedFileSystemHandle;
+      if (typeof extLinkedHandle.remove !== "function") {
         showUiAlert(t("editor.deleteNotSupported"));
         return;
       }
 
       try {
-        if (typeof linkedHandle.requestPermission === "function") {
-          const permission = await linkedHandle.requestPermission({ mode: "readwrite" });
-          if (permission !== "granted") {
-            showUiAlert(t("editor.deletePermissionDenied"));
-            return;
-          }
+        const permission = await requestPermissionIfAvailable(linkedHandle, "readwrite");
+        if (permission !== "granted") {
+          showUiAlert(t("editor.deletePermissionDenied"));
+          return;
         }
 
-        await linkedHandle.remove();
+        await extLinkedHandle.remove();
         await clearLinkedMetadata();
       } catch (error) {
         console.error("Delete linked file failed", error);
@@ -1162,10 +1165,8 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
       fileHandleByNoteIdRef.current[note.id] = storedHandle;
 
       try {
-        if (typeof storedHandle.requestPermission === "function") {
-          const permission = await storedHandle.requestPermission({ mode: "read" });
-          if (permission !== "granted") return;
-        }
+        const permission = await requestPermissionIfAvailable(storedHandle, "read");
+        if (permission !== "granted") return;
 
         const file = await storedHandle.getFile();
 

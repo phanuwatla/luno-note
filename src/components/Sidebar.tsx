@@ -733,7 +733,6 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           {onOpenFolder && (
             <Button type="button" variant="ghost" size="icon" onClick={onOpenFolder} title={t("sidebar.openFolder")}>
               <FolderOpen className="h-4 w-4" />
-              {/* eslint-disable-next-line react/jsx-no-undef */}
               <span className="sr-only">{t("sidebar.openFolder")}</span>
             </Button>
           )}

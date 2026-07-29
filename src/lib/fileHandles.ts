@@ -43,18 +43,18 @@ export function canUseNativeFileSystem() {
   return typeof w.showOpenFilePicker === "function" && typeof w.showSaveFilePicker === "function";
 }
 
-export async function getStoredFileHandle(noteId: string): Promise<any | null> {
+export async function getStoredFileHandle(noteId: string): Promise<FileSystemFileHandle | null> {
   if (!canUseNativeFileSystem()) return null;
 
   try {
-    const handle = await withStore<any | undefined>("readonly", (store) => store.get(noteId));
+    const handle = await withStore<FileSystemFileHandle | undefined>("readonly", (store) => store.get(noteId));
     return handle ?? null;
   } catch {
     return null;
   }
 }
 
-export async function setStoredFileHandle(noteId: string, handle: any) {
+export async function setStoredFileHandle(noteId: string, handle: FileSystemFileHandle) {
   if (!canUseNativeFileSystem()) return;
   await withStore("readwrite", (store) => store.put(handle, noteId));
 }
@@ -67,4 +67,22 @@ export async function removeStoredFileHandle(noteId: string) {
 export async function clearAllStoredFileHandles() {
   if (!canUseNativeFileSystem()) return;
   await withStore("readwrite", (store) => store.clear());
+}
+
+export type ExtendedFileSystemHandle = FileSystemHandle & {
+  requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+  queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+  remove?: () => Promise<void>;
+};
+
+export async function requestPermissionIfAvailable(
+  handle: FileSystemHandle | null | undefined,
+  mode: "read" | "readwrite" = "readwrite",
+): Promise<PermissionState | "granted"> {
+  if (!handle) return "granted";
+  const extHandle = handle as ExtendedFileSystemHandle;
+  if (typeof extHandle.requestPermission === "function") {
+    return await extHandle.requestPermission({ mode });
+  }
+  return "granted";
 }

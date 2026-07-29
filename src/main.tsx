@@ -6,15 +6,16 @@ import "./index.css";
 // โหลด mammoth แบบ dynamic เพื่อรองรับ dev server/public path
 if (typeof window !== "undefined") {
 	function ensureMammothLoaded() {
-		if (typeof (window as any).mammoth !== "undefined") {
-			console.log("[mammoth] mammoth loaded successfully", (window as any).mammoth);
+		const win = window as unknown as Record<string, unknown>;
+		if (typeof win.mammoth !== "undefined") {
+			console.log("[mammoth] mammoth loaded successfully", win.mammoth);
 			return;
 		}
 		const script = document.createElement("script");
 		script.src = "mammoth.browser.min.js";
 		script.onload = () => {
-			if (typeof (window as any).mammoth !== "undefined") {
-				console.log("[mammoth] mammoth loaded successfully (dynamic)", (window as any).mammoth);
+			if (typeof win.mammoth !== "undefined") {
+				console.log("[mammoth] mammoth loaded successfully (dynamic)", win.mammoth);
 			} else {
 				console.error("[mammoth] mammoth failed to load (dynamic)");
 			}

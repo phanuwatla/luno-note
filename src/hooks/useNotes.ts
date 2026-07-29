@@ -34,7 +34,8 @@ function deriveTitleFromContent(content: string): string {
   if (content.trimStart().startsWith('{"type":"doc"')) {
     try {
       const doc = JSON.parse(content);
-      const extractText = (node: any): string => {
+      type DocNode = { type?: string; text?: string; content?: DocNode[] };
+      const extractText = (node: DocNode): string => {
         if (node.type === "text") return node.text || "";
         if (node.content) return node.content.map(extractText).join("");
         return "";

@@ -22,7 +22,7 @@ export default function Index() {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openedFolderName, setOpenedFolderName] = useState<string | null>(null);
-  const [openedRootDirHandle, setOpenedRootDirHandle] = useState<any | null>(null);
+  const [openedRootDirHandle, setOpenedRootDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   // เพิ่ม state สำหรับ split tab (id ของ note ที่แยก)
@@ -75,7 +75,7 @@ export default function Index() {
     return { fileName: `${base}.txt`, contentFormat: "plain" as const };
   };
 
-  const resolveUniqueFileName = async (targetDir: any, desiredFileName: string) => {
+  const resolveUniqueFileName = async (targetDir: FileSystemDirectoryHandle, desiredFileName: string) => {
     const dotIndex = desiredFileName.lastIndexOf(".");
     const base = dotIndex > 0 ? desiredFileName.slice(0, dotIndex) : desiredFileName;
     const ext = dotIndex > 0 ? desiredFileName.slice(dotIndex) : ".txt";
@@ -93,7 +93,7 @@ export default function Index() {
     }
   };
 
-  const resolveUniqueFolderName = async (targetDir: any, desiredFolderName: string) => {
+  const resolveUniqueFolderName = async (targetDir: FileSystemDirectoryHandle, desiredFolderName: string) => {
     let index = 0;
     while (true) {
       const candidate = index === 0 ? desiredFolderName : `${desiredFolderName}-${index}`;
@@ -117,24 +117,24 @@ export default function Index() {
     return dir;
   };
 
-  const copyFileHandleToDirectory = async (sourceFileHandle: any, targetDir: any, targetName: string) => {
+  const copyFileHandleToDirectory = async (sourceFileHandle: FileSystemFileHandle, targetDir: FileSystemDirectoryHandle, targetName: string) => {
     const file = await sourceFileHandle.getFile();
     const writableTarget = await targetDir.getFileHandle(targetName, { create: true });
-    const writable = await writableTarget.createWritable();
+    const writable = await (writableTarget as unknown as { createWritable: () => Promise<WritableStreamDefaultWriter | { write: (data: unknown) => Promise<void>; close: () => Promise<void> }> }).createWritable();
     await writable.write(file);
     await writable.close();
     return writableTarget;
   };
 
-  const copyDirectoryRecursive = async (sourceDirHandle: any, targetParentDir: any, desiredFolderName: string) => {
+  const copyDirectoryRecursive = async (sourceDirHandle: FileSystemDirectoryHandle, targetParentDir: FileSystemDirectoryHandle, desiredFolderName: string) => {
     const finalFolderName = await resolveUniqueFolderName(targetParentDir, desiredFolderName);
     const newDir = await targetParentDir.getDirectoryHandle(finalFolderName, { create: true });
 
-    for await (const [entryName, entryHandle] of sourceDirHandle.entries()) {
+    for await (const [entryName, entryHandle] of (sourceDirHandle as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
       if (entryHandle.kind === "directory") {
-        await copyDirectoryRecursive(entryHandle, newDir, entryName as string);
+        await copyDirectoryRecursive(entryHandle as FileSystemDirectoryHandle, newDir, entryName);
       } else if (entryHandle.kind === "file") {
-        await copyFileHandleToDirectory(entryHandle, newDir, entryName as string);
+        await copyFileHandleToDirectory(entryHandle as FileSystemFileHandle, newDir, entryName);
       }
     }
 
@@ -143,7 +143,7 @@ export default function Index() {
 
   const getRelativePath = (folderPath: string, fileName: string) => (folderPath ? `${folderPath}/${fileName}` : fileName);
 
-  const scanFolderEntries = useCallback(async (dirHandle: any) => {
+  const scanFolderEntries = useCallback(async (dirHandle: FileSystemDirectoryHandle) => {
     const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif"]);
     const TEXT_EXTS = new Set([
       ".txt", ".md", ".markdown",
@@ -159,20 +159,20 @@ export default function Index() {
       fileName: string;
       contentFormat: "plain" | "markdown" | "html";
       fileType?: "image" | "binary";
-      handle: any;
+      handle: FileSystemFileHandle;
       folderPath: string;
       relativePath: string;
     }> = [];
     const folderPaths = new Set<string>();
 
-    async function readDir(handle: any, path: string) {
-      for await (const [name, childHandle] of handle.entries()) {
+    async function readDir(handle: FileSystemDirectoryHandle, path: string) {
+      for await (const [name, childHandle] of (handle as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
         if (childHandle.kind === "directory") {
           const subPath = path ? `${path}/${name}` : name;
           folderPaths.add(subPath);
-          await readDir(childHandle, subPath);
+          await readDir(childHandle as FileSystemDirectoryHandle, subPath);
         } else if (childHandle.kind === "file") {
-          const lname = (name as string).toLowerCase();
+          const lname = name.toLowerCase();
           const dotIdx = lname.lastIndexOf(".");
           const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
 
@@ -188,12 +188,12 @@ export default function Index() {
           }
 
           entries.push({
-            fileName: name as string,
+            fileName: name,
             contentFormat,
             fileType,
-            handle: childHandle,
+            handle: childHandle as FileSystemFileHandle,
             folderPath: path,
-            relativePath: getRelativePath(path, name as string),
+            relativePath: getRelativePath(path, name),
           });
         }
       }
@@ -210,7 +210,7 @@ export default function Index() {
     return { entries, folderPaths: Array.from(folderPaths).sort((a, b) => a.localeCompare(b)) };
   }, []);
 
-  const syncFolderFromDisk = useCallback(async (dirHandle: any) => {
+  const syncFolderFromDisk = useCallback(async (dirHandle: FileSystemDirectoryHandle) => {
     const { entries, folderPaths } = await scanFolderEntries(dirHandle);
     setOpenedFolderPaths(folderPaths);
     const existingByPath = new Map(
@@ -692,7 +692,7 @@ export default function Index() {
   };
 
   const handleOpenFolder = async () => {
-    const w = window as any;
+    const w = window as unknown as { showDirectoryPicker?: (options?: unknown) => Promise<FileSystemDirectoryHandle> };
     if (typeof w.showDirectoryPicker !== "function") return;
 
     try {
@@ -825,7 +825,7 @@ export default function Index() {
                     // ถ้า prev ยังไม่เคย set ให้ใช้ 50% ของ container
                     const container = document.querySelector(".flex.flex-1.min-h-0.flex-row.w-full");
                     const total = container instanceof HTMLElement ? container.offsetWidth : 0;
-                    let base = prev ?? (total ? total / 2 : 400);
+                    const base = prev ?? (total ? total / 2 : 400);
                     let next = base + delta;
                     // จำกัดขนาดขั้นต่ำ/สูงสุด
                     if (next < 120) next = 120;

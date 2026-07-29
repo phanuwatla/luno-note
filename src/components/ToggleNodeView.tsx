@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface ToggleNodeViewProps {
-  node: any;
+  node: { attrs: { open?: boolean; title?: string } };
   updateAttributes: (attrs: Record<string, unknown>) => void;
 }
 
