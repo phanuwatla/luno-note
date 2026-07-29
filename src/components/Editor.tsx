@@ -6,6 +6,7 @@ import {
   Circle,
   Code,
   Download,
+  ExternalLink,
   File,
   FileCode,
   FileText,
@@ -17,6 +18,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  ChevronsDownUp,
   Monitor,
   Moon,
   MoreHorizontal,
@@ -60,7 +62,8 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { docxToHtml } from "@/lib/docxUtils";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
+import { mergeAttributes, Node } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
@@ -69,7 +72,9 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { marked } from "marked";
 import TurndownService from "turndown";
+import ToggleNodeView from "@/components/ToggleNodeView";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle } from "@/lib/fileHandles";
+import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
@@ -193,6 +198,54 @@ const TH_TO_EN_KEYMAP: Record<string, string> = Object.entries(EN_TO_TH_KEYMAP).
   {} as Record<string, string>,
 );
 
+export const Toggle = Node.create({
+  name: "toggle",
+  group: "block",
+  content: "block+",
+  defining: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      title: {
+        default: "",
+      },
+      open: {
+        default: false,
+        parseHTML: (element) => Boolean((element as HTMLDetailsElement).open),
+        renderHTML: (attributes) => (attributes.open ? { open: "" } : {}),
+      },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "details",
+        getAttrs: (element) => {
+          const summary = (element as HTMLElement).querySelector("summary");
+          return {
+            title: summary?.textContent?.trim() || "",
+            open: Boolean((element as HTMLDetailsElement).open),
+          };
+        },
+      },
+    ];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const sanitizedAttributes = { ...HTMLAttributes };
+    delete sanitizedAttributes.open;
+
+    return [
+      "details",
+      node.attrs.open ? mergeAttributes(sanitizedAttributes, { open: "" }) : mergeAttributes(sanitizedAttributes),
+      ["summary", node.attrs.title],
+      ["div", 0],
+    ];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ToggleNodeView);
+  },
+});
+
 interface EditorProps {
   note: Note | null;
   onUpdate: (id: string, patch: Partial<Note>) => void;
@@ -202,6 +255,7 @@ interface EditorProps {
   isSidebarOpen?: boolean;
   editorFontSize?: number;
   isMobile?: boolean;
+  rootDirHandle?: any;
   onCloseSplit?: () => void; // เพิ่ม prop สำหรับปิด split
 }
 
@@ -211,8 +265,9 @@ type SaveSnapshot = {
 };
 
 export default function Editor(props: EditorProps & { notes?: any[] }) {
-  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, onCloseSplit } = props;
+  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit } = props;
     const [importDocxDialogOpen, setImportDocxDialogOpen] = useState(false);
+    const [previewHtml, setPreviewHtml] = useState("");
     const docxInputRef = useRef<HTMLInputElement>(null);
     // Handle docx import
     const handleImportDocx = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -399,8 +454,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
     if (isLikelyHtml(text)) {
       // Already in Tiptap native format — return as-is
       if (text.includes('data-type="taskList"') || text.includes("data-type='taskList'")) return text;
-      // Migrate legacy HTML (<li class="task-list-item">) to Tiptap format
-      if (!text.includes("task-list-item")) return text;
+      // Migrate any legacy or GFM HTML (checkbox inputs / old task-list-item) to Tiptap format
       const temp = document.createElement("div");
       temp.innerHTML = text;
       migrateDomTaskLists(temp);
@@ -420,6 +474,7 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
   const editor = useEditor({
     extensions: [
       StarterKit,
+      Toggle,
       TaskList,
       TaskItem,
       Link.configure({
@@ -455,8 +510,8 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
       attributes: {
         style: `font-size:${editorFontSize}px;`,
         class:
-          "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6" +
-          " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-2 [&_ul[data-type='taskList']_li_label_input]:h-3 [&_ul[data-type='taskList']_li_label_input]:w-3 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0",
+          "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6" +
+          " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-2 [&_ul[data-type='taskList']_li_label_input]:h-3 [&_ul[data-type='taskList']_li_label_input]:w-3 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90",
       },
     },
     onUpdate: ({ editor: instance }) => {
@@ -496,8 +551,8 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
         attributes: {
           style: `font-size:${editorFontSize}px;`,
           class:
-            "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6" +
-            " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-[3px] [&_ul[data-type='taskList']_li_label_input]:h-4 [&_ul[data-type='taskList']_li_label_input]:w-4 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0",
+            "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6" +
+            " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-2 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-2 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:mt-[3px] [&_ul[data-type='taskList']_li_label_input]:h-4 [&_ul[data-type='taskList']_li_label_input]:w-4 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90",
         },
       },
     });
@@ -756,6 +811,102 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
       .join("")
       .replace(/\n{3,}/g, "\n\n")
       .trimEnd();
+  };
+
+  const resolveAssetPath = (baseFolderPath: string, assetPath: string) => {
+    const trimmed = assetPath.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("/")) return trimmed.replace(/^\/+/, "");
+
+    const segments = `${baseFolderPath}/${trimmed}`.split("/").filter(Boolean);
+    const stack: string[] = [];
+
+    for (const segment of segments) {
+      if (segment === ".") continue;
+      if (segment === "..") {
+        if (stack.length > 0) stack.pop();
+        continue;
+      }
+      stack.push(segment);
+    }
+
+    return stack.join("/");
+  };
+
+  const resolveAssetHandle = async (assetPath: string) => {
+    if (!rootDirHandle || !note) return null;
+
+    const resolvedPath = resolveAssetPath(note.folderPath || "", assetPath);
+    if (!resolvedPath) return null;
+
+    const segments = resolvedPath.split("/").filter(Boolean);
+    let current: any = rootDirHandle;
+
+    for (const segment of segments) {
+      if (!current) return null;
+      try {
+        current = await current.getDirectoryHandle(segment, { create: false });
+      } catch {
+        try {
+          current = await current.getFileHandle(segment, { create: false });
+        } catch {
+          return null;
+        }
+      }
+    }
+
+    return current;
+  };
+
+  const fileToDataUrl = async (file: File) => {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read file as data URL"));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPreviewHtml = async () => {
+      if (!note || note.contentFormat !== "html" || !note.content) {
+        if (!cancelled) setPreviewHtml("");
+        return;
+      }
+
+      const rewritten = await rewriteHtmlForPreview(note.content, async (assetPath) => {
+        const handle = await resolveAssetHandle(assetPath);
+        if (!handle || typeof handle.getFile !== "function") return null;
+        const file = await handle.getFile();
+        return await fileToDataUrl(file);
+      });
+
+      if (!cancelled) setPreviewHtml(rewritten);
+    };
+
+    void loadPreviewHtml();
+    return () => {
+      cancelled = true;
+    };
+  }, [note?.id, note?.content, note?.contentFormat, note?.folderPath, rootDirHandle]);
+
+  const openHtmlPreviewInNewTab = () => {
+    if (!note) return;
+
+    const contentToOpen = note.contentFormat === "html" ? (previewHtml || note.content) : (editor?.getHTML() ?? note.content);
+    if (!contentToOpen) return;
+
+    const blob = new Blob([contentToOpen], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const popup = window.open(url, "_blank", "noopener,noreferrer");
+
+    if (popup) {
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } else {
+      URL.revokeObjectURL(url);
+    }
   };
 
   const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
@@ -1387,6 +1538,23 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
                 type="button"
                 variant="ghost"
                 size="icon"
+                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("toggle") ? "bg-primary/15 text-primary" : ""}`}
+                disabled={!editor}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => editor?.chain().focus().insertContent({ type: "toggle", content: [{ type: "paragraph" }] }).run()}
+              >
+                <ChevronsDownUp className="h-4 w-4" />
+                <span className="sr-only">{t("editor.toggle")}</span>
+              </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.toggle")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+              <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
                 className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("code") ? "bg-primary/15 text-primary" : ""}`}
                 disabled={!editor}
                 onMouseDown={(e) => e.preventDefault()}
@@ -1510,6 +1678,10 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
                     <DropdownMenuItem onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <ListTodoIcon className="mr-2 h-4 w-4" />
                       <span>{t("editor.checkbox")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => editor?.chain().focus().insertContent({ type: "toggle", content: [{ type: "paragraph" }] }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Plus className="mr-2 h-4 w-4" />
+                      <span>{t("editor.toggle")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Link2 className="mr-2 h-4 w-4" />
@@ -1779,13 +1951,24 @@ export default function Editor(props: EditorProps & { notes?: any[] }) {
         </div>
         {note.contentFormat === "html" && htmlPreviewOpen && (
           <div className="flex-1 border-t border-border md:border-t-0 md:border-l overflow-hidden flex flex-col md:w-1/2">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30">
-              <Play className="h-3 w-3" />
-              <span>Run</span>
+            <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30">
+              <div className="flex items-center gap-2">
+                <Play className="h-3 w-3" />
+                <span>Run</span>
+              </div>
+              <button
+                type="button"
+                onClick={openHtmlPreviewInNewTab}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                aria-label="Open HTML in browser"
+                title="Open HTML in browser"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
             </div>
             <iframe
               className="flex-1 w-full bg-white"
-              srcDoc={note.contentFormat === "html" ? note.content : (editor?.getHTML() ?? note.content)}
+              srcDoc={note.contentFormat === "html" ? previewHtml || note.content : (editor?.getHTML() ?? note.content)}
               sandbox="allow-scripts allow-same-origin"
               title="HTML Preview"
             />

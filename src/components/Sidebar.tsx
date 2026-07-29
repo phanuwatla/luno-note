@@ -151,6 +151,23 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
+
+  const openFolderBeforeCreation = () => {
+    if (!openedFolderName && onOpenFolder) {
+      onOpenFolder();
+      return true;
+    }
+    return false;
+  };
+
+  const openCreateFileDialog = () => {
+    setCreateFileDialogOpen(true);
+  };
+
+  const openCreateFolderDialog = () => {
+    setCreateFolderDialogOpen(true);
+  };
   const [renameFileDialogOpen, setRenameFileDialogOpen] = useState(false);
   const [renameFolderDialogOpen, setRenameFolderDialogOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
@@ -193,6 +210,22 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   useEffect(() => {
     setSelectedFolderPath(currentFolderPath);
   }, [currentFolderPath]);
+
+  // Complete pending creation when a folder gets opened
+  useEffect(() => {
+    if (!pendingCreate) return;
+    if (!openedFolderName) return;
+
+    if (pendingCreate.kind === "file") {
+      const fileName = pendingCreate.fileName ?? `untitled.txt`;
+      const contentFormat = pendingCreate.contentFormat ?? "plain";
+      onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
+    } else if (pendingCreate.kind === "folder") {
+      if (onCreateFolder) onCreateFolder(selectedFolderPath || currentFolderPath, pendingCreate.folderName ?? "untitled-folder");
+    }
+
+    setPendingCreate(null);
+  }, [openedFolderName, pendingCreate, onCreate, onCreateFolder, selectedFolderPath, currentFolderPath]);
 
   const hasTreeView = useMemo(() => notes.some((n) => n.folderPath !== undefined) || folderPaths.length > 0, [notes, folderPaths]);
 
@@ -332,6 +365,16 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     // ใช้ extension ที่เลือกเสมอ
     const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
 
+    // If there's no opened folder yet, store pending create and trigger folder picker
+    if (!openedFolderName && onOpenFolder) {
+      setPendingCreate({ kind: "file", fileName, contentFormat });
+      setCreateFileDialogOpen(false);
+      setNewFileName("");
+      setNewFileExt("txt");
+      onOpenFolder();
+      return;
+    }
+
     onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     setCreateFileDialogOpen(false);
     setNewFileName("");
@@ -342,6 +385,15 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     if (!onCreateFolder) return;
     const safeFolderName = newFolderName.trim().replace(/[\\/:*?"<>|]/g, "_");
     const folderName = safeFolderName || "untitled-folder";
+
+    if (!openedFolderName && onOpenFolder) {
+      setPendingCreate({ kind: "folder", folderName });
+      setCreateFolderDialogOpen(false);
+      setNewFolderName("");
+      onOpenFolder();
+      return;
+    }
+
     onCreateFolder(selectedFolderPath || currentFolderPath, folderName);
     setCreateFolderDialogOpen(false);
     setNewFolderName("");
@@ -693,11 +745,11 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44 rounded-xl px-0 py-2">
-              <DropdownMenuItem onClick={() => setCreateFileDialogOpen(true)} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <DropdownMenuItem onClick={openCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
                 <FileText className="h-4 w-4" />
                 <span>{t("sidebar.createFileAction")}</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setCreateFolderDialogOpen(true)} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <DropdownMenuItem onClick={openCreateFolderDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
                 <FolderPlus className="h-4 w-4" />
                 <span>{t("sidebar.createFolderAction")}</span>
               </DropdownMenuItem>

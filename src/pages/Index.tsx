@@ -816,6 +816,7 @@ export default function Index() {
                   isSidebarOpen={sidebarOpen}
                   editorFontSize={settings.editorFontSize}
                   isMobile={isMobile}
+                  rootDirHandle={openedRootDirHandle}
                 />
               </div>
               <SplitResizer
@@ -843,6 +844,7 @@ export default function Index() {
                   isSidebarOpen={sidebarOpen}
                   editorFontSize={settings.editorFontSize}
                   isMobile={isMobile}
+                  rootDirHandle={openedRootDirHandle}
                   onCloseSplit={() => setSplitTabId(null)}
                 />
               </div>
@@ -857,6 +859,7 @@ export default function Index() {
               isSidebarOpen={sidebarOpen}
               editorFontSize={settings.editorFontSize}
               isMobile={isMobile}
+              rootDirHandle={openedRootDirHandle}
             />
           )}
         </div>
