@@ -25,8 +25,8 @@ export default function Index() {
   const [openedRootDirHandle, setOpenedRootDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
-  // เพิ่ม state สำหรับ split tab (id ของ note ที่แยก)
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
@@ -788,6 +788,7 @@ export default function Index() {
           isMobile={isMobile}
           onClose={() => setSidebarOpen(false)}
           confirmBeforeDelete={settings.confirmBeforeDelete}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </div>
 
@@ -822,6 +823,8 @@ export default function Index() {
                   editorFontSize={settings.editorFontSize}
                   isMobile={isMobile}
                   rootDirHandle={openedRootDirHandle}
+                  settingsOpen={settingsOpen}
+                  onSettingsOpenChange={setSettingsOpen}
                 />
               </div>
               <SplitResizer
@@ -851,6 +854,8 @@ export default function Index() {
                   isMobile={isMobile}
                   rootDirHandle={openedRootDirHandle}
                   onCloseSplit={() => setSplitTabId(null)}
+                  settingsOpen={settingsOpen}
+                  onSettingsOpenChange={setSettingsOpen}
                 />
               </div>
             </div>
@@ -865,6 +870,8 @@ export default function Index() {
               editorFontSize={settings.editorFontSize}
               isMobile={isMobile}
               rootDirHandle={openedRootDirHandle}
+              settingsOpen={settingsOpen}
+              onSettingsOpenChange={setSettingsOpen}
             />
           )}
         </div>

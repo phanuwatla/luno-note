@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive } from "lucide-react";
+import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -41,6 +41,7 @@ interface SidebarProps {
   sidebarWidth?: number;
   isMobile?: boolean;
   onClose?: () => void;
+  onOpenSettings?: () => void;
 }
 
 interface FolderNode {
@@ -146,7 +147,7 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   return <FileText className={cls} />;
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 320, isMobile = false, onClose }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 320, isMobile = false, onClose, onOpenSettings }: SidebarProps) {
   const [query, setQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
@@ -813,6 +814,20 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             filtered.map((note) => renderNote(note))
           )}
         </AnimatePresence>
+      </div>
+
+      {/* Sidebar Footer with Settings Button */}
+      <div className="border-t border-border/60 p-2 shrink-0 bg-muted/10">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-xs text-muted-foreground hover:text-primary hover:font-semibold hover:bg-accent/5 rounded-lg px-2.5 py-1.5 gap-1.5 transition-colors"
+          onClick={onOpenSettings}
+        >
+          <Settings className="h-4 w-4 shrink-0 transition-colors" />
+          <span>{t("common.settings")}</span>
+        </Button>
       </div>
 
       <Dialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>

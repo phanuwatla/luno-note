@@ -20,6 +20,9 @@ import {
   List,
   ListOrdered,
   ChevronsDownUp,
+  ChevronUp,
+  ChevronDown,
+  Keyboard,
   Monitor,
   Moon,
   MoreHorizontal,
@@ -32,15 +35,30 @@ import {
   Smile,
   Upload,
   Trash2,
+  Trash,
+  Eraser,
+  Minus,
   Settings,
   Sun,
   Play,
   Pause,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  XCircle,
   Save,
+  Table as TableIcon,
+  Copy,
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  Columns,
+  Layers,
   X
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -66,14 +84,18 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { docxToHtml } from "@/lib/docxUtils";
-import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
-import { mergeAttributes, Node as TiptapNode } from "@tiptap/core";
+import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
+import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
@@ -92,6 +114,9 @@ import { Heading2Icon } from "@/components/icons/Heading2Icon";
 import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
 import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
 import { PanelRightCloseIcon } from "./icons/PanelRightCloseIcon";
+import { DeleteRowIcon } from "@/components/icons/DeleteRowIcon";
+import { DeleteColumnIcon } from "@/components/icons/DeleteColumnIcon";
+import { DeleteTableIcon } from "@/components/icons/DeleteTableIcon";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -225,7 +250,7 @@ export function getToggleButtonMode(selection: { empty: boolean }): "wrap" | "in
   return selection.empty ? "insert" : "wrap";
 }
 
-export function handleToggleClick(editor: Editor | null) {
+export function handleToggleClick(editor: TiptapEditor | null) {
   if (!editor) return;
   const { from, to, empty } = editor.state.selection;
   const selectedText = empty ? "" : editor.state.doc.textBetween(from, to, " ", " ").trim();
@@ -302,26 +327,874 @@ export const Toggle = TiptapNode.create({
   },
 });
 
-interface EditorProps {
+export type SlashMenuItem = {
+  id: string;
+  titleKey: string;
+  icon: React.ReactNode;
+  keywords: string[];
+  action: (
+    editor: TiptapEditor,
+    helpers: {
+      openLinkDialog: () => void;
+      openImageDialog: () => void;
+      triggerImageUpload: () => void;
+      handleFixLanguage: () => void;
+    }
+  ) => void;
+};
+
+export const slashMenuStateRef = {
+  current: {
+    open: false,
+    query: "",
+    slashRange: null as { from: number; to: number } | null,
+    coords: null as { top: number; left: number } | null,
+    selectedIndex: 0,
+    filteredItems: [] as SlashMenuItem[],
+    onSelect: null as ((item: SlashMenuItem) => void) | null,
+    notify: null as (() => void) | null,
+  },
+};
+
+export const slashMenuScrollRef = {
+  current: null as HTMLDivElement | null,
+};
+
+export const SLASH_ITEMS: SlashMenuItem[] = [
+  {
+    id: "h1",
+    titleKey: "editor.heading1",
+    icon: <Heading1Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h1", "heading1", "header1", "หัวข้อ1", "หัวข้อ 1"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run(),
+  },
+  {
+    id: "h2",
+    titleKey: "editor.heading2",
+    icon: <Heading2Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h2", "heading2", "header2", "หัวข้อ2", "หัวข้อ 2"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run(),
+  },
+  {
+    id: "bold",
+    titleKey: "editor.bold",
+    icon: <Bold className="mr-2 h-4 w-4" />,
+    keywords: ["bold", "b", "ตัวหนา"],
+    action: (editor) => editor.chain().focus().toggleBold().run(),
+  },
+  {
+    id: "italic",
+    titleKey: "editor.italic",
+    icon: <Italic className="mr-2 h-4 w-4" />,
+    keywords: ["italic", "i", "ตัวเอียง"],
+    action: (editor) => editor.chain().focus().toggleItalic().run(),
+  },
+  {
+    id: "strike",
+    titleKey: "editor.strikethrough",
+    icon: <Strikethrough className="mr-2 h-4 w-4" />,
+    keywords: ["strike", "strikethrough", "s", "ขีดฆ่า"],
+    action: (editor) => editor.chain().focus().toggleStrike().run(),
+  },
+  {
+    id: "bulletList",
+    titleKey: "editor.bulletList",
+    icon: <List className="mr-2 h-4 w-4" />,
+    keywords: ["bullet", "list", "ul", "รายการ", "จุด"],
+    action: (editor) => editor.chain().focus().toggleBulletList().run(),
+  },
+  {
+    id: "orderedList",
+    titleKey: "editor.numberedList",
+    icon: <ListOrdered className="mr-2 h-4 w-4" />,
+    keywords: ["number", "ordered", "ol", "เลข", "ลำดับ"],
+    action: (editor) => editor.chain().focus().toggleOrderedList().run(),
+  },
+  {
+    id: "taskList",
+    titleKey: "editor.checkbox",
+    icon: <ListTodoIcon className="mr-2 h-4 w-4" />,
+    keywords: ["todo", "task", "check", "checkbox", "กล่อง", "เช็ค"],
+    action: (editor) => editor.chain().focus().toggleTaskList().run(),
+  },
+  {
+    id: "toggle",
+    titleKey: "editor.toggle",
+    icon: <ChevronsDownUp className="mr-2 h-4 w-4" />,
+    keywords: ["toggle", "collapse", "details", "พับ", "ย่อย"],
+    action: (editor) => handleToggleClick(editor),
+  },
+  {
+    id: "code",
+    titleKey: "editor.inlineCode",
+    icon: <Code className="mr-2 h-4 w-4" />,
+    keywords: ["code", "inline", "โค้ด"],
+    action: (editor) => editor.chain().focus().toggleCode().run(),
+  },
+  {
+    id: "blockquote",
+    titleKey: "editor.blockquote",
+    icon: <Quote className="mr-2 h-4 w-4" />,
+    keywords: ["quote", "blockquote", "คำพูด", "อ้างอิง"],
+    action: (editor) => editor.chain().focus().toggleBlockquote().run(),
+  },
+  {
+    id: "emoji",
+    titleKey: "editor.insertEmoji",
+    icon: <Smile className="mr-2 h-4 w-4" />,
+    keywords: ["emoji", "smile", "อิโมจิ"],
+    action: (editor) => editor.chain().focus().insertContent("😊").run(),
+  },
+  {
+    id: "link",
+    titleKey: "editor.link",
+    icon: <Link2 className="mr-2 h-4 w-4" />,
+    keywords: ["link", "url", "ลิงก์"],
+    action: (_editor, helpers) => helpers.openLinkDialog(),
+  },
+  {
+    id: "imageUrl",
+    titleKey: "editor.insertImageByUrl",
+    icon: <ImagePlus className="mr-2 h-4 w-4" />,
+    keywords: ["image", "img", "photo", "pic", "รูป", "ภาพ", "url"],
+    action: (_editor, helpers) => helpers.openImageDialog(),
+  },
+  {
+    id: "imageUpload",
+    titleKey: "editor.uploadImage",
+    icon: <Upload className="mr-2 h-4 w-4" />,
+    keywords: ["upload", "file", "image", "img", "อัปโหลด", "อัพโหลด", "รูป", "ไฟล์"],
+    action: (_editor, helpers) => helpers.triggerImageUpload(),
+  },
+  {
+    id: "table",
+    titleKey: "editor.insertTable",
+    icon: <TableIcon className="mr-2 h-4 w-4" />,
+    keywords: ["table", "grid", "ตาราง", "แถว", "คอลัมน์"],
+    action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+  },
+  {
+    id: "fixLanguage",
+    titleKey: "editor.fixLanguage",
+    icon: <Languages className="mr-2 h-4 w-4" />,
+    keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา"],
+    action: (_editor, helpers) => helpers.handleFixLanguage(),
+  },
+];
+
+const IndentKeymap = Extension.create({
+  name: "indentKeymap",
+  addKeyboardShortcuts() {
+    return {
+      Tab: ({ editor }) => {
+        if (editor.can().sinkListItem("listItem") && editor.chain().focus().sinkListItem("listItem").run()) {
+          return true;
+        }
+        if (editor.can().sinkListItem("taskItem") && editor.chain().focus().sinkListItem("taskItem").run()) {
+          return true;
+        }
+        return editor.chain().focus().insertContent("  ").run();
+      },
+      "Shift-Tab": ({ editor }) => {
+        if (editor.can().liftListItem("listItem") && editor.chain().focus().liftListItem("listItem").run()) {
+          return true;
+        }
+        if (editor.can().liftListItem("taskItem") && editor.chain().focus().liftListItem("taskItem").run()) {
+          return true;
+        }
+        const { state } = editor;
+        const { selection } = state;
+        const { $from } = selection;
+        const lineText = $from.nodeBefore ? $from.nodeBefore.text || "" : "";
+        if (lineText.endsWith("  ")) {
+          return editor.chain().focus().deleteRange({ from: $from.pos - 2, to: $from.pos }).run();
+        }
+        return false;
+      },
+      "Mod-Shift-t": ({ editor }) => {
+        handleToggleClick(editor);
+        return true;
+      },
+      ArrowDown: () => {
+        if (slashMenuStateRef.current.open && slashMenuStateRef.current.filteredItems.length > 0) {
+          const len = slashMenuStateRef.current.filteredItems.length;
+          const curr = slashMenuStateRef.current.selectedIndex;
+          const next = curr === -1 ? 0 : (curr + 1) % len;
+          slashMenuStateRef.current.selectedIndex = next;
+          slashMenuStateRef.current.notify?.();
+          const target = slashMenuScrollRef.current?.querySelector(`[data-slash-item="${next}"]`);
+          target?.scrollIntoView({ block: "nearest" });
+          return true;
+        }
+        return false;
+      },
+      ArrowUp: () => {
+        if (slashMenuStateRef.current.open && slashMenuStateRef.current.filteredItems.length > 0) {
+          const len = slashMenuStateRef.current.filteredItems.length;
+          const curr = slashMenuStateRef.current.selectedIndex;
+          const next = curr <= 0 ? len - 1 : curr - 1;
+          slashMenuStateRef.current.selectedIndex = next;
+          slashMenuStateRef.current.notify?.();
+          const target = slashMenuScrollRef.current?.querySelector(`[data-slash-item="${next}"]`);
+          target?.scrollIntoView({ block: "nearest" });
+          return true;
+        }
+        return false;
+      },
+      Enter: ({ editor }) => {
+        if (slashMenuStateRef.current.open && slashMenuStateRef.current.filteredItems.length > 0) {
+          const curr = slashMenuStateRef.current.selectedIndex;
+          const idx = curr >= 0 ? curr : 0;
+          const item = slashMenuStateRef.current.filteredItems[idx];
+          if (item && slashMenuStateRef.current.onSelect) {
+            slashMenuStateRef.current.onSelect(item);
+            return true;
+          }
+        }
+        return false;
+      },
+      Escape: () => {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          slashMenuStateRef.current.notify?.();
+          return true;
+        }
+        return false;
+      },
+    };
+  },
+});
+
+export interface EditorProps {
   note: Note | null;
-  onUpdate: (id: string, patch: Partial<Note>) => void;
-  onDelete: (id: string) => boolean;
-  onCreate?: (folderPath?: string) => Note;
-  onOpenSidebar?: () => void;
+  onUpdate: (id: string, updates: Partial<Note>) => void;
+  onDelete: (id: string) => void;
+  onCreate?: () => Note;
+  onOpenSidebar: () => void;
   isSidebarOpen?: boolean;
   editorFontSize?: number;
   isMobile?: boolean;
-  rootDirHandle?: FileSystemDirectoryHandle | null;
-  onCloseSplit?: () => void; // เพิ่ม prop สำหรับปิด split
+  notes?: Note[];
+  rootDirHandle?: ExtendedFileSystemHandle | null;
+  onCloseSplit?: () => void;
+  settingsOpen?: boolean;
+  onSettingsOpenChange?: (open: boolean) => void;
 }
 
-type SaveSnapshot = {
+interface SaveSnapshot {
   ext: "md" | "txt" | "html";
   content: string;
-};
+}
+
+function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
+  const { t } = useTranslation();
+  const [tableRect, setTableRect] = useState<DOMRect | null>(null);
+  const [cellRect, setCellRect] = useState<DOMRect | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [duplicateSubmenuOpen, setDuplicateSubmenuOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const tableMenuScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const checkScroll = useCallback(() => {
+    const el = tableMenuScrollRef.current;
+    if (!el) return;
+    const hasScrollable = el.scrollHeight > el.clientHeight;
+    setCanScrollUp(hasScrollable && el.scrollTop > 2);
+    setCanScrollDown(hasScrollable && el.scrollTop < el.scrollHeight - el.clientHeight - 2);
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setDuplicateSubmenuOpen(false);
+    }
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuOpen) {
+      setTimeout(checkScroll, 50);
+    } else {
+      setCanScrollUp(false);
+      setCanScrollDown(false);
+    }
+  }, [menuOpen, duplicateSubmenuOpen, checkScroll]);
+
+  // Click / Tap outside to dismiss popover menu
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [menuOpen]);
+
+  const updatePositions = useCallback(() => {
+    if (!editor || editor.isDestroyed || !editor.isActive("table")) {
+      setTableRect(null);
+      setCellRect(null);
+      return;
+    }
+
+    try {
+      const { selection } = editor.state;
+      const domAtPos = editor.view.domAtPos(selection.from);
+      let node: Node | null = domAtPos.node;
+      if (node && node.nodeType === Node.TEXT_NODE) {
+        node = node.parentNode;
+      }
+      const tableEl = (node as HTMLElement)?.closest?.("table") as HTMLElement | null;
+
+      if (!tableEl) {
+        setCellRect(null);
+        setTableRect(null);
+        return;
+      }
+
+      setTableRect(tableEl.getBoundingClientRect());
+
+      // Check if multiple cells are selected (.selectedCell)
+      const selectedCells = tableEl.querySelectorAll("td.selectedCell, th.selectedCell");
+
+      if (selectedCells.length > 0) {
+        let minTop = Infinity;
+        let minLeft = Infinity;
+        let maxRight = -Infinity;
+        let maxBottom = -Infinity;
+
+        selectedCells.forEach((cell) => {
+          const r = cell.getBoundingClientRect();
+          if (r.top < minTop) minTop = r.top;
+          if (r.left < minLeft) minLeft = r.left;
+          if (r.right > maxRight) maxRight = r.right;
+          if (r.bottom > maxBottom) maxBottom = r.bottom;
+        });
+
+        setCellRect(new DOMRect(minLeft, minTop, maxRight - minLeft, maxBottom - minTop));
+      } else {
+        const cellEl = (node as HTMLElement)?.closest?.("td, th") as HTMLElement | null;
+        if (cellEl) {
+          setCellRect(cellEl.getBoundingClientRect());
+        } else {
+          setCellRect(null);
+        }
+      }
+    } catch {
+      setCellRect(null);
+      setTableRect(null);
+    }
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    updatePositions();
+
+    const handleUpdate = () => updatePositions();
+
+    editor.on("selectionUpdate", handleUpdate);
+    editor.on("transaction", handleUpdate);
+    window.addEventListener("scroll", handleUpdate, true);
+    window.addEventListener("resize", handleUpdate);
+
+    return () => {
+      if (!editor.isDestroyed) {
+        editor.off("selectionUpdate", handleUpdate);
+        editor.off("transaction", handleUpdate);
+      }
+      window.removeEventListener("scroll", handleUpdate, true);
+      window.removeEventListener("resize", handleUpdate);
+    };
+  }, [editor, updatePositions]);
+
+  let isMultiSelection = false;
+  try {
+    if (editor && !editor.isDestroyed && tableRect) {
+      const { selection } = editor.state;
+      const domAtPos = editor.view.domAtPos(selection.from);
+      let node: Node | null = domAtPos.node;
+      if (node && node.nodeType === Node.TEXT_NODE) {
+        node = node.parentNode;
+      }
+      const tableEl = (node as HTMLElement)?.closest?.("table") as HTMLElement | null;
+      if (tableEl) {
+        isMultiSelection = tableEl.querySelectorAll("td.selectedCell, th.selectedCell").length > 1;
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  const canMerge = editor?.can()?.mergeCells();
+  const canSplit = editor?.can()?.splitCell();
+
+  const items = useMemo(() => {
+    if (!editor || editor.isDestroyed) return [];
+    return [
+      {
+        id: "toggleHeaderRow",
+        label: t("editor.toggleHeaderRow"),
+        icon: <TableIcon className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().toggleHeaderRow().run(),
+      },
+      {
+        id: "toggleHeaderColumn",
+        label: t("editor.toggleHeaderColumn"),
+        icon: <Columns className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().toggleHeaderColumn().run(),
+      },
+      ...(isMultiSelection || canMerge
+        ? [
+            {
+              id: "mergeCells",
+              label: t("editor.mergeCells"),
+              icon: <Layers className="mr-2 h-4 w-4 shrink-0" />,
+              action: () => editor.chain().focus().mergeCells().run(),
+            },
+          ]
+        : []),
+      ...(canSplit
+        ? [
+            {
+              id: "splitCell",
+              label: t("editor.splitCell"),
+              icon: <Layers className="mr-2 h-4 w-4 shrink-0" />,
+              action: () => editor.chain().focus().splitCell().run(),
+            },
+          ]
+        : []),
+      {
+        id: "addColumnBefore",
+        label: t("editor.addColumnLeft"),
+        icon: <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().addColumnBefore().run(),
+      },
+      {
+        id: "addColumnAfter",
+        label: t("editor.addColumnRight"),
+        icon: <ArrowRight className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().addColumnAfter().run(),
+      },
+      {
+        id: "addRowBefore",
+        label: t("editor.addRowAbove"),
+        icon: <ArrowUp className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().addRowBefore().run(),
+      },
+      {
+        id: "addRowAfter",
+        label: t("editor.addRowBelow"),
+        icon: <ArrowDown className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().addRowAfter().run(),
+      },
+      {
+        id: "clearContents",
+        label: t("editor.clearContents"),
+        icon: <Eraser className="mr-2 h-4 w-4 shrink-0" />,
+        action: () => editor.chain().focus().deleteSelection().run(),
+      },
+      {
+        id: "deleteRow",
+        label: t("editor.deleteRow"),
+        icon: <DeleteRowIcon className="mr-2 h-4 w-4 shrink-0" />,
+        danger: true,
+        action: () => editor.chain().focus().deleteRow().run(),
+      },
+      {
+        id: "deleteColumn",
+        label: t("editor.deleteColumn"),
+        icon: <DeleteColumnIcon className="mr-2 h-4 w-4 shrink-0" />,
+        danger: true,
+        action: () => editor.chain().focus().deleteColumn().run(),
+      },
+      {
+        id: "deleteTable",
+        label: t("editor.deleteTable"),
+        icon: <DeleteTableIcon className="mr-2 h-4 w-4 shrink-0" />,
+        danger: true,
+        action: () => editor.chain().focus().deleteTable().run(),
+      },
+    ];
+  }, [editor, isMultiSelection, canMerge, canSplit, t]);
+
+  const normalItems = useMemo(() => items.filter((item) => !item.danger), [items]);
+  const dangerItems = useMemo(() => items.filter((item) => item.danger), [items]);
+
+  const allFlatItems = useMemo(() => {
+    const list: Array<{ id: string; label: string; icon: React.ReactNode; danger?: boolean; action: () => void }> = [];
+    normalItems.forEach((item) => list.push(item));
+    list.push({
+      id: "duplicate",
+      label: t("editor.duplicate"),
+      icon: <Copy className="mr-2 h-4 w-4 shrink-0" />,
+      action: () => setDuplicateSubmenuOpen((v) => !v),
+    });
+    if (duplicateSubmenuOpen) {
+      list.push({
+        id: "duplicateRow",
+        label: t("editor.duplicateRow"),
+        icon: <DeleteRowIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />,
+        action: () => {
+          editor.chain().focus().addRowAfter().run();
+          setMenuOpen(false);
+          setDuplicateSubmenuOpen(false);
+        },
+      });
+      list.push({
+        id: "duplicateColumn",
+        label: t("editor.duplicateColumn"),
+        icon: <DeleteColumnIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />,
+        action: () => {
+          editor.chain().focus().addColumnAfter().run();
+          setMenuOpen(false);
+          setDuplicateSubmenuOpen(false);
+        },
+      });
+    }
+    dangerItems.forEach((item) => list.push(item));
+    return list;
+  }, [normalItems, duplicateSubmenuOpen, dangerItems, editor, t]);
+
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [menuOpen, duplicateSubmenuOpen]);
+
+  // Arrow up/down & Enter/Escape keyboard navigation
+  useEffect(() => {
+    if (!menuOpen || allFlatItems.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev < 0 ? 0 : (prev + 1) % allFlatItems.length));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev <= 0 ? allFlatItems.length - 1 : prev - 1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (selectedIndex >= 0 && selectedIndex < allFlatItems.length) {
+          const selected = allFlatItems[selectedIndex];
+          if (selected) {
+            selected.action();
+            if (selected.id !== "duplicate") {
+              setMenuOpen(false);
+            }
+          }
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [menuOpen, selectedIndex, allFlatItems]);
+
+  useEffect(() => {
+    if (!menuOpen || !popoverRef.current) return;
+    const activeEl = popoverRef.current.querySelector(`[data-flat-index="${selectedIndex}"]`);
+    if (activeEl) {
+      activeEl.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex, menuOpen]);
+
+  if (!editor || editor.isDestroyed || !editor.isActive("table") || !tableRect || !cellRect) {
+    return null;
+  }
+
+  let currentFlatIndex = 0;
+
+  return (
+    <>
+      {/* Active Focused Cell Blue Outline */}
+      <div
+        className="fixed pointer-events-none z-30 border-2 border-primary rounded-[2px]"
+        style={{
+          top: `${cellRect.top}px`,
+          left: `${cellRect.left}px`,
+          width: `${cellRect.width}px`,
+          height: `${cellRect.height}px`,
+        }}
+      />
+
+      {/* Column Handle Bar */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="fixed z-40 cursor-pointer rounded-full bg-primary shadow-sm hover:scale-110 transition-transform -translate-x-1/2 -translate-y-1/2"
+            style={{
+              top: `${cellRect.top + 1}px`,
+              left: `${cellRect.left + cellRect.width / 2}px`,
+              width: "20px",
+              height: "6px",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuPos({ top: cellRect.top + 10, left: cellRect.left + cellRect.width / 2 - 100 });
+              setMenuOpen((v) => !v);
+            }}
+          />
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.tableOptions")}</TooltipContent>
+      </Tooltip>
+
+      {/* Right Margin Plus Button (+) to add Column */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="fixed z-30 flex items-center justify-center rounded-xl border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
+            style={{
+              top: `${tableRect.top}px`,
+              left: `${tableRect.right + 6}px`,
+              width: "22px",
+              height: `${tableRect.height}px`,
+            }}
+            onClick={() => {
+              editor.chain().focus().addColumnAfter().run();
+              setTimeout(updatePositions, 50);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.addColumnRight")}</TooltipContent>
+      </Tooltip>
+
+      {/* Bottom Margin Plus Button (+) to add Row */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="fixed z-30 flex items-center justify-center rounded-xl border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
+            style={{
+              top: `${tableRect.bottom + 6}px`,
+              left: `${tableRect.left}px`,
+              width: `${tableRect.width}px`,
+              height: "22px",
+            }}
+            onClick={() => {
+              editor.chain().focus().addRowAfter().run();
+              setTimeout(updatePositions, 50);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.addRowBelow")}</TooltipContent>
+      </Tooltip>
+
+      {/* Floating Actions Popover Card (100% Identical to Slash Commands Menu with Keyboard Nav & Dismiss) */}
+      {menuOpen && (
+        <div
+          ref={popoverRef}
+          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
+          style={{
+            top: `${Math.min(menuPos.top, window.innerHeight - 360)}px`,
+            left: `${Math.min(menuPos.left, window.innerWidth - 240)}px`,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+            {t("editor.tableOptions")}
+          </div>
+
+          {canScrollUp && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onClick={() => {
+                if (tableMenuScrollRef.current) {
+                  tableMenuScrollRef.current.scrollBy({ top: -80, behavior: "smooth" });
+                  setTimeout(checkScroll, 150);
+                }
+              }}
+              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </div>
+          )}
+
+          <div
+            ref={tableMenuScrollRef}
+            onScroll={checkScroll}
+            className="overflow-y-auto no-scrollbar flex-1 py-1"
+          >
+            {normalItems.map((item) => {
+              const flatIndex = currentFlatIndex++;
+              const isSelected = flatIndex === selectedIndex;
+              return (
+                <div
+                  key={item.id}
+                  data-flat-index={flatIndex}
+                  role="button"
+                  tabIndex={0}
+                  className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                    isSelected
+                      ? "bg-accent/10 text-primary font-semibold"
+                      : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                  }`}
+                  onMouseEnter={() => setSelectedIndex(flatIndex)}
+                  onClick={() => {
+                    item.action();
+                    setMenuOpen(false);
+                  }}
+                >
+                  {item.icon}
+                  <span className="truncate flex-1">{item.label}</span>
+                </div>
+              );
+            })}
+
+            {/* Duplicate Waterfall Submenu */}
+            {(() => {
+              const duplicateFlatIndex = currentFlatIndex++;
+              const isDuplicateSelected = duplicateFlatIndex === selectedIndex;
+              return (
+                <>
+                  <div
+                    data-flat-index={duplicateFlatIndex}
+                    role="button"
+                    tabIndex={0}
+                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                      isDuplicateSelected
+                        ? "bg-accent/10 text-primary font-semibold"
+                        : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                    }`}
+                    onMouseEnter={() => setSelectedIndex(duplicateFlatIndex)}
+                    onClick={() => setDuplicateSubmenuOpen((v) => !v)}
+                  >
+                    <Copy className="mr-2 h-4 w-4 shrink-0" />
+                    <span className="truncate flex-1">{t("editor.duplicate")}</span>
+                    <ChevronRight
+                      className={`ml-auto h-4 w-4 shrink-0 opacity-60 transition-transform ${
+                        duplicateSubmenuOpen ? "rotate-90" : ""
+                      }`}
+                    />
+                  </div>
+
+                  {duplicateSubmenuOpen && (
+                    <div className="my-0.5 space-y-0.5 animate-in fade-in-50 slide-in-from-top-1">
+                      {(() => {
+                        const dupRowIndex = currentFlatIndex++;
+                        const isDupRowSelected = dupRowIndex === selectedIndex;
+                        return (
+                          <div
+                            data-flat-index={dupRowIndex}
+                            role="button"
+                            tabIndex={0}
+                            className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
+                              isDupRowSelected
+                                ? "bg-accent/10 text-primary font-semibold"
+                                : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                            }`}
+                            onMouseEnter={() => setSelectedIndex(dupRowIndex)}
+                            onClick={() => {
+                              editor.chain().focus().addRowAfter().run();
+                              setMenuOpen(false);
+                              setDuplicateSubmenuOpen(false);
+                            }}
+                          >
+                            <DeleteRowIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <span className="truncate flex-1">{t("editor.duplicateRow")}</span>
+                          </div>
+                        );
+                      })()}
+                      {(() => {
+                        const dupColIndex = currentFlatIndex++;
+                        const isDupColSelected = dupColIndex === selectedIndex;
+                        return (
+                          <div
+                            data-flat-index={dupColIndex}
+                            role="button"
+                            tabIndex={0}
+                            className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
+                              isDupColSelected
+                                ? "bg-accent/10 text-primary font-semibold"
+                                : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                            }`}
+                            onMouseEnter={() => setSelectedIndex(dupColIndex)}
+                            onClick={() => {
+                              editor.chain().focus().addColumnAfter().run();
+                              setMenuOpen(false);
+                              setDuplicateSubmenuOpen(false);
+                            }}
+                          >
+                            <DeleteColumnIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <span className="truncate flex-1">{t("editor.duplicateColumn")}</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
+            {dangerItems.length > 0 && (
+              <>
+                <div className="my-1 border-t border-border/40" />
+                <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider shrink-0">
+                  {t("editor.deleteActions")}
+                </div>
+                {dangerItems.map((item) => {
+                  const flatIndex = currentFlatIndex++;
+                  const isSelected = flatIndex === selectedIndex;
+                  return (
+                    <div
+                      key={item.id}
+                      data-flat-index={flatIndex}
+                      role="button"
+                      tabIndex={0}
+                      className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                        isSelected
+                          ? "bg-accent/10 text-primary font-semibold"
+                          : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                      }`}
+                      onMouseEnter={() => setSelectedIndex(flatIndex)}
+                      onClick={() => {
+                        item.action();
+                        setMenuOpen(false);
+                      }}
+                    >
+                      {item.icon}
+                      <span className="truncate flex-1">{item.label}</span>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+
+          {canScrollDown && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onClick={() => {
+                if (tableMenuScrollRef.current) {
+                  tableMenuScrollRef.current.scrollBy({ top: 80, behavior: "smooth" });
+                  setTimeout(checkScroll, 150);
+                }
+              }}
+              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit } = props;
+  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange } = props;
     const [importDocxDialogOpen, setImportDocxDialogOpen] = useState(false);
     const [previewHtml, setPreviewHtml] = useState("");
     const docxInputRef = useRef<HTMLInputElement>(null);
@@ -340,6 +1213,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         // กรณีสร้าง note ใหม่
         else if (onCreate) {
           const newNote = onCreate();
+          onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
           onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
           updated = true;
         }
@@ -391,10 +1265,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [imageUrl, setImageUrl] = useState("");
   const [savedSnapshotByNoteId, setSavedSnapshotByNoteId] = useState<Record<string, SaveSnapshot>>({});
   const [pendingSaveAction, setPendingSaveAction] = useState<"save" | "saveas" | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
+  const settingsOpen = propSettingsOpen !== undefined ? propSettingsOpen : internalSettingsOpen;
+  const setSettingsOpen = (open: boolean) => {
+    if (onSettingsOpenChange) {
+      onSettingsOpenChange(open);
+    } else {
+      setInternalSettingsOpen(open);
+    }
+  };
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
+  const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
 
@@ -402,6 +1285,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const turndown = useMemo(() => {
     const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
+
+    // Preserve table elements so table structure & layout are saved intact
+    td.keep(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col"]);
 
     // Suppress individual taskItem processing – handled wholesale by taskList rule below
     td.addRule("taskItem", {
@@ -557,9 +1443,187 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const EDITOR_CLASSES =
     "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
-    " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90";
+    " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
+    " [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_td]:border [&_td]:border-border/60 [&_td]:p-2.5 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:p-2.5 [&_th]:bg-muted/30 [&_th]:font-semibold [&_th]:text-left";
 
   const scheduleAutoSaveDiskRef = useRef<(() => void) | null>(null);
+
+  const [slashMenuState, setSlashMenuState] = useState<{
+    open: boolean;
+    query: string;
+    slashRange: { from: number; to: number } | null;
+    coords: { top: number; left: number } | null;
+    selectedIndex: number;
+    filteredItems: SlashMenuItem[];
+  }>({
+    open: false,
+    query: "",
+    slashRange: null,
+    coords: null,
+    selectedIndex: -1,
+    filteredItems: [],
+  });
+
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+  const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current) {
+      clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
+  }, []);
+
+  const checkSlashMenuScroll = useCallback(() => {
+    const el = slashMenuScrollRef.current;
+    if (!el) return;
+    const hasScrollable = el.scrollHeight > el.clientHeight;
+    setCanScrollUp(hasScrollable && el.scrollTop > 2);
+    setCanScrollDown(hasScrollable && el.scrollTop < el.scrollHeight - el.clientHeight - 2);
+  }, []);
+
+  const startAutoScroll = useCallback((direction: "up" | "down") => {
+    stopAutoScroll();
+    const step = () => {
+      const el = slashMenuScrollRef.current;
+      if (!el) return;
+      el.scrollTop += direction === "up" ? -12 : 12;
+      checkSlashMenuScroll();
+    };
+    step();
+    scrollIntervalRef.current = setInterval(step, 30);
+  }, [checkSlashMenuScroll, stopAutoScroll]);
+
+  const scrollSlashMenu = useCallback((direction: "up" | "down") => {
+    const el = slashMenuScrollRef.current;
+    if (!el) return;
+    const delta = direction === "up" ? -80 : 80;
+    el.scrollBy({ top: delta, behavior: "smooth" });
+    setTimeout(checkSlashMenuScroll, 150);
+  }, [checkSlashMenuScroll]);
+
+  useEffect(() => {
+    if (slashMenuState.open) {
+      setTimeout(checkSlashMenuScroll, 50);
+    } else {
+      stopAutoScroll();
+      setCanScrollUp(false);
+      setCanScrollDown(false);
+    }
+  }, [slashMenuState.open, slashMenuState.filteredItems, checkSlashMenuScroll, stopAutoScroll]);
+
+  const openLinkDialogRef = useRef<(() => void) | null>(null);
+  const openImageDialogRef = useRef<(() => void) | null>(null);
+  const triggerImageUploadRef = useRef<(() => void) | null>(null);
+  const handleFixLanguageRef = useRef<(() => void) | null>(null);
+  const tRef = useRef(t);
+  const isMobileRef = useRef(isMobile);
+
+  useEffect(() => {
+    tRef.current = t;
+    isMobileRef.current = isMobile;
+  }, [t, isMobile]);
+
+  const executeSlashCommand = useCallback(
+    (editorInstance: TiptapEditor, item: SlashMenuItem) => {
+      if (slashMenuStateRef.current.slashRange) {
+        const { from, to } = slashMenuStateRef.current.slashRange;
+        editorInstance.chain().focus().deleteRange({ from, to }).run();
+      }
+      slashMenuStateRef.current.open = false;
+      setSlashMenuState((prev) => ({ ...prev, open: false }));
+      item.action(editorInstance, {
+        openLinkDialog: () => openLinkDialogRef.current?.(),
+        openImageDialog: () => openImageDialogRef.current?.(),
+        triggerImageUpload: () => triggerImageUploadRef.current?.(),
+        handleFixLanguage: () => handleFixLanguageRef.current?.(),
+      });
+    },
+    [],
+  );
+
+  const checkSlashCommand = useCallback(
+    (editorInstance: TiptapEditor) => {
+      const { selection } = editorInstance.state;
+      if (!selection.empty) {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          setSlashMenuState((prev) => ({ ...prev, open: false }));
+        }
+        return;
+      }
+
+      const { $from } = selection;
+      const textBefore = $from.parent.textBetween(0, $from.parentOffset, " ", " ");
+      const slashIdx = textBefore.lastIndexOf("/");
+
+      if (slashIdx === -1) {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          setSlashMenuState((prev) => ({ ...prev, open: false }));
+        }
+        return;
+      }
+
+      const charBeforeSlash = slashIdx > 0 ? textBefore[slashIdx - 1] : "";
+      if (slashIdx > 0 && !/\s/.test(charBeforeSlash)) {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          setSlashMenuState((prev) => ({ ...prev, open: false }));
+        }
+        return;
+      }
+
+      const query = textBefore.slice(slashIdx + 1).toLowerCase();
+      if (query.includes(" ")) {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          setSlashMenuState((prev) => ({ ...prev, open: false }));
+        }
+        return;
+      }
+
+      const startPos = $from.start() + slashIdx;
+      const endPos = $from.pos;
+      const coords = editorInstance.view.coordsAtPos($from.pos);
+
+      const filtered = SLASH_ITEMS.filter((item) => {
+        if (!query) return true;
+        const titleStr = t(item.titleKey).toLowerCase();
+        return (
+          titleStr.includes(query) ||
+          item.keywords.some((kw) => kw.toLowerCase().includes(query))
+        );
+      });
+
+      const newState = {
+        open: true,
+        query,
+        slashRange: { from: startPos, to: endPos },
+        coords: { top: coords.bottom + window.scrollY, left: coords.left + window.scrollX },
+        selectedIndex: -1,
+        filteredItems: filtered,
+      };
+
+      slashMenuStateRef.current = {
+        ...newState,
+        onSelect: (item) => executeSlashCommand(editorInstance, item),
+        notify: () => {
+          setSlashMenuState((prev) => ({
+            ...prev,
+            selectedIndex: slashMenuStateRef.current.selectedIndex,
+            open: slashMenuStateRef.current.open,
+          }));
+        },
+      };
+
+      setSlashMenuState(newState);
+    },
+    [t, executeSlashCommand],
+  );
+
+  const [editorTick, setEditorTick] = useState(0);
 
   const editor = useEditor({
     extensions: [
@@ -567,6 +1631,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Toggle,
       TaskList,
       TaskItem,
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      IndentKeymap,
       Link.configure({
         openOnClick: false,
         autolink: true,
@@ -583,14 +1654,46 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         },
       }),
       Placeholder.configure({
-        placeholder: ({ node, pos }) => {
-          if (node.type.name === "heading" && pos === 0) {
-            return t("editor.untitled");
+        placeholder: ({ node, pos, editor: ed, hasAnchor }) => {
+          if (node.type.name === "heading" && node.attrs?.level === 1 && pos === 0) {
+            return tRef.current("editor.untitled");
           }
-          return isMobile ? t("editor.startWritingMobile") : t("editor.startWriting");
+
+          const doc = ed.state.doc;
+          const firstChild = doc.firstChild;
+          const isTopH1Empty =
+            firstChild &&
+            firstChild.type.name === "heading" &&
+            firstChild.attrs?.level === 1 &&
+            firstChild.textContent.trim() === "";
+
+          // Check if this node is the paragraph directly under an empty top H1
+          const isSecondChildAfterTopH1 =
+            isTopH1Empty &&
+            doc.childCount >= 2 &&
+            doc.child(1) === node;
+
+          const isH1OrH2 =
+            node.type.name === "heading" &&
+            (node.attrs?.level === 1 || node.attrs?.level === 2);
+
+          // Only show placeholder for H1, H2, currently focused line, OR line 2 under empty H1
+          if (!hasAnchor && !isH1OrH2 && !isSecondChildAfterTopH1) {
+            return "";
+          }
+
+          // If slash was typed in focused line, show "Type to search..."
+          const text = node.textContent;
+          if (hasAnchor && text.startsWith("/")) {
+            return tRef.current("editor.typeToSearch");
+          }
+
+          return isMobileRef.current
+            ? tRef.current("editor.startWritingMobile")
+            : tRef.current("editor.startWriting");
         },
         showOnlyCurrent: false,
-        includeChildren: true,
+        includeChildren: false,
         emptyEditorClass: "is-editor-empty",
         emptyNodeClass: "is-empty",
       }),
@@ -602,13 +1705,68 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         class: EDITOR_CLASSES,
       },
     },
+    onSelectionUpdate: ({ editor: instance }) => {
+      checkSlashCommand(instance);
+      setEditorTick((v) => v + 1);
+    },
     onUpdate: ({ editor: instance }) => {
+      checkSlashCommand(instance);
+      setEditorTick((v) => v + 1);
       if (!note || syncingFromNote.current) return;
       if (!settings.autoSave) return;
       onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
       scheduleAutoSaveDiskRef.current?.();
     },
   });
+
+  const editorStats = useMemo(() => {
+    if (!editor) {
+      const charCount = note?.content ? note.content.length : 0;
+      let syntaxLabel = t("editor.syntaxMarkdown");
+      const fileName = note?.fileName?.toLowerCase() ?? "";
+      if (fileName.endsWith(".html") || note?.contentFormat === "html") {
+        syntaxLabel = t("editor.syntaxHtml");
+      } else if (fileName.endsWith(".txt")) {
+        syntaxLabel = t("editor.syntaxText");
+      }
+      return {
+        line: 1,
+        col: 1,
+        charCount,
+        syntaxLabel,
+        zoom: Math.round((editorFontSize / 15) * 100),
+        lineEnding: "Windows (CRLF)",
+      };
+    }
+
+    const { selection, doc } = editor.state;
+    const pos = selection.$from.pos;
+    const textBefore = doc.textBetween(0, pos, "\n", "\n");
+    const lines = textBefore.split("\n");
+    const line = lines.length;
+    const col = (lines[lines.length - 1]?.length ?? 0) + 1;
+    const charCount = doc.textContent.length;
+
+    let syntaxLabel = t("editor.syntaxMarkdown");
+    const fileName = note?.fileName?.toLowerCase() ?? "";
+    if (fileName.endsWith(".html") || note?.contentFormat === "html") {
+      syntaxLabel = t("editor.syntaxHtml");
+    } else if (fileName.endsWith(".txt")) {
+      syntaxLabel = t("editor.syntaxText");
+    }
+
+    const zoom = Math.round((editorFontSize / 15) * 100);
+    const lineEnding = "Windows (CRLF)";
+
+    return {
+      line,
+      col,
+      charCount,
+      syntaxLabel,
+      zoom,
+      lineEnding,
+    };
+  }, [editor, editorTick, note, editorFontSize, t]);
 
   const saveLinkedFileToDisk = useCallback(async () => {
     if (!note || !editor || !settings.autoSave) return;
@@ -683,6 +1841,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       },
     });
   }, [editor, editorFontSize]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr);
+  }, [editor, settings.language, t]);
 
   useEffect(() => {
     const updateWidth = () => {
@@ -834,6 +1997,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setImageUrl("");
     setImageDialogOpen(true);
   };
+
+  const triggerImageUpload = useCallback(() => {
+    rememberSelection();
+    imageInputRef.current?.click();
+  }, [rememberSelection]);
+
+  useEffect(() => {
+    openLinkDialogRef.current = openLinkDialog;
+    openImageDialogRef.current = openImageDialog;
+    triggerImageUploadRef.current = triggerImageUpload;
+    handleFixLanguageRef.current = handleFixLanguage;
+  });
 
   const handleApplyImageUrl = () => {
     const nextUrl = normalizeUrl(imageUrl);
@@ -1460,440 +2635,762 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </div>
           )}
           {/* Hide toolbar if not txt or md */}
-          {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (
-            <div className={`flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1`}>
-              {/* Undo / Redo */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                    disabled={!editor || !editor.can().undo()}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => editor?.chain().focus().undo().run()}
-                  >
-                    <Undo2 className="h-4 w-4" />
-                    <span className="sr-only">{t("editor.undo")}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.undo")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                disabled={!editor || !editor.can().redo()}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().redo().run()}
-              >
-                <Redo2 className="h-4 w-4" />
-                <span className="sr-only">{t("editor.redo")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.redo")}</TooltipContent>
-              </Tooltip>
+          {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
+            const TOOLBAR_ITEMS: Array<{
+              id: string;
+              group: "history" | "heading" | "inline" | "list" | "block" | "media";
+              labelKey: string;
+            }> = [
+              { id: "undo", group: "history", labelKey: "editor.undo" },
+              { id: "redo", group: "history", labelKey: "editor.redo" },
+              { id: "h1", group: "heading", labelKey: "editor.heading1" },
+              { id: "h2", group: "heading", labelKey: "editor.heading2" },
+              { id: "bold", group: "inline", labelKey: "editor.bold" },
+              { id: "italic", group: "inline", labelKey: "editor.italic" },
+              { id: "strike", group: "inline", labelKey: "editor.strikethrough" },
+              { id: "bulletList", group: "list", labelKey: "editor.bulletList" },
+              { id: "orderedList", group: "list", labelKey: "editor.numberedList" },
+              { id: "taskList", group: "list", labelKey: "editor.checkbox" },
+              { id: "toggle", group: "block", labelKey: "editor.toggle" },
+              { id: "code", group: "block", labelKey: "editor.inlineCode" },
+              { id: "blockquote", group: "block", labelKey: "editor.blockquote" },
+              { id: "table", group: "block", labelKey: "editor.insertTable" },
+              { id: "emoji", group: "media", labelKey: "editor.insertEmoji" },
+              { id: "link", group: "media", labelKey: "editor.link" },
+              { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
+              { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
+            ];
 
-              <div className="h-4 w-px shrink-0 bg-border/60" />
+            const BUTTON_WIDTH = 36;
+            const SEP_WIDTH = 9;
+            const THREE_DOTS_WIDTH = 36;
+            const CONTAINER_PADDING = 12;
 
-              {/* Headings */}
-              <>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
-              >
-                <Heading1Icon className="h-4 w-4" />
-                <span className="sr-only">{t("editor.heading1")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.heading1")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
-              >
-                <Heading2Icon className="h-4 w-4" />
-                <span className="sr-only">{t("editor.heading2")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.heading2")}</TooltipContent>
-              </Tooltip>
-              </>
+            const totalAvailable = mobileToolbarWidth > 0 ? mobileToolbarWidth - CONTAINER_PADDING : 1000;
 
-              <div className="h-4 w-px shrink-0 bg-border/60" />
+            let fullWidthNeeded = 0;
+            let lastGroup = "";
+            for (const item of TOOLBAR_ITEMS) {
+              if (lastGroup && item.group !== lastGroup) fullWidthNeeded += SEP_WIDTH;
+              fullWidthNeeded += BUTTON_WIDTH;
+              lastGroup = item.group;
+            }
 
-              {/* Inline formats */}
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bold") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleBold().run()}
-              >
-                <Bold className="h-4 w-4" />
-                <span className="sr-only">{t("editor.bold")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.bold")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("italic") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleItalic().run()}
-              >
-                <Italic className="h-4 w-4" />
-                <span className="sr-only">{t("editor.italic")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.italic")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("strike") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleStrike().run()}
-              >
-                <Strikethrough className="h-4 w-4" />
-                <span className="sr-only">{t("editor.strikethrough")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.strikethrough")}</TooltipContent>
-              </Tooltip>
+            let visibleCount = TOOLBAR_ITEMS.length;
+            let hasOverflow = false;
 
-              <div className="h-4 w-px shrink-0 bg-border/60" />
+            if (totalAvailable < fullWidthNeeded && mobileToolbarWidth > 0) {
+              const budget = totalAvailable - THREE_DOTS_WIDTH;
+              let accumulated = 0;
+              let count = 0;
+              lastGroup = "";
 
+              for (let i = 0; i < TOOLBAR_ITEMS.length; i++) {
+                const item = TOOLBAR_ITEMS[i];
+                let cost = BUTTON_WIDTH;
+                if (lastGroup && item.group !== lastGroup) cost += SEP_WIDTH;
 
-              {/* Lists */}
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bulletList") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleBulletList().run()}
-              >
-                <List className="h-4 w-4" />
-                <span className="sr-only">{t("editor.bulletList")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.bulletList")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("orderedList") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-              >
-                <ListOrdered className="h-4 w-4" />
-                <span className="sr-only">{t("editor.orderedList")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.orderedList")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("taskList") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleTaskList().run()}
-              >
-                <ListTodoIcon className="h-4 w-4" />
-                <span className="sr-only">{t("editor.checkbox")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.checkbox")}</TooltipContent>
-              </Tooltip>
+                if (accumulated + cost > budget) break;
 
-              <div className="h-4 w-px shrink-0 bg-border/60" />
+                accumulated += cost;
+                count++;
+                lastGroup = item.group;
+              }
 
-              {/* Code / Blockquote */}
-              <>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("toggle") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleToggleClick(editor)}
-              >
-                <ChevronsDownUp className="h-4 w-4" />
-                <span className="sr-only">{t("editor.toggle")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.toggle")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("code") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleCode().run()}
-              >
-                <Code className="h-4 w-4" />
-                <span className="sr-only">{t("editor.code")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.code")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("blockquote") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-              >
-                <Quote className="h-4 w-4" />
-                <span className="sr-only">{t("editor.blockquote")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.blockquote")}</TooltipContent>
-              </Tooltip>
-              </>
+              visibleCount = Math.max(1, count);
+              hasOverflow = true;
+            }
 
-              {/* Emoji Picker */}
-              <Popover>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                        disabled={!editor}
-                        onMouseDown={(e) => e.preventDefault()}
-                      >
-                        <Smile className="h-4 w-4" />
-                        <span className="sr-only">{t("editor.emoji")}</span>
-                      </Button>
-                    </PopoverTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("editor.emoji")}</TooltipContent>
-                </Tooltip>
-                <PopoverContent align="start" className="w-72 rounded-xl p-3 shadow-lg">
-                  <div className="text-xs font-semibold text-muted-foreground mb-2 px-1">
-                    {t("editor.insertEmoji")}
-                  </div>
-                  <div className="grid grid-cols-7 gap-1 max-h-56 overflow-y-auto pr-1 select-none no-scrollbar">
-                    {EMOJI_LIST.map((emoji, index) => (
-                      <button
-                        key={`${emoji}-${index}`}
-                        type="button"
-                        className="h-8 w-8 text-lg rounded-lg hover:bg-muted focus:bg-muted flex items-center justify-center transition-colors cursor-pointer"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          if (editor) {
-                            editor.chain().focus().insertContent(emoji).run();
+            const visibleItems = TOOLBAR_ITEMS.slice(0, visibleCount);
+            const overflowItems = TOOLBAR_ITEMS.slice(visibleCount);
+
+            const renderToolbarButton = (id: string) => {
+              switch (id) {
+                case "undo":
+                  return (
+                    <Tooltip key="undo">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor || !editor.can().undo()}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().undo().run()}
+                        >
+                          <Undo2 className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.undo")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.undo")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "redo":
+                  return (
+                    <Tooltip key="redo">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor || !editor.can().redo()}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().redo().run()}
+                        >
+                          <Redo2 className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.redo")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.redo")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "h1":
+                  return (
+                    <Tooltip key="h1">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+                        >
+                          <Heading1Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading1")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading1")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "h2":
+                  return (
+                    <Tooltip key="h2">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+                        >
+                          <Heading2Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading2")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading2")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "bold":
+                  return (
+                    <Tooltip key="bold">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bold") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleBold().run()}
+                        >
+                          <Bold className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.bold")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.bold")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "italic":
+                  return (
+                    <Tooltip key="italic">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("italic") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleItalic().run()}
+                        >
+                          <Italic className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.italic")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.italic")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "strike":
+                  return (
+                    <Tooltip key="strike">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("strike") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleStrike().run()}
+                        >
+                          <Strikethrough className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.strikethrough")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.strikethrough")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "bulletList":
+                  return (
+                    <Tooltip key="bulletList">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bulletList") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                        >
+                          <List className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.bulletList")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.bulletList")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "orderedList":
+                  return (
+                    <Tooltip key="orderedList">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("orderedList") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                        >
+                          <ListOrdered className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.orderedList")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.orderedList")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "taskList":
+                  return (
+                    <Tooltip key="taskList">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("taskList") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleTaskList().run()}
+                        >
+                          <ListTodoIcon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.checkbox")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.checkbox")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "toggle":
+                  return (
+                    <Tooltip key="toggle">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("toggle") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleToggleClick(editor)}
+                        >
+                          <ChevronsDownUp className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.toggle")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.toggle")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "code":
+                  return (
+                    <Tooltip key="code">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("code") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleCode().run()}
+                        >
+                          <Code className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.code")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.code")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "blockquote":
+                  return (
+                    <Tooltip key="blockquote">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("blockquote") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+                        >
+                          <Quote className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.blockquote")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.blockquote")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "table":
+                  if (!editor) return null;
+                  if (!editor.isActive("table")) {
+                    return (
+                      <Tooltip key="table">
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+                          >
+                            <TableIcon className="h-4 w-4" />
+                            <span className="sr-only">{t("editor.insertTable")}</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.insertTable")}</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return (
+                    <DropdownMenu key="table">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full bg-primary/15 text-primary"
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <TableIcon className="h-4 w-4" />
+                              <span className="sr-only">{t("editor.tableOptions")}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.tableOptions")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowBefore().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Plus className="mr-2 h-4 w-4" />
+                          <span>{t("editor.addRowAbove")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowAfter().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Plus className="mr-2 h-4 w-4" />
+                          <span>{t("editor.addRowBelow")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteRow().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
+                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteRow")}</span>
+                        </DropdownMenuItem>
+                        <div className="my-1 border-t border-border/40" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnBefore().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Plus className="mr-2 h-4 w-4" />
+                          <span>{t("editor.addColumnLeft")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnAfter().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Plus className="mr-2 h-4 w-4" />
+                          <span>{t("editor.addColumnRight")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteColumn().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
+                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteColumn")}</span>
+                        </DropdownMenuItem>
+                        <div className="my-1 border-t border-border/40" />
+                        <DropdownMenuItem
+                          onClick={() => editor.chain().focus().mergeCells().run()}
+                          disabled={!editor.can().mergeCells()}
+                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                        >
+                          <TableIcon className="mr-2 h-4 w-4" />
+                          <span>{t("editor.mergeCells")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor.chain().focus().splitCell().run()}
+                          disabled={!editor.can().splitCell()}
+                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                        >
+                          <TableIcon className="mr-2 h-4 w-4" />
+                          <span>{t("editor.splitCell")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeaderRow().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <TableIcon className="mr-2 h-4 w-4" />
+                          <span>{t("editor.toggleHeaderRow")}</span>
+                        </DropdownMenuItem>
+                        <div className="my-1 border-t border-border/40" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteTable().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
+                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteTable")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                case "emoji":
+                  return (
+                    <Popover key="emoji">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <Smile className="h-4 w-4" />
+                              <span className="sr-only">{t("editor.emoji")}</span>
+                            </Button>
+                          </PopoverTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.emoji")}</TooltipContent>
+                      </Tooltip>
+                      <PopoverContent align="start" className="w-72 rounded-xl p-3 shadow-lg">
+                        <div className="text-xs font-semibold text-muted-foreground mb-2 px-1">
+                          {t("editor.insertEmoji")}
+                        </div>
+                        <div className="grid grid-cols-7 gap-1 max-h-56 overflow-y-auto pr-1 select-none no-scrollbar">
+                          {EMOJI_LIST.map((emoji, index) => (
+                            <button
+                              key={`${emoji}-${index}`}
+                              type="button"
+                              className="h-8 w-8 text-lg rounded-lg hover:bg-muted focus:bg-muted flex items-center justify-center transition-colors cursor-pointer"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                if (editor) {
+                                  editor.chain().focus().insertContent(emoji).run();
+                                }
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  );
+                case "link":
+                  return (
+                    <Tooltip key="link">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("link") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={openLinkDialog}
+                        >
+                          <Link2 className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.link")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.link")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "image":
+                  return (
+                    <DropdownMenu key="image">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <ImagePlus className="h-4 w-4" />
+                              <span className="sr-only">{t("editor.image")}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.image")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-52 rounded-xl px-0 py-2">
+                        <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <ImagePlus className="mr-2 h-4 w-4" />
+                          <span>{t("editor.insertImageByUrl")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            rememberSelection();
+                            imageInputRef.current?.click();
+                          }}
+                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          <span>{t("editor.uploadImage")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                case "fixLanguage":
+                  return (
+                    <Tooltip key="fixLanguage">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={handleFixLanguage}
+                        >
+                          <Languages className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.fixLanguage")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.fixLanguage")}</TooltipContent>
+                    </Tooltip>
+                  );
+                default:
+                  return null;
+              }
+            };
+
+            const renderDropdownItem = (id: string) => {
+              switch (id) {
+                case "undo":
+                  return (
+                    <DropdownMenuItem key="undo" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor || !editor.can().undo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Undo2 className="mr-2 h-4 w-4" />
+                      <span>{t("editor.undo")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "redo":
+                  return (
+                    <DropdownMenuItem key="redo" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor || !editor.can().redo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Redo2 className="mr-2 h-4 w-4" />
+                      <span>{t("editor.redo")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "h1":
+                  return (
+                    <DropdownMenuItem key="h1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading1Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading1")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "h2":
+                  return (
+                    <DropdownMenuItem key="h2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading2Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading2")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "bold":
+                  return (
+                    <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Bold className="mr-2 h-4 w-4" />
+                      <span>{t("editor.bold")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "italic":
+                  return (
+                    <DropdownMenuItem key="italic" onClick={() => editor?.chain().focus().toggleItalic().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Italic className="mr-2 h-4 w-4" />
+                      <span>{t("editor.italic")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "strike":
+                  return (
+                    <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Strikethrough className="mr-2 h-4 w-4" />
+                      <span>{t("editor.strikethrough")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "bulletList":
+                  return (
+                    <DropdownMenuItem key="bulletList" onClick={() => editor?.chain().focus().toggleBulletList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <List className="mr-2 h-4 w-4" />
+                      <span>{t("editor.bulletList")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "orderedList":
+                  return (
+                    <DropdownMenuItem key="orderedList" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <ListOrdered className="mr-2 h-4 w-4" />
+                      <span>{t("editor.numberedList")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "taskList":
+                  return (
+                    <DropdownMenuItem key="taskList" onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <ListTodoIcon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.checkbox")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "toggle":
+                  return (
+                    <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <ChevronsDownUp className="mr-2 h-4 w-4" />
+                      <span>{t("editor.toggle")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "code":
+                  return (
+                    <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Code className="mr-2 h-4 w-4" />
+                      <span>{t("editor.inlineCode")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "blockquote":
+                  return (
+                    <DropdownMenuItem key="blockquote" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Quote className="mr-2 h-4 w-4" />
+                      <span>{t("editor.blockquote")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "table":
+                  return (
+                    <DropdownMenuItem
+                      key="table"
+                      onClick={() => {
+                        if (editor) {
+                          if (editor.isActive("table")) {
+                            editor.chain().focus().deleteTable().run();
+                          } else {
+                            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
                           }
+                        }
+                      }}
+                      className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                    >
+                      <TableIcon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.insertTable")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "emoji":
+                  return (
+                    <DropdownMenuItem key="emoji" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Smile className="mr-2 h-4 w-4" />
+                      <span>{t("editor.insertEmoji")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "link":
+                  return (
+                    <DropdownMenuItem key="link" onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Link2 className="mr-2 h-4 w-4" />
+                      <span>{t("editor.link")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "image":
+                  return (
+                    <Fragment key="image">
+                      <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        <span>{t("editor.insertImageByUrl")}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          rememberSelection();
+                          imageInputRef.current?.click();
                         }}
+                        className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                       >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-              <div className="h-4 w-px shrink-0 bg-border/60" />
+                        <Upload className="mr-2 h-4 w-4" />
+                        <span>{t("editor.uploadImage")}</span>
+                      </DropdownMenuItem>
+                    </Fragment>
+                  );
+                case "fixLanguage":
+                  return (
+                    <DropdownMenuItem key="fixLanguage" onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Languages className="mr-2 h-4 w-4" />
+                      <span>{t("editor.fixLanguage")}</span>
+                    </DropdownMenuItem>
+                  );
+                default:
+                  return null;
+              }
+            };
 
-              {/* Link & Image */}
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("link") ? "bg-primary/15 text-primary" : ""}`}
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={openLinkDialog}
-              >
-                <Link2 className="h-4 w-4" />
-                <span className="sr-only">{t("editor.link")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.link")}</TooltipContent>
-              </Tooltip>
-              <DropdownMenu>
-                <Tooltip>
-                <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                    disabled={!editor}
-                    onMouseDown={(e) => e.preventDefault()}
-                  >
-                    <ImagePlus className="h-4 w-4" />
-                    <span className="sr-only">{t("editor.image")}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.image")}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="w-52 rounded-xl px-0 py-2">
-                  <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    <span>{t("editor.insertImageByUrl")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      rememberSelection();
-                      imageInputRef.current?.click();
-                    }}
-                    className="mx-1 cursor-pointer rounded-lg px-4 py-2"
-                  >
-                    <Upload className="mr-2 h-4 w-4" />
-                    <span>{t("editor.uploadImage")}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+            return (
+              <div className="flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1">
+                {visibleItems.map((item, index) => {
+                  const showSeparator = index > 0 && item.group !== visibleItems[index - 1].group;
+                  return (
+                    <Fragment key={item.id}>
+                      {showSeparator && <div className="h-4 w-px shrink-0 bg-border" />}
+                      {renderToolbarButton(item.id)}
+                    </Fragment>
+                  );
+                })}
 
-              {/* Fix Language */}
-              <Tooltip>
-              <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                disabled={!editor}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleFixLanguage}
-              >
-                <Languages className="h-4 w-4" />
-                <span className="sr-only">{t("editor.fixLanguage")}</span>
-              </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.fixLanguage")}</TooltipContent>
-              </Tooltip>
-
-              <div className="h-4 w-px shrink-0 bg-border/60" />
-
-              {/* 3-Dots More Tools Menu */}
-              <DropdownMenu>
-                <Tooltip>
-                <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-                    disabled={!editor}
-                    onMouseDown={(e) => e.preventDefault()}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                    <span className="sr-only">{t("editor.moreTools")}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.moreTools")}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" sideOffset={4} className="w-56 rounded-xl px-0 py-2">
-                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Heading2Icon className="mr-2 h-4 w-4" />
-                    <span>{t("editor.heading2")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Strikethrough className="mr-2 h-4 w-4" />
-                    <span>{t("editor.strikethrough")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <ListOrdered className="mr-2 h-4 w-4" />
-                    <span>{t("editor.numberedList")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Code className="mr-2 h-4 w-4" />
-                    <span>{t("editor.inlineCode")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => editor?.chain().focus().toggleBlockquote().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Quote className="mr-2 h-4 w-4" />
-                    <span>{t("editor.blockquote")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Link2 className="mr-2 h-4 w-4" />
-                    <span>{t("editor.link")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    <span>{t("editor.insertImageByUrl")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      rememberSelection();
-                      imageInputRef.current?.click();
-                    }}
-                    className="mx-1 cursor-pointer rounded-lg px-4 py-2"
-                  >
-                    <Upload className="mr-2 h-4 w-4" />
-                    <span>{t("editor.uploadImage")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                    <Languages className="mr-2 h-4 w-4" />
-                    <span>{t("editor.fixLanguage")}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ) : null}
+                {hasOverflow && (
+                  <>
+                    <div className="h-4 w-px shrink-0 bg-border" />
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">{t("editor.moreTools")}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.moreTools")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="end" sideOffset={4} className="w-56 rounded-xl px-0 py-2">
+                        {overflowItems.map((item) => renderDropdownItem(item.id))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
+                )}
+              </div>
+            );
+          })() : null}
         </div>
 
         <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground relative lg:block lg:justify-self-center lg:self-auto">
@@ -2047,17 +3544,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </TooltipTrigger>
           <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
           </Tooltip>
-          {!onCloseSplit && (
-            <Tooltip>
-            <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={() => setSettingsOpen(true)}>
-              <Settings className="h-4 w-4" />
-              <span className="sr-only">{t("common.settings")}</span>
-            </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("common.settings")}</TooltipContent>
-            </Tooltip>
-          )}
           {onCloseSplit && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2106,6 +3592,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             />
           ) : (
             <div className="flex min-h-full w-full flex-col overflow-y-auto px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
+              {editor && <TableInteractiveOverlay editor={editor} />}
               <EditorContent editor={editor} />
             </div>
           )}
@@ -2135,7 +3622,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             />
           </div>
         )}
+      </div>
+
+      {/* Editor Status Bar */}
+      {note && (
+        <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-3 shrink-0">
+            <span>{`Ln ${editorStats.line}, Col ${editorStats.col}`}</span>
+            <div className="h-3 w-[1px] bg-border/60" />
+            <span>{`${editorStats.charCount} ${t("editor.charCountUnit")}`}</span>
+            <div className="h-3 w-[1px] bg-border/60" />
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-[10px] tracking-tight">M↓</span>
+              <span>{editorStats.syntaxLabel}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <span>{`${editorStats.zoom}%`}</span>
+            <div className="h-3 w-[1px] bg-border/60" />
+            <span>{editorStats.lineEnding}</span>
+            <div className="h-3 w-[1px] bg-border/60" />
+            <span>UTF-8</span>
+          </div>
         </div>
+      )}
 
       <AlertDialog open={Boolean(alertMessage)} onOpenChange={(open) => !open && setAlertMessage(null)}>
         <AlertDialogContent>
@@ -2418,6 +3929,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </div>
               </div>
             </div>
+
+            <div>
+              <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
+                <Keyboard className="h-4 w-4 text-primary" />
+                <span>{t("editor.shortcutsTitle")}</span>
+              </Button>
+            </div>
           </div>
 
           <DialogFooter className="sm:justify-between sm:space-x-0">
@@ -2430,6 +3948,141 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Keyboard Shortcuts Dialog */}
+      <Dialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:w-full max-w-lg p-5 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-5 w-5 text-primary" />
+              <span>{t("editor.shortcutsTitle")}</span>
+            </DialogTitle>
+            <DialogDescription>{t("editor.shortcutsDescription")}</DialogDescription>
+          </DialogHeader>
+
+          <div className="my-2 max-h-[60vh] overflow-y-auto space-y-2.5 pr-1 no-scrollbar text-sm">
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutTabDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutTab")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutBoldDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutBold")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutItalicDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutItalic")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutStrikeDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutStrike")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutToggleDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutToggle")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutFixLangDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutFixLang")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutSaveDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSave")}</kbd>
+            </div>
+          </div>
+
+          <DialogFooter className="sm:justify-end">
+            <Button type="button" onClick={() => setShortcutsDialogOpen(false)}>
+              {t("common.ok")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Floating Slash Commands Menu */}
+      {slashMenuState.open && slashMenuState.coords && (
+        <div
+          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground"
+          style={{
+            top: `${Math.min(slashMenuState.coords.top + 6, window.innerHeight - 300)}px`,
+            left: `${Math.min(slashMenuState.coords.left, window.innerWidth - 240)}px`,
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+            {t("editor.slashMenuTitle")}
+          </div>
+
+          {canScrollUp && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onMouseEnter={() => startAutoScroll("up")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollSlashMenu("up")}
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </div>
+          )}
+
+          <div
+            ref={(el) => {
+              slashMenuScrollRef.current = el;
+            }}
+            onScroll={checkSlashMenuScroll}
+            className="overflow-y-auto no-scrollbar flex-1 py-1"
+          >
+            {slashMenuState.filteredItems.length === 0 ? (
+              <div className="px-4 py-3 text-xs text-center text-muted-foreground">
+                {t("editor.noCommandsFound")}
+              </div>
+            ) : (
+              slashMenuState.filteredItems.map((item, idx) => {
+                const isSelected = idx === slashMenuState.selectedIndex;
+                return (
+                  <div
+                    key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    data-slash-item={idx}
+                    onMouseEnter={() => {
+                      setSlashMenuState((prev) => ({ ...prev, selectedIndex: idx }));
+                      slashMenuStateRef.current.selectedIndex = idx;
+                    }}
+                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                      isSelected
+                        ? "bg-accent/5 text-primary font-semibold"
+                        : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                    }`}
+                    onClick={() => {
+                      if (editor) {
+                        executeSlashCommand(editor, item);
+                      }
+                    }}
+                  >
+                    {item.icon}
+                    <span className="truncate flex-1">{t(item.titleKey)}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {canScrollDown && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onMouseEnter={() => startAutoScroll("down")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollSlashMenu("down")}
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </div>
+          )}
+        </div>
+      )}
       </div>
       </TooltipProvider>
     </>

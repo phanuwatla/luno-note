@@ -325,3 +325,51 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   background-repeat: no-repeat !important;
   background-size: 11px 11px !important;
 }
+
+/* Notion-Style Table Styling */
+.ProseMirror table {
+  margin: 1rem 0;
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px hsl(var(--border) / 0.6);
+}
+.ProseMirror td,
+.ProseMirror th {
+  min-width: 130px;
+  width: 150px;
+  border: 1px solid hsl(var(--border) / 0.6);
+  padding: 0.5rem 0.65rem;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+.ProseMirror th {
+  font-weight: 600;
+  text-align: left;
+  background-color: hsl(var(--muted) / 0.4);
+}
+.ProseMirror .selectedCell:after {
+  z-index: 2;
+  position: absolute;
+  content: "";
+  left: 0; right: 0; top: 0; bottom: 0;
+  background: hsl(var(--primary) / 0.15);
+  pointer-events: none;
+}
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: hsl(var(--primary));
+  pointer-events: none;
+}
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
