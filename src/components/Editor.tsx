@@ -51,8 +51,6 @@ import {
   Table as TableIcon,
   Copy,
   ChevronRight,
-  ChevronUp,
-  ChevronDown,
   Columns,
   Layers,
   X
@@ -569,7 +567,7 @@ export interface EditorProps {
   note: Note | null;
   onUpdate: (id: string, updates: Partial<Note>) => void;
   onDelete: (id: string) => void;
-  onCreate?: () => Note;
+  onCreate?: (folderPath?: string) => Note;
   onOpenSidebar: () => void;
   isSidebarOpen?: boolean;
   editorFontSize?: number;
@@ -594,34 +592,64 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [duplicateSubmenuOpen, setDuplicateSubmenuOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
 
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const tableMenuScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current) {
+      clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
+  }, []);
 
   const checkScroll = useCallback(() => {
-    const el = tableMenuScrollRef.current;
+    const el = scrollContainerRef.current;
     if (!el) return;
     const hasScrollable = el.scrollHeight > el.clientHeight;
     setCanScrollUp(hasScrollable && el.scrollTop > 2);
     setCanScrollDown(hasScrollable && el.scrollTop < el.scrollHeight - el.clientHeight - 2);
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) {
-      setDuplicateSubmenuOpen(false);
-    }
-  }, [menuOpen]);
+  const startAutoScroll = useCallback((direction: "up" | "down") => {
+    stopAutoScroll();
+    const step = () => {
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      el.scrollTop += direction === "up" ? -12 : 12;
+      checkScroll();
+    };
+    step();
+    scrollIntervalRef.current = setInterval(step, 30);
+  }, [checkScroll, stopAutoScroll]);
+
+  const scrollMenu = useCallback((direction: "up" | "down") => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const delta = direction === "up" ? -100 : 100;
+    el.scrollBy({ top: delta, behavior: "smooth" });
+    setTimeout(checkScroll, 150);
+  }, [checkScroll]);
 
   useEffect(() => {
     if (menuOpen) {
       setTimeout(checkScroll, 50);
     } else {
+      stopAutoScroll();
       setCanScrollUp(false);
       setCanScrollDown(false);
     }
-  }, [menuOpen, duplicateSubmenuOpen, checkScroll]);
+  }, [menuOpen, duplicateSubmenuOpen, checkScroll, stopAutoScroll]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setDuplicateSubmenuOpen(false);
+    }
+  }, [menuOpen]);
 
   // Click / Tap outside to dismiss popover menu
   useEffect(() => {
@@ -876,10 +904,12 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
         setSelectedIndex((prev) => (prev < 0 ? 0 : (prev + 1) % allFlatItems.length));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev <= 0 ? allFlatItems.length - 1 : prev - 1));
+        setSelectedIndex((prev) =>
+          prev < 0 ? allFlatItems.length - 1 : (prev - 1 + allFlatItems.length) % allFlatItems.length
+        );
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (selectedIndex >= 0 && selectedIndex < allFlatItems.length) {
+        if (selectedIndex >= 0) {
           const selected = allFlatItems[selectedIndex];
           if (selected) {
             selected.action();
@@ -899,8 +929,8 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
   }, [menuOpen, selectedIndex, allFlatItems]);
 
   useEffect(() => {
-    if (!menuOpen || !popoverRef.current) return;
-    const activeEl = popoverRef.current.querySelector(`[data-flat-index="${selectedIndex}"]`);
+    if (!menuOpen || selectedIndex < 0 || !scrollContainerRef.current) return;
+    const activeEl = scrollContainerRef.current.querySelector(`[data-flat-index="${selectedIndex}"]`);
     if (activeEl) {
       activeEl.scrollIntoView({ block: "nearest" });
     }
@@ -950,11 +980,11 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <div
-            className="fixed z-30 flex items-center justify-center rounded-xl border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
+            className="fixed z-30 flex items-center justify-center rounded-lg border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
             style={{
               top: `${tableRect.top}px`,
-              left: `${tableRect.right + 6}px`,
-              width: "22px",
+              left: `${tableRect.right + 10}px`,
+              width: "16px",
               height: `${tableRect.height}px`,
             }}
             onClick={() => {
@@ -962,7 +992,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
               setTimeout(updatePositions, 50);
             }}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3 w-3" />
           </div>
         </TooltipTrigger>
         <TooltipContent>{t("editor.addColumnRight")}</TooltipContent>
@@ -972,25 +1002,25 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <div
-            className="fixed z-30 flex items-center justify-center rounded-xl border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
+            className="fixed z-30 flex items-center justify-center rounded-lg border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
             style={{
-              top: `${tableRect.bottom + 6}px`,
+              top: `${tableRect.bottom + 10}px`,
               left: `${tableRect.left}px`,
               width: `${tableRect.width}px`,
-              height: "22px",
+              height: "16px",
             }}
             onClick={() => {
               editor.chain().focus().addRowAfter().run();
               setTimeout(updatePositions, 50);
             }}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3 w-3" />
           </div>
         </TooltipTrigger>
         <TooltipContent>{t("editor.addRowBelow")}</TooltipContent>
       </Tooltip>
 
-      {/* Floating Actions Popover Card (100% Identical to Slash Commands Menu with Keyboard Nav & Dismiss) */}
+      {/* Floating Actions Popover Card (100% Identical to Slash Commands Menu with Chevron Scroll Indicators) */}
       {menuOpen && (
         <div
           ref={popoverRef}
@@ -1009,22 +1039,19 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
             <div
               role="button"
               tabIndex={-1}
-              onClick={() => {
-                if (tableMenuScrollRef.current) {
-                  tableMenuScrollRef.current.scrollBy({ top: -80, behavior: "smooth" });
-                  setTimeout(checkScroll, 150);
-                }
-              }}
-              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none"
+              onMouseEnter={() => startAutoScroll("up")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollMenu("up")}
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
             >
               <ChevronUp className="h-4 w-4" />
             </div>
           )}
 
           <div
-            ref={tableMenuScrollRef}
+            ref={scrollContainerRef}
             onScroll={checkScroll}
-            className="overflow-y-auto no-scrollbar flex-1 py-1"
+            className="overflow-y-auto no-scrollbar flex-1 py-1 pb-3"
           >
             {normalItems.map((item) => {
               const flatIndex = currentFlatIndex++;
@@ -1037,7 +1064,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                   tabIndex={0}
                   className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
                     isSelected
-                      ? "bg-accent/10 text-primary font-semibold"
+                      ? "bg-accent/5 text-primary font-semibold"
                       : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
                   }`}
                   onMouseEnter={() => setSelectedIndex(flatIndex)}
@@ -1064,7 +1091,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                     tabIndex={0}
                     className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
                       isDuplicateSelected
-                        ? "bg-accent/10 text-primary font-semibold"
+                        ? "bg-accent/5 text-primary font-semibold"
                         : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
                     }`}
                     onMouseEnter={() => setSelectedIndex(duplicateFlatIndex)}
@@ -1091,7 +1118,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                             tabIndex={0}
                             className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
                               isDupRowSelected
-                                ? "bg-accent/10 text-primary font-semibold"
+                                ? "bg-accent/5 text-primary font-semibold"
                                 : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
                             }`}
                             onMouseEnter={() => setSelectedIndex(dupRowIndex)}
@@ -1116,7 +1143,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                             tabIndex={0}
                             className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
                               isDupColSelected
-                                ? "bg-accent/10 text-primary font-semibold"
+                                ? "bg-accent/5 text-primary font-semibold"
                                 : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
                             }`}
                             onMouseEnter={() => setSelectedIndex(dupColIndex)}
@@ -1154,7 +1181,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                       tabIndex={0}
                       className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
                         isSelected
-                          ? "bg-accent/10 text-primary font-semibold"
+                          ? "bg-accent/5 text-primary font-semibold"
                           : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
                       }`}
                       onMouseEnter={() => setSelectedIndex(flatIndex)}
@@ -1176,13 +1203,10 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
             <div
               role="button"
               tabIndex={-1}
-              onClick={() => {
-                if (tableMenuScrollRef.current) {
-                  tableMenuScrollRef.current.scrollBy({ top: 80, behavior: "smooth" });
-                  setTimeout(checkScroll, 150);
-                }
-              }}
-              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none"
+              onMouseEnter={() => startAutoScroll("down")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollMenu("down")}
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
             >
               <ChevronDown className="h-4 w-4" />
             </div>
@@ -1444,7 +1468,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const EDITOR_CLASSES =
     "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
-    " [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_td]:border [&_td]:border-border/60 [&_td]:p-2.5 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:p-2.5 [&_th]:bg-muted/30 [&_th]:font-semibold [&_th]:text-left";
+    " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted/30 [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
   const scheduleAutoSaveDiskRef = useRef<(() => void) | null>(null);
 
@@ -3560,7 +3584,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </div>
 
         <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-        <div className={`flex flex-col ${note.contentFormat === "html" ? "flex-1 min-h-0" : "no-scrollbar flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : ""}`}>
+        <div className={`flex flex-col ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : ""}`}>
           {note.fileType === "image" ? (
             <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
               {imageBlobUrl ? (
@@ -3591,7 +3615,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               fontSize={editorFontSize}
             />
           ) : (
-            <div className="flex min-h-full w-full flex-col overflow-y-auto px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
+            <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
               {editor && <TableInteractiveOverlay editor={editor} />}
               <EditorContent editor={editor} />
             </div>

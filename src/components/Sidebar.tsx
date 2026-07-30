@@ -147,7 +147,7 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   return <FileText className={cls} />;
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 320, isMobile = false, onClose, onOpenSettings }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 275, isMobile = false, onClose, onOpenSettings }: SidebarProps) {
   const [query, setQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
@@ -716,10 +716,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   return (
     <aside
       className={
-        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full md:w-[320px] lg:w-[380px] min-w-[220px] max-w-[380px] transition-all duration-200 ` +
-        (isMobile ? 'fixed left-0 top-0 z-50 w-[92vw] max-w-[380px] shadow-2xl' : 'relative')
+        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full md:w-[275px] lg:w-[300px] min-w-[220px] max-w-[340px] transition-all duration-200 ` +
+        (isMobile ? 'fixed left-0 top-0 z-50 w-[92vw] max-w-[340px] shadow-2xl' : 'relative')
       }
-      style={!isMobile ? { width: `min(${sidebarWidth}px, 34vw)`, minWidth: `min(${sidebarWidth}px, 34vw)` } : undefined}
+      style={!isMobile ? { width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` } : undefined}
     >
       <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <div>
@@ -740,9 +740,9 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" className="gap-1.5 text-xs">
+              <Button type="button" variant="ghost" size="icon" title={t("sidebar.newNote")}>
                 <Plus className="h-4 w-4" />
-                {t("sidebar.newNote")}
+                <span className="sr-only">{t("sidebar.newNote")}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44 rounded-xl px-0 py-2">

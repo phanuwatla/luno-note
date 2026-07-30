@@ -804,7 +804,7 @@ export default function Index() {
             setSplitTabId(prev => prev === id ? null : id);
           }}
         />
-        <Breadcrumb note={activeTabNote} rootFolderName={openedFolderName} />
+        <Breadcrumb note={activeTabNote} rootFolderName={openedFolderName} notes={notes} onSelectNote={setActiveTabId} />
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
           {/* ถ้า splitTabId มีค่า ให้ render editor 2 pane ซ้าย-ขวา */}
           {splitTabId && splitTabId !== activeTabId ? (

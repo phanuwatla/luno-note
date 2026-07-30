@@ -69,11 +69,15 @@ export async function clearAllStoredFileHandles() {
   await withStore("readwrite", (store) => store.clear());
 }
 
-export type ExtendedFileSystemHandle = FileSystemHandle & {
-  requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
-  queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
-  remove?: () => Promise<void>;
-};
+declare global {
+  interface FileSystemHandle {
+    requestPermission?(descriptor?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
+    queryPermission?(descriptor?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
+    remove?(options?: { recursive?: boolean }): Promise<void>;
+  }
+}
+
+export type ExtendedFileSystemHandle = FileSystemFileHandle | FileSystemDirectoryHandle;
 
 export async function requestPermissionIfAvailable(
   handle: FileSystemHandle | null | undefined,
