@@ -15,7 +15,7 @@ import {
   FolderArchive,
   ImagePlus,
   Italic,
-  Languages,
+  Wrench,
   Link2,
   List,
   ListOrdered,
@@ -85,6 +85,7 @@ import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { docxToHtml } from "@/lib/docxUtils";
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
+import { EditorState } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
@@ -475,7 +476,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "fixLanguage",
     titleKey: "editor.fixLanguage",
-    icon: <Languages className="mr-2 h-4 w-4" />,
+    icon: <Wrench className="mr-2 h-4 w-4" />,
     keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา"],
     action: (_editor, helpers) => helpers.handleFixLanguage(),
   },
@@ -1981,6 +1982,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
     editor.commands.setContent(parsed as string);
+    // Reset undo/redo history so that undoing does not bring back content
+    // from a previously opened note.
+    editor.view.updateState(
+      EditorState.create({
+        doc: editor.state.doc,
+        plugins: editor.state.plugins,
+      })
+    );
+    setEditorTick((v) => v + 1);
     syncingFromNote.current = false;
   }, [editor, note?.id, note?.content]);
 
@@ -3162,7 +3172,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           )}
           {/* Hide toolbar if not txt or md */}
           {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
-            const TOOLBAR_ITEMS: Array<{
+            const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
               group: "history" | "heading" | "inline" | "list" | "block" | "media";
               labelKey: string;
@@ -3186,6 +3196,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
             ];
+
+            // For plain text (.txt) files, only keep tools that work without HTML
+            // formatting (undo/redo, emoji, fixLanguage) since all other formatting
+            // is stripped on save via getPlainTextFromHtml().
+            const isPlainText = note?.fileName?.toLowerCase().endsWith(".txt") ||
+              (!note?.fileName && getContentFormat() === "plain");
+            const TOOLBAR_ITEMS = isPlainText
+              ? ALL_TOOLBAR_ITEMS.filter(item =>
+                  ["undo", "redo", "emoji", "fixLanguage"].includes(item.id)
+                )
+              : ALL_TOOLBAR_ITEMS;
 
             const BUTTON_WIDTH = 36;
             const SEP_WIDTH = 9;
@@ -3705,7 +3726,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={handleFixLanguage}
                         >
-                          <Languages className="h-4 w-4" />
+                          <Wrench className="h-4 w-4" />
                           <span className="sr-only">{t("editor.fixLanguage")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -3865,7 +3886,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 case "fixLanguage":
                   return (
                     <DropdownMenuItem key="fixLanguage" onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Languages className="mr-2 h-4 w-4" />
+                      <Wrench className="mr-2 h-4 w-4" />
                       <span>{t("editor.fixLanguage")}</span>
                     </DropdownMenuItem>
                   );
