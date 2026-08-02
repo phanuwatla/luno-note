@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { docxToHtml } from "@/lib/docxUtils";
+import { markNoteAsDeleted } from "@/lib/fileHandles";
 
 export interface Note {
   id: string;
@@ -172,7 +173,7 @@ export function useNotes() {
   }, []);
 
   const updateNote = useCallback(
-    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat">>) => {
+    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath">>) => {
       const normalizedPatch = { ...patch };
       if (typeof patch.content === "string") {
         normalizedPatch.title = deriveTitleFromContent(patch.content);
@@ -191,6 +192,7 @@ export function useNotes() {
 
   const deleteNote = useCallback(
     (id: string) => {
+      markNoteAsDeleted(id);
       setNotes((prev) => {
         const updated = prev.filter((n) => n.id !== id);
         saveNotes(updated);

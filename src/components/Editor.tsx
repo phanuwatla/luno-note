@@ -28,6 +28,7 @@ import {
   MoreHorizontal,
   ClipboardList,
   Plus,
+  FolderPlus,
   Undo2,
   Redo2,
   Strikethrough,
@@ -97,7 +98,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
-import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, ExtendedFileSystemHandle } from "@/lib/fileHandles";
+import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -567,13 +568,16 @@ export interface EditorProps {
   note: Note | null;
   onUpdate: (id: string, updates: Partial<Note>) => void;
   onDelete: (id: string) => void;
-  onCreate?: (folderPath?: string) => Note;
+  onCreate?: (folderPath?: string, opts?: CreateNoteOptions) => Note | void | Promise<Note | void>;
+  onCreateFolder?: (folderPath?: string, folderName?: string) => void | Promise<void>;
+  onOpenFolder?: (pending?: OpenFolderPending) => void | Promise<void>;
+  openedFolderName?: string | null;
   onOpenSidebar: () => void;
   isSidebarOpen?: boolean;
   editorFontSize?: number;
   isMobile?: boolean;
   notes?: Note[];
-  rootDirHandle?: ExtendedFileSystemHandle | null;
+  rootDirHandle?: FileSystemDirectoryHandle | null;
   onCloseSplit?: () => void;
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
@@ -1218,7 +1222,82 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
 }
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onCreate, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange } = props;
+  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange } = props;
+
+  const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">("txt");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
+
+  // Complete pending creation when a folder gets opened
+  useEffect(() => {
+    if (!pendingCreate) return;
+    if (!openedFolderName) return;
+
+    if (pendingCreate.kind === "file") {
+      const fileName = pendingCreate.fileName ?? `untitled.txt`;
+      const contentFormat = pendingCreate.contentFormat ?? "plain";
+      if (onCreate) onCreate(undefined, { fileName, contentFormat });
+    } else if (pendingCreate.kind === "folder") {
+      if (onCreateFolder) onCreateFolder(undefined, pendingCreate.folderName ?? "untitled-folder");
+    }
+
+    setPendingCreate(null);
+  }, [openedFolderName, pendingCreate, onCreate, onCreateFolder]);
+
+  const handleOpenCreateFileDialog = () => {
+    setNewFileName("");
+    setNewFileExt("txt");
+    setCreateFileDialogOpen(true);
+  };
+
+  const handleOpenCreateFolderDialog = () => {
+    setNewFolderName("");
+    setCreateFolderDialogOpen(true);
+  };
+
+  const handleCreateFileFromDialog = () => {
+    const baseName = newFileName.trim();
+    const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
+    const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
+
+    if (!openedFolderName && onOpenFolder) {
+      setPendingCreate({ kind: "file", fileName, contentFormat });
+      setCreateFileDialogOpen(false);
+      setNewFileName("");
+      setNewFileExt("txt");
+      onOpenFolder({ kind: "file", fileName, contentFormat });
+      return;
+    }
+
+    if (onCreate) {
+      onCreate(undefined, { fileName, contentFormat });
+    }
+    setCreateFileDialogOpen(false);
+    setNewFileName("");
+    setNewFileExt("txt");
+  };
+
+  const handleCreateFolderFromDialog = () => {
+    const safeFolderName = newFolderName.trim().replace(/[\\/:*?"<>|]/g, "_");
+    const folderName = safeFolderName || "untitled-folder";
+
+    if (!openedFolderName && onOpenFolder) {
+      setPendingCreate({ kind: "folder", folderName });
+      setCreateFolderDialogOpen(false);
+      setNewFolderName("");
+      onOpenFolder({ kind: "folder", folderName });
+      return;
+    }
+
+    if (onCreateFolder) {
+      onCreateFolder(undefined, folderName);
+    }
+    setCreateFolderDialogOpen(false);
+    setNewFolderName("");
+  };
     const [importDocxDialogOpen, setImportDocxDialogOpen] = useState(false);
     const [previewHtml, setPreviewHtml] = useState("");
     const docxInputRef = useRef<HTMLInputElement>(null);
@@ -1236,10 +1315,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
         // กรณีสร้าง note ใหม่
         else if (onCreate) {
-          const newNote = onCreate();
-          onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
-          onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
-          updated = true;
+          const result = onCreate();
+          const newNote = result instanceof Promise ? await result : result;
+          if (newNote && "id" in newNote) {
+            onUpdate(newNote.id, { content: html, contentFormat: "html", fileType: undefined });
+            updated = true;
+          }
         }
         // กรณี openfolder หรือ note ถูกสร้างจากไฟล์ในระบบ: ค้นหา note ที่ fileName ตรงกับไฟล์ docx แล้ว update ซ้ำ
         if (!updated && file.name) {
@@ -1278,7 +1359,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
+  const editorActiveNoteIdRef = useRef<string | null>(null);
   const fileHandleByNoteIdRef = useRef<Record<string, FileSystemFileHandle>>({});
+  const deletedNoteIdsRef = useRef<Set<string>>(new Set());
   const editorSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -1466,7 +1549,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const EDITOR_CLASSES =
-    "min-h-[60vh] md:min-h-[70vh] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "min-h-[60vh] md:min-h-[70vh] w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted/30 [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -1736,7 +1819,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     onUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       setEditorTick((v) => v + 1);
-      if (!note || syncingFromNote.current) return;
+      if (!note || syncingFromNote.current || isNoteDeleted(note.id)) return;
+      if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
+      if (note.fileType === "image" || note.fileType === "binary") return;
       if (!settings.autoSave) return;
       onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
       scheduleAutoSaveDiskRef.current?.();
@@ -1792,10 +1877,55 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
   }, [editor, editorTick, note, editorFontSize, t]);
 
+  const getFreshFileHandle = useCallback(async (targetNote: Note, allowCreate = false): Promise<FileSystemFileHandle | null> => {
+    if (!targetNote || isNoteDeleted(targetNote.id) || deletedNoteIdsRef.current.has(targetNote.id)) {
+      return null;
+    }
+    const relPath = targetNote.fileName ? (targetNote.folderPath ? `${targetNote.folderPath}/${targetNote.fileName}` : targetNote.fileName) : "";
+    if (relPath && isRelativePathDeleted(relPath)) {
+      return null;
+    }
+
+    if (rootDirHandle && targetNote.fileName) {
+      try {
+        let targetDir = rootDirHandle;
+        const segments = (targetNote.folderPath ?? "").split("/").filter(Boolean);
+        for (const segment of segments) {
+          targetDir = await targetDir.getDirectoryHandle(segment, { create: allowCreate });
+        }
+        const handle = await targetDir.getFileHandle(targetNote.fileName, { create: allowCreate });
+        fileHandleByNoteIdRef.current[targetNote.id] = handle;
+        return handle;
+      } catch {
+        const cached = fileHandleByNoteIdRef.current[targetNote.id] ?? (await getStoredFileHandle(targetNote.id));
+        if (cached) {
+          fileHandleByNoteIdRef.current[targetNote.id] = cached;
+          return cached;
+        }
+        return null;
+      }
+    }
+
+    const cachedHandle = fileHandleByNoteIdRef.current[targetNote.id] ?? (await getStoredFileHandle(targetNote.id));
+    if (cachedHandle) {
+      fileHandleByNoteIdRef.current[targetNote.id] = cachedHandle;
+      return cachedHandle;
+    }
+    return null;
+  }, [rootDirHandle]);
+
   const saveLinkedFileToDisk = useCallback(async () => {
     if (!note || !editor || !settings.autoSave) return;
-    const existingHandle = fileHandleByNoteIdRef.current[note.id];
-    if (!existingHandle?.createWritable) return;
+    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
+    if (note.fileType === "image" || note.fileType === "binary") return;
+    if (deletedNoteIdsRef.current.has(note.id) || isNoteDeleted(note.id)) return;
+    if (Array.isArray(notes) && !notes.some((n) => n.id === note.id)) return;
+
+    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    if (relPath && isRelativePathDeleted(relPath)) return;
+
+    const freshHandle = await getFreshFileHandle(note);
+    if (!freshHandle?.createWritable) return;
 
     try {
       const ext = getPreferredExtension() as "md" | "txt" | "html";
@@ -1804,7 +1934,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } catch {
       /* ignore background disk save errors */
     }
-  }, [note, editor, settings.autoSave]);
+  }, [note, editor, settings.autoSave, notes, getFreshFileHandle]);
 
   const scheduleAutoSaveDisk = useCallback(() => {
     if (autoSaveDiskTimeoutRef.current) {
@@ -1824,11 +1954,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (autoSaveDiskTimeoutRef.current) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
       }
-      if (note && editor && settings.autoSave) {
-        void saveLinkedFileToDisk();
-      }
     };
-  }, [note?.id, editor, settings.autoSave, saveLinkedFileToDisk]);
+  }, [note?.id]);
 
   useEffect(() => {
     if (!note || !editor || note.fileType) return;
@@ -1838,18 +1965,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [note?.id, note?.content, editor]);
 
   useEffect(() => {
-    if (!editor) return;
-    const noteContent = note?.content ?? "";
+    if (!editor || !note) return;
+    const noteContent = note.content ?? "";
     const parsed = parseEditorContent(noteContent);
 
-    // For JSON content, compare by JSON string to avoid spurious re-renders
-    if (isTiptapJson(noteContent)) {
-      if (JSON.stringify(editor.getJSON()) === noteContent) return;
-    } else {
-      if (editor.getHTML() === parsed) return;
+    // If editor is already showing content for this exact note, avoid re-rendering:
+    if (editorActiveNoteIdRef.current === note.id) {
+      if (isTiptapJson(noteContent)) {
+        if (JSON.stringify(editor.getJSON()) === noteContent) return;
+      } else {
+        if (editor.getHTML() === parsed) return;
+      }
     }
 
     syncingFromNote.current = true;
+    editorActiveNoteIdRef.current = note.id;
     editor.commands.setContent(parsed as string);
     syncingFromNote.current = false;
   }, [editor, note?.id, note?.content]);
@@ -2235,16 +2365,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
+  const extractTextFromTiptapJson = (node: unknown): string => {
+    if (!node || typeof node !== "object") return "";
+    const n = node as { type?: string; text?: string; content?: unknown[] };
+    if (n.type === "text" && typeof n.text === "string") return n.text;
+    if (Array.isArray(n.content)) {
+      return n.content.map(extractTextFromTiptapJson).filter(Boolean).join("\n");
+    }
+    return "";
+  };
+
   const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
     if (!note) return "";
     const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
-    const content = note.content;
 
-    // For JSON-stored notes, always use the live editor HTML as the source for export
-    const htmlContent = isTiptapJson(content) ? (editor?.getHTML() ?? "") : content;
+    let htmlContent = "";
+    if (editor && !editor.isDestroyed) {
+      htmlContent = editor.getHTML();
+    }
+
+    const isBlank = !htmlContent || htmlContent.trim() === "<p></p>" || htmlContent.trim() === "<h1></h1><p></p>";
+    if (isBlank && note.content && note.content.trim() !== "<p></p>") {
+      if (isTiptapJson(note.content)) {
+        try {
+          const parsed = JSON.parse(note.content);
+          const extracted = extractTextFromTiptapJson(parsed);
+          htmlContent = extracted ? `<p>${extracted}</p>` : note.content;
+        } catch {
+          htmlContent = note.content;
+        }
+      } else {
+        htmlContent = note.content;
+      }
+    }
+
+    if (!htmlContent) return "";
 
     if (format === "html") {
-      return note.contentFormat === "html" ? content : (editor?.getHTML() ?? content);
+      return isLikelyHtml(htmlContent) ? htmlContent : `<p>${htmlContent}</p>`;
     } else if (format === "plain") {
       if (isLikelyHtml(htmlContent)) return getPlainTextFromHtml(htmlContent);
       const stripped = htmlContent
@@ -2320,21 +2478,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const performSave = async (content: string, ext: "md" | "txt" | "html", isSilent = false) => {
-    if (!note) return;
+    if (!note || isNoteDeleted(note.id) || deletedNoteIdsRef.current.has(note.id)) return;
+    if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const existingHandle = fileHandleByNoteIdRef.current[note.id];
+    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    if (relPath && isRelativePathDeleted(relPath)) return;
+
+    const existingHandle = await getFreshFileHandle(note, true);
     if (!existingHandle?.createWritable) return;
 
+    let writable: FileSystemWritableFileStream | null = null;
     try {
-      const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
-      if (permission !== "granted") {
-        if (!isSilent) downloadMarkdown(content, ext);
-        return;
+      if (!isSilent) {
+        const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
+        if (permission !== "granted") {
+          downloadMarkdown(content, ext);
+          return;
+        }
       }
 
-      const writable = await existingHandle.createWritable();
+      writable = await existingHandle.createWritable();
       await writable.write(content);
       await writable.close();
+      writable = null;
       await setStoredFileHandle(note.id, existingHandle);
       const savedFile = await existingHandle.getFile();
       updateLinkedMetadata(note.id, savedFile.name);
@@ -2346,6 +2512,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       setSavedSnapshot(note.id, ext, content);
     } catch (error) {
+      if (writable) {
+        try {
+          await (writable as unknown as { abort?: () => Promise<void> }).abort?.();
+        } catch {
+          /* ignore abort error */
+        }
+      }
       console.error("Save to existing file failed", error);
       // If file is missing, clear the link and fallback to download
       if ((error as Error)?.name === "NotFoundError" || (error as Error)?.name === "NotAllowedError") {
@@ -2356,7 +2529,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const performSaveAs = async (content: string, ext: "md" | "txt" | "html") => {
-    if (!note) return;
+    if (!note || isNoteDeleted(note.id)) return;
+    if (note.fileType === "image" || note.fileType === "binary") return;
 
     if (!canUseNativeFs()) {
       downloadMarkdown(content, ext);
@@ -2385,14 +2559,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       // Save As on a linked note should create a new note entry, keeping the original linked file.
       if (note.isLinkedFile && onCreate) {
-        const createdNote = onCreate(note.folderPath ?? undefined);
-        targetNoteId = createdNote.id;
-        onUpdate(targetNoteId, {
-          content: ext === "txt" ? content : note.content,
-          contentFormat: ext === "txt" ? "plain" : ext === "html" ? "html" : "markdown",
-          isLinkedFile: false,
-          fileName: undefined,
-        });
+        const result = onCreate(note.folderPath ?? undefined);
+        const createdNote = result instanceof Promise ? await result : result;
+        if (createdNote && "id" in createdNote) {
+          targetNoteId = createdNote.id;
+          onUpdate(targetNoteId, {
+            content: ext === "txt" ? content : note.content,
+            contentFormat: ext === "txt" ? "plain" : ext === "html" ? "html" : "markdown",
+            isLinkedFile: false,
+            fileName: undefined,
+          });
+        }
       }
 
       fileHandleByNoteIdRef.current[targetNoteId] = handle;
@@ -2414,6 +2591,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleSaveFile = async () => {
     if (!note) return;
+    if (note.fileType === "image" || note.fileType === "binary") return;
 
     const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
     const ext = getPreferredExtension() as "md" | "txt" | "html";
@@ -2444,33 +2622,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleDeleteNote = async () => {
     if (!note) return;
 
-    const linkedHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
-
-    if (linkedHandle) {
-      const extLinkedHandle = linkedHandle as ExtendedFileSystemHandle;
-      if (typeof extLinkedHandle.remove !== "function") {
-        showUiAlert(t("editor.deleteNotSupported"));
-        return;
-      }
-
-      try {
-        const permission = await requestPermissionIfAvailable(linkedHandle, "readwrite");
-        if (permission !== "granted") {
-          showUiAlert(t("editor.deletePermissionDenied"));
-          return;
-        }
-
-        await extLinkedHandle.remove();
-        await clearLinkedMetadata();
-      } catch (error) {
-        console.error("Delete linked file failed", error);
-        showUiAlert(t("editor.deleteFailed"));
-        return;
-      }
+    deletedNoteIdsRef.current.add(note.id);
+    if (autoSaveDiskTimeoutRef.current) {
+      clearTimeout(autoSaveDiskTimeoutRef.current);
     }
+    delete fileHandleByNoteIdRef.current[note.id];
+    await clearLinkedMetadata();
 
-    onDelete(note.id);
     setDeleteConfirmOpen(false);
+    onDelete(note.id);
   };
 
   useEffect(() => {
@@ -2480,7 +2640,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let objectUrl: string | null = null;
 
     const hydrateHandle = async () => {
-      const storedHandle = await getStoredFileHandle(note.id);
+      let storedHandle = await getStoredFileHandle(note.id);
+      if (!storedHandle && rootDirHandle && note.fileName) {
+        try {
+          let targetDir = rootDirHandle;
+          const segments = (note.folderPath ?? "").split("/").filter(Boolean);
+          for (const segment of segments) {
+            targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+          }
+          storedHandle = await targetDir.getFileHandle(note.fileName, { create: false });
+          await setStoredFileHandle(note.id, storedHandle);
+        } catch {
+          /* ignore handle fallback error */
+        }
+      }
       if (cancelled || !storedHandle) return;
 
       fileHandleByNoteIdRef.current[note.id] = storedHandle;
@@ -2534,10 +2707,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <>
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground relative">
           <p className="text-sm">{t("editor.selectOrCreate")}</p>
-          <Button type="button" className="gap-2" onClick={() => onCreate?.()}>
-            <Plus className="h-4 w-4" />
-            {t("sidebar.newNote")}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" className="gap-2">
+                <Plus className="h-4 w-4" />
+                {t("sidebar.newNote")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="w-44 rounded-xl px-0 py-2">
+              <DropdownMenuItem onClick={handleOpenCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                <FileText className="h-4 w-4" />
+                <span>{t("sidebar.createFileAction")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleOpenCreateFolderDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                <FolderPlus className="h-4 w-4" />
+                <span>{t("sidebar.createFolderAction")}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {/* ปุ่มปิด split เฉพาะ editor ฝั่งขวา */}
           {onCloseSplit && (
             <Tooltip>
@@ -2552,6 +2739,100 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           )}
         </div>
 
+        <Dialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t("sidebar.createFileTitle")}</DialogTitle>
+              <DialogDescription>{t("sidebar.createFileDescription")}</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-1">
+              <div>
+                <label htmlFor="new-file-name-editor" className="mb-2 block text-sm font-medium text-foreground">
+                  {t("sidebar.fileNameLabel")}
+                </label>
+                <input
+                  id="new-file-name-editor"
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleCreateFileFromDialog();
+                    }
+                  }}
+                  placeholder="untitled"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new-file-ext-editor" className="mb-2 block text-sm font-medium text-foreground">
+                  {t("sidebar.fileExtensionLabel")}
+                </label>
+                <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v === "md" ? "md" : v === "html" ? "html" : "txt")}>
+                  <SelectTrigger id="new-file-ext-editor" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
+                    <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
+                    <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateFileDialogOpen(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="button" onClick={handleCreateFileFromDialog}>
+                {t("sidebar.createFileAction")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={createFolderDialogOpen} onOpenChange={setCreateFolderDialogOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t("sidebar.createFolderTitle")}</DialogTitle>
+              <DialogDescription>{t("sidebar.createFolderDescription")}</DialogDescription>
+            </DialogHeader>
+
+            <div className="py-1">
+              <label htmlFor="new-folder-name-editor" className="mb-2 block text-sm font-medium text-foreground">
+                {t("sidebar.folderNameLabel")}
+              </label>
+              <input
+                id="new-folder-name-editor"
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateFolderFromDialog();
+                  }
+                }}
+                placeholder="untitled-folder"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateFolderDialogOpen(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="button" onClick={handleCreateFolderFromDialog}>
+                {t("sidebar.createFolderAction")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <AlertDialog open={Boolean(alertMessage)} onOpenChange={(open) => !open && setAlertMessage(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -2563,6 +2844,227 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl p-6 sm:p-7 sm:max-w-2xl">
+            <DialogHeader className="pt-1 pb-1">
+              <DialogTitle className="text-2xl font-semibold leading-normal pt-1">{t("settings.title")}</DialogTitle>
+              <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
+            </DialogHeader>
+
+            <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 px-2 py-1.5">
+              <div>
+                <label className="mb-3 block text-sm font-medium text-foreground">
+                  {t("settings.colorScheme")}
+                </label>
+                <div className="flex gap-2">
+                  {(["light", "dark", "system"] as const).map((scheme) => {
+                    const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
+                    const label = t(`settings.colorScheme${scheme.charAt(0).toUpperCase()}${scheme.slice(1)}`);
+                    return (
+                      <button
+                        key={scheme}
+                        type="button"
+                        onClick={() => updateSetting("colorScheme", scheme)}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                          settings.colorScheme === scheme
+                            ? "border-primary bg-primary/10 text-primary font-medium"
+                            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-3 block text-sm font-medium text-foreground">
+                  {t("settings.theme")}
+                </label>
+                <div className="flex flex-wrap gap-2.5 p-1">
+                  {APP_THEMES.map((th) => (
+                    <button
+                      key={th.id}
+                      type="button"
+                      style={{ backgroundColor: th.color }}
+                      title={t(`settings.theme${th.id.charAt(0).toUpperCase()}${th.id.slice(1)}`)}
+                      onClick={() => updateSetting("theme", th.id)}
+                      className={`h-7 w-7 rounded-full transition-all ${
+                        settings.theme === th.id
+                          ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
+                          : "opacity-70 hover:opacity-100"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="modal-language-empty" className="mb-2 block text-sm font-medium text-foreground">
+                  {t("settings.language")}
+                </label>
+                <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
+                  <SelectTrigger id="modal-language-empty" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">{t("settings.english")}</SelectItem>
+                    <SelectItem value="th">{t("settings.thai")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label htmlFor="modal-fontFamily-empty" className="mb-2 block text-sm font-medium text-foreground">
+                  {t("settings.fontFamily")}
+                </label>
+                <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
+                  <SelectTrigger id="modal-fontFamily-empty" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
+                    <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
+                    <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
+                    <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
+                    <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label htmlFor="modal-editorFontSize-empty" className="text-sm font-medium text-foreground">
+                    {t("settings.editorFontSize")}
+                  </label>
+                  <span className="text-xs text-muted-foreground">{settings.editorFontSize}px</span>
+                </div>
+                <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
+                  <SelectTrigger id="modal-editorFontSize-empty" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {FONT_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}px
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+                  <div>
+                    <label htmlFor="modal-autoSave-empty" className="text-sm font-medium text-foreground">
+                      {t("settings.autoSave")}
+                    </label>
+                    <p className="mt-1 text-xs text-muted-foreground">{t("settings.autoSaveDescription")}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {settings.autoSave ? t("settings.enabled") : t("settings.disabled")}
+                    </span>
+                    <Switch
+                      id="modal-autoSave-empty"
+                      checked={settings.autoSave}
+                      onCheckedChange={(checked) => updateSetting("autoSave", checked)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+                  <div>
+                    <label htmlFor="modal-confirmBeforeDelete-empty" className="text-sm font-medium text-foreground">
+                      {t("settings.confirmBeforeDelete")}
+                    </label>
+                    <p className="mt-1 text-xs text-muted-foreground">{t("settings.confirmBeforeDeleteDescription")}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {settings.confirmBeforeDelete ? t("settings.enabled") : t("settings.disabled")}
+                    </span>
+                    <Switch
+                      id="modal-confirmBeforeDelete-empty"
+                      checked={settings.confirmBeforeDelete}
+                      onCheckedChange={(checked) => updateSetting("confirmBeforeDelete", checked)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
+                  <Keyboard className="h-4 w-4 text-primary" />
+                  <span>{t("editor.shortcutsTitle")}</span>
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter className="sm:justify-between sm:space-x-0">
+              <Button type="button" variant="outline" onClick={resetSettings}>
+                {t("common.reset")}
+              </Button>
+              <Button type="button" onClick={() => setSettingsOpen(false)}>
+                {t("common.save")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen}>
+          <DialogContent className="w-[calc(100vw-2rem)] sm:w-full max-w-lg p-5 sm:p-6">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Keyboard className="h-5 w-5 text-primary" />
+                <span>{t("editor.shortcutsTitle")}</span>
+              </DialogTitle>
+              <DialogDescription>{t("editor.shortcutsDescription")}</DialogDescription>
+            </DialogHeader>
+
+            <div className="my-2 max-h-[60vh] overflow-y-auto space-y-2.5 pr-1 no-scrollbar text-sm">
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutTabDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutTab")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutBoldDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutBold")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutItalicDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutItalic")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutStrikeDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutStrike")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutToggleDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutToggle")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutFixLangDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutFixLang")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutSaveDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSave")}</kbd>
+              </div>
+            </div>
+
+            <DialogFooter className="sm:justify-end">
+              <Button type="button" onClick={() => setShortcutsDialogOpen(false)}>
+                {t("common.ok")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
@@ -3522,10 +4024,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <FileCode className="h-4 w-4" />
                 <span>{t("editor.exportWord")}</span>
               </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setImportDocxDialogOpen(true)} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                  <FileImage className="h-4 w-4" />
-                  <span>Import docx</span>
-                </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <input ref={docxInputRef} type="file" accept=".docx" className="hidden" onChange={handleImportDocx} />
@@ -3615,9 +4113,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               fontSize={editorFontSize}
             />
           ) : (
-            <div className="flex min-h-full w-full flex-col px-3 py-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] sm:px-4 sm:py-5 sm:pb-24 md:px-5 md:py-8 lg:px-6 lg:py-10 lg:pb-10">
+            <div className="flex min-h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden px-4 py-6 sm:px-6 sm:py-8 md:px-8 md:py-10 lg:px-12 lg:py-12">
               {editor && <TableInteractiveOverlay editor={editor} />}
-              <EditorContent editor={editor} />
+              <EditorContent editor={editor} className="w-full min-w-0 max-w-full" />
             </div>
           )}
         </div>

@@ -170,6 +170,8 @@ const en = {
     deleteNotSupported: "This browser cannot delete linked files from disk yet.",
     deletePermissionDenied: "File delete permission was denied.",
     deleteFailed: "Failed to delete the linked file from disk.",
+    deleteToastTitle: "Deleted successfully",
+    deleteToastSuccess: "Deleted {file}",
   },
   home: {
     title: "Start creating your notes right away",

@@ -356,7 +356,16 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 
 /* Notion-Style Table Styling */
 .ProseMirror {
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ProseMirror > * {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .ProseMirror .tableWrapper {

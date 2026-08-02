@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
 import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
+import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 
 interface SidebarProps {
   notes: Note[];
@@ -19,7 +20,7 @@ interface SidebarProps {
   activeNoteId: string | null;
   openedFolderName?: string | null;
   onSelect: (id: string) => void;
-  onCreate: (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => void;
+  onCreate: (folderPath?: string, options?: CreateNoteOptions) => void | Promise<void>;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void;
   onCopyFile?: (note: Note) => void;
   onCopyFiles?: (notes: Note[]) => void;
@@ -36,7 +37,7 @@ interface SidebarProps {
   onDeleteFile?: (note: Note) => void;
   onDeleteFiles?: (notes: Note[]) => void;
   onDeleteFolder?: (folderPath: string) => void;
-  onOpenFolder?: () => void;
+  onOpenFolder?: (pending?: OpenFolderPending) => void | Promise<void>;
   confirmBeforeDelete?: boolean;
   sidebarWidth?: number;
   isMobile?: boolean;
@@ -373,7 +374,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       setCreateFileDialogOpen(false);
       setNewFileName("");
       setNewFileExt("txt");
-      onOpenFolder();
+      onOpenFolder({ kind: "file", fileName, contentFormat });
       return;
     }
 
@@ -392,7 +393,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       setPendingCreate({ kind: "folder", folderName });
       setCreateFolderDialogOpen(false);
       setNewFolderName("");
-      onOpenFolder();
+      onOpenFolder({ kind: "folder", folderName });
       return;
     }
 
@@ -451,7 +452,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                     ? "bg-sidebar-accent/40 text-foreground"
                     : "text-foreground hover:bg-sidebar-accent/50"
               }`}
-              style={{ paddingLeft: `${12 + depth * 12}px` }}
+              style={{ paddingLeft: `${12 + depth * 14}px` }}
             >
               <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <NoteIcon note={note} active={activeNoteId === note.id} />
@@ -580,7 +581,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     return (
       <ContextMenu key={node.path}>
         <ContextMenuTrigger asChild>
-          <div>
+          <div className="group/tree-item relative w-full">
             <button
               onClick={() => {
                 setSelectedFolderPath(node.path);
@@ -612,13 +613,11 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               }}
               onContextMenu={() => setSelectedFolderPath(node.path)}
               className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-sm font-medium transition-colors ${
-                selectedFolderPath === node.path
-                  ? "bg-sidebar-accent/70 text-foreground"
-                  : dropTargetFolderPath === node.path
-                    ? "bg-sidebar-accent/50 text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
+                dropTargetFolderPath === node.path
+                  ? "bg-sidebar-accent/50 text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
-              style={{ paddingLeft: `${12 + depth * 12}px` }}
+              style={{ paddingLeft: `${12 + depth * 14}px` }}
             >
               {isOpen ? (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
@@ -636,24 +635,30 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               )}
             </button>
             {isOpen && (
-              <div
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDropTargetFolderPath(node.path);
-                }}
-                onDragLeave={() => {
-                  if (dropTargetFolderPath === node.path) {
-                    setDropTargetFolderPath(null);
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  handleDropToFolder(node.path);
-                }}
-                className={dropTargetFolderPath === node.path ? "rounded-md bg-sidebar-accent/30" : undefined}
-              >
-                {node.notes.map((note) => renderNote(note, depth + 1))}
-                {node.children.map((child) => renderFolderNode(child, depth + 1))}
+              <div className="relative w-full">
+                <div
+                  className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
+                  style={{ left: `${18 + depth * 14}px` }}
+                />
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDropTargetFolderPath(node.path);
+                  }}
+                  onDragLeave={() => {
+                    if (dropTargetFolderPath === node.path) {
+                      setDropTargetFolderPath(null);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handleDropToFolder(node.path);
+                  }}
+                  className={`w-full ${dropTargetFolderPath === node.path ? "rounded-md bg-sidebar-accent/30" : ""}`}
+                >
+                  {node.notes.map((note) => renderNote(note, depth + 1))}
+                  {node.children.map((child) => renderFolderNode(child, depth + 1))}
+                </div>
               </div>
             )}
           </div>
@@ -733,7 +738,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <span className="sr-only">{t("sidebar.hideSidebar")}</span>
           </Button>
           {onOpenFolder && (
-            <Button type="button" variant="ghost" size="icon" onClick={onOpenFolder} title={t("sidebar.openFolder")}>
+            <Button type="button" variant="ghost" size="icon" onClick={() => void onOpenFolder()} title={t("sidebar.openFolder")}>
               <FolderOpen className="h-4 w-4" />
               <span className="sr-only">{t("sidebar.openFolder")}</span>
             </Button>
@@ -847,6 +852,12 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 type="text"
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateFromDialog();
+                  }
+                }}
                 placeholder="untitled"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
               />
@@ -896,6 +907,12 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               type="text"
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateFolderFromDialog();
+                }
+              }}
               placeholder="untitled-folder"
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
             />

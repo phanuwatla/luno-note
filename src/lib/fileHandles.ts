@@ -69,6 +69,43 @@ export async function clearAllStoredFileHandles() {
   await withStore("readwrite", (store) => store.clear());
 }
 
+export const globalDeletedNoteIds = new Set<string>();
+export const globalDeletedRelativePaths = new Set<string>();
+
+export function markNoteAsDeleted(id: string) {
+  if (!id) return;
+  globalDeletedNoteIds.add(id);
+  void removeStoredFileHandle(id);
+}
+
+export function unmarkNoteAsDeleted(id: string) {
+  if (!id) return;
+  globalDeletedNoteIds.delete(id);
+}
+
+export function isNoteDeleted(id?: string | null): boolean {
+  if (!id) return false;
+  return globalDeletedNoteIds.has(id);
+}
+
+export function trackDeletedRelativePath(relPath: string) {
+  if (!relPath) return;
+  globalDeletedRelativePaths.add(relPath);
+  setTimeout(() => {
+    globalDeletedRelativePaths.delete(relPath);
+  }, 4000);
+}
+
+export function clearDeletedRelativePath(relPath: string) {
+  if (!relPath) return;
+  globalDeletedRelativePaths.delete(relPath);
+}
+
+export function isRelativePathDeleted(relPath?: string | null): boolean {
+  if (!relPath) return false;
+  return globalDeletedRelativePaths.has(relPath);
+}
+
 declare global {
   interface FileSystemHandle {
     requestPermission?(descriptor?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
@@ -79,14 +116,34 @@ declare global {
 
 export type ExtendedFileSystemHandle = FileSystemFileHandle | FileSystemDirectoryHandle;
 
+export type OpenFolderPending = {
+  kind: "file" | "folder";
+  fileName?: string;
+  contentFormat?: "plain" | "markdown" | "html";
+  folderName?: string;
+};
+
+export type CreateNoteOptions = {
+  fileName?: string;
+  contentFormat?: "plain" | "markdown" | "html";
+};
+
 export async function requestPermissionIfAvailable(
   handle: FileSystemHandle | null | undefined,
   mode: "read" | "readwrite" = "readwrite",
 ): Promise<PermissionState | "granted"> {
   if (!handle) return "granted";
   const extHandle = handle as ExtendedFileSystemHandle;
-  if (typeof extHandle.requestPermission === "function") {
-    return await extHandle.requestPermission({ mode });
+  try {
+    if (typeof extHandle.queryPermission === "function") {
+      const state = await extHandle.queryPermission({ mode });
+      if (state === "granted") return "granted";
+    }
+    if (typeof extHandle.requestPermission === "function") {
+      return await extHandle.requestPermission({ mode });
+    }
+  } catch {
+    /* ignore permission query errors */
   }
   return "granted";
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
@@ -9,10 +9,13 @@ import { useNotes } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
-import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle } from "@/lib/fileHandles";
+import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
 import { marked } from "marked";
+import { toast } from "@/hooks/use-toast";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export default function Index() {
+  const { t } = useTranslation();
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
   const { notes, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
@@ -27,6 +30,11 @@ export default function Index() {
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const notesRef = useRef(notes);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
@@ -173,8 +181,16 @@ export default function Index() {
           await readDir(childHandle as FileSystemDirectoryHandle, subPath);
         } else if (childHandle.kind === "file") {
           const lname = name.toLowerCase();
-          // Filter out temporary swap files (.crswap, .tmp, .swp, etc.)
-          if (lname.endsWith(".crswap") || lname.includes(".crswap") || lname.endsWith(".tmp") || lname.endsWith(".swp") || lname.startsWith(".")) {
+          // Filter out and auto-clean temporary swap files (.crswap, .tmp, .swp, etc.)
+          if (lname.endsWith(".crswap") || lname.includes(".crswap") || lname.endsWith(".tmp") || lname.endsWith(".swp")) {
+            try {
+              await handle.removeEntry(name);
+            } catch {
+              /* ignore swap cleanup errors */
+            }
+            continue;
+          }
+          if (lname.startsWith(".")) {
             continue;
           }
 
@@ -215,23 +231,29 @@ export default function Index() {
     return { entries, folderPaths: Array.from(folderPaths).sort((a, b) => a.localeCompare(b)) };
   }, []);
 
-  const syncFolderFromDisk = useCallback(async (dirHandle: FileSystemDirectoryHandle) => {
+  const syncFolderFromDisk = useCallback(async (dirHandle: FileSystemDirectoryHandle, excludeRelativePaths?: Set<string>, selectRelativePath?: string) => {
+    const isExcluded = (relPath: string) =>
+      isRelativePathDeleted(relPath) || Boolean(excludeRelativePaths && excludeRelativePaths.has(relPath));
+
     const { entries, folderPaths } = await scanFolderEntries(dirHandle);
+    const filteredEntries = entries.filter((e) => !isExcluded(e.relativePath));
+
     setOpenedFolderPaths(folderPaths);
+    const currentNotes = notesRef.current;
     const existingByPath = new Map(
-      notes
-        .filter((n) => n.fileName)
+      currentNotes
+        .filter((n) => n.fileName && !isExcluded(getRelativePath(n.folderPath || "", n.fileName)))
         .map((n) => [getRelativePath(n.folderPath || "", n.fileName as string), n] as const),
     );
 
-    const activeNoteRef = activeTabId ? notes.find((n) => n.id === activeTabId) : null;
+    const activeNoteRef = activeTabId ? currentNotes.find((n) => n.id === activeTabId) : null;
     const activeRelativePath = activeNoteRef?.fileName
       ? getRelativePath(activeNoteRef.folderPath || "", activeNoteRef.fileName)
       : null;
 
     const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown" | "html"; isLinkedFile: true; folderPath: string; fileType?: "image" | "binary" }> = [];
 
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       const existing = existingByPath.get(entry.relativePath);
 
       if (existing) {
@@ -275,7 +297,7 @@ export default function Index() {
       }
     }
 
-    const handleByRelativePath = new Map(entries.map((entry) => [entry.relativePath, entry.handle] as const));
+    const handleByRelativePath = new Map(filteredEntries.map((entry) => [entry.relativePath, entry.handle] as const));
 
     await clearAllStoredFileHandles();
     const nextNotes = replaceNotes(nextItems);
@@ -289,20 +311,22 @@ export default function Index() {
 
     if (nextNotes.length === 0) {
       setActiveTabId(null);
-      return;
+      return nextNotes;
     }
 
-    if (activeRelativePath) {
-      const nextActive = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === activeRelativePath);
+    const targetPathToOpen = selectRelativePath || activeRelativePath;
+    if (targetPathToOpen) {
+      const nextActive = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === targetPathToOpen);
       if (nextActive) {
         openTab(nextActive.id);
         removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
-        return;
+        return nextNotes;
       }
     }
 
     removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
-  }, [activeTabId, notes, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes]);
+    return nextNotes;
+  }, [activeTabId, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes]);
 
   const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
@@ -311,6 +335,7 @@ export default function Index() {
     // If no folder is opened, fallback to normal in-app note creation.
     if (!openedRootDirHandle) {
       const note = createNote(normalizedPath || undefined);
+      unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
         isLinkedFile: false,
@@ -328,6 +353,8 @@ export default function Index() {
       }
 
       const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
+      const relPath = getRelativePath(normalizedPath, fileName);
+      clearDeletedRelativePath(relPath);
 
       const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
@@ -335,6 +362,7 @@ export default function Index() {
       await writable.close();
 
       const note = createNote(normalizedPath || undefined);
+      unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName,
         isLinkedFile: true,
@@ -342,9 +370,12 @@ export default function Index() {
       });
       openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
+
+      void syncFolderFromDisk(openedRootDirHandle, undefined, relPath);
     } catch (error) {
       console.error("Create file in folder failed", error);
       const note = createNote(normalizedPath || undefined);
+      unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
         isLinkedFile: false,
@@ -361,27 +392,22 @@ export default function Index() {
     if (!openedRootDirHandle) return;
 
     try {
-      let targetDir = openedRootDirHandle;
+      let parentDir = openedRootDirHandle;
       const segments = normalizedPath.split("/").filter(Boolean);
       for (const segment of segments) {
-        targetDir = await targetDir.getDirectoryHandle(segment);
+        parentDir = await parentDir.getDirectoryHandle(segment);
       }
 
-      let index = 0;
-      let finalName = safeName;
-      while (true) {
-        const candidate = index === 0 ? safeName : `${safeName}-${index}`;
-        try {
-          await targetDir.getDirectoryHandle(candidate, { create: false });
-          index += 1;
-        } catch (error) {
-          if ((error as DOMException)?.name !== "NotFoundError") throw error;
-          finalName = candidate;
-          break;
+      const targetFolderName = await resolveUniqueFolderName(parentDir, safeName);
+      await parentDir.getDirectoryHandle(targetFolderName, { create: true });
+
+      const newFolderPath = normalizedPath ? `${normalizedPath}/${targetFolderName}` : targetFolderName;
+      for (const p of Array.from(globalDeletedRelativePaths)) {
+        if (p === newFolderPath || p.startsWith(`${newFolderPath}/`)) {
+          clearDeletedRelativePath(p);
         }
       }
 
-      await targetDir.getDirectoryHandle(finalName, { create: true });
       await syncFolderFromDisk(openedRootDirHandle);
     } catch (error) {
       console.error("Create folder failed", error);
@@ -394,25 +420,29 @@ export default function Index() {
     const proposed = nextName.trim();
     if (!proposed || proposed === note.fileName) return;
 
+    const oldRelPath = getRelativePath(note.folderPath || "", note.fileName);
+    trackDeletedRelativePath(oldRelPath);
+
     try {
       const sourceDir = await getDirectoryHandleByPath(note.folderPath || "");
       if (!sourceDir) return;
 
       const safeName = proposed.replace(/[\\/:*?"<>|]/g, "_") || note.fileName;
       const finalName = await resolveUniqueFileName(sourceDir, safeName);
+      const newRelPath = getRelativePath(note.folderPath || "", finalName);
+      clearDeletedRelativePath(newRelPath);
 
       const sourceHandle = await sourceDir.getFileHandle(note.fileName);
       const newHandle = await copyFileHandleToDirectory(sourceHandle, sourceDir, finalName);
+
+      await setStoredFileHandle(note.id, newHandle);
+      updateNote(note.id, { fileName: finalName });
+
       await sourceDir.removeEntry(note.fileName);
-
-      await syncFolderFromDisk(openedRootDirHandle);
-
-      const nextNote = notes.find((n) => n.id === note.id);
-      if (nextNote) {
-        await setStoredFileHandle(note.id, newHandle);
-      }
+      await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
     } catch (error) {
       console.error("Rename file failed", error);
+      clearDeletedRelativePath(oldRelPath);
     }
   };
 
@@ -423,6 +453,15 @@ export default function Index() {
     const currentName = segments[segments.length - 1] || "folder";
     const proposed = nextName.trim();
     if (!proposed || proposed === currentName) return;
+
+    const notesInFolder = notes.filter(
+      (n) => n.folderPath === folderPath || n.folderPath?.startsWith(`${folderPath}/`)
+    );
+    notesInFolder.forEach((n) => {
+      if (n.fileName) {
+        trackDeletedRelativePath(getRelativePath(n.folderPath || "", n.fileName));
+      }
+    });
 
     try {
       let parentDir = openedRootDirHandle;
@@ -438,13 +477,11 @@ export default function Index() {
       // Keep selection on the renamed folder when possible.
       const parentPath = segments.slice(0, -1).join("/");
       const renamedPath = parentPath ? `${parentPath}/${newFolderName}` : newFolderName;
-      const active = notes.find((n) => n.id === activeTabId);
-      if (active && (active.folderPath || "").startsWith(folderPath)) {
-        const suffix = (active.folderPath || "").slice(folderPath.length);
-        const newPath = `${renamedPath}${suffix}`.replace(/^\/+/, "");
-        const noteWithNewPath = notes.find((n) => n.fileName === active.fileName && n.folderPath === newPath);
-        if (noteWithNewPath) openTab(noteWithNewPath.id);
-      }
+      notesInFolder.forEach((n) => {
+        const suffix = (n.folderPath || "").slice(folderPath.length);
+        const updatedPath = `${renamedPath}${suffix}`.replace(/^\/+/, "");
+        updateNote(n.id, { folderPath: updatedPath });
+      });
 
       await syncFolderFromDisk(openedRootDirHandle);
     } catch (error) {
@@ -589,6 +626,9 @@ export default function Index() {
     const sourcePath = note.folderPath || "";
     if (sourcePath === targetFolderPath) return;
 
+    const oldRelPath = getRelativePath(sourcePath, note.fileName);
+    trackDeletedRelativePath(oldRelPath);
+
     try {
       const sourceDir = await getDirectoryHandleByPath(sourcePath);
       const targetDir = await getDirectoryHandleByPath(targetFolderPath);
@@ -596,17 +636,39 @@ export default function Index() {
 
       const sourceHandle = await sourceDir.getFileHandle(note.fileName);
       const targetName = await resolveUniqueFileName(targetDir, note.fileName);
+      const newRelPath = getRelativePath(targetFolderPath, targetName);
+      clearDeletedRelativePath(newRelPath);
+
       await copyFileHandleToDirectory(sourceHandle, targetDir, targetName);
+      const targetHandle = await targetDir.getFileHandle(targetName);
+      await setStoredFileHandle(note.id, targetHandle);
+      updateNote(note.id, {
+        folderPath: targetFolderPath,
+        fileName: targetName,
+      });
+
       await sourceDir.removeEntry(note.fileName);
-      await syncFolderFromDisk(openedRootDirHandle);
+      await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
     } catch (error) {
       console.error("Move file failed", error);
+      clearDeletedRelativePath(oldRelPath);
     }
   };
 
   const moveFolderToFolder = async (sourceFolderPath: string, targetFolderPath: string) => {
     if (!openedRootDirHandle || !sourceFolderPath) return;
     if (sourceFolderPath === targetFolderPath || targetFolderPath.startsWith(`${sourceFolderPath}/`)) return;
+
+    const notesInFolder = notes.filter(
+      (n) => n.folderPath === sourceFolderPath || n.folderPath?.startsWith(`${sourceFolderPath}/`)
+    );
+
+    notesInFolder.forEach((n) => {
+      if (n.fileName) {
+        const oldRelPath = getRelativePath(n.folderPath || "", n.fileName);
+        trackDeletedRelativePath(oldRelPath);
+      }
+    });
 
     try {
       const sourceSegments = sourceFolderPath.split("/").filter(Boolean);
@@ -630,73 +692,155 @@ export default function Index() {
     }
   };
 
-  const deleteFileInFolder = async (note: { id: string; folderPath?: string; fileName?: string }) => {
-    if (!openedRootDirHandle || !note.fileName) {
-      deleteNote(note.id);
-      return;
+  const deleteFileInFolder = async (note: { id: string; folderPath?: string; fileName?: string; title?: string }) => {
+    const deletedFileName = note.fileName || note.title || t("editor.untitled");
+
+    if (note.fileName) {
+      const relPath = getRelativePath(note.folderPath || "", note.fileName);
+      trackDeletedRelativePath(relPath);
     }
 
-    try {
-      let targetDir = openedRootDirHandle;
-      const segments = (note.folderPath ?? "").split("/").filter(Boolean);
-      for (const segment of segments) {
-        targetDir = await targetDir.getDirectoryHandle(segment);
-      }
+    handleDeleteNote(note.id);
 
-      await targetDir.removeEntry(note.fileName);
-      await syncFolderFromDisk(openedRootDirHandle);
-    } catch (error) {
-      console.error("Delete file failed", error);
-    }
+    toast({
+      title: t("editor.deleteToastTitle"),
+      description: t("editor.deleteToastSuccess", { file: deletedFileName }),
+    });
   };
 
   const deleteFilesInFolder = async (targetNotes: Note[]) => {
     if (targetNotes.length === 0) return;
 
-    if (!openedRootDirHandle) {
-      targetNotes.forEach((n) => deleteNote(n.id));
-      return;
-    }
-
-    try {
-      for (const note of targetNotes) {
-        if (!note.fileName) continue;
-        const targetDir = await getDirectoryHandleByPath(note.folderPath || "");
-        if (!targetDir) continue;
-        try {
-          await targetDir.removeEntry(note.fileName);
-        } catch {
-          // Continue deleting the rest of selected files.
-        }
+    const count = targetNotes.length;
+    targetNotes.forEach((n) => {
+      if (n.fileName) {
+        trackDeletedRelativePath(getRelativePath(n.folderPath || "", n.fileName));
       }
+      handleDeleteNote(n.id);
+    });
 
-      await syncFolderFromDisk(openedRootDirHandle);
-    } catch (error) {
-      console.error("Delete files failed", error);
-    }
+    toast({
+      title: t("editor.deleteToastTitle"),
+      description: t("editor.deleteToastSuccess", { file: `${count} items` }),
+    });
   };
 
   const deleteFolderInFolder = async (folderPath: string) => {
-    if (!openedRootDirHandle || !folderPath) return;
+    if (!folderPath) return;
+
+    const folderName = folderPath.split("/").filter(Boolean).pop() || folderPath;
+    const notesInFolder = notes.filter(
+      (n) => n.folderPath === folderPath || n.folderPath?.startsWith(`${folderPath}/`)
+    );
+
+    const relPaths = new Set<string>();
+    notesInFolder.forEach((n) => {
+      if (n.fileName) {
+        const relPath = getRelativePath(n.folderPath || "", n.fileName);
+        relPaths.add(relPath);
+        trackDeletedRelativePath(relPath);
+      }
+      handleDeleteNote(n.id);
+    });
+
+    if (openedRootDirHandle) {
+      try {
+        const segments = folderPath.split("/").filter(Boolean);
+        if (segments.length > 0) {
+          let parentDir = openedRootDirHandle;
+          for (const segment of segments.slice(0, -1)) {
+            parentDir = await parentDir.getDirectoryHandle(segment, { create: false });
+          }
+
+          await requestPermissionIfAvailable(parentDir, "readwrite");
+          const targetName = segments[segments.length - 1];
+          await parentDir.removeEntry(targetName, { recursive: true });
+        }
+
+        await syncFolderFromDisk(openedRootDirHandle, relPaths);
+      } catch (error) {
+        console.warn("Delete folder from disk warning:", error);
+      }
+    }
+
+    toast({
+      title: t("editor.deleteToastTitle"),
+      description: t("editor.deleteToastSuccess", { file: folderName }),
+    });
+  };
+
+  const createNoteInFolderWithDir = async (
+    targetRootDirHandle: FileSystemDirectoryHandle,
+    folderPath?: string,
+    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }
+  ) => {
+    const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
+    const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
 
     try {
-      const segments = folderPath.split("/").filter(Boolean);
-      if (segments.length === 0) return;
-
-      let parentDir = openedRootDirHandle;
-      for (const segment of segments.slice(0, -1)) {
-        parentDir = await parentDir.getDirectoryHandle(segment);
+      let targetDir = targetRootDirHandle;
+      const segments = normalizedPath.split("/").filter(Boolean);
+      for (const segment of segments) {
+        targetDir = await targetDir.getDirectoryHandle(segment, { create: true });
       }
 
-      const targetName = segments[segments.length - 1];
-      await parentDir.removeEntry(targetName, { recursive: true });
-      await syncFolderFromDisk(openedRootDirHandle);
+      const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
+      const relPath = getRelativePath(normalizedPath, fileName);
+      clearDeletedRelativePath(relPath);
+
+      const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write("");
+      await writable.close();
+
+      const note = createNote(normalizedPath || undefined);
+      unmarkNoteAsDeleted(note.id);
+      updateNote(note.id, {
+        fileName,
+        isLinkedFile: true,
+        contentFormat,
+      });
+      openTab(note.id);
+      await setStoredFileHandle(note.id, fileHandle);
+
+      void syncFolderFromDisk(targetRootDirHandle, undefined, relPath);
     } catch (error) {
-      console.error("Delete folder failed", error);
+      console.error("Create file in target folder failed", error);
     }
   };
 
-  const handleOpenFolder = async () => {
+  const createFolderInFolderWithDir = async (
+    targetRootDirHandle: FileSystemDirectoryHandle,
+    folderPath?: string,
+    folderName?: string
+  ) => {
+    const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
+    const safeName = (folderName ?? "").trim().replace(/[\\/:*?"<>|]/g, "_") || "untitled-folder";
+
+    try {
+      let parentDir = targetRootDirHandle;
+      const segments = normalizedPath.split("/").filter(Boolean);
+      for (const segment of segments) {
+        parentDir = await parentDir.getDirectoryHandle(segment, { create: true });
+      }
+
+      const targetFolderName = await resolveUniqueFolderName(parentDir, safeName);
+      await parentDir.getDirectoryHandle(targetFolderName, { create: true });
+
+      const newFolderPath = normalizedPath ? `${normalizedPath}/${targetFolderName}` : targetFolderName;
+      for (const p of Array.from(globalDeletedRelativePaths)) {
+        if (p === newFolderPath || p.startsWith(`${newFolderPath}/`)) {
+          clearDeletedRelativePath(p);
+        }
+      }
+
+      await syncFolderFromDisk(targetRootDirHandle);
+    } catch (error) {
+      console.error("Create folder in target folder failed", error);
+    }
+  };
+
+  const handleOpenFolder = async (pending?: { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }) => {
     const w = window as unknown as { showDirectoryPicker?: (options?: unknown) => Promise<FileSystemDirectoryHandle> };
     if (typeof w.showDirectoryPicker !== "function") return;
 
@@ -705,6 +849,14 @@ export default function Index() {
       setOpenedFolderName(dirHandle.name ?? null);
       setOpenedRootDirHandle(dirHandle);
       await syncFolderFromDisk(dirHandle);
+
+      if (pending) {
+        if (pending.kind === "file") {
+          await createNoteInFolderWithDir(dirHandle, undefined, { fileName: pending.fileName, contentFormat: pending.contentFormat });
+        } else if (pending.kind === "folder") {
+          await createFolderInFolderWithDir(dirHandle, undefined, pending.folderName);
+        }
+      }
     } catch (error) {
       if ((error as DOMException)?.name !== "AbortError") {
         console.error("Open folder failed", error);
@@ -741,12 +893,74 @@ export default function Index() {
   const openTabNotes = openTabIds.map((id) => notes.find((n) => n.id === id)).filter((n): n is Note => Boolean(n));
 
   const handleDeleteNote = (id: string): boolean => {
+    const targetNote = notes.find((n) => n.id === id);
+    if (!targetNote) return false;
+
+    if (targetNote.fileName) {
+      const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
+      trackDeletedRelativePath(relPath);
+    }
     closeTab(id, notes.map((n) => n.id));
-    return deleteNote(id);
+    const result = deleteNote(id);
+
+    if (openedRootDirHandle && targetNote.fileName) {
+      const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
+      void (async () => {
+        try {
+          let targetDir = openedRootDirHandle;
+          const segments = (targetNote.folderPath ?? "").split("/").filter(Boolean);
+          for (const segment of segments) {
+            targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+          }
+          await requestPermissionIfAvailable(targetDir, "readwrite");
+          const fname = targetNote.fileName as string;
+          try {
+            await targetDir.removeEntry(fname);
+          } catch {
+            /* ignore main file remove error */
+          }
+
+          try {
+            for await (const [childName, childHandle] of (targetDir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
+              if (childHandle.kind === "file" && (childName.endsWith(".crswap") || childName.includes(".crswap"))) {
+                if (childName.startsWith(fname) || childName.toLowerCase().includes(fname.toLowerCase())) {
+                  try {
+                    await targetDir.removeEntry(childName);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        } catch (e) {
+          console.warn("Disk file removal warning:", e);
+        } finally {
+          await syncFolderFromDisk(openedRootDirHandle, new Set([relPath]));
+        }
+      })();
+    }
+
+    return result;
   };
 
-  const handleCreateNote = (folderPath?: string): Note => {
+  const handleCreateNote = (
+    folderPath?: string,
+    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" },
+  ): Note | void => {
+    if (openedRootDirHandle) {
+      void createNoteInFolder(folderPath, options);
+      return;
+    }
     const note = createNote(folderPath);
+    if (options) {
+      updateNote(note.id, {
+        fileName: options.fileName,
+        contentFormat: options.contentFormat,
+      });
+    }
     openTab(note.id);
     return note;
   };
@@ -815,9 +1029,13 @@ export default function Index() {
               >
                 <Editor
                   note={activeTabNote}
+                  notes={notes}
                   onUpdate={updateNote}
                   onDelete={handleDeleteNote}
                   onCreate={handleCreateNote}
+                  onCreateFolder={createFolderInFolder}
+                  onOpenFolder={handleOpenFolder}
+                  openedFolderName={openedFolderName}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   isSidebarOpen={sidebarOpen}
                   editorFontSize={settings.editorFontSize}
@@ -845,9 +1063,13 @@ export default function Index() {
               <div className="min-w-0 overflow-auto flex-1">
                 <Editor
                   note={notes.find(n => n.id === splitTabId) ?? null}
+                  notes={notes}
                   onUpdate={updateNote}
                   onDelete={handleDeleteNote}
                   onCreate={handleCreateNote}
+                  onCreateFolder={createFolderInFolder}
+                  onOpenFolder={handleOpenFolder}
+                  openedFolderName={openedFolderName}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   isSidebarOpen={sidebarOpen}
                   editorFontSize={settings.editorFontSize}
@@ -862,9 +1084,13 @@ export default function Index() {
           ) : (
             <Editor
               note={activeTabNote}
+              notes={notes}
               onUpdate={updateNote}
               onDelete={handleDeleteNote}
               onCreate={handleCreateNote}
+              onCreateFolder={createFolderInFolder}
+              onOpenFolder={handleOpenFolder}
+              openedFolderName={openedFolderName}
               onOpenSidebar={() => setSidebarOpen(true)}
               isSidebarOpen={sidebarOpen}
               editorFontSize={settings.editorFontSize}

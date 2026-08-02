@@ -172,6 +172,8 @@ const th = {
     deleteNotSupported: "เบราว์เซอร์นี้ยังไม่รองรับการลบไฟล์ที่เชื่อมจากดิสก์โดยตรง",
     deletePermissionDenied: "ไม่ได้รับสิทธิ์ในการลบไฟล์",
     deleteFailed: "ลบไฟล์ที่เชื่อมในเครื่องไม่สำเร็จ",
+    deleteToastTitle: "ลบไฟล์สำเร็จ",
+    deleteToastSuccess: "ลบ {file} เรียบร้อยแล้ว",
   },
   home: {
     title: "เริ่มสร้างโน้ตของคุณได้เลย",
