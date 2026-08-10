@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
+import RightPanel from "@/components/RightPanel";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -19,7 +21,7 @@ export default function Index() {
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
   const { notes, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
-  const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, setActiveTabId } = useTabs();
+  const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, setActiveTabId } = useTabs();
   const activeTabNote = notes.find((n) => n.id === activeTabId) ?? null;
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
@@ -29,6 +31,7 @@ export default function Index() {
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const notesRef = useRef(notes);
 
@@ -54,14 +57,24 @@ export default function Index() {
     const raw = (options?.fileName ?? "").trim();
     const safe = raw.replace(/[\\/:*?"<>|]/g, "_");
 
+    const defaultExt = settings.defaultExtension || "md";
+    const defaultFormat = defaultExt === "html" ? ("html" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
+
     if (!safe) {
-      return { fileName: "untitled.txt", contentFormat: "plain" as const };
+      const dateStr = new Date().toISOString().slice(0, 10);
+      let baseName = "Untitled";
+      if (settings.newFilePattern === "date") {
+        baseName = `Note_${dateStr}`;
+      } else if (settings.newFilePattern === "daily") {
+        baseName = `Daily-${dateStr}`;
+      }
+      return { fileName: `${baseName}.${defaultExt}`, contentFormat: defaultFormat };
     }
 
     const dotIndex = safe.lastIndexOf(".");
     const base = dotIndex > 0 ? safe.slice(0, dotIndex) : safe;
     const extFromName = dotIndex > 0 ? safe.slice(dotIndex + 1).toLowerCase() : "";
-    const desiredFormat = options?.contentFormat ?? "plain";
+    const desiredFormat = options?.contentFormat ?? defaultFormat;
 
     if (extFromName === "md" || extFromName === "markdown") {
       return { fileName: `${base}.md`, contentFormat: "markdown" as const };
@@ -79,8 +92,7 @@ export default function Index() {
     if (desiredFormat === "html") {
       return { fileName: `${base}.html`, contentFormat: "html" as const };
     }
-
-    return { fileName: `${base}.txt`, contentFormat: "plain" as const };
+    return { fileName: `${base}.${defaultExt}`, contentFormat: defaultFormat };
   };
 
   const resolveUniqueFileName = async (targetDir: FileSystemDirectoryHandle, desiredFileName: string) => {
@@ -173,50 +185,84 @@ export default function Index() {
     }> = [];
     const folderPaths = new Set<string>();
 
+    const MAX_FILES = 2500;
+    const IGNORED_FOLDERS = new Set([
+      "node_modules",
+      ".git",
+      ".next",
+      "dist",
+      "build",
+      ".output",
+      ".cache",
+      "vendor",
+      "target",
+      ".vscode",
+      ".idea",
+      "coverage",
+      ".turbo",
+      ".svelte-kit",
+      ".nuxt",
+      "__pycache__",
+      "venv",
+      ".venv",
+      "bin",
+      "obj",
+    ]);
+
     async function readDir(handle: FileSystemDirectoryHandle, path: string) {
-      for await (const [name, childHandle] of (handle as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
-        if (childHandle.kind === "directory") {
-          const subPath = path ? `${path}/${name}` : name;
-          folderPaths.add(subPath);
-          await readDir(childHandle as FileSystemDirectoryHandle, subPath);
-        } else if (childHandle.kind === "file") {
+      if (entries.length >= MAX_FILES) return;
+      try {
+        const iterator =
+          typeof (handle as any).entries === "function"
+            ? (handle as any).entries()
+            : (handle as unknown as AsyncIterable<[string, FileSystemHandle]>);
+
+        for await (const [name, childHandle] of iterator) {
+          if (entries.length >= MAX_FILES) break;
           const lname = name.toLowerCase();
-          // Filter out and auto-clean temporary swap files (.crswap, .tmp, .swp, etc.)
-          if (lname.endsWith(".crswap") || lname.includes(".crswap") || lname.endsWith(".tmp") || lname.endsWith(".swp")) {
-            try {
-              await handle.removeEntry(name);
-            } catch {
-              /* ignore swap cleanup errors */
+
+          if (childHandle.kind === "directory") {
+            if (IGNORED_FOLDERS.has(lname) || lname.startsWith(".")) continue;
+            const subPath = path ? `${path}/${name}` : name;
+            folderPaths.add(subPath);
+            await readDir(childHandle as FileSystemDirectoryHandle, subPath);
+          } else if (childHandle.kind === "file") {
+            if (lname.endsWith(".crswap") || lname.includes(".crswap") || lname.endsWith(".tmp") || lname.endsWith(".swp")) {
+              try {
+                await handle.removeEntry(name);
+              } catch {
+                /* ignore swap cleanup errors */
+              }
+              continue;
             }
-            continue;
+            if (lname.startsWith(".")) continue;
+
+            const dotIdx = lname.lastIndexOf(".");
+            const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
+
+            let fileType: "image" | "binary" | undefined;
+            let contentFormat: "plain" | "markdown" | "html" = "plain";
+
+            if (IMAGE_EXTS.has(ext)) {
+              fileType = "image";
+            } else if (TEXT_EXTS.has(ext)) {
+              contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : "plain";
+            } else {
+              fileType = "binary";
+            }
+
+            entries.push({
+              fileName: name,
+              contentFormat,
+              fileType,
+              handle: childHandle as FileSystemFileHandle,
+              folderPath: path,
+              relativePath: getRelativePath(path, name),
+            });
           }
-          if (lname.startsWith(".")) {
-            continue;
-          }
-
-          const dotIdx = lname.lastIndexOf(".");
-          const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
-
-          let fileType: "image" | "binary" | undefined;
-          let contentFormat: "plain" | "markdown" | "html" = "plain";
-
-          if (IMAGE_EXTS.has(ext)) {
-            fileType = "image";
-          } else if (TEXT_EXTS.has(ext)) {
-            contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : "plain";
-          } else {
-            fileType = "binary";
-          }
-
-          entries.push({
-            fileName: name,
-            contentFormat,
-            fileType,
-            handle: childHandle as FileSystemFileHandle,
-            folderPath: path,
-            relativePath: getRelativePath(path, name),
-          });
         }
+      } catch (err) {
+        console.warn("Failed reading directory", path, err);
       }
     }
 
@@ -284,9 +330,8 @@ export default function Index() {
       try {
         const file = await entry.handle.getFile();
         const text = await file.text();
-        const content = entry.contentFormat === "markdown" ? (marked.parse(text, { async: false, gfm: true, breaks: true }) as string) : text;
         nextItems.push({
-          content,
+          content: text,
           fileName: entry.fileName,
           contentFormat: entry.contentFormat,
           isLinkedFile: true,
@@ -973,8 +1018,10 @@ export default function Index() {
       )}
 
       {/* Sidebar responsive */}
-      <div className={sidebarOpen ? (isMobile ? "block md:hidden" : "hidden md:block") : "hidden"}>
+      <div className={isMobile ? (sidebarOpen ? "block" : "hidden") : "block"}>
         <Sidebar
+          sidebarOpen={sidebarOpen}
+          onOpenSidebar={() => setSidebarOpen(true)}
           notes={notes}
           folderPaths={openedFolderPaths}
           activeNoteId={activeTabId}
@@ -1017,8 +1064,16 @@ export default function Index() {
             // ถ้า split อยู่แล้วและกดซ้ำ ให้ toggle ปิด split
             setSplitTabId(prev => prev === id ? null : id);
           }}
+          onNewTab={() => createNoteInFolder("", { fileName: "untitled.md", contentFormat: "markdown" })}
+          onReorderTabs={reorderTabs}
         />
-        <Breadcrumb note={activeTabNote} rootFolderName={openedFolderName} notes={notes} onSelectNote={setActiveTabId} />
+        <Breadcrumb
+          note={activeTabNote}
+          rootFolderName={openedFolderName}
+          notes={notes}
+          onSelectNote={setActiveTabId}
+          onOpenRightPanel={() => setRightPanelOpen((prev) => !prev)}
+        />
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
           {/* ถ้า splitTabId มีค่า ให้ render editor 2 pane ซ้าย-ขวา */}
           {splitTabId && splitTabId !== activeTabId ? (
@@ -1043,6 +1098,8 @@ export default function Index() {
                   rootDirHandle={openedRootDirHandle}
                   settingsOpen={settingsOpen}
                   onSettingsOpenChange={setSettingsOpen}
+                  rightPanelOpen={rightPanelOpen}
+                  onCloseRightPanel={() => setRightPanelOpen(false)}
                 />
               </div>
               <SplitResizer
@@ -1098,6 +1155,8 @@ export default function Index() {
               rootDirHandle={openedRootDirHandle}
               settingsOpen={settingsOpen}
               onSettingsOpenChange={setSettingsOpen}
+              rightPanelOpen={rightPanelOpen}
+              onCloseRightPanel={() => setRightPanelOpen(false)}
             />
           )}
         </div>

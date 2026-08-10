@@ -47,12 +47,25 @@ export function useTabs() {
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
+  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    syncedSetOpenTabIds((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length || fromIndex === toIndex) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, [syncedSetOpenTabIds]);
+
   return {
     openTabIds,
     activeTabId,
     openTab,
     closeTab,
     removeTabsForDeletedNotes,
+    reorderTabs,
     setActiveTabId: syncedSetActiveTabId,
   };
 }

@@ -10,9 +10,9 @@ export interface AppThemeConfig {
 }
 
 export const APP_THEMES: AppThemeConfig[] = [
+  { id: "emerald", color: "#26A295", label: "Emerald" },
   { id: "blue",    color: "hsl(217 91% 53%)", label: "Blue" },
   { id: "violet",  color: "hsl(262 83% 58%)", label: "Violet" },
-  { id: "emerald", color: "hsl(158 60% 38%)", label: "Emerald" },
   { id: "rose",    color: "hsl(347 77% 50%)", label: "Rose" },
   { id: "orange",  color: "hsl(25 95% 60%)", label: "Orange" },
   { id: "slate",   color: "hsl(215 16% 40%)", label: "Slate" },
@@ -27,12 +27,27 @@ export interface AppSettings {
   theme: AppTheme;
   colorScheme: ColorScheme;
   autoSave: boolean;
+
+  // File Settings
+  defaultExtension: "md" | "txt" | "html";
+  newFilePattern: "untitled" | "date" | "daily";
+
+  // Appearance Settings
+  editorWidth: "compact" | "standard" | "full";
+  lineHeight: "1.4" | "1.6" | "1.8";
+  sidebarDensity: "compact" | "comfortable";
+  showGuideLines: boolean;
+
+  // Editor Settings
+  showWordCount: boolean;
+  autoPairBrackets: boolean;
+  showCodeLineNumbers: boolean;
 }
 
 const STORAGE_KEY = "notes-app-settings";
-const FIXED_SIDEBAR_WIDTH = 275;
+const FIXED_SIDEBAR_WIDTH = 300;
 
-const VALID_THEMES: AppTheme[] = ["blue", "violet", "emerald", "rose", "orange", "slate"];
+const VALID_THEMES: AppTheme[] = ["emerald", "blue", "violet", "rose", "orange", "slate"];
 const VALID_COLOR_SCHEMES: ColorScheme[] = ["light", "dark", "system"];
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -41,9 +56,21 @@ const DEFAULT_SETTINGS: AppSettings = {
   confirmBeforeDelete: true,
   language: "en",
   fontFamily: "inter",
-  theme: "blue",
+  theme: "emerald",
   colorScheme: "system",
   autoSave: true,
+
+  defaultExtension: "md",
+  newFilePattern: "untitled",
+
+  editorWidth: "standard",
+  lineHeight: "1.6",
+  sidebarDensity: "comfortable",
+  showGuideLines: true,
+
+  showWordCount: true,
+  autoPairBrackets: true,
+  showCodeLineNumbers: true,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -57,9 +84,21 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
       ? raw.fontFamily
       : "inter";
 
-  const theme: AppTheme = raw?.theme && VALID_THEMES.includes(raw.theme as AppTheme) ? (raw.theme as AppTheme) : "blue";
+  const theme: AppTheme = raw?.theme && VALID_THEMES.includes(raw.theme as AppTheme) ? (raw.theme as AppTheme) : "emerald";
   const colorScheme: ColorScheme = raw?.colorScheme && VALID_COLOR_SCHEMES.includes(raw.colorScheme as ColorScheme) ? (raw.colorScheme as ColorScheme) : "system";
   const confirmBeforeDelete = raw?.confirmBeforeDelete !== false;
+
+  const defaultExtension = raw?.defaultExtension === "txt" || raw?.defaultExtension === "html" ? raw.defaultExtension : "md";
+  const newFilePattern = raw?.newFilePattern === "date" || raw?.newFilePattern === "daily" ? raw.newFilePattern : "untitled";
+
+  const editorWidth = raw?.editorWidth === "compact" || raw?.editorWidth === "full" ? raw.editorWidth : "standard";
+  const lineHeight = raw?.lineHeight === "1.4" || raw?.lineHeight === "1.8" ? raw.lineHeight : "1.6";
+  const sidebarDensity = raw?.sidebarDensity === "compact" ? "compact" : "comfortable";
+  const showGuideLines = raw?.showGuideLines !== false;
+
+  const showWordCount = raw?.showWordCount !== false;
+  const autoPairBrackets = raw?.autoPairBrackets !== false;
+  const showCodeLineNumbers = raw?.showCodeLineNumbers !== false;
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
@@ -70,6 +109,18 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     theme,
     colorScheme,
     autoSave: typeof raw?.autoSave === "boolean" ? raw.autoSave : DEFAULT_SETTINGS.autoSave,
+
+    defaultExtension,
+    newFilePattern,
+
+    editorWidth,
+    lineHeight,
+    sidebarDensity,
+    showGuideLines,
+
+    showWordCount,
+    autoPairBrackets,
+    showCodeLineNumbers,
   };
 }
 

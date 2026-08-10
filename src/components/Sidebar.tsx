@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings } from "lucide-react";
+import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings, Home, Compass, Star, Tag, HelpCircle, Sun, Moon, ArrowDown } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -9,9 +9,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
 import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 
 interface SidebarProps {
@@ -41,6 +43,8 @@ interface SidebarProps {
   confirmBeforeDelete?: boolean;
   sidebarWidth?: number;
   isMobile?: boolean;
+  sidebarOpen?: boolean;
+  onOpenSidebar?: () => void;
   onClose?: () => void;
   onOpenSettings?: () => void;
 }
@@ -52,12 +56,15 @@ interface FolderNode {
   notes: Note[];
 }
 
-function buildFolderTree(notes: Note[], folderPaths: string[] = []): FolderNode {
-  const root: FolderNode = { name: "", path: "", children: [], notes: [] };
+function buildFolderTree(notes: Note[], folderPaths: string[] = [], openedFolderName?: string | null): FolderNode {
+  const rootPath = openedFolderName ? "__opened_root__" : "";
+  const rootName = openedFolderName || "";
+  const root: FolderNode = { name: rootName, path: rootPath, children: [], notes: [] };
   const folderMap = new Map<string, FolderNode>();
   folderMap.set("", root);
 
   const getOrCreateFolder = (path: string): FolderNode => {
+    if (!path) return root;
     if (folderMap.has(path)) return folderMap.get(path)!;
     const lastSlash = path.lastIndexOf("/");
     const name = lastSlash === -1 ? path : path.slice(lastSlash + 1);
@@ -75,7 +82,7 @@ function buildFolderTree(notes: Note[], folderPaths: string[] = []): FolderNode 
   }
 
   for (const path of folderPaths) {
-    getOrCreateFolder(path);
+    if (path) getOrCreateFolder(path);
   }
 
   return root;
@@ -148,8 +155,24 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   return <FileText className={cls} />;
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 275, isMobile = false, onClose, onOpenSettings }: SidebarProps) {
+function MarkdownIndicator({ active }: { active: boolean }) {
+  return (
+    <span
+      className={`ml-auto flex shrink-0 items-center justify-end gap-[1px] text-[10px] font-bold leading-none select-none ${
+        active ? "text-primary opacity-90" : "text-muted-foreground/70"
+      }`}
+      title="Markdown"
+    >
+      <span>M</span>
+      <ArrowDown className="h-2.5 w-2.5 shrink-0 stroke-[2.5]" />
+    </span>
+  );
+}
+
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 275, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings }: SidebarProps) {
+  const { settings, updateSetting } = useAppSettings();
   const [query, setQuery] = useState("");
+  const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
@@ -246,7 +269,17 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     [notes, query],
   );
 
-  const folderTree = useMemo(() => buildFolderTree(notes, folderPaths), [notes, folderPaths]);
+  const folderTree = useMemo(() => buildFolderTree(notes, folderPaths, openedFolderName), [notes, folderPaths, openedFolderName]);
+
+  useEffect(() => {
+    if (openedFolderName) {
+      setOpenFolders((prev) => {
+        const next = new Set(prev);
+        next.add("__opened_root__");
+        return next;
+      });
+    }
+  }, [openedFolderName]);
   const selectableNotes = useMemo(() => (query ? filtered : notes), [notes, filtered, query]);
 
   const setSingleSelectedNote = (noteId: string) => {
@@ -425,6 +458,11 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const renderNote = (note: Note, depth = 0) => {
     // In directory mode, show actual file name to match folder structure.
     const noteLabel = hasTreeView ? (note.fileName?.trim() || t("editor.untitled")) : (note.title || t("editor.untitled"));
+    const isMarkdownNote = Boolean(
+      note.fileName?.toLowerCase().endsWith(".md") ||
+      note.fileName?.toLowerCase().endsWith(".markdown") ||
+      note.contentFormat === "markdown"
+    );
 
     if (hasTreeView && !query) {
       return (
@@ -445,18 +483,19 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               onContextMenu={() => {
                 if (!selectedNoteIds.has(note.id)) setSingleSelectedNote(note.id);
               }}
-              className={`flex w-full items-center gap-1.5 py-1.5 pr-3 text-left text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"} text-left transition-colors rounded-lg ${
                 activeNoteId === note.id
-                  ? "bg-sidebar-accent/70 text-primary"
+                  ? "bg-primary/10 text-primary font-medium"
                   : selectedNoteIds.has(note.id)
                     ? "bg-sidebar-accent/40 text-foreground"
-                    : "text-foreground hover:bg-sidebar-accent/50"
+                    : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
               }`}
               style={{ paddingLeft: `${12 + depth * 14}px` }}
             >
               <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <NoteIcon note={note} active={activeNoteId === note.id} />
-              <span className={`truncate ${activeNoteId === note.id ? "font-semibold" : "font-medium"}`}>{noteLabel}</span>
+              <span className={`truncate ${activeNoteId === note.id ? "font-semibold text-primary" : "font-normal"}`}>{noteLabel}</span>
+              {isMarkdownNote && <MarkdownIndicator active={activeNoteId === note.id} />}
             </button>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-44 rounded-xl">
@@ -529,6 +568,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 >
                   {noteLabel}
                 </span>
+                {isMarkdownNote && <MarkdownIndicator active={activeNoteId === note.id} />}
               </div>
               <span className="shrink-0 text-[10px] text-muted-foreground">{formatDate(note.updatedAt)}</span>
             </div>
@@ -566,7 +606,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   };
 
   const renderFolderNode = (node: FolderNode, depth = 0): React.ReactNode => {
-    if (node.path === "") {
+    if (node.path === "" && !node.name) {
       return (
         <>
           {node.notes.map((note) => renderNote(note, depth))}
@@ -612,34 +652,36 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 handleDropToFolder(node.path);
               }}
               onContextMenu={() => setSelectedFolderPath(node.path)}
-              className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"} font-medium transition-colors rounded-lg ${
                 dropTargetFolderPath === node.path
                   ? "bg-sidebar-accent/50 text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                  : "text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40"
               }`}
               style={{ paddingLeft: `${12 + depth * 14}px` }}
             >
               {isOpen ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               {isOpen ? (
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
               ) : (
-                <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
               )}
               <span className="truncate">{node.name}</span>
               {hasContent && (
-                <span className="ml-auto shrink-0 text-[10px] opacity-50">{node.notes.length + node.children.length}</span>
+                <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">{node.notes.length + node.children.length}</span>
               )}
             </button>
             {isOpen && (
               <div className="relative w-full">
-                <div
-                  className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
-                  style={{ left: `${18 + depth * 14}px` }}
-                />
+                {settings.showGuideLines && (
+                  <div
+                    className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
+                    style={{ left: `${18 + depth * 14}px` }}
+                  />
+                )}
                 <div
                   onDragOver={(event) => {
                     event.preventDefault();
@@ -718,36 +760,245 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     );
   };
 
+  if (sidebarOpen === false && !isMobile) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <aside className="flex flex-col items-center border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-[52px] shrink-0 py-3 select-none justify-between transition-all duration-200">
+          <div className="flex flex-col items-center gap-2.5 w-full px-1.5">
+            {/* Top Logo / Open Sidebar Hover Button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onOpenSidebar}
+                  className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 hover:bg-sidebar-accent hover:text-foreground"
+                >
+                  {/* Normal state: Logo */}
+                  <span className="transition-all duration-200 group-hover:scale-0 group-hover:opacity-0 flex items-center justify-center">
+                    <img src="/luno-logo.png" alt="Luno Logo" className="h-5 w-5 object-contain shrink-0" />
+                  </span>
+
+                  {/* Hover state: Open Sidebar Button */}
+                  <span className="absolute inset-0 flex items-center justify-center opacity-0 scale-75 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100 text-primary-foreground">
+                    <PanelRightCloseIcon className="h-4 w-4" />
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.openSidebar") || "Open Sidebar"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Top Divider */}
+            <div className="w-5 h-[1px] bg-sidebar-border/60 my-0.5" />
+
+            {/* Nav Item 1: Files / Notes (Active Highlight) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onOpenSidebar}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors"
+                >
+                  <Files className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.notesLabel") || "Notes & Files"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Nav Item 2: Explore / Sparkles */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onOpenSidebar}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  <Compass className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.exploreLabel") || "Explore"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Nav Item 3: Plus (New Note) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => void onCreate()}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.newNote") || "New Note"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Nav Item 4: Open Workspace / Folder */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => void onOpenFolder?.()}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  <Folder className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.openFolderAction") || "Open Folder"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Bottom Divider */}
+            <div className="w-5 h-[1px] bg-sidebar-border/60 my-0.5" />
+          </div>
+
+          {/* Bottom Nav Item: Settings */}
+          <div className="flex flex-col items-center w-full px-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("settings.title") || "Settings"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </aside>
+      </TooltipProvider>
+    );
+  }
+
   return (
     <aside
       className={
-        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full md:w-[275px] lg:w-[300px] min-w-[220px] max-w-[340px] transition-all duration-200 ` +
-        (isMobile ? 'fixed left-0 top-0 z-50 w-[92vw] max-w-[340px] shadow-2xl' : 'relative')
+        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full md:w-[20vw] lg:w-[20vw] min-w-[200px] max-w-[320px] transition-all duration-200 select-none ` +
+        (isMobile ? 'fixed left-0 top-0 z-50 w-[90vw] max-w-[320px] shadow-2xl' : 'relative')
       }
-      style={!isMobile ? { width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` } : undefined}
+      style={!isMobile ? { width: '20vw', minWidth: '200px', maxWidth: '320px' } : undefined}
     >
-      <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-[0.08em] text-sidebar-foreground uppercase">NOTES+</h1>
-          <p className="text-[11px] text-muted-foreground">{t("sidebar.savedCount", { count: notes.length })}</p>
+      {/* Brand Header */}
+      <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2">
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex h-[22px] w-[22px] items-center justify-center shrink-0">
+            <img src="/luno-logo.png" alt="Luno Logo" className="h-[22px] w-auto object-contain shrink-0" />
+          </div>
+          <span className="font-krona text-[16px] font-normal tracking-tight text-foreground">Luno</span>
         </div>
 
+        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors" onClick={onClose}>
+          <PanelRightOpenIcon className="h-4 w-4" />
+          <span className="sr-only">{t("sidebar.hideSidebar")}</span>
+        </Button>
+      </div>
+
+      {/* Search Input Box */}
+      <div className="px-3 py-1">
+        <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3 py-2 border border-sidebar-border/40 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+          <Search size={15} className="shrink-0 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder={isMobile ? t("sidebar.searchShortPlaceholder") : t("sidebar.searchPlaceholder")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+          />
+        </div>
+      </div>
+
+      {/* Quick Navigation Items */}
+      <div className="px-3 py-2 space-y-0.5 border-b border-sidebar-border/40">
+        <button
+          type="button"
+          onClick={() => { setQuery(""); setNavFilter("all"); }}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            navFilter === "all" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Home className="h-4 w-4 shrink-0 text-foreground" />
+          <span>Home</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setNavFilter("explore")}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            navFilter === "explore" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Compass className="h-4 w-4 shrink-0 text-foreground" />
+          <span>Explore</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setNavFilter("favorites")}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            navFilter === "favorites" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Star className="h-4 w-4 shrink-0 text-foreground" />
+          <span>Favorites</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setNavFilter("tags")}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            navFilter === "tags" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Tag className="h-4 w-4 shrink-0 text-foreground" />
+          <span>Tags</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setNavFilter("trash")}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            navFilter === "trash" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Trash2 className="h-4 w-4 shrink-0 text-foreground" />
+          <span>Trash</span>
+        </button>
+      </div>
+
+      {/* WORKSPACE Header */}
+      <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5">
+        <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">WORKSPACE</span>
         <div className="flex items-center gap-1">
-          <Button type="button" variant="ghost" size="icon" onClick={onClose}>
-            <PanelRightOpenIcon className="h-4 w-4" />
-            <span className="sr-only">{t("sidebar.hideSidebar")}</span>
-          </Button>
           {onOpenFolder && (
-            <Button type="button" variant="ghost" size="icon" onClick={() => void onOpenFolder()} title={t("sidebar.openFolder")}>
-              <FolderOpen className="h-4 w-4" />
-              <span className="sr-only">{t("sidebar.openFolder")}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+              onClick={() => void onOpenFolder()}
+              title={t("sidebar.openFolder")}
+            >
+              <Folder className="h-4 w-4" />
             </Button>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" title={t("sidebar.newNote")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                title={t("sidebar.newNote")}
+              >
                 <Plus className="h-4 w-4" />
-                <span className="sr-only">{t("sidebar.newNote")}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44 rounded-xl px-0 py-2">
@@ -764,49 +1015,8 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </div>
       </div>
 
-      <div className="border-b border-sidebar-border px-3 py-3">
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-2.5 py-2">
-          <Search size={14} className="shrink-0 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder={isMobile ? t("sidebar.searchShortPlaceholder") : t("sidebar.searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
-          />
-        </div>
-      </div>
-
-      {openedFolderName && (
-        <div className="border-b border-sidebar-border px-3 py-2">
-          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-background/80 px-2.5 py-2 text-xs text-muted-foreground">
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-            <span className="shrink-0">{t("sidebar.currentFolder")}</span>
-            <span className="truncate text-foreground font-semibold">{openedFolderName}</span>
-          </div>
-        </div>
-      )}
-
-      <div className="no-scrollbar flex-1 overflow-y-auto pb-4">
-        {hasTreeView && !query && (
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDropTargetFolderPath("");
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              handleDropToFolder("");
-            }}
-            className={`mx-3 mt-2 rounded-md border border-dashed px-2 py-1 text-xs transition-colors ${
-              dropTargetFolderPath === ""
-                ? "border-primary text-primary"
-                : "border-border/70 text-muted-foreground"
-            }`}
-          >
-            {t("sidebar.dropToRoot")}
-          </div>
-        )}
+      {/* Tree Content */}
+      <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
         <AnimatePresence initial={false}>
           {filtered.length === 0 && (query || !hasTreeView) ? (
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
@@ -821,17 +1031,38 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </AnimatePresence>
       </div>
 
-      {/* Sidebar Footer with Settings Button */}
-      <div className="border-t border-border/60 p-2 shrink-0 bg-muted/10">
+      {/* Sidebar Footer */}
+      <div className="border-t border-sidebar-border/60 px-3 py-2 flex items-center justify-between shrink-0 bg-sidebar">
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+            onClick={onOpenSettings}
+            title={t("common.settings")}
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+            title="Help"
+          >
+            <HelpCircle className="h-4 w-4" />
+          </Button>
+        </div>
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className="w-full justify-start text-xs text-muted-foreground hover:text-primary hover:font-semibold hover:bg-accent/5 rounded-lg px-2.5 py-1.5 gap-1.5 transition-colors"
-          onClick={onOpenSettings}
+          size="icon"
+          className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+          onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
+          title="Toggle Theme"
         >
-          <Settings className="h-4 w-4 shrink-0 transition-colors" />
-          <span>{t("common.settings")}</span>
+          {settings.colorScheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
       </div>
 

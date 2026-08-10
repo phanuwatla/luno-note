@@ -1,5 +1,6 @@
-/* eslint-disable react-hooks/exhaustive-deps, react-refresh/only-export-components */
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
+import RightPanel from "@/components/RightPanel";
+import { AnimatePresence } from "framer-motion";
 import { Note } from "@/hooks/useNotes";
 import {
   Bold,
@@ -48,6 +49,8 @@ import {
   ArrowUp,
   ArrowDown,
   XCircle,
+  Loader2,
+  AlertTriangle,
   Save,
   Table as TableIcon,
   Copy,
@@ -57,6 +60,7 @@ import {
   X
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
+import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -82,10 +86,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
-import { EditorState } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
@@ -582,6 +587,8 @@ export interface EditorProps {
   onCloseSplit?: () => void;
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
+  rightPanelOpen?: boolean;
+  onCloseRightPanel?: () => void;
 }
 
 interface SaveSnapshot {
@@ -1223,7 +1230,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
 }
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange } = props;
+  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel } = props;
 
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -1387,6 +1394,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const { settings, updateSetting, resetSettings } = useAppSettings();
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
   const { t } = useTranslation();
 
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
@@ -1457,11 +1468,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   /** Detect if a string is a Tiptap JSON document */
-  const isTiptapJson = (text: string) => text.trimStart().startsWith('{"type":"doc"');
+  const isTiptapJson = (text: string) => typeof text === "string" && text.trimStart().startsWith('{"type":"doc"');
 
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
-  const parseEditorContent = (text: string): string | Record<string, unknown> => {
-    if (!text.trim()) return "<h1></h1><p></p>";
+  const parseEditorContent = (text: unknown): string | Record<string, unknown> => {
+    if (typeof text !== "string" || !text.trim()) return "<h1></h1><p></p>";
     if (isTiptapJson(text)) {
       try { return JSON.parse(text); } catch { /* fall through */ }
     }
@@ -1539,10 +1550,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!text.trim()) return "<h1></h1><p></p>";
 
     const temp = document.createElement("div");
-    if (isLikelyHtml(text)) {
+    const format = note?.contentFormat ?? "markdown";
+
+    if (format === "html") {
       temp.innerHTML = text;
+    } else if (format === "plain") {
+      const lines = text.split("\n");
+      temp.innerHTML = lines.map((l) => `<p>${l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "<br>"}</p>`).join("");
     } else {
-      temp.innerHTML = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+      try {
+        const parsed = marked.parse(text, { async: false, gfm: true, breaks: true });
+        temp.innerHTML = typeof parsed === "string" ? parsed : text;
+      } catch {
+        temp.innerHTML = text;
+      }
     }
 
     prepareDomForEditor(temp);
@@ -1550,7 +1571,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const EDITOR_CLASSES =
-    "min-h-[60vh] md:min-h-[70vh] w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mb-3 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted/30 [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -1809,8 +1830,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     content: parseEditorContent(note?.content ?? ""),
     editorProps: {
       attributes: {
-        style: `font-size:${editorFontSize}px;`,
+        style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
         class: EDITOR_CLASSES,
+      },
+      handleKeyDown: (view, event) => {
+        if (settingsRef.current.autoPairBrackets && !event.ctrlKey && !event.altKey && !event.metaKey) {
+          const pairs: Record<string, string> = {
+            "(": ")",
+            "[": "]",
+            "{": "}",
+            '"': '"',
+            "'": "'",
+            "`": "`",
+          };
+          const closing = pairs[event.key];
+          if (closing) {
+            const { selection, tr } = view.state;
+            const { from, to, empty } = selection;
+            if (!empty) {
+              tr.insertText(closing, to);
+              tr.insertText(event.key, from);
+              view.dispatch(tr);
+              return true;
+            } else {
+              tr.insertText(event.key + closing, from);
+              view.dispatch(tr);
+              const resolved = view.state.doc.resolve(from + 1);
+              view.dispatch(view.state.tr.setSelection(TextSelection.near(resolved)));
+              return true;
+            }
+          }
+        }
+        return false;
       },
     },
     onSelectionUpdate: ({ editor: instance }) => {
@@ -1820,11 +1871,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     onUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       setEditorTick((v) => v + 1);
+      setLastEditedTime(Date.now());
       if (!note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
       if (note.fileType === "image" || note.fileType === "binary") return;
-      if (!settings.autoSave) return;
       onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
+      if (!settings.autoSave) {
+        setSaveStatus("unsaved");
+        return;
+      }
+      setSaveStatus("auto_saving");
       scheduleAutoSaveDiskRef.current?.();
     },
   });
@@ -1832,6 +1888,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const editorStats = useMemo(() => {
     if (!editor) {
       const charCount = note?.content ? note.content.length : 0;
+      const wordCount = note?.content?.trim() ? note.content.trim().split(/\s+/).length : 0;
+      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
       let syntaxLabel = t("editor.syntaxMarkdown");
       const fileName = note?.fileName?.toLowerCase() ?? "";
       if (fileName.endsWith(".html") || note?.contentFormat === "html") {
@@ -1843,6 +1901,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         line: 1,
         col: 1,
         charCount,
+        wordCount,
+        readingTime,
         syntaxLabel,
         zoom: Math.round((editorFontSize / 15) * 100),
         lineEnding: "Windows (CRLF)",
@@ -1922,18 +1982,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (deletedNoteIdsRef.current.has(note.id) || isNoteDeleted(note.id)) return;
     if (Array.isArray(notes) && !notes.some((n) => n.id === note.id)) return;
 
+    const opId = ++saveOpIdRef.current;
+    setSaveStatus("auto_saving");
+
     const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
     if (relPath && isRelativePathDeleted(relPath)) return;
 
     const freshHandle = await getFreshFileHandle(note);
-    if (!freshHandle?.createWritable) return;
+    if (!freshHandle?.createWritable) {
+      if (saveOpIdRef.current === opId) setSaveStatus("unavailable");
+      return;
+    }
 
     try {
       const ext = getPreferredExtension() as "md" | "txt" | "html";
       const content = getContentToSave(ext);
       await performSave(content, ext, true);
+      if (saveOpIdRef.current === opId) {
+        setSaveStatus("auto_saved");
+      }
     } catch {
-      /* ignore background disk save errors */
+      if (saveOpIdRef.current === opId) {
+        setSaveStatus("failed");
+      }
     }
   }, [note, editor, settings.autoSave, notes, getFreshFileHandle]);
 
@@ -1957,6 +2028,61 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     };
   }, [note?.id]);
+
+  type SaveStatus =
+    | "saved"
+    | "auto_saved"
+    | "manually_saved"
+    | "saving"
+    | "auto_saving"
+    | "unsaved"
+    | "failed"
+    | "unavailable";
+
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [lastEditedTime, setLastEditedTime] = useState<number | null>(null);
+  const saveOpIdRef = useRef(0);
+
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [statusPortalTarget, setStatusPortalTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (onCloseSplit) return;
+
+    const findTargets = () => {
+      const target = document.getElementById("breadcrumb-editor-actions");
+      if (target) {
+        setPortalTarget((prev) => (prev !== target ? target : prev));
+      }
+      const statusTarget = document.getElementById("breadcrumb-save-status");
+      if (statusTarget) {
+        setStatusPortalTarget((prev) => (prev !== statusTarget ? statusTarget : prev));
+      }
+    };
+
+    findTargets();
+    const interval = setInterval(findTargets, 100);
+
+    const observer = new MutationObserver(findTargets);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      clearInterval(interval);
+      observer.disconnect();
+    };
+  }, [onCloseSplit]);
+
+  useEffect(() => {
+    if (!note) return;
+    const savedSnapshot = savedSnapshotByNoteId[note.id];
+    const currentContent = getContentToSave(savedSnapshot?.ext ?? "md");
+    const currentlySaved = Boolean(savedSnapshot && currentContent === savedSnapshot.content);
+
+    setSaveStatus((prev) => {
+      if (prev === "saving" || prev === "auto_saving") return prev;
+      return currentlySaved ? "saved" : "unsaved";
+    });
+  }, [note?.id, editorTick, note?.content]);
 
   useEffect(() => {
     if (!note || !editor || note.fileType) return;
@@ -2491,11 +2617,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note || isNoteDeleted(note.id) || deletedNoteIdsRef.current.has(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
+    const currentOpId = ++saveOpIdRef.current;
+    if (!isSilent) setSaveStatus("saving");
+
     const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-    if (relPath && isRelativePathDeleted(relPath)) return;
+    if (relPath && isRelativePathDeleted(relPath)) {
+      if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
+      return;
+    }
 
     const existingHandle = await getFreshFileHandle(note, true);
-    if (!existingHandle?.createWritable) return;
+    if (!existingHandle?.createWritable) {
+      if (saveOpIdRef.current === currentOpId) setSaveStatus("unavailable");
+      return;
+    }
 
     let writable: FileSystemWritableFileStream | null = null;
     try {
@@ -2503,6 +2638,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
         if (permission !== "granted") {
           downloadMarkdown(content, ext);
+          if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
           return;
         }
       }
@@ -2521,6 +2657,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         });
       }
       setSavedSnapshot(note.id, ext, content);
+      if (saveOpIdRef.current === currentOpId) {
+        setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
+      }
     } catch (error) {
       if (writable) {
         try {
@@ -2530,7 +2669,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
       }
       console.error("Save to existing file failed", error);
-      // If file is missing, clear the link and fallback to download
+      if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
       if ((error as Error)?.name === "NotFoundError" || (error as Error)?.name === "NotAllowedError") {
         await clearLinkedMetadata();
       }
@@ -2542,8 +2681,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note || isNoteDeleted(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
+    const currentOpId = ++saveOpIdRef.current;
+    setSaveStatus("saving");
+
     if (!canUseNativeFs()) {
       downloadMarkdown(content, ext);
+      if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
       return;
     }
 
@@ -2591,9 +2734,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         description: t("editor.saveToastSuccess", { file: savedFile.name }),
       });
       setSavedSnapshot(targetNoteId, ext, content);
+      if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
     } catch (error) {
       if ((error as DOMException)?.name !== "AbortError") {
         console.error("Save file failed", error);
+        if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
       }
       downloadMarkdown(content, ext);
     }
@@ -2715,6 +2860,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   if (!note) {
     return (
       <>
+        {statusPortalTarget && createPortal(renderSaveStatusIndicator(), statusPortalTarget)}
+        {portalTarget && createPortal(renderActionButtons(), portalTarget)}
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground relative">
           <p className="text-sm">{t("editor.selectOrCreate")}</p>
           <DropdownMenu>
@@ -2862,161 +3009,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
             </DialogHeader>
 
-            <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 px-2 py-1.5">
-              <div>
-                <label className="mb-3 block text-sm font-medium text-foreground">
-                  {t("settings.colorScheme")}
-                </label>
-                <div className="flex gap-2">
-                  {(["light", "dark", "system"] as const).map((scheme) => {
-                    const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
-                    const label = t(`settings.colorScheme${scheme.charAt(0).toUpperCase()}${scheme.slice(1)}`);
-                    return (
-                      <button
-                        key={scheme}
-                        type="button"
-                        onClick={() => updateSetting("colorScheme", scheme)}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
-                          settings.colorScheme === scheme
-                            ? "border-primary bg-primary/10 text-primary font-medium"
-                            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+            <SettingsBody idPrefix="modal1" />
 
-              <div>
-                <label className="mb-3 block text-sm font-medium text-foreground">
-                  {t("settings.theme")}
-                </label>
-                <div className="flex flex-wrap gap-2.5 p-1">
-                  {APP_THEMES.map((th) => (
-                    <button
-                      key={th.id}
-                      type="button"
-                      style={{ backgroundColor: th.color }}
-                      title={t(`settings.theme${th.id.charAt(0).toUpperCase()}${th.id.slice(1)}`)}
-                      onClick={() => updateSetting("theme", th.id)}
-                      className={`h-7 w-7 rounded-full transition-all ${
-                        settings.theme === th.id
-                          ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
-                          : "opacity-70 hover:opacity-100"
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="modal-language-empty" className="mb-2 block text-sm font-medium text-foreground">
-                  {t("settings.language")}
-                </label>
-                <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
-                  <SelectTrigger id="modal-language-empty" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="en">{t("settings.english")}</SelectItem>
-                    <SelectItem value="th">{t("settings.thai")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label htmlFor="modal-fontFamily-empty" className="mb-2 block text-sm font-medium text-foreground">
-                  {t("settings.fontFamily")}
-                </label>
-                <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
-                  <SelectTrigger id="modal-fontFamily-empty" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
-                    <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
-                    <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
-                    <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
-                    <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <label htmlFor="modal-editorFontSize-empty" className="text-sm font-medium text-foreground">
-                    {t("settings.editorFontSize")}
-                  </label>
-                  <span className="text-xs text-muted-foreground">{settings.editorFontSize}px</span>
-                </div>
-                <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
-                  <SelectTrigger id="modal-editorFontSize-empty" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    {FONT_SIZE_OPTIONS.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size}px
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-                  <div>
-                    <label htmlFor="modal-autoSave-empty" className="text-sm font-medium text-foreground">
-                      {t("settings.autoSave")}
-                    </label>
-                    <p className="mt-1 text-xs text-muted-foreground">{t("settings.autoSaveDescription")}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {settings.autoSave ? t("settings.enabled") : t("settings.disabled")}
-                    </span>
-                    <Switch
-                      id="modal-autoSave-empty"
-                      checked={settings.autoSave}
-                      onCheckedChange={(checked) => updateSetting("autoSave", checked)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-                  <div>
-                    <label htmlFor="modal-confirmBeforeDelete-empty" className="text-sm font-medium text-foreground">
-                      {t("settings.confirmBeforeDelete")}
-                    </label>
-                    <p className="mt-1 text-xs text-muted-foreground">{t("settings.confirmBeforeDeleteDescription")}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {settings.confirmBeforeDelete ? t("settings.enabled") : t("settings.disabled")}
-                    </span>
-                    <Switch
-                      id="modal-confirmBeforeDelete-empty"
-                      checked={settings.confirmBeforeDelete}
-                      onCheckedChange={(checked) => updateSetting("confirmBeforeDelete", checked)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
-                  <Keyboard className="h-4 w-4 text-primary" />
-                  <span>{t("editor.shortcutsTitle")}</span>
-                </Button>
-              </div>
+            <div className="pt-2">
+              <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
+                <Keyboard className="h-4 w-4 text-primary" />
+                <span>{t("editor.shortcutsTitle")}</span>
+              </Button>
             </div>
 
-            <DialogFooter className="sm:justify-between sm:space-x-0">
+            <DialogFooter className="sm:justify-between sm:space-x-0 pt-2">
               <Button type="button" variant="outline" onClick={resetSettings}>
                 {t("common.reset")}
               </Button>
@@ -3123,12 +3125,170 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     URL.revokeObjectURL(url);
   };
 
+  const renderSaveStatusIndicator = () => {
+    if (!note) {
+      return (
+        <div className="flex items-center gap-2 select-none">
+          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span>{t("saveStatus.saved")}</span>
+          </div>
+          <span className="text-muted-foreground/30 font-light">|</span>
+          <span className="text-muted-foreground/70">{t("saveStatus.editedJustNow")}</span>
+        </div>
+      );
+    }
+
+    let icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
+    let text = t("saveStatus.saved");
+    let textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+
+    switch (saveStatus) {
+      case "saving":
+        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />;
+        text = t("saveStatus.saving");
+        textClass = "text-blue-600 dark:text-blue-400 font-medium";
+        break;
+      case "auto_saving":
+        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />;
+        text = t("saveStatus.autoSaving");
+        textClass = "text-blue-600 dark:text-blue-400 font-medium";
+        break;
+      case "auto_saved":
+        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
+        text = t("saveStatus.autoSaved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "manually_saved":
+        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
+        text = t("saveStatus.manuallySaved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "saved":
+        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
+        text = t("saveStatus.saved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "unsaved":
+        icon = <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+        text = t("saveStatus.unsavedChanges");
+        textClass = "text-amber-600 dark:text-amber-400 font-medium";
+        break;
+      case "failed":
+        icon = <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />;
+        text = t("saveStatus.saveFailed");
+        textClass = "text-rose-600 dark:text-rose-400 font-medium";
+        break;
+      case "unavailable":
+        icon = <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+        text = t("saveStatus.saveUnavailable");
+        textClass = "text-muted-foreground font-medium";
+        break;
+    }
+
+    const getLastEditedLabel = () => {
+      if (!lastEditedTime) return t("saveStatus.editedJustNow");
+      const diffSec = Math.floor((Date.now() - lastEditedTime) / 1000);
+      if (diffSec < 10) return t("saveStatus.editedJustNow");
+      if (diffSec < 60) return t("saveStatus.editedAt", { time: `${diffSec}s` });
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return t("saveStatus.editedAt", { time: `${diffMin}m` });
+      const diffHr = Math.floor(diffMin / 60);
+      return t("saveStatus.editedAt", { time: `${diffHr}h` });
+    };
+
+    return (
+      <div className="flex items-center gap-2 select-none">
+        <div className={`flex items-center gap-1.5 ${textClass}`}>
+          {icon}
+          <span>{text}</span>
+        </div>
+        <span className="text-muted-foreground/30 font-light">|</span>
+        <span className="text-muted-foreground/70">{getLastEditedLabel()}</span>
+      </div>
+    );
+  };
+
+  const renderActionButtons = () => (
+    <Fragment>
+      <DropdownMenu>
+        <Tooltip>
+        <TooltipTrigger asChild>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+            <Save className="h-3.5 w-3.5" />
+            <span className="sr-only">{t("editor.saveFile")}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.saveFile")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
+          <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <Save className="h-4 w-4" />
+            <span>{t("editor.save")}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!note} onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <File className="h-4 w-4" />
+            <span>{t("editor.saveAs")}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <Tooltip>
+        <TooltipTrigger asChild>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+            <Download className="h-3.5 w-3.5" />
+            <span className="sr-only">{t("editor.exportFile")}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.exportFile")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
+          <DropdownMenuItem disabled={!note} onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <FileText className="h-4 w-4" />
+            <span>{t("editor.exportPdf")}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!note} onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <FileCode className="h-4 w-4" />
+            <span>{t("editor.exportWord")}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Tooltip>
+      <TooltipTrigger asChild>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        disabled={!note}
+        className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+        onClick={() => {
+          if (settings.confirmBeforeDelete) {
+            setDeleteConfirmOpen(true);
+          } else {
+            void handleDeleteNote();
+          }
+        }}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+        <span className="sr-only">{t("editor.deleteNote")}</span>
+      </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
+      </Tooltip>
+    </Fragment>
+  );
+
   return (
     <>
       <TooltipProvider delayDuration={420}>
-      <div className="flex min-h-0 flex-1 flex-col bg-background relative">
+      <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
+        <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         {/* ...ปุ่ม close split เดิมถูกลบออก... */}
-        <div className="border-b border-border px-3 py-3 sm:px-4 md:px-6">
+        <div className="px-3 py-2 sm:px-4 md:px-6">
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3 md:hidden">
           <div>
             <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">NOTES+</p>
@@ -3940,48 +4100,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           })() : null}
         </div>
 
-        <div className="hidden min-w-0 self-start rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground relative lg:block lg:justify-self-center lg:self-auto">
-          <span className="flex items-center gap-2">
-            {(note.fileType === "image" || note.fileType === "binary") ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-            ) : isSaved ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-            ) : (
-              <CircleDotDashedIcon className="h-4 w-4 shrink-0 text-amber-600" />
-            )}
-            <span className="sr-only">{saveStatusLabel}</span>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <span className="block max-w-[296px] truncate xl:max-w-[356px] cursor-pointer" tabIndex={0}>{displayFileName}</span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 rounded-xl px-0 py-2 absolute right-[-1rem] top-full z-50 mt-2">
-                <div className="px-4 py-2 text-sm">
-                  <div><b>Name:</b> {note.fileName || t("editor.untitled")}</div>
-                  <div><b>Type:</b> {note.fileType || "-"}</div>
-                  <div><b>Format:</b> {note.contentFormat || "-"}</div>
-                  {note.fileName && <div><b>Extension:</b> {note.fileName.split('.').pop()}</div>}
-                  {note.isLinkedFile && <div><b>Linked File:</b> Yes</div>}
-                  {note.folderPath && <div><b>Folder:</b> {note.folderPath}</div>}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-        </div>
-      {/* File Info Dropdown now handled inline above */}
-
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
-          {!onCloseSplit && !isSidebarOpen && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onOpenSidebar}>
-                  <PanelRightCloseIcon className="h-4 w-4" />
-                  <span className="sr-only">{t("editor.showSidebar")}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.showSidebar")}</TooltipContent>
-            </Tooltip>
-          )}
-
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           <div className="ml-auto flex items-center gap-1">
           {note.contentFormat === "html" && (
@@ -4001,52 +4120,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <TooltipContent>{htmlPreviewOpen ? t("editor.hidePreview") : t("editor.showPreview")}</TooltipContent>
           </Tooltip>
           )}
-          <DropdownMenu>
-            <Tooltip>
-            <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full">
-                <Save className="h-4 w-4" />
-                <span className="sr-only">{t("editor.saveFile")}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.saveFile")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
-              <DropdownMenuItem onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                <Save className="h-4 w-4" />
-                <span>{t("editor.save")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                <File className="h-4 w-4" />
-                <span>{t("editor.saveAs")}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <Tooltip>
-            <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full">
-                <Download className="h-4 w-4" />
-                <span className="sr-only">{t("editor.exportFile")}</span>
-              </Button>
-            </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.exportFile")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
-              <DropdownMenuItem onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                <FileText className="h-4 w-4" />
-                <span>{t("editor.exportPdf")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                <FileCode className="h-4 w-4" />
-                <span>{t("editor.exportWord")}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {statusPortalTarget && createPortal(renderSaveStatusIndicator(), statusPortalTarget)}
+          {portalTarget && createPortal(renderActionButtons(), portalTarget)}
           <input ref={docxInputRef} type="file" accept=".docx" className="hidden" onChange={handleImportDocx} />
           <Dialog open={importDocxDialogOpen} onOpenChange={setImportDocxDialogOpen}>
             <DialogContent className="sm:max-w-md rounded-2xl">
@@ -4066,27 +4141,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Tooltip>
-          <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
-            onClick={() => {
-              if (settings.confirmBeforeDelete) {
-                setDeleteConfirmOpen(true);
-              } else {
-                void handleDeleteNote();
-              }
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span className="sr-only">{t("editor.deleteNote")}</span>
-          </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
-          </Tooltip>
           {onCloseSplit && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -4103,7 +4157,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </div>
 
         <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-        <div className={`flex flex-col ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : ""}`}>
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget && editor) {
+              editor.commands.focus("end");
+            }
+          }}
+          className={`flex flex-col cursor-text ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : "w-full"}`}
+        >
           {note.fileType === "image" ? (
             <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
               {imageBlobUrl ? (
@@ -4134,9 +4195,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               fontSize={editorFontSize}
             />
           ) : (
-            <div className="flex min-h-full w-full min-w-0 max-w-full flex-col overflow-x-hidden px-4 py-6 sm:px-6 sm:py-8 md:px-8 md:py-10 lg:px-12 lg:py-12">
+            <div className={`flex w-full min-w-0 flex-col overflow-x-hidden px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto ${
+              settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
+            } ${settings.showCodeLineNumbers ? "show-code-line-numbers" : ""}`}>
               {editor && <TableInteractiveOverlay editor={editor} />}
               <EditorContent editor={editor} className="w-full min-w-0 max-w-full" />
+              <div className="h-6 sm:h-8 md:h-10 lg:h-12 w-full shrink-0 pointer-events-none" />
             </div>
           )}
         </div>
@@ -4165,31 +4229,77 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             />
           </div>
         )}
-      </div>
+        </div>
 
-      {/* Editor Status Bar */}
-      {note && (
-        <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-3 shrink-0">
-            <span>{`Ln ${editorStats.line}, Col ${editorStats.col}`}</span>
-            <div className="h-3 w-[1px] bg-border/60" />
-            <span>{`${editorStats.charCount} ${t("editor.charCountUnit")}`}</span>
-            <div className="h-3 w-[1px] bg-border/60" />
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-[10px] tracking-tight">M↓</span>
-              <span>{editorStats.syntaxLabel}</span>
+        {/* Editor Status Bar */}
+        {note && (
+          <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-3 shrink-0">
+              <span>{`Ln ${editorStats.line}, Col ${editorStats.col}`}</span>
+              {settings.showWordCount && (
+                <>
+                  <div className="h-3 w-[1px] bg-border/60" />
+                  <span>{`${editorStats.wordCount} words`}</span>
+                </>
+              )}
+              <div className="h-3 w-[1px] bg-border/60" />
+              <span>{`${editorStats.charCount} ${t("editor.charCountUnit")}`}</span>
+              {settings.showWordCount && (
+                <>
+                  <div className="h-3 w-[1px] bg-border/60" />
+                  <span>{`${editorStats.readingTime} min read`}</span>
+                </>
+              )}
+              <div className="h-3 w-[1px] bg-border/60" />
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-[10px] tracking-tight">M↓</span>
+                <span>{editorStats.syntaxLabel}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <span>{`${editorStats.zoom}%`}</span>
+              <div className="h-3 w-[1px] bg-border/60" />
+              <span>{editorStats.lineEnding}</span>
+              <div className="h-3 w-[1px] bg-border/60" />
+              <span>UTF-8</span>
             </div>
           </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <span>{`${editorStats.zoom}%`}</span>
-            <div className="h-3 w-[1px] bg-border/60" />
-            <span>{editorStats.lineEnding}</span>
-            <div className="h-3 w-[1px] bg-border/60" />
-            <span>UTF-8</span>
-          </div>
+        )}
         </div>
-      )}
+        {/* Docked Right Panel */}
+        <AnimatePresence>
+          {rightPanelOpen && (
+            <RightPanel
+              isOpen={rightPanelOpen}
+              onClose={onCloseRightPanel || (() => {})}
+              note={note}
+              editor={editor}
+              notes={notes}
+              onUpdateNote={onUpdate}
+              onFavorite={(id) => {
+                const n = notes?.find((item) => item.id === id);
+                if (n && onUpdate) onUpdate(id, { isFavorite: !n.isFavorite });
+              }}
+              onDuplicate={(n) => {
+                if (onCreate) {
+                  const baseName = n.fileName || "untitled.md";
+                  const newName = baseName.includes(".")
+                    ? baseName.replace(/(\.[^/.]+)$/, " copy$1")
+                    : `${baseName} copy`;
+                  onCreate(n.folderPath || "", {
+                    fileName: newName,
+                    contentFormat: n.contentFormat || "markdown",
+                  });
+                }
+              }}
+              onDelete={onDelete}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+
+
 
       <AlertDialog open={Boolean(alertMessage)} onOpenChange={(open) => !open && setAlertMessage(null)}>
         <AlertDialogContent>
@@ -4327,161 +4437,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
           </DialogHeader>
 
-          <div className="no-scrollbar flex-1 overflow-y-auto space-y-6 px-2 py-1.5">
-            <div>
-              <label className="mb-3 block text-sm font-medium text-foreground">
-                {t("settings.colorScheme")}
-              </label>
-              <div className="flex gap-2">
-                {(["light", "dark", "system"] as const).map((scheme) => {
-                  const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
-                  const label = t(`settings.colorScheme${scheme.charAt(0).toUpperCase()}${scheme.slice(1)}`);
-                  return (
-                    <button
-                      key={scheme}
-                      type="button"
-                      onClick={() => updateSetting("colorScheme", scheme)}
-                      className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
-                        settings.colorScheme === scheme
-                          ? "border-primary bg-primary/10 text-primary font-medium"
-                          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+          <SettingsBody idPrefix="modal2" />
 
-            <div>
-              <label className="mb-3 block text-sm font-medium text-foreground">
-                {t("settings.theme")}
-              </label>
-              <div className="flex flex-wrap gap-2.5 p-1">
-                {APP_THEMES.map((th) => (
-                  <button
-                    key={th.id}
-                    type="button"
-                    style={{ backgroundColor: th.color }}
-                    title={t(`settings.theme${th.id.charAt(0).toUpperCase()}${th.id.slice(1)}`)}
-                    onClick={() => updateSetting("theme", th.id)}
-                    className={`h-7 w-7 rounded-full transition-all ${
-                      settings.theme === th.id
-                        ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
-                        : "opacity-70 hover:opacity-100"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="modal-language" className="mb-2 block text-sm font-medium text-foreground">
-                {t("settings.language")}
-              </label>
-              <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
-                <SelectTrigger id="modal-language" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="en">{t("settings.english")}</SelectItem>
-                  <SelectItem value="th">{t("settings.thai")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label htmlFor="modal-fontFamily" className="mb-2 block text-sm font-medium text-foreground">
-                {t("settings.fontFamily")}
-              </label>
-              <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
-                <SelectTrigger id="modal-fontFamily" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
-                  <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
-                  <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
-                  <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
-                  <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <label htmlFor="modal-editorFontSize" className="text-sm font-medium text-foreground">
-                  {t("settings.editorFontSize")}
-                </label>
-                <span className="text-xs text-muted-foreground">{settings.editorFontSize}px</span>
-              </div>
-              <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
-                <SelectTrigger id="modal-editorFontSize" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {FONT_SIZE_OPTIONS.map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size}px
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-                <div>
-                  <label htmlFor="modal-autoSave" className="text-sm font-medium text-foreground">
-                    {t("settings.autoSave")}
-                  </label>
-                  <p className="mt-1 text-xs text-muted-foreground">{t("settings.autoSaveDescription")}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {settings.autoSave ? t("settings.enabled") : t("settings.disabled")}
-                  </span>
-                  <Switch
-                    id="modal-autoSave"
-                    checked={settings.autoSave}
-                    onCheckedChange={(checked) => updateSetting("autoSave", checked)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-                <div>
-                  <label htmlFor="modal-confirmBeforeDelete" className="text-sm font-medium text-foreground">
-                    {t("settings.confirmBeforeDelete")}
-                  </label>
-                  <p className="mt-1 text-xs text-muted-foreground">{t("settings.confirmBeforeDeleteDescription")}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {settings.confirmBeforeDelete ? t("settings.enabled") : t("settings.disabled")}
-                  </span>
-                  <Switch
-                    id="modal-confirmBeforeDelete"
-                    checked={settings.confirmBeforeDelete}
-                    onCheckedChange={(checked) => updateSetting("confirmBeforeDelete", checked)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
-                <Keyboard className="h-4 w-4 text-primary" />
-                <span>{t("editor.shortcutsTitle")}</span>
-              </Button>
-            </div>
+          <div className="pt-2">
+            <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
+              <Keyboard className="h-4 w-4 text-primary" />
+              <span>{t("editor.shortcutsTitle")}</span>
+            </Button>
           </div>
 
-          <DialogFooter className="sm:justify-between sm:space-x-0">
+          <DialogFooter className="sm:justify-between sm:space-x-0 pt-2">
             <Button type="button" variant="outline" onClick={resetSettings}>
               {t("common.reset")}
             </Button>
@@ -4626,7 +4591,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           )}
         </div>
       )}
-      </div>
       </TooltipProvider>
     </>
   );
