@@ -30,43 +30,30 @@ function saveNotes(notes: Note[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
 }
 
-function deriveTitleFromContent(content: string): string {
-  // Handle Tiptap JSON format
-  if (content.trimStart().startsWith('{"type":"doc"')) {
-    try {
-      const doc = JSON.parse(content);
-      type DocNode = { type?: string; text?: string; content?: DocNode[] };
-      const extractText = (node: DocNode): string => {
-        if (node.type === "text") return node.text || "";
-        if (node.content) return node.content.map(extractText).join("");
-        return "";
-      };
-      const firstBlock = doc.content?.[0];
-      const title = firstBlock ? extractText(firstBlock).trim() : "";
-      return title;
-    } catch {
-      return "";
-    }
+
+
+export function extractBaseTitleFromFileName(fileName?: string): string {
+  if (!fileName) return "";
+  const name = fileName.trim();
+  const lastDot = name.lastIndexOf(".");
+  if (lastDot > 0) {
+    return name.slice(0, lastDot);
   }
+  return name;
+}
 
-  const hasHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-  let text = content;
+export function isSystemGeneratedUntitledName(name?: string): boolean {
+  if (!name) return true;
+  const trimmed = name.trim().toLowerCase();
+  const dotIdx = trimmed.lastIndexOf(".");
+  const baseName = dotIdx > 0 ? trimmed.slice(0, dotIdx) : trimmed;
+  return /^untitled([_\-\s]?\d+)?$/i.test(baseName);
+}
 
-  if (hasHtml && typeof document !== "undefined") {
-    const parser = document.createElement("div");
-    parser.innerHTML = content;
-    const firstBlock = parser.firstElementChild;
-    text = (firstBlock?.textContent || parser.textContent || parser.innerText || "").trim();
-  } else if (hasHtml) {
-    text = content.replace(/<[^>]*>/g, " ");
-  }
-
-  const firstLine = text
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-
-  return firstLine ?? "";
+export function getNoteTitleFromFileName(fileName?: string): string {
+  if (!fileName) return "";
+  const base = extractBaseTitleFromFileName(fileName);
+  return isSystemGeneratedUntitledName(base) ? "" : base;
 }
 
 export function useNotes() {
@@ -108,12 +95,11 @@ export function useNotes() {
       // If .docx file, convert to HTML
       if (item.fileName?.toLowerCase().endsWith('.docx') && typeof window !== 'undefined' && typeof File !== 'undefined' && item.content instanceof ArrayBuffer) {
         try {
-          // Create a File object from ArrayBuffer if possible (depends on how you read files)
           const file = new File([item.content], item.fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
           const html = await docxToHtml(file);
           newNotes.push({
             id: item.id ?? crypto.randomUUID(),
-            title: deriveTitleFromContent(html),
+            title: getNoteTitleFromFileName(item.fileName),
             content: html,
             createdAt: now,
             updatedAt: now,
@@ -121,7 +107,6 @@ export function useNotes() {
             isLinkedFile: item.isLinkedFile,
             contentFormat: 'html',
             folderPath: item.folderPath,
-            // fileType intentionally omitted
           });
           continue;
         } catch (e) {
@@ -130,7 +115,7 @@ export function useNotes() {
       }
       newNotes.push({
         id: item.id ?? crypto.randomUUID(),
-        title: deriveTitleFromContent(item.content),
+        title: getNoteTitleFromFileName(item.fileName),
         content: item.content,
         createdAt: now,
         updatedAt: now,
@@ -153,7 +138,7 @@ export function useNotes() {
     const now = Date.now();
     const newNotes: Note[] = items.map((item) => ({
       id: item.id ?? crypto.randomUUID(),
-      title: deriveTitleFromContent(item.content),
+      title: getNoteTitleFromFileName(item.fileName),
       content: item.content,
       createdAt: now,
       updatedAt: now,
@@ -175,14 +160,15 @@ export function useNotes() {
   const updateNote = useCallback(
     (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath">>) => {
       const normalizedPatch = { ...patch };
-      if (typeof patch.content === "string") {
-        normalizedPatch.title = deriveTitleFromContent(patch.content);
+      if (patch.fileName && normalizedPatch.title === undefined) {
+        normalizedPatch.title = getNoteTitleFromFileName(patch.fileName);
       }
 
       setNotes((prev) => {
-        const updated = prev.map((n) =>
-          n.id === id ? { ...n, ...normalizedPatch, updatedAt: Date.now() } : n
-        );
+        const updated = prev.map((n) => {
+          if (n.id !== id) return n;
+          return { ...n, ...normalizedPatch, updatedAt: Date.now() };
+        });
         saveNotes(updated);
         return updated;
       });

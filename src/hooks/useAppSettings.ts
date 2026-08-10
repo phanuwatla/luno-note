@@ -45,7 +45,7 @@ export interface AppSettings {
 }
 
 const STORAGE_KEY = "notes-app-settings";
-const FIXED_SIDEBAR_WIDTH = 300;
+const FIXED_SIDEBAR_WIDTH = 280;
 
 const VALID_THEMES: AppTheme[] = ["emerald", "blue", "violet", "rose", "orange", "slate"];
 const VALID_COLOR_SCHEMES: ColorScheme[] = ["light", "dark", "system"];

@@ -236,8 +236,8 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
       <div
         ref={lineNumbersRef}
         aria-hidden
-        className="no-scrollbar select-none overflow-hidden border-r border-border bg-muted/40 py-4 text-right text-muted-foreground/60 shrink-0"
-        style={{ fontSize: `${Math.round(fontSize * 0.85)}px`, lineHeight: "1.625rem", width: `${String(lines.length).length * Math.round(fontSize * 0.55) + 16}px`, paddingLeft: "8px", paddingRight: "8px" }}
+        className="no-scrollbar select-none overflow-hidden bg-transparent py-4 text-right text-muted-foreground/30 shrink-0"
+        style={{ fontSize: `${Math.max(10, Math.round(fontSize * 0.72))}px`, lineHeight: "1.625rem", width: `${Math.max(24, String(lines.length).length * Math.round(fontSize * 0.48) + 12)}px`, paddingLeft: "4px", paddingRight: "6px" }}
       >
         {lines.map((_, i) => (
           <div key={i} style={{ lineHeight: "1.625rem" }}>{i + 1}</div>

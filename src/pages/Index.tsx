@@ -7,7 +7,7 @@ import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
 import RightPanel from "@/components/RightPanel";
 import type { Note } from "@/hooks/useNotes";
-import { useNotes } from "@/hooks/useNotes";
+import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
@@ -376,6 +376,11 @@ export default function Index() {
   const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
+    const isTxt = desiredFileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+    const rawTitle = extractBaseTitleFromFileName(desiredFileName);
+    const isUntitled = isSystemGeneratedUntitledName(rawTitle);
+    const initialTitle = isUntitled || isTxt ? "" : rawTitle;
+    const initialContent = isTxt ? "" : (initialTitle ? `<h1>${initialTitle}</h1>` : "<h1></h1>");
 
     // If no folder is opened, fallback to normal in-app note creation.
     if (!openedRootDirHandle) {
@@ -383,6 +388,8 @@ export default function Index() {
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
+        title: initialTitle,
+        content: initialContent,
         isLinkedFile: false,
         contentFormat,
       });
@@ -398,18 +405,25 @@ export default function Index() {
       }
 
       const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
+      const isFileTxt = fileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+      const rawFileTitle = extractBaseTitleFromFileName(fileName);
+      const isFileUntitled = isSystemGeneratedUntitledName(rawFileTitle);
+      const fileTitle = isFileUntitled || isFileTxt ? "" : rawFileTitle;
+      const fileContent = isFileTxt ? "" : (fileTitle ? `<h1>${fileTitle}</h1>` : "<h1></h1>");
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
       const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write("");
+      await writable.write(fileContent);
       await writable.close();
 
       const note = createNote(normalizedPath || undefined);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName,
+        title: fileTitle,
+        content: fileContent,
         isLinkedFile: true,
         contentFormat,
       });
@@ -423,6 +437,8 @@ export default function Index() {
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
+        title: initialTitle,
+        content: initialContent,
         isLinkedFile: false,
         contentFormat,
       });
@@ -459,12 +475,16 @@ export default function Index() {
     }
   };
 
+  const activeRenameLocksRef = useRef<Set<string>>(new Set());
+
   const renameFileInFolder = async (note: Note, nextName: string) => {
     if (!openedRootDirHandle || !note.fileName) return;
+    if (activeRenameLocksRef.current.has(note.id)) return;
 
     const proposed = nextName.trim();
     if (!proposed || proposed === note.fileName) return;
 
+    activeRenameLocksRef.current.add(note.id);
     const oldRelPath = getRelativePath(note.folderPath || "", note.fileName);
     trackDeletedRelativePath(oldRelPath);
 
@@ -478,16 +498,23 @@ export default function Index() {
       clearDeletedRelativePath(newRelPath);
 
       const sourceHandle = await sourceDir.getFileHandle(note.fileName);
-      const newHandle = await copyFileHandleToDirectory(sourceHandle, sourceDir, finalName);
+      let newHandle = sourceHandle;
+
+      if (typeof (sourceHandle as unknown as { move?: (name: string) => Promise<void> }).move === "function") {
+        await (sourceHandle as unknown as { move: (name: string) => Promise<void> }).move(finalName);
+      } else {
+        newHandle = await copyFileHandleToDirectory(sourceHandle, sourceDir, finalName);
+        await sourceDir.removeEntry(note.fileName);
+      }
 
       await setStoredFileHandle(note.id, newHandle);
-      updateNote(note.id, { fileName: finalName });
-
-      await sourceDir.removeEntry(note.fileName);
+      updateNote(note.id, { fileName: finalName, title: extractBaseTitleFromFileName(finalName) });
       await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
     } catch (error) {
       console.error("Rename file failed", error);
       clearDeletedRelativePath(oldRelPath);
+    } finally {
+      activeRenameLocksRef.current.delete(note.id);
     }
   };
 
@@ -1090,6 +1117,7 @@ export default function Index() {
                   onCreate={handleCreateNote}
                   onCreateFolder={createFolderInFolder}
                   onOpenFolder={handleOpenFolder}
+                  onRenameFile={renameFileInFolder}
                   openedFolderName={openedFolderName}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   isSidebarOpen={sidebarOpen}
@@ -1126,6 +1154,7 @@ export default function Index() {
                   onCreate={handleCreateNote}
                   onCreateFolder={createFolderInFolder}
                   onOpenFolder={handleOpenFolder}
+                  onRenameFile={renameFileInFolder}
                   openedFolderName={openedFolderName}
                   onOpenSidebar={() => setSidebarOpen(true)}
                   isSidebarOpen={sidebarOpen}
@@ -1147,6 +1176,7 @@ export default function Index() {
               onCreate={handleCreateNote}
               onCreateFolder={createFolderInFolder}
               onOpenFolder={handleOpenFolder}
+              onRenameFile={renameFileInFolder}
               openedFolderName={openedFolderName}
               onOpenSidebar={() => setSidebarOpen(true)}
               isSidebarOpen={sidebarOpen}

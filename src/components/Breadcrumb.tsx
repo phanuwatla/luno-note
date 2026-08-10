@@ -115,10 +115,11 @@ function BreadcrumbTreeView({
   onSelectNote?: (id: string) => void;
 }) {
   const { settings } = useAppSettings();
+  const { t } = useTranslation();
   const tree = useMemo(() => buildTreeFromNotes(notes, baseFolderPath), [notes, baseFolderPath]);
 
   // Subfolders start collapsed by default
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set());
 
   const toggleFolder = (path: string) => {
     setOpenFolders((prev) => {
@@ -130,7 +131,7 @@ function BreadcrumbTreeView({
   };
 
   const renderNoteItem = (note: Note, depth: number) => {
-    const fileName = note.fileName || note.title?.trim() || "Untitled";
+    const fileName = note.fileName || note.title?.trim() || t("editor.untitled");
     const isActive = activeNoteId === note.id;
     return (
       <button
@@ -154,17 +155,50 @@ function BreadcrumbTreeView({
   };
 
   const renderFolderItem = (node: TreeNode, depth: number): React.ReactNode => {
+    const isOpen = openFolders.has(node.path);
+    const hasContent = node.notes.length > 0 || node.children.length > 0;
+    const totalCount = node.notes.length + node.children.length;
+
     return (
-      <div key={node.path} className="space-y-0.5">
-        <div
-          className="flex w-full items-center gap-1.5 px-2 py-1 text-xs font-semibold text-muted-foreground/80 uppercase tracking-wider select-none"
-          style={{ paddingLeft: `${8 + depth * 12}px` }}
+      <div key={node.path} className="group/tree-item relative w-full">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleFolder(node.path);
+          }}
+          className="flex w-full items-center gap-1.5 py-1.5 pr-3 text-left text-xs font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50 cursor-pointer"
+          style={{ paddingLeft: `${12 + depth * 14}px` }}
         >
-          <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          <span className="truncate">{node.name}</span>
-        </div>
-        {node.notes.map((n) => renderNoteItem(n, depth + 1))}
-        {node.children.map((child) => renderFolderItem(child, depth + 1))}
+          {isOpen ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          {isOpen ? (
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+          ) : (
+            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className="truncate flex-1 font-semibold text-foreground/90">{node.name}</span>
+          {hasContent && (
+            <span className="ml-auto shrink-0 text-[10px] opacity-50">{totalCount}</span>
+          )}
+        </button>
+        {isOpen && (
+          <div className="relative w-full">
+            {settings.showGuideLines && (
+              <div
+                className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
+                style={{ left: `${18 + depth * 14}px` }}
+              />
+            )}
+            <div className="w-full">
+              {node.notes.map((n) => renderNoteItem(n, depth + 1))}
+              {node.children.map((child) => renderFolderItem(child, depth + 1))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };

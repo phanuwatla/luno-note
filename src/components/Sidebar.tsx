@@ -169,7 +169,7 @@ function MarkdownIndicator({ active }: { active: boolean }) {
   );
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 275, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings }: SidebarProps) {
   const { settings, updateSetting } = useAppSettings();
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
@@ -885,10 +885,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   return (
     <aside
       className={
-        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full md:w-[20vw] lg:w-[20vw] min-w-[200px] max-w-[320px] transition-all duration-200 select-none ` +
+        `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full w-full w-[280px] shrink-0 transition-all duration-200 select-none ` +
         (isMobile ? 'fixed left-0 top-0 z-50 w-[90vw] max-w-[320px] shadow-2xl' : 'relative')
       }
-      style={!isMobile ? { width: '20vw', minWidth: '200px', maxWidth: '320px' } : undefined}
+      style={!isMobile ? { width: `${sidebarWidth || 280}px` } : undefined}
     >
       {/* Brand Header */}
       <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2">
@@ -929,7 +929,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }`}
         >
           <Home className="h-4 w-4 shrink-0 text-foreground" />
-          <span>Home</span>
+          <span>{t("sidebar.home")}</span>
         </button>
         <button
           type="button"
@@ -939,7 +939,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }`}
         >
           <Compass className="h-4 w-4 shrink-0 text-foreground" />
-          <span>Explore</span>
+          <span>{t("sidebar.explore")}</span>
         </button>
         <button
           type="button"
@@ -949,7 +949,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }`}
         >
           <Star className="h-4 w-4 shrink-0 text-foreground" />
-          <span>Favorites</span>
+          <span>{t("sidebar.favorites")}</span>
         </button>
         <button
           type="button"
@@ -959,7 +959,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }`}
         >
           <Tag className="h-4 w-4 shrink-0 text-foreground" />
-          <span>Tags</span>
+          <span>{t("sidebar.tags")}</span>
         </button>
         <button
           type="button"
@@ -969,13 +969,13 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }`}
         >
           <Trash2 className="h-4 w-4 shrink-0 text-foreground" />
-          <span>Trash</span>
+          <span>{t("sidebar.trash")}</span>
         </button>
       </div>
 
       {/* WORKSPACE Header */}
       <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5">
-        <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">WORKSPACE</span>
+        <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">{t("sidebar.workspace")}</span>
         <div className="flex items-center gap-1">
           {onOpenFolder && (
             <Button
@@ -1049,7 +1049,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             variant="ghost"
             size="icon"
             className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-            title="Help"
+            title={t("sidebar.help")}
           >
             <HelpCircle className="h-4 w-4" />
           </Button>
@@ -1060,7 +1060,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           size="icon"
           className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
           onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
-          title="Toggle Theme"
+          title={t("sidebar.toggleTheme")}
         >
           {settings.colorScheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>

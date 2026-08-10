@@ -1,12 +1,13 @@
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import RightPanel from "@/components/RightPanel";
 import { AnimatePresence } from "framer-motion";
-import { Note } from "@/hooks/useNotes";
+import { Note, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import {
   Bold,
   CheckCircle2,
   Circle,
   Code,
+  Eye,
   Download,
   ExternalLink,
   File,
@@ -577,6 +578,7 @@ export interface EditorProps {
   onCreate?: (folderPath?: string, opts?: CreateNoteOptions) => Note | void | Promise<Note | void>;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void | Promise<void>;
   onOpenFolder?: (pending?: OpenFolderPending) => void | Promise<void>;
+  onRenameFile?: (note: Note, nextName: string) => void | Promise<void>;
   openedFolderName?: string | null;
   onOpenSidebar: () => void;
   isSidebarOpen?: boolean;
@@ -1230,7 +1232,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
 }
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel } = props;
+  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, onRenameFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel } = props;
 
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -1364,6 +1366,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       event.target.value = "";
     };
   const autoSaveDiskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceRenameTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRenameRef = useRef<{ note: Note; firstH1Text: string; newFileName: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
@@ -1467,16 +1471,103 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return "markdown";
   };
 
+  const isTxtFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.fileName?.toLowerCase().endsWith(".txt")) return true;
+    if (targetNote.contentFormat === "plain") return true;
+    return false;
+  }, []);
+
+  const getBaseTitle = useCallback((targetNote: Note | null): string => {
+    if (!targetNote || isTxtFile(targetNote)) return "";
+    if (targetNote.title === "") {
+      return "";
+    }
+    let rawName = "";
+    if (targetNote.title && targetNote.title.trim()) {
+      rawName = targetNote.title.trim();
+    } else if (targetNote.fileName) {
+      const name = targetNote.fileName.trim();
+      const lastDot = name.lastIndexOf(".");
+      rawName = lastDot > 0 ? name.slice(0, lastDot) : name;
+    }
+    if (isSystemGeneratedUntitledName(rawName)) {
+      return "";
+    }
+    return rawName;
+  }, [isTxtFile]);
+
+  const flushPendingRename = useCallback(() => {
+    if (debounceRenameTimeoutRef.current) {
+      clearTimeout(debounceRenameTimeoutRef.current);
+      debounceRenameTimeoutRef.current = null;
+    }
+    if (pendingRenameRef.current) {
+      const { note: targetNote, firstH1Text, newFileName } = pendingRenameRef.current;
+      pendingRenameRef.current = null;
+      if (firstH1Text === "") {
+        onUpdate(targetNote.id, { title: "" });
+      } else if (newFileName && onRenameFile) {
+        onUpdate(targetNote.id, { title: firstH1Text });
+        void onRenameFile(targetNote, newFileName);
+      } else if (newFileName) {
+        onUpdate(targetNote.id, { fileName: newFileName, title: firstH1Text });
+      } else if (firstH1Text) {
+        onUpdate(targetNote.id, { title: firstH1Text });
+      }
+    }
+  }, [onUpdate, onRenameFile]);
+
+  const escHtml = (s: string): string => {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  };
+
   /** Detect if a string is a Tiptap JSON document */
   const isTiptapJson = (text: string) => typeof text === "string" && text.trimStart().startsWith('{"type":"doc"');
 
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
-  const parseEditorContent = (text: unknown): string | Record<string, unknown> => {
-    if (typeof text !== "string" || !text.trim()) return "<h1></h1><p></p>";
-    if (isTiptapJson(text)) {
-      try { return JSON.parse(text); } catch { /* fall through */ }
+  const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false): string | Record<string, unknown> => {
+    if (isTxt) {
+      if (typeof text !== "string" || !text.trim()) return "<p></p>";
+      if (isTiptapJson(text)) {
+        try { return JSON.parse(text); } catch { /* fall through */ }
+      }
+      return toEditorHtml(text);
     }
-    return toEditorHtml(text);
+
+    const titleH1Html = baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
+
+    if (typeof text !== "string" || !text.trim()) {
+      return titleH1Html;
+    }
+
+    if (isTiptapJson(text)) {
+      try {
+        const json = JSON.parse(text);
+        if (json && Array.isArray(json.content)) {
+          const firstNode = json.content[0];
+          if (!firstNode || firstNode.type !== "heading" || firstNode.attrs?.level !== 1) {
+            const h1Node: Record<string, unknown> = {
+              type: "heading",
+              attrs: { level: 1 },
+            };
+            if (baseTitle) {
+              h1Node.content = [{ type: "text", text: baseTitle }];
+            }
+            json.content = [h1Node, ...json.content];
+          } else if (baseTitle && (!firstNode.content || firstNode.content.length === 0)) {
+            firstNode.content = [{ type: "text", text: baseTitle }];
+          }
+          return json;
+        }
+      } catch { /* fall through */ }
+    }
+
+    const editorHtml = toEditorHtml(text);
+    if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
+      return titleH1Html + editorHtml;
+    }
+    return editorHtml;
   };
 
   /** Convert one task-list line/element to a Tiptap taskItem <li> string */
@@ -1827,13 +1918,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         emptyNodeClass: "is-empty",
       }),
     ],
-    content: parseEditorContent(note?.content ?? ""),
+    content: parseEditorContent(note?.content ?? "", getBaseTitle(note), isTxtFile(note)),
     editorProps: {
       attributes: {
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
         class: EDITOR_CLASSES,
       },
       handleKeyDown: (view, event) => {
+        if (event.key === "Enter") {
+          const { selection } = view.state;
+          if (selection.from <= (view.state.doc.firstChild?.nodeSize ?? 0)) {
+            flushPendingRename();
+          }
+        }
         if (settingsRef.current.autoPairBrackets && !event.ctrlKey && !event.altKey && !event.metaKey) {
           const pairs: Record<string, string> = {
             "(": ")",
@@ -1864,9 +1961,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return false;
       },
     },
+    onBlur: () => {
+      flushPendingRename();
+    },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       setEditorTick((v) => v + 1);
+      const { from } = instance.state.selection;
+      if (from > (instance.state.doc.firstChild?.nodeSize ?? 0)) {
+        flushPendingRename();
+      }
     },
     onUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
@@ -1875,7 +1979,50 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (!note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
       if (note.fileType === "image" || note.fileType === "binary") return;
-      onUpdate(note.id, { content: JSON.stringify(instance.getJSON()) });
+
+      if (!isTxtFile(note)) {
+        const doc = instance.state.doc;
+        const firstChild = doc.firstChild;
+        let firstH1Text = "";
+        if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
+          firstH1Text = firstChild.textContent.trim();
+        }
+
+        const currentBaseTitle = getBaseTitle(note);
+        if (firstH1Text !== currentBaseTitle) {
+          if (firstH1Text === "") {
+            pendingRenameRef.current = { note, firstH1Text: "", newFileName: "" };
+          } else if (note.fileName) {
+            const lastDot = note.fileName.lastIndexOf(".");
+            const ext = lastDot > 0 ? note.fileName.slice(lastDot) : ".md";
+            const safeName = firstH1Text.replace(/[\\/:*?"<>|]/g, "_").trim();
+            if (safeName && !isSystemGeneratedUntitledName(safeName)) {
+              const newFileName = `${safeName}${ext}`;
+              if (newFileName !== note.fileName) {
+                // Queue pending title update & disk rename - runs ONLY when user finishes typing (on Blur/Enter)
+                pendingRenameRef.current = { note, firstH1Text, newFileName };
+              }
+            } else {
+              pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
+            }
+          } else {
+            pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
+          }
+        }
+      }
+
+      const json = instance.getJSON();
+      let savedContent = "";
+      if (isTxtFile(note)) {
+        savedContent = JSON.stringify(json);
+      } else {
+        if (json.content && json.content.length > 0 && json.content[0].type === "heading" && json.content[0].attrs?.level === 1) {
+          savedContent = JSON.stringify({ ...json, content: json.content.slice(1) });
+        } else {
+          savedContent = JSON.stringify(json);
+        }
+      }
+      onUpdate(note.id, { content: savedContent });
       if (!settings.autoSave) {
         setSaveStatus("unsaved");
         return;
@@ -1985,12 +2132,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const opId = ++saveOpIdRef.current;
     setSaveStatus("auto_saving");
 
-    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-    if (relPath && isRelativePathDeleted(relPath)) return;
-
     const freshHandle = await getFreshFileHandle(note);
     if (!freshHandle?.createWritable) {
-      if (saveOpIdRef.current === opId) setSaveStatus("unavailable");
+      if (saveOpIdRef.current === opId) {
+        setSaveStatus("auto_saved");
+      }
+      return;
+    }
+
+    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    if (relPath && isRelativePathDeleted(relPath)) {
+      if (saveOpIdRef.current === opId) {
+        setSaveStatus("auto_saved");
+      }
       return;
     }
 
@@ -2020,6 +2174,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
   }, [scheduleAutoSaveDisk]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingRename();
+    };
+  }, [note?.id, flushPendingRename]);
 
   useEffect(() => {
     return () => {
@@ -2079,31 +2239,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const currentlySaved = Boolean(savedSnapshot && currentContent === savedSnapshot.content);
 
     setSaveStatus((prev) => {
-      if (prev === "saving" || prev === "auto_saving") return prev;
+      if (prev === "saving" || prev === "auto_saving" || prev === "auto_saved") return prev;
       return currentlySaved ? "saved" : "unsaved";
     });
   }, [note?.id, editorTick, note?.content]);
 
   useEffect(() => {
-    if (!note || !editor || note.fileType) return;
-    if (!note.content.trim()) {
-      requestAnimationFrame(() => editor.commands.focus("start"));
+    if (saveStatus === "auto_saved") {
+      const timer = setTimeout(() => {
+        setSaveStatus("saved");
+      }, 1500);
+      return () => clearTimeout(timer);
     }
-  }, [note?.id, note?.content, editor]);
+  }, [saveStatus]);
 
   useEffect(() => {
     if (!editor || !note) return;
-    const noteContent = note.content ?? "";
-    const parsed = parseEditorContent(noteContent);
 
-    // If editor is already showing content for this exact note, avoid re-rendering:
+    // If editor is already showing content for this exact active note, do not re-set content or disrupt selection cursor!
     if (editorActiveNoteIdRef.current === note.id) {
-      if (isTiptapJson(noteContent)) {
-        if (JSON.stringify(editor.getJSON()) === noteContent) return;
-      } else {
-        if (editor.getHTML() === parsed) return;
-      }
+      return;
     }
+
+    const noteContent = note.content ?? "";
+    const baseTitle = getBaseTitle(note);
+    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note));
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
@@ -2116,9 +2276,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         plugins: editor.state.plugins,
       })
     );
+
+    const firstChild = editor.state.doc.firstChild;
+    if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
+      if (!firstChild.textContent.trim() && baseTitle) {
+        const tr = editor.state.tr;
+        tr.insertText(baseTitle, 1, 1);
+        editor.view.dispatch(tr);
+      }
+    }
+
     setEditorTick((v) => v + 1);
     syncingFromNote.current = false;
-  }, [editor, note?.id, note?.content]);
+  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle]);
 
   useEffect(() => {
     if (!editor) return;
@@ -2511,14 +2681,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return "";
   };
 
+  const stripTopH1FromHtml = (html: string): string => {
+    if (!html) return "";
+    return html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
+  };
+
   const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
     if (!note) return "";
     const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
 
-    let htmlContent = "";
+    let rawHtml = "";
     if (editor && !editor.isDestroyed) {
-      htmlContent = editor.getHTML();
+      rawHtml = editor.getHTML();
     }
+
+    let htmlContent = (!note || isTxtFile(note)) ? rawHtml : stripTopH1FromHtml(rawHtml);
 
     const isBlank = !htmlContent || htmlContent.trim() === "<p></p>" || htmlContent.trim() === "<h1></h1><p></p>";
     if (isBlank && note.content && note.content.trim() !== "<p></p>") {
@@ -2744,49 +2921,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
-  const handleSaveFile = async () => {
-    if (!note) return;
-    if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
-    const ext = getPreferredExtension() as "md" | "txt" | "html";
-    const content = getContentToSave(ext);
-
-    if (!existingHandle?.createWritable) {
-      setPendingSaveAction("saveas");
-      setExtensionDialogOpen(true);
-      return;
-    }
-
-    await performSave(content, ext);
-  };
-
-  const handleExtensionSelected = async (ext: "md" | "txt" | "html") => {
-    if (!note) return;
-    setSelectedExtension(ext);
-    const content = getContentToSave(ext);
-    setExtensionDialogOpen(false);
-    if (pendingSaveAction === "save") {
-      await performSave(content, ext);
-    } else if (pendingSaveAction === "saveas") {
-      await performSaveAs(content, ext);
-    }
-    setPendingSaveAction(null);
-  };
-
-  const handleDeleteNote = async () => {
-    if (!note) return;
-
-    deletedNoteIdsRef.current.add(note.id);
-    if (autoSaveDiskTimeoutRef.current) {
-      clearTimeout(autoSaveDiskTimeoutRef.current);
-    }
-    delete fileHandleByNoteIdRef.current[note.id];
-    await clearLinkedMetadata();
-
-    setDeleteConfirmOpen(false);
-    onDelete(note.id);
-  };
 
   useEffect(() => {
     if (!note || !canUseNativeFs()) return;
@@ -2856,6 +2991,275 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [note?.id]);
+
+  function getExportBaseName() {
+    if (!note) return t("editor.untitled");
+    const name = note.fileName || note.title?.trim() || t("editor.untitled");
+    const dotIdx = name.lastIndexOf(".");
+    return dotIdx > 0 ? name.slice(0, dotIdx) : name;
+  }
+
+  function handleExportPdf() {
+    if (!note) return;
+    const content = editor?.getHTML() ?? note.content;
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const docTitle = note.fileName || note.title?.trim() || t("editor.untitled");
+    win.document.write(
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${docTitle}</title>` +
+      `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
+      `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
+      `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
+      `</head><body>${content}</body></html>`
+    );
+    win.document.close();
+    win.focus();
+    win.print();
+  }
+
+  function handleExportWord() {
+    if (!note) return;
+    const content = editor?.getHTML() ?? note.content;
+    const html =
+      `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
+      `<head><meta charset="UTF-8"></head><body>${content}</body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${getExportBaseName()}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleSaveFile() {
+    if (!note) return;
+    if (note.fileType === "image" || note.fileType === "binary") return;
+
+    const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
+    const ext = getPreferredExtension() as "md" | "txt" | "html";
+    const content = getContentToSave(ext);
+
+    if (!existingHandle?.createWritable) {
+      setPendingSaveAction("saveas");
+      setExtensionDialogOpen(true);
+      return;
+    }
+
+    await performSave(content, ext);
+  }
+
+  async function handleExtensionSelected(ext: "md" | "txt" | "html") {
+    if (!note) return;
+    setSelectedExtension(ext);
+    const content = getContentToSave(ext);
+    setExtensionDialogOpen(false);
+    if (pendingSaveAction === "save") {
+      await performSave(content, ext);
+    } else if (pendingSaveAction === "saveas") {
+      await performSaveAs(content, ext);
+    }
+    setPendingSaveAction(null);
+  }
+
+  async function handleDeleteNote() {
+    if (!note) return;
+
+    deletedNoteIdsRef.current.add(note.id);
+    if (autoSaveDiskTimeoutRef.current) {
+      clearTimeout(autoSaveDiskTimeoutRef.current);
+    }
+    delete fileHandleByNoteIdRef.current[note.id];
+    await clearLinkedMetadata();
+
+    setDeleteConfirmOpen(false);
+    onDelete(note.id);
+  }
+
+  function renderSaveStatusIndicator() {
+    const isNonEditable =
+      !note ||
+      note.fileType === "image" ||
+      note.fileType === "binary" ||
+      note.fileName?.toLowerCase()?.endsWith(".zip") ||
+      note.fileName?.toLowerCase()?.endsWith(".pdf") ||
+      saveStatus === "unavailable";
+
+    if (isNonEditable) {
+      return null;
+    }
+
+    const solidCheckIcon = (
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-background" />
+    );
+
+    let icon = solidCheckIcon;
+    let text = t("saveStatus.saved");
+    let textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+
+    switch (saveStatus) {
+      case "saving":
+        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/70" />;
+        text = t("saveStatus.saving");
+        textClass = "text-muted-foreground/70 font-medium";
+        break;
+      case "auto_saving":
+        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/70" />;
+        text = t("saveStatus.autoSaving");
+        textClass = "text-muted-foreground/70 font-medium";
+        break;
+      case "auto_saved":
+        icon = solidCheckIcon;
+        text = t("saveStatus.autoSaved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "manually_saved":
+        icon = solidCheckIcon;
+        text = t("saveStatus.manuallySaved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "saved":
+        icon = solidCheckIcon;
+        text = t("saveStatus.saved");
+        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
+        break;
+      case "unsaved":
+        icon = <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+        text = t("saveStatus.unsavedChanges");
+        textClass = "text-amber-600 dark:text-amber-400 font-medium";
+        break;
+      case "failed":
+        icon = <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />;
+        text = t("saveStatus.saveFailed");
+        textClass = "text-rose-600 dark:text-rose-400 font-medium";
+        break;
+    }
+
+    const getLastEditedLabel = () => {
+      if (!lastEditedTime) return t("saveStatus.editedJustNow");
+      const diffSec = Math.floor((Date.now() - lastEditedTime) / 1000);
+      if (diffSec < 10) return t("saveStatus.editedJustNow");
+      if (diffSec < 60) return t("saveStatus.editedAt", { time: t("saveStatus.secondsAgo", { count: diffSec }) });
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return t("saveStatus.editedAt", { time: t("saveStatus.minutesAgo", { count: diffMin }) });
+      const diffHr = Math.floor(diffMin / 60);
+      return t("saveStatus.editedAt", { time: t("saveStatus.hoursAgo", { count: diffHr }) });
+    };
+
+    return (
+      <div className="flex items-center gap-2 select-none">
+        <div className={`flex items-center gap-1.5 ${textClass}`}>
+          {icon}
+          <span>{text}</span>
+        </div>
+        <span className="text-muted-foreground/30 font-light">|</span>
+        <span className="text-muted-foreground/70">{getLastEditedLabel()}</span>
+      </div>
+    );
+  }
+
+  function renderActionButtons() {
+    return (
+      <Fragment>
+        {note?.contentFormat === "html" && (
+          <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none mr-1.5">
+            <button
+              type="button"
+              onClick={() => setHtmlPreviewOpen(false)}
+              className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                !htmlPreviewOpen
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Code className="h-3 w-3" />
+              <span>{t("editor.modeEditor")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setHtmlPreviewOpen(true)}
+              className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                htmlPreviewOpen
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Eye className="h-3 w-3" />
+              <span>{t("editor.modePreview")}</span>
+            </button>
+          </div>
+        )}
+        <DropdownMenu>
+          <Tooltip>
+          <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+              <Save className="h-3.5 w-3.5" />
+              <span className="sr-only">{t("editor.saveFile")}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{t("editor.saveFile")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
+            <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <Save className="h-4 w-4" />
+              <span>{t("editor.save")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!note} onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <File className="h-4 w-4" />
+              <span>{t("editor.saveAs")}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <Tooltip>
+          <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+              <Download className="h-3.5 w-3.5" />
+              <span className="sr-only">{t("editor.exportFile")}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{t("editor.exportFile")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
+            <DropdownMenuItem disabled={!note} onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <FileText className="h-4 w-4" />
+              <span>{t("editor.exportPdf")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!note} onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <FileCode className="h-4 w-4" />
+              <span>{t("editor.exportWord")}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Tooltip>
+        <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={!note}
+          className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+          onClick={() => {
+            if (settings.confirmBeforeDelete) {
+              setDeleteConfirmOpen(true);
+            } else {
+              void handleDeleteNote();
+            }
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span className="sr-only">{t("editor.deleteNote")}</span>
+        </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
+        </Tooltip>
+      </Fragment>
+    );
+  }
 
   if (!note) {
     return (
@@ -3089,198 +3493,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   );
   const saveStatusLabel = isSaved ? t("editor.saveStatusSaved") : t("editor.saveStatusUnsaved");
 
-  const getExportBaseName = () => {
-    const name = note.fileName || note.title?.trim() || t("editor.untitled");
-    const dotIdx = name.lastIndexOf(".");
-    return dotIdx > 0 ? name.slice(0, dotIdx) : name;
-  };
 
-  const handleExportPdf = () => {
-    const content = editor?.getHTML() ?? note.content;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(
-      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${displayFileName}</title>` +
-      `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
-      `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
-      `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
-      `</head><body>${content}</body></html>`
-    );
-    win.document.close();
-    win.focus();
-    win.print();
-  };
 
-  const handleExportWord = () => {
-    const content = editor?.getHTML() ?? note.content;
-    const html =
-      `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
-      `<head><meta charset="UTF-8"></head><body>${content}</body></html>`;
-    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${getExportBaseName()}.doc`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
-  const renderSaveStatusIndicator = () => {
-    if (!note) {
-      return (
-        <div className="flex items-center gap-2 select-none">
-          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <span>{t("saveStatus.saved")}</span>
-          </div>
-          <span className="text-muted-foreground/30 font-light">|</span>
-          <span className="text-muted-foreground/70">{t("saveStatus.editedJustNow")}</span>
-        </div>
-      );
-    }
-
-    let icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
-    let text = t("saveStatus.saved");
-    let textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
-
-    switch (saveStatus) {
-      case "saving":
-        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />;
-        text = t("saveStatus.saving");
-        textClass = "text-blue-600 dark:text-blue-400 font-medium";
-        break;
-      case "auto_saving":
-        icon = <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />;
-        text = t("saveStatus.autoSaving");
-        textClass = "text-blue-600 dark:text-blue-400 font-medium";
-        break;
-      case "auto_saved":
-        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
-        text = t("saveStatus.autoSaved");
-        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
-        break;
-      case "manually_saved":
-        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
-        text = t("saveStatus.manuallySaved");
-        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
-        break;
-      case "saved":
-        icon = <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
-        text = t("saveStatus.saved");
-        textClass = "text-emerald-600 dark:text-emerald-400 font-medium";
-        break;
-      case "unsaved":
-        icon = <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
-        text = t("saveStatus.unsavedChanges");
-        textClass = "text-amber-600 dark:text-amber-400 font-medium";
-        break;
-      case "failed":
-        icon = <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />;
-        text = t("saveStatus.saveFailed");
-        textClass = "text-rose-600 dark:text-rose-400 font-medium";
-        break;
-      case "unavailable":
-        icon = <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-        text = t("saveStatus.saveUnavailable");
-        textClass = "text-muted-foreground font-medium";
-        break;
-    }
-
-    const getLastEditedLabel = () => {
-      if (!lastEditedTime) return t("saveStatus.editedJustNow");
-      const diffSec = Math.floor((Date.now() - lastEditedTime) / 1000);
-      if (diffSec < 10) return t("saveStatus.editedJustNow");
-      if (diffSec < 60) return t("saveStatus.editedAt", { time: `${diffSec}s` });
-      const diffMin = Math.floor(diffSec / 60);
-      if (diffMin < 60) return t("saveStatus.editedAt", { time: `${diffMin}m` });
-      const diffHr = Math.floor(diffMin / 60);
-      return t("saveStatus.editedAt", { time: `${diffHr}h` });
-    };
-
-    return (
-      <div className="flex items-center gap-2 select-none">
-        <div className={`flex items-center gap-1.5 ${textClass}`}>
-          {icon}
-          <span>{text}</span>
-        </div>
-        <span className="text-muted-foreground/30 font-light">|</span>
-        <span className="text-muted-foreground/70">{getLastEditedLabel()}</span>
-      </div>
-    );
-  };
-
-  const renderActionButtons = () => (
-    <Fragment>
-      <DropdownMenu>
-        <Tooltip>
-        <TooltipTrigger asChild>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
-            <Save className="h-3.5 w-3.5" />
-            <span className="sr-only">{t("editor.saveFile")}</span>
-          </Button>
-        </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.saveFile")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
-          <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-            <Save className="h-4 w-4" />
-            <span>{t("editor.save")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={!note} onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-            <File className="h-4 w-4" />
-            <span>{t("editor.saveAs")}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <Tooltip>
-        <TooltipTrigger asChild>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
-            <Download className="h-3.5 w-3.5" />
-            <span className="sr-only">{t("editor.exportFile")}</span>
-          </Button>
-        </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.exportFile")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
-          <DropdownMenuItem disabled={!note} onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-            <FileText className="h-4 w-4" />
-            <span>{t("editor.exportPdf")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={!note} onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-            <FileCode className="h-4 w-4" />
-            <span>{t("editor.exportWord")}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Tooltip>
-      <TooltipTrigger asChild>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        disabled={!note}
-        className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
-        onClick={() => {
-          if (settings.confirmBeforeDelete) {
-            setDeleteConfirmOpen(true);
-          } else {
-            void handleDeleteNote();
-          }
-        }}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        <span className="sr-only">{t("editor.deleteNote")}</span>
-      </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
-      </Tooltip>
-    </Fragment>
-  );
 
   return (
     <>
@@ -3288,7 +3503,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         {/* ...ปุ่ม close split เดิมถูกลบออก... */}
-        <div className="px-3 py-2 sm:px-4 md:px-6">
+        <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3 md:hidden">
           <div>
             <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">NOTES+</p>
@@ -3324,12 +3539,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         </div>
         <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
-          {note.contentFormat === "html" && (
-            <div className="flex w-fit items-center gap-1.5 text-sm font-medium text-muted-foreground">
-              <FileCode className="h-4 w-4" />
-              <span>HTML Editor</span>
-            </div>
-          )}
           {/* Hide toolbar if not txt or md */}
           {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
@@ -4103,23 +4312,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           <div className="ml-auto flex items-center gap-1">
-          {note.contentFormat === "html" && (
-          <Tooltip>
-          <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant={htmlPreviewOpen ? "secondary" : "ghost"}
-            size="icon"
-            className="h-8 w-8 rounded-full"
-            onClick={() => setHtmlPreviewOpen((v) => !v)}
-          >
-            {htmlPreviewOpen ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            <span className="sr-only">Preview</span>
-          </Button>
-          </TooltipTrigger>
-          <TooltipContent>{htmlPreviewOpen ? t("editor.hidePreview") : t("editor.showPreview")}</TooltipContent>
-          </Tooltip>
-          )}
           {statusPortalTarget && createPortal(renderSaveStatusIndicator(), statusPortalTarget)}
           {portalTarget && createPortal(renderActionButtons(), portalTarget)}
           <input ref={docxInputRef} type="file" accept=".docx" className="hidden" onChange={handleImportDocx} />
@@ -4163,7 +4355,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               editor.commands.focus("end");
             }
           }}
-          className={`flex flex-col cursor-text ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} ${note.contentFormat === "html" && htmlPreviewOpen ? "md:w-1/2" : "w-full"}`}
+          className={`flex flex-col cursor-text ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} w-full`}
         >
           {note.fileType === "image" ? (
             <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
@@ -4188,12 +4380,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <p className="text-xs opacity-60">{t("editor.previewNotSupported")}</p>
             </div>
           ) : note.contentFormat === "html" ? (
-            <HtmlCodeEditor
-              key={note.id}
-              value={note.content}
-              onChange={(val) => onUpdate(note.id, { content: val })}
-              fontSize={editorFontSize}
-            />
+            htmlPreviewOpen ? (
+              <div className="flex-1 w-full h-full overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between border-b border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Play className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    <span className="font-semibold text-foreground/80">HTML Preview</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openHtmlPreviewInNewTab}
+                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground flex items-center gap-1 text-xs"
+                    aria-label="Open HTML in browser"
+                    title="Open HTML in browser"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <iframe
+                  className="flex-1 w-full bg-white border-0"
+                  srcDoc={previewHtml || note.content}
+                  sandbox="allow-scripts allow-same-origin"
+                  title="HTML Preview"
+                />
+              </div>
+            ) : (
+              <HtmlCodeEditor
+                key={note.id}
+                value={note.content}
+                onChange={(val) => onUpdate(note.id, { content: val })}
+                fontSize={editorFontSize}
+              />
+            )
           ) : (
             <div className={`flex w-full min-w-0 flex-col overflow-x-hidden px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto ${
               settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
@@ -4204,31 +4422,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </div>
           )}
         </div>
-        {note.contentFormat === "html" && htmlPreviewOpen && (
-          <div className="flex-1 border-t border-border md:border-t-0 md:border-l overflow-hidden flex flex-col md:w-1/2">
-            <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30">
-              <div className="flex items-center gap-2">
-                <Play className="h-3 w-3" />
-                <span>Run</span>
-              </div>
-              <button
-                type="button"
-                onClick={openHtmlPreviewInNewTab}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                aria-label="Open HTML in browser"
-                title="Open HTML in browser"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <iframe
-              className="flex-1 w-full bg-white"
-              srcDoc={note.contentFormat === "html" ? previewHtml || note.content : (editor?.getHTML() ?? note.content)}
-              sandbox="allow-scripts allow-same-origin"
-              title="HTML Preview"
-            />
-          </div>
-        )}
         </div>
 
         {/* Editor Status Bar */}
