@@ -13,6 +13,7 @@ export interface Note {
   contentFormat?: "plain" | "markdown" | "html";
   folderPath?: string;
   fileType?: "image" | "binary";
+  isFavorite?: boolean;
 }
 
 const STORAGE_KEY = "notes-app-data";

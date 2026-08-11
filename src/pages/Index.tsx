@@ -53,6 +53,16 @@ export default function Index() {
     }
   }, [activeTabNote, isMobile]);
 
+  useEffect(() => {
+    if (activeTabNote) {
+      const rawName = activeTabNote.fileName || activeTabNote.title || "";
+      const baseName = extractBaseTitleFromFileName(rawName) || rawName || "Untitled";
+      document.title = baseName;
+    } else {
+      document.title = "Luno Note";
+    }
+  }, [activeTabNote?.fileName, activeTabNote?.title, activeTabNote?.id]);
+
   const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
     const raw = (options?.fileName ?? "").trim();
     const safe = raw.replace(/[\\/:*?"<>|]/g, "_");

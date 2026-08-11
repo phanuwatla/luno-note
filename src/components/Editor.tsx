@@ -1,7 +1,7 @@
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import RightPanel from "@/components/RightPanel";
 import { AnimatePresence } from "framer-motion";
-import { Note, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
+import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import {
   Bold,
   CheckCircle2,
@@ -438,11 +438,25 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (editor) => editor.chain().focus().toggleCode().run(),
   },
   {
+    id: "codeBlock",
+    titleKey: "editor.codeBlock",
+    icon: <FileCode className="mr-2 h-4 w-4" />,
+    keywords: ["codeblock", "code", "block", "โค้ด", "บล็อกโค้ด"],
+    action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
+  },
+  {
     id: "blockquote",
     titleKey: "editor.blockquote",
     icon: <Quote className="mr-2 h-4 w-4" />,
     keywords: ["quote", "blockquote", "คำพูด", "อ้างอิง"],
     action: (editor) => editor.chain().focus().toggleBlockquote().run(),
+  },
+  {
+    id: "horizontalRule",
+    titleKey: "editor.horizontalRule",
+    icon: <Minus className="mr-2 h-4 w-4" />,
+    keywords: ["hr", "horizontal", "rule", "line", "divider", "เส้นแบ่ง", "เส้น"],
+    action: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   {
     id: "emoji",
@@ -1402,6 +1416,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    if (note) {
+      const rawName = note.fileName || note.title || "";
+      const baseName = extractBaseTitleFromFileName(rawName) || rawName || "Untitled";
+      document.title = baseName;
+    } else {
+      document.title = "Luno Note";
+    }
+  }, [note?.fileName, note?.title, note?.id]);
   const { t } = useTranslation();
 
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
@@ -3506,7 +3530,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3 md:hidden">
           <div>
-            <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">NOTES+</p>
+            <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">LUNO</p>
             <p className="text-xs text-muted-foreground">{t("editor.mobileWritingMode")}</p>
           </div>
           <div className="min-w-0 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground relative">
@@ -3558,7 +3582,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "taskList", group: "list", labelKey: "editor.checkbox" },
               { id: "toggle", group: "block", labelKey: "editor.toggle" },
               { id: "code", group: "block", labelKey: "editor.inlineCode" },
+              { id: "codeBlock", group: "block", labelKey: "editor.codeBlock" },
               { id: "blockquote", group: "block", labelKey: "editor.blockquote" },
+              { id: "horizontalRule", group: "block", labelKey: "editor.horizontalRule" },
               { id: "table", group: "block", labelKey: "editor.insertTable" },
               { id: "emoji", group: "media", labelKey: "editor.insertEmoji" },
               { id: "link", group: "media", labelKey: "editor.link" },
@@ -3862,6 +3888,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.code")}</TooltipContent>
                     </Tooltip>
                   );
+                case "codeBlock":
+                  return (
+                    <Tooltip key="codeBlock">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("codeBlock") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+                        >
+                          <FileCode className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.codeBlock")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.codeBlock")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "blockquote":
                   return (
                     <Tooltip key="blockquote">
@@ -3880,6 +3926,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t("editor.blockquote")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "horizontalRule":
+                  return (
+                    <Tooltip key="horizontalRule">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().setHorizontalRule().run()}
+                        >
+                          <Minus className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.horizontalRule")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.horizontalRule")}</TooltipContent>
                     </Tooltip>
                   );
                 case "table":
@@ -4486,7 +4552,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   });
                 }
               }}
-              onDelete={onDelete}
+              onDelete={(n) => onDelete(n.id)}
             />
           )}
         </AnimatePresence>

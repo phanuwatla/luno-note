@@ -48,7 +48,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
               {this.state.error?.message || "Unknown error"}
             </p>
             <Button type="button" onClick={this.handleReload} className="w-full">
-              Reload Notes App
+              Reload Luno App
             </Button>
           </div>
         </div>
