@@ -483,7 +483,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .ProseMirror th {
   font-weight: 600;
   text-align: left;
-  background-color: hsl(var(--muted) / 0.4);
+  background-color: hsl(var(--muted));
 }
 .ProseMirror .selectedCell:after {
   z-index: 2;
