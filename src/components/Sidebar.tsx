@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings, Home, Compass, Star, Tag, HelpCircle, Sun, Moon, ArrowDown } from "lucide-react";
+import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings, Home, Compass, Star, Tag, HelpCircle, Sun, Moon, ArrowDown, X } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,6 +14,7 @@ import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
 import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { getTagColorClass } from "@/lib/tagColors";
 import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 
 interface SidebarProps {
@@ -47,6 +48,8 @@ interface SidebarProps {
   onOpenSidebar?: () => void;
   onClose?: () => void;
   onOpenSettings?: () => void;
+  onRenameTagGlobally?: (oldTag: string, newTag: string) => void;
+  onDeleteTagGlobally?: (tagToDelete: string) => void;
 }
 
 interface FolderNode {
@@ -169,10 +172,18 @@ function MarkdownIndicator({ active }: { active: boolean }) {
   );
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally }: SidebarProps) {
   const { settings, updateSetting } = useAppSettings();
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
+
+  const [renameTagModalOpen, setRenameTagModalOpen] = useState(false);
+  const [renameTagOldName, setRenameTagOldName] = useState("");
+  const [renameTagNewName, setRenameTagNewName] = useState("");
+  const [deleteTagModalOpen, setDeleteTagModalOpen] = useState(false);
+  const [deleteTagTarget, setDeleteTagTarget] = useState("");
+
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
@@ -255,18 +266,65 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
   const hasTreeView = useMemo(() => notes.some((n) => n.folderPath !== undefined) || folderPaths.length > 0, [notes, folderPaths]);
 
+  const vaultTagCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const n of notes) {
+      if (n.tags) {
+        for (const t of n.tags) {
+          const norm = t.trim();
+          if (!norm) continue;
+          const lower = norm.toLowerCase();
+          map.set(lower, (map.get(lower) || 0) + 1);
+        }
+      }
+    }
+    const result: Array<{ tag: string; lower: string; count: number }> = [];
+    const seenLower = new Set<string>();
+    for (const n of notes) {
+      if (n.tags) {
+        for (const t of n.tags) {
+          const norm = t.trim();
+          const lower = norm.toLowerCase();
+          if (norm && !seenLower.has(lower)) {
+            seenLower.add(lower);
+            result.push({ tag: norm, lower, count: map.get(lower) || 0 });
+          }
+        }
+      }
+    }
+    return result.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [notes]);
+
   const filtered = useMemo(
     () => {
-      if (!query) return notes;
-      const q = query.toLowerCase();
-      return notes.filter((n) => {
+      let list = notes;
+
+      if (navFilter === "favorites") {
+        list = list.filter((n) => n.isFavorite);
+      }
+
+      if (selectedTagFilter) {
+        const targetLower = selectedTagFilter.toLowerCase();
+        list = list.filter((n) => n.tags?.some((t) => t.toLowerCase() === targetLower));
+      }
+
+      if (!query) return list;
+
+      const q = query.trim().toLowerCase();
+      if (q.startsWith("#")) {
+        const tagQ = q.slice(1);
+        return list.filter((n) => n.tags?.some((t) => t.toLowerCase().includes(tagQ)));
+      }
+
+      return list.filter((n) => {
         const titleMatch = n.title?.toLowerCase().includes(q);
         const fileNameMatch = n.fileName?.toLowerCase().includes(q);
         const contentMatch = n.content?.toLowerCase().includes(q);
-        return titleMatch || fileNameMatch || contentMatch;
+        const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
+        return titleMatch || fileNameMatch || contentMatch || tagMatch;
       });
     },
-    [notes, query],
+    [notes, query, navFilter, selectedTagFilter],
   );
 
   const folderTree = useMemo(() => buildFolderTree(notes, folderPaths, openedFolderName), [notes, folderPaths, openedFolderName]);
@@ -771,7 +829,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 <button
                   type="button"
                   onClick={onOpenSidebar}
-                  className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 hover:bg-sidebar-accent hover:text-foreground"
+                  className="group relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 hover:bg-primary/10 hover:text-primary"
                 >
                   {/* Normal state: Logo */}
                   <span className="transition-all duration-200 group-hover:scale-0 group-hover:opacity-0 flex items-center justify-center">
@@ -779,7 +837,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                   </span>
 
                   {/* Hover state: Open Sidebar Button */}
-                  <span className="absolute inset-0 flex items-center justify-center opacity-0 scale-75 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100 text-primary-foreground">
+                  <span className="absolute inset-0 flex items-center justify-center opacity-0 scale-75 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100 text-primary">
                     <PanelRightCloseIcon className="h-4 w-4" />
                   </span>
                 </button>
@@ -978,29 +1036,37 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">{t("sidebar.workspace")}</span>
         <div className="flex items-center gap-1">
           {onOpenFolder && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
-              onClick={() => void onOpenFolder()}
-              title={t("sidebar.openFolder")}
-            >
-              <Folder className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                  onClick={() => void onOpenFolder()}
+                >
+                  <Folder className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("sidebar.openFolder")}</TooltipContent>
+            </Tooltip>
           )}
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
-                title={t("sidebar.newNote")}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" className="w-44 rounded-xl px-0 py-2">
               <DropdownMenuItem onClick={openCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
                 <FileText className="h-4 w-4" />
@@ -1015,55 +1081,144 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </div>
       </div>
 
+      {/* Active Tag Filter Pill */}
+      {selectedTagFilter && (
+        <div className={`mx-2 mb-2 flex items-center justify-between rounded-xl px-3 py-1.5 text-xs border ${getTagColorClass(selectedTagFilter, settings.theme, undefined, settings.tagColorStyle)}`}>
+          <span className="font-semibold truncate flex items-center gap-1">
+            <Tag className="h-3 w-3" /> #{selectedTagFilter}
+          </span>
+          <button type="button" onClick={() => setSelectedTagFilter(null)} className="ml-1 opacity-70 hover:opacity-100 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Tree Content */}
       <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
-        <AnimatePresence initial={false}>
-          {filtered.length === 0 && (query || !hasTreeView) ? (
-            <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
-              <FileText size={24} className="mb-3 opacity-40" />
-              <p className="text-sm">{query ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
+        {navFilter === "tags" ? (
+          <div className="space-y-3 p-1">
+            <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1">
+              <span>{t("sidebar.tags") || "Tags"} ({vaultTagCounts.length})</span>
             </div>
-          ) : hasTreeView && !query ? (
-            renderFolderNode(folderTree)
-          ) : (
-            filtered.map((note) => renderNote(note))
-          )}
-        </AnimatePresence>
+            {vaultTagCounts.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                No tags found in workspace
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {vaultTagCounts.map(({ tag, count }, idx) => {
+                  const isSelected = selectedTagFilter?.toLowerCase() === tag.toLowerCase();
+                  return (
+                    <div
+                      key={tag}
+                      className={`group flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer border ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground font-semibold border-primary"
+                          : getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)
+                      }`}
+                      onClick={() => setSelectedTagFilter(isSelected ? null : tag)}
+                    >
+                      <span>#{tag}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({count})</span>
+                      <div className="hidden group-hover:flex items-center gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          title="Rename tag"
+                          onClick={() => {
+                            setRenameTagOldName(tag);
+                            setRenameTagNewName(tag);
+                            setRenameTagModalOpen(true);
+                          }}
+                          className="hover:text-amber-500 transition-colors p-0.5"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete tag"
+                          onClick={() => {
+                            setDeleteTagTarget(tag);
+                            setDeleteTagModalOpen(true);
+                          }}
+                          className="hover:text-red-500 transition-colors p-0.5"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <hr className="border-sidebar-border/60 my-2" />
+            <div className="text-xs font-semibold text-muted-foreground px-1 mb-1">
+              Matching Notes ({filtered.length})
+            </div>
+            <AnimatePresence initial={false}>
+              {filtered.map((note) => renderNote(note))}
+            </AnimatePresence>
+          </div>
+        ) : (
+          <AnimatePresence initial={false}>
+            {filtered.length === 0 && (query || !hasTreeView || selectedTagFilter) ? (
+              <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
+                <FileText size={24} className="mb-3 opacity-40" />
+                <p className="text-sm">{query || selectedTagFilter ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
+              </div>
+            ) : hasTreeView && !query && !selectedTagFilter ? (
+              renderFolderNode(folderTree)
+            ) : (
+              filtered.map((note) => renderNote(note))
+            )}
+          </AnimatePresence>
+        )}
       </div>
 
       {/* Sidebar Footer */}
       <div className="border-t border-sidebar-border/60 px-3 py-2 flex items-center justify-between shrink-0 bg-sidebar">
         <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-            onClick={onOpenSettings}
-            title={t("common.settings")}
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-            title={t("sidebar.help")}
-          >
-            <HelpCircle className="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                onClick={onOpenSettings}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("common.settings")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sidebar.help")}</TooltipContent>
+          </Tooltip>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-          onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
-          title={t("sidebar.toggleTheme")}
-        >
-          {settings.colorScheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+              onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
+            >
+              {settings.colorScheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("sidebar.toggleTheme")}</TooltipContent>
+        </Tooltip>
       </div>
 
       <Dialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>
@@ -1073,22 +1228,16 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <DialogDescription>{t("sidebar.createFileDescription")}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-1">
+          <div className="space-y-4 py-2">
             <div>
-              <label htmlFor="new-file-name" className="mb-2 block text-sm font-medium text-foreground">
+              <label htmlFor="create-file-name" className="mb-2 block text-sm font-medium text-foreground">
                 {t("sidebar.fileNameLabel")}
               </label>
               <input
-                id="new-file-name"
+                id="create-file-name"
                 type="text"
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleCreateFromDialog();
-                  }
-                }}
                 placeholder="untitled"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
               />
@@ -1096,7 +1245,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
             <div>
               <label htmlFor="new-file-ext" className="mb-2 block text-sm font-medium text-foreground">
-                {t("sidebar.fileExtensionLabel")}
+                {t("sidebar.fileTypeLabel")}
               </label>
               <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v === "md" ? "md" : v === "html" ? "html" : "txt")}>
                 <SelectTrigger id="new-file-ext" className="w-full">

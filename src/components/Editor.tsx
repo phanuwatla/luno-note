@@ -4,6 +4,7 @@ import { AnimatePresence } from "framer-motion";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import {
   Bold,
+  Check,
   CheckCircle2,
   Circle,
   Code,
@@ -59,15 +60,30 @@ import {
   ChevronRight,
   Columns,
   Layers,
-  X
+  X,
+  Wand,
+  Scissors,
+  Maximize2,
+  Minimize2,
+  BookOpen,
+  MessageCircle,
+  Languages,
+  Key
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
+import { SparklesIcon } from "@/components/icons/SparklesIcon";
+import { WandSparklesIcon } from "@/components/icons/WandSparklesIcon";
+import { SpellCheckIcon } from "@/components/icons/SpellCheckIcon";
+import { BriefcaseBusinessIcon } from "@/components/icons/BriefcaseBusinessIcon";
+import { PenLineIcon } from "@/components/icons/PenLineIcon";
+import { AiDiffExtension } from "@/components/editor/AiDiffExtension";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -90,6 +106,9 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
+import { parseFrontmatterAndTags, updateFrontmatterTags } from "@/lib/frontmatter";
+import { getTagColorClass } from "@/lib/tagColors";
+import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
@@ -1434,8 +1453,53 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const turndown = useMemo(() => {
     const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
 
-    // Preserve table elements so table structure & layout are saved intact
-    td.keep(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col"]);
+    // Convert HTML tables back into clean GFM Markdown tables unless originally HTML or using merged cells
+    td.addRule("table", {
+      filter: "table",
+      replacement: (_content, node) => {
+        const table = node as HTMLElement;
+
+        const hasSpans = Boolean(table.querySelector('[colspan]:not([colspan="1"]), [rowspan]:not([rowspan="1"])'));
+        const isOriginalHtmlTable = table.getAttribute("data-original-html-table") === "true";
+
+        if (isOriginalHtmlTable || hasSpans) {
+          const clone = table.cloneNode(true) as HTMLElement;
+          clone.removeAttribute("data-original-html-table");
+          return `\n\n${clone.outerHTML}\n\n`;
+        }
+
+        const rows = Array.from(table.querySelectorAll("tr"));
+        if (rows.length === 0) return "";
+
+        const matrix: string[][] = [];
+        let maxCols = 0;
+
+        rows.forEach((row) => {
+          const cells = Array.from(row.querySelectorAll("th, td"));
+          const rowData = cells.map((cell) => {
+            const text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
+            return text;
+          });
+          if (rowData.length > maxCols) maxCols = rowData.length;
+          matrix.push(rowData);
+        });
+
+        if (matrix.length === 0 || maxCols === 0) return "";
+
+        const header = matrix[0];
+        while (header.length < maxCols) header.push("");
+        const headerLine = `| ${header.join(" | ")} |`;
+        const separatorLine = `| ${Array(maxCols).fill("---").join(" | ")} |`;
+
+        const bodyLines = matrix.slice(1).map((row) => {
+          while (row.length < maxCols) row.push("");
+          return `| ${row.join(" | ")} |`;
+        });
+
+        const lines = [headerLine, separatorLine, ...bodyLines];
+        return `\n\n${lines.join("\n")}\n\n`;
+      },
+    });
 
     // Suppress individual taskItem processing – handled wholesale by taskList rule below
     td.addRule("taskItem", {
@@ -1548,47 +1612,57 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   /** Detect if a string is a Tiptap JSON document */
-  const isTiptapJson = (text: string) => typeof text === "string" && text.trimStart().startsWith('{"type":"doc"');
+  const isTiptapJson = (text: string) => typeof text === "string" && (text.trimStart().startsWith('{"type":"doc"') || text.includes('{"type":"doc"'));
 
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
   const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false): string | Record<string, unknown> => {
-    if (isTxt) {
-      if (typeof text !== "string" || !text.trim()) return "<p></p>";
-      if (isTiptapJson(text)) {
-        try { return JSON.parse(text); } catch { /* fall through */ }
+    if (typeof text !== "string" || !text.trim()) {
+      return baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
+    }
+
+    let cleanText = text;
+
+    // Auto-recover if JSON string is embedded after Frontmatter
+    if (isTiptapJson(cleanText)) {
+      const jsonStart = cleanText.indexOf('{"type":"doc"');
+      if (jsonStart >= 0) {
+        try {
+          const jsonStr = cleanText.slice(jsonStart);
+          const json = JSON.parse(jsonStr);
+          if (json && Array.isArray(json.content)) {
+            const firstNode = json.content[0];
+            if (!firstNode || firstNode.type !== "heading" || firstNode.attrs?.level !== 1) {
+              const h1Node: Record<string, unknown> = {
+                type: "heading",
+                attrs: { level: 1 },
+              };
+              if (baseTitle) {
+                h1Node.content = [{ type: "text", text: baseTitle }];
+              }
+              json.content = [h1Node, ...json.content];
+            } else if (baseTitle && (!firstNode.content || firstNode.content.length === 0)) {
+              firstNode.content = [{ type: "text", text: baseTitle }];
+            }
+            return json;
+          }
+        } catch { /* fall through */ }
       }
-      return toEditorHtml(text);
+    }
+
+    // Strip Frontmatter block for Markdown view
+    const parsedFm = parseFrontmatterAndTags(cleanText);
+    if (parsedFm.hasFrontmatter) {
+      cleanText = parsedFm.bodyContent;
+    }
+
+    if (isTxt) {
+      if (!cleanText.trim()) return "<p></p>";
+      return toEditorHtml(cleanText);
     }
 
     const titleH1Html = baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
+    const editorHtml = toEditorHtml(cleanText);
 
-    if (typeof text !== "string" || !text.trim()) {
-      return titleH1Html;
-    }
-
-    if (isTiptapJson(text)) {
-      try {
-        const json = JSON.parse(text);
-        if (json && Array.isArray(json.content)) {
-          const firstNode = json.content[0];
-          if (!firstNode || firstNode.type !== "heading" || firstNode.attrs?.level !== 1) {
-            const h1Node: Record<string, unknown> = {
-              type: "heading",
-              attrs: { level: 1 },
-            };
-            if (baseTitle) {
-              h1Node.content = [{ type: "text", text: baseTitle }];
-            }
-            json.content = [h1Node, ...json.content];
-          } else if (baseTitle && (!firstNode.content || firstNode.content.length === 0)) {
-            firstNode.content = [{ type: "text", text: baseTitle }];
-          }
-          return json;
-        }
-      } catch { /* fall through */ }
-    }
-
-    const editorHtml = toEditorHtml(text);
     if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
       return titleH1Html + editorHtml;
     }
@@ -1675,7 +1749,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       temp.innerHTML = lines.map((l) => `<p>${l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "<br>"}</p>`).join("");
     } else {
       try {
-        const parsed = marked.parse(text, { async: false, gfm: true, breaks: true });
+        const textWithTableAttr = text.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
+        const parsed = marked.parse(textWithTableAttr, { async: false, gfm: true, breaks: true });
         temp.innerHTML = typeof parsed === "string" ? parsed : text;
       } catch {
         temp.innerHTML = text;
@@ -1683,7 +1758,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     prepareDomForEditor(temp);
-    return temp.innerHTML;
+    // Cleanup any legacy/corrupted <hr><p>tags:</p>... inserted at the top of temp
+    const cleanHtml = temp.innerHTML.replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "");
+    return cleanHtml;
   };
 
   const EDITOR_CLASSES =
@@ -1876,6 +1953,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Toggle,
       TaskList,
       TaskItem,
+      AiDiffExtension,
       Table.configure({
         resizable: true,
       }),
@@ -2200,6 +2278,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
   }, [scheduleAutoSaveDisk]);
 
+  const prevTagsStrRef = useRef<string>("");
+  useEffect(() => {
+    if (!note) return;
+    const currentTagsStr = JSON.stringify(note.tags || []);
+    if (prevTagsStrRef.current && prevTagsStrRef.current !== currentTagsStr) {
+      scheduleAutoSaveDiskRef.current?.();
+    }
+    prevTagsStrRef.current = currentTagsStr;
+  }, [note?.tags]);
+
   useEffect(() => {
     return () => {
       flushPendingRename();
@@ -2435,6 +2523,102 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     editor.chain().focus().setTextSelection({ from, to: from + convertedText.length }).run();
   };
 
+  // AI Assistant states & handlers
+  const [aiApiKeyModalOpen, setAiApiKeyModalOpen] = useState(false);
+  const [aiResultModalOpen, setAiResultModalOpen] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiOutputText, setAiOutputText] = useState("");
+  const [aiActionPending, setAiActionPending] = useState<AiActionType | null>(null);
+  const [aiErrorMsg, setAiErrorMsg] = useState("");
+  const [aiKeyInputValue, setAiKeyInputValue] = useState("");
+
+  const handleAiAction = async (action: AiActionType) => {
+    if (!editor) return;
+
+    if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+      setAiActionPending(action);
+      setAiKeyInputValue("");
+      setAiErrorMsg("");
+      setAiApiKeyModalOpen(true);
+      return;
+    }
+
+    const { from, to } = editor.state.selection;
+    let targetText = "";
+    let selectionFrom = from;
+    let selectionTo = to;
+
+    if (from !== to) {
+      targetText = editor.state.doc.textBetween(from, to, " ");
+    } else {
+      const currentNode = editor.state.selection.$from.parent;
+      if (currentNode && currentNode.textContent.trim()) {
+        targetText = currentNode.textContent.trim();
+        selectionFrom = editor.state.selection.$from.start();
+        selectionTo = editor.state.selection.$from.end();
+      } else {
+        targetText = editor.getText().trim();
+        selectionFrom = 0;
+        selectionTo = editor.state.doc.content.size;
+      }
+    }
+
+    if (!targetText || !targetText.trim()) {
+      showUiAlert("โปรดเลือกหรือพิมพ์ข้อความที่ต้องการให้ผู้ช่วย AI ดำเนินการ");
+      return;
+    }
+
+    setAiGenerating(true);
+    setAiErrorMsg("");
+
+    try {
+      const result = await runGeminiAction(settings.geminiApiKey, action, targetText);
+      setAiOutputText(result);
+
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from: selectionFrom, to: selectionTo },
+          {
+            type: "aiDiffNode",
+            attrs: {
+              originalText: targetText,
+              proposedText: result,
+              action: action,
+            },
+          }
+        )
+        .run();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Gemini API Key") || msg.includes("API key")) {
+        setAiActionPending(action);
+        setAiErrorMsg(msg);
+        setAiKeyInputValue(settings.geminiApiKey);
+        setAiApiKeyModalOpen(true);
+      } else {
+        showUiAlert(`เกิดข้อผิดพลาด AI: ${msg}`);
+      }
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const handleSaveApiKeyFromModal = () => {
+    const trimmed = aiKeyInputValue.trim();
+    if (!trimmed) return;
+    updateSetting("geminiApiKey", trimmed);
+    setAiApiKeyModalOpen(false);
+    if (aiActionPending) {
+      const actionToRun = aiActionPending;
+      setAiActionPending(null);
+      setTimeout(() => {
+        handleAiAction(actionToRun);
+      }, 100);
+    }
+  };
+
   const openLinkDialog = () => {
     if (!editor) return;
     rememberSelection();
@@ -2547,10 +2731,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const parseAndSetContent = (text: string, format?: "plain" | "markdown") => {
     if (!note) return;
-    // For plain text, store as plain text directly
-    // For markdown, parse and store as HTML
-    const content = format === "plain" ? text : marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
-    onUpdate(note.id, { content, contentFormat: format });
+    const parsedFm = parseFrontmatterAndTags(text);
+    const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : text;
+    const content = format === "plain" ? cleanText : (marked.parse(cleanText, { async: false, gfm: true, breaks: true }) as string);
+    const tags = Array.from(new Set([...(note.tags || []), ...parsedFm.allTags]));
+    onUpdate(note.id, { content, contentFormat: format, tags });
   };
 
   const canUseNativeFs = canUseNativeFileSystem;
@@ -2754,8 +2939,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return stripped;
     } else {
       // For markdown, convert HTML back to markdown using turndown rules
-      if (isLikelyHtml(htmlContent)) return getMarkdownFromHtml(htmlContent);
-      return htmlContent;
+      let mdText = isLikelyHtml(htmlContent) ? getMarkdownFromHtml(htmlContent) : htmlContent;
+      mdText = updateFrontmatterTags(mdText, note.tags || []);
+      return mdText;
     }
   };
 
@@ -3568,7 +3754,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
-              group: "history" | "heading" | "inline" | "list" | "block" | "media";
+              group: "history" | "heading" | "inline" | "list" | "block" | "media" | "ai";
               labelKey: string;
             }> = [
               { id: "undo", group: "history", labelKey: "editor.undo" },
@@ -3591,16 +3777,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "link", group: "media", labelKey: "editor.link" },
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
+              { id: "aiAssistant", group: "ai", labelKey: "settings.aiAssistant" },
             ];
 
             // For plain text (.txt) files, only keep tools that work without HTML
-            // formatting (undo/redo, emoji, fixLanguage) since all other formatting
+            // formatting (undo/redo, aiAssistant, emoji, fixLanguage) since all other formatting
             // is stripped on save via getPlainTextFromHtml().
             const isPlainText = note?.fileName?.toLowerCase().endsWith(".txt") ||
               (!note?.fileName && getContentFormat() === "plain");
             const TOOLBAR_ITEMS = isPlainText
               ? ALL_TOOLBAR_ITEMS.filter(item =>
-                  ["undo", "redo", "emoji", "fixLanguage"].includes(item.id)
+                  ["undo", "redo", "aiAssistant", "emoji", "fixLanguage"].includes(item.id)
                 )
               : ALL_TOOLBAR_ITEMS;
 
@@ -3688,6 +3875,71 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </TooltipTrigger>
                       <TooltipContent>{t("editor.redo")}</TooltipContent>
                     </Tooltip>
+                  );
+                case "aiAssistant":
+                  return (
+                    <DropdownMenu key="aiAssistant">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                              disabled={!editor || aiGenerating}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {aiGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+                              <span className="sr-only">{t("settings.aiAssistant")}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("settings.aiAssistant")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="end" className="w-56 rounded-xl px-0 py-2">
+                        <DropdownMenuItem onClick={() => handleAiAction("improve")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <WandSparklesIcon className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiImprove")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("fix_grammar")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <SpellCheckIcon className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiFixGrammar")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_shorter")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Minimize2 className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiMakeShorter")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_longer")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Maximize2 className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiMakeLonger")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("simplify")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <BookOpen className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiSimplify")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("formalize")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <BriefcaseBusinessIcon className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiFormalize")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_casual")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <MessageCircle className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiMakeCasual")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("translate")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Languages className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiTranslate")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("continue_writing")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <ArrowRight className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiContinueWriting")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("rewrite")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <PenLineIcon className="mr-2 h-4 w-4" />
+                          <span>{t("settings.aiRewrite")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   );
                 case "h1":
                   return (
@@ -4326,6 +4578,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.fixLanguage")}</span>
                     </DropdownMenuItem>
                   );
+                case "aiAssistant":
+                  return (
+                    <DropdownMenuItem key="aiAssistant" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <SparklesIcon className="mr-2 h-4 w-4" />
+                      <span>{t("settings.aiAssistant")}</span>
+                    </DropdownMenuItem>
+                  );
                 default:
                   return null;
               }
@@ -4400,6 +4659,62 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* AI Assistant API Key Dialog */}
+          <Dialog open={aiApiKeyModalOpen} onOpenChange={setAiApiKeyModalOpen}>
+            <DialogContent className="sm:max-w-md rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>{t("settings.aiApiKeyRequiredTitle")}</DialogTitle>
+                <DialogDescription>{t("settings.aiApiKeyRequiredDesc")}</DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-2 py-1">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="ai-api-key-modal-input" className="block text-sm font-medium text-foreground">
+                    Gemini API Key
+                  </label>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-[hsl(var(--accent))] hover:underline flex items-center gap-1 font-medium"
+                  >
+                    Get Free API Key <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                <input
+                  id="ai-api-key-modal-input"
+                  type="password"
+                  value={aiKeyInputValue}
+                  onChange={(e) => setAiKeyInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSaveApiKeyFromModal();
+                    }
+                  }}
+                  placeholder="AIzaSy..."
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                {aiErrorMsg && (
+                  <p className="text-xs text-destructive bg-destructive/10 p-2.5 rounded-xl border border-destructive/20 mt-1">
+                    {aiErrorMsg}
+                  </p>
+                )}
+              </div>
+
+              <DialogFooter className="gap-2 sm:justify-between">
+                <Button type="button" variant="outline" onClick={() => setAiApiKeyModalOpen(false)}>
+                  {t("common.cancel") || "Cancel"}
+                </Button>
+                <Button type="button" onClick={handleSaveApiKeyFromModal} disabled={!aiKeyInputValue.trim()}>
+                  Save Key & Continue
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+
           {onCloseSplit && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -4454,15 +4769,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <Play className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                     <span className="font-semibold text-foreground/80">HTML Preview</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={openHtmlPreviewInNewTab}
-                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground flex items-center gap-1 text-xs"
-                    aria-label="Open HTML in browser"
-                    title="Open HTML in browser"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={openHtmlPreviewInNewTab}
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground flex items-center gap-1 text-xs"
+                        aria-label="Open HTML in browser"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Open HTML in browser</TooltipContent>
+                  </Tooltip>
                 </div>
                 <iframe
                   className="flex-1 w-full bg-white border-0"
@@ -4483,6 +4802,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <div className={`flex w-full min-w-0 flex-col overflow-x-hidden px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto ${
               settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
             } ${settings.showCodeLineNumbers ? "show-code-line-numbers" : ""}`}>
+              {note.tags && note.tags.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                  {note.tags.map((tag, idx) => (
+                    <span
+                      key={tag}
+                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
+                    >
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
               {editor && <TableInteractiveOverlay editor={editor} />}
               <EditorContent editor={editor} className="w-full min-w-0 max-w-full" />
               <div className="h-6 sm:h-8 md:h-10 lg:h-12 w-full shrink-0 pointer-events-none" />

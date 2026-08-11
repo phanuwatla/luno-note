@@ -20,7 +20,7 @@ export default function Index() {
   const { t } = useTranslation();
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
-  const { notes, createNote, replaceNotes, updateNote, deleteNote } = useNotes();
+  const { notes, createNote, replaceNotes, updateNote, deleteNote, renameTagGlobally, deleteTagGlobally } = useNotes();
   const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, setActiveTabId } = useTabs();
   const activeTabNote = notes.find((n) => n.id === activeTabId) ?? null;
   const { settings } = useAppSettings();
@@ -1086,6 +1086,8 @@ export default function Index() {
           isMobile={isMobile}
           onClose={() => setSidebarOpen(false)}
           confirmBeforeDelete={settings.confirmBeforeDelete}
+          onRenameTagGlobally={renameTagGlobally}
+          onDeleteTagGlobally={deleteTagGlobally}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       </div>

@@ -15,11 +15,15 @@ import {
   FileEdit,
   AlignLeft,
   Link2,
-  Sparkles,
+  Wand,
 } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import type { Editor } from "@tiptap/react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson } from "@/lib/frontmatter";
+import { getTagColorClass } from "@/lib/tagColors";
 
 interface RightPanelProps {
   isOpen: boolean;
@@ -56,6 +60,7 @@ export default function RightPanel({
   onSelectNote,
 }: RightPanelProps) {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
   const [activeTab, setActiveTab] = useState<"outline" | "properties" | "backlinks">("outline");
   const [newTagInput, setNewTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
@@ -156,13 +161,15 @@ export default function RightPanel({
     }
   };
 
-  const handleAddTag = () => {
-    if (!newTagInput.trim() || !note || !onUpdateNote) return;
-    const tagToAdd = newTagInput.trim().replace(/^#/, "");
+  const handleAddTag = (overrideTag?: string) => {
+    const rawVal = overrideTag !== undefined ? overrideTag : newTagInput;
+    const tagToAdd = rawVal.trim().replace(/^#/, "");
+    if (!tagToAdd || !note || !onUpdateNote) return;
+
     const currentTags = note.tags || [];
-    if (!currentTags.includes(tagToAdd)) {
-      onUpdateNote(note.id, { tags: [...currentTags, tagToAdd] });
-    }
+    const updatedTags = Array.from(new Set([...currentTags, tagToAdd]));
+    onUpdateNote(note.id, { tags: updatedTags });
+
     setNewTagInput("");
     setIsAddingTag(false);
   };
@@ -170,7 +177,8 @@ export default function RightPanel({
   const handleRemoveTag = (tagToRemove: string) => {
     if (!note || !onUpdateNote) return;
     const currentTags = note.tags || [];
-    onUpdateNote(note.id, { tags: currentTags.filter((t) => t !== tagToRemove) });
+    const updatedTags = currentTags.filter((t) => t.toLowerCase() !== tagToRemove.toLowerCase());
+    onUpdateNote(note.id, { tags: updatedTags });
   };
 
   if (!note || !isOpen) return null;
@@ -224,14 +232,18 @@ export default function RightPanel({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title={t("rightPanel.closePanel")}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("rightPanel.closePanel")}</TooltipContent>
+        </Tooltip>
       </div>
 
             {/* Scrollable Content Body */}
@@ -316,10 +328,10 @@ export default function RightPanel({
               <div className="space-y-2.5">
                 <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("rightPanel.tagsSection")}</h4>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {(note.tags || []).map((tag) => (
+                  {(note.tags || []).map((tag, idx) => (
                     <span
                       key={tag}
-                      className="group flex items-center gap-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 text-xs font-medium"
+                      className={`group flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
                     >
                       <span>#{tag}</span>
                       <button
@@ -347,14 +359,18 @@ export default function RightPanel({
                       className="h-6 w-20 rounded-md border border-primary bg-transparent px-2 text-xs text-foreground outline-none"
                     />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingTag(true)}
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                      title={t("rightPanel.addTag")}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingTag(true)}
+                          className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("rightPanel.addTag")}</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
               </div>

@@ -3,7 +3,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { X, FileText, FileCode, Plus, FileImage, File, FolderArchive } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import { Columns2Icon } from "@/components/icons/Columns2Icon";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface TabBarProps {
   tabs: Note[];
@@ -122,49 +122,61 @@ export default function TabBar({
               {/* Action buttons (Split + Close right next to each other) */}
               <div className="ml-auto flex items-center gap-0.5 shrink-0">
                 {onSplitTab && (
-                  <button
-                    type="button"
-                    className="rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground"
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSplitTab(note.id);
-                    }}
-                    title={t("editor.splitTab")}
-                  >
-                    <Columns2Icon className="h-3 w-3" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSplitTab(note.id);
+                        }}
+                      >
+                        <Columns2Icon className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("editor.splitTab")}</TooltipContent>
+                  </Tooltip>
                 )}
 
-                <button
-                  type="button"
-                  className={`rounded-md p-0.5 transition-colors ${
-                    isActive
-                      ? "text-muted-foreground hover:text-foreground hover:bg-muted/80"
-                      : "opacity-0 group-hover:opacity-70 hover:opacity-100 text-muted-foreground hover:bg-muted"
-                  }`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseTab(note.id);
-                  }}
-                  title={t("editor.closeTab")}
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={`rounded-md p-0.5 transition-colors ${
+                        isActive
+                          ? "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                          : "opacity-0 group-hover:opacity-70 hover:opacity-100 text-muted-foreground hover:bg-muted"
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseTab(note.id);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("editor.closeTab")}</TooltipContent>
+                </Tooltip>
               </div>
             </div>
           );
         })}
 
         {onNewTab && (
-          <button
-            type="button"
-            onClick={onNewTab}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground/80 hover:bg-background/60 hover:text-foreground transition-colors mb-0.5 ml-1"
-            title={t("sidebar.newNote")}
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onNewTab}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground/80 hover:bg-background/60 hover:text-foreground transition-colors mb-0.5 ml-1"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
+          </Tooltip>
         )}
       </div>
     </TooltipProvider>

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { docxToHtml } from "@/lib/docxUtils";
 import { markNoteAsDeleted } from "@/lib/fileHandles";
+import { parseFrontmatterAndTags, updateFrontmatterTags, renameTagInMarkdown, removeTagFromMarkdown, isTiptapJson } from "@/lib/frontmatter";
 
 export interface Note {
   id: string;
@@ -14,6 +15,7 @@ export interface Note {
   folderPath?: string;
   fileType?: "image" | "binary";
   isFavorite?: boolean;
+  tags?: string[];
 }
 
 const STORAGE_KEY = "notes-app-data";
@@ -21,7 +23,15 @@ const STORAGE_KEY = "notes-app-data";
 function loadNotes(): Note[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const loaded: Note[] = JSON.parse(raw);
+    return loaded.map((n) => {
+      const extracted = (!n.content || isTiptapJson(n.content)) ? [] : parseFrontmatterAndTags(n.content).allTags;
+      return {
+        ...n,
+        tags: Array.from(new Set([...(n.tags || []), ...extracted])),
+      };
+    });
   } catch {
     return [];
   }
@@ -30,8 +40,6 @@ function loadNotes(): Note[] {
 function saveNotes(notes: Note[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
 }
-
-
 
 export function extractBaseTitleFromFileName(fileName?: string): string {
   if (!fileName) return "";
@@ -78,6 +86,7 @@ export function useNotes() {
       createdAt: now,
       updatedAt: now,
       folderPath,
+      tags: [],
     };
 
     setNotes((prev) => {
@@ -108,16 +117,18 @@ export function useNotes() {
             isLinkedFile: item.isLinkedFile,
             contentFormat: 'html',
             folderPath: item.folderPath,
+            tags: [],
           });
           continue;
         } catch (e) {
           // fallback: treat as binary
         }
       }
+      const parsedTags = (typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
       newNotes.push({
         id: item.id ?? crypto.randomUUID(),
         title: getNoteTitleFromFileName(item.fileName),
-        content: item.content,
+        content: typeof item.content === "string" ? item.content : "",
         createdAt: now,
         updatedAt: now,
         fileName: item.fileName,
@@ -125,6 +136,7 @@ export function useNotes() {
         contentFormat: item.contentFormat,
         folderPath: item.folderPath,
         fileType: item.fileType,
+        tags: parsedTags,
       });
     }
     setNotes((prev) => {
@@ -135,31 +147,50 @@ export function useNotes() {
     return newNotes;
   }, []);
 
-  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" }>) => {
+  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary"; tags?: string[] }>) => {
     const now = Date.now();
-    const newNotes: Note[] = items.map((item) => ({
-      id: item.id ?? crypto.randomUUID(),
-      title: getNoteTitleFromFileName(item.fileName),
-      content: item.content,
-      createdAt: now,
-      updatedAt: now,
-      fileName: item.fileName,
-      isLinkedFile: item.isLinkedFile,
-      contentFormat: item.contentFormat,
-      folderPath: item.folderPath,
-      fileType: item.fileType,
-    }));
+    let resultNotes: Note[] = [];
 
-    setNotes(() => {
-      saveNotes(newNotes);
-      return newNotes;
+    setNotes((prev) => {
+      const prevNotesMap = new Map<string, Note>();
+      prev.forEach((n) => {
+        if (n.id) prevNotesMap.set(n.id, n);
+        const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
+        if (relPath) prevNotesMap.set(relPath, n);
+      });
+
+      resultNotes = items.map((item) => {
+        const id = item.id ?? crypto.randomUUID();
+        const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName) : "";
+        const existingNote = prevNotesMap.get(id) || (relPath ? prevNotesMap.get(relPath) : undefined);
+
+        const extractedTags = (typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
+        const mergedTags = item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]));
+
+        return {
+          id,
+          title: getNoteTitleFromFileName(item.fileName),
+          content: typeof item.content === "string" ? item.content : "",
+          createdAt: existingNote?.createdAt ?? now,
+          updatedAt: now,
+          fileName: item.fileName,
+          isLinkedFile: item.isLinkedFile,
+          contentFormat: item.contentFormat,
+          folderPath: item.folderPath,
+          fileType: item.fileType,
+          tags: mergedTags,
+        };
+      });
+
+      saveNotes(resultNotes);
+      return resultNotes;
     });
 
-    return newNotes;
+    return resultNotes;
   }, []);
 
   const updateNote = useCallback(
-    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath">>) => {
+    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "tags">>) => {
       const normalizedPatch = { ...patch };
       if (patch.fileName && normalizedPatch.title === undefined) {
         normalizedPatch.title = getNoteTitleFromFileName(patch.fileName);
@@ -168,7 +199,29 @@ export function useNotes() {
       setNotes((prev) => {
         const updated = prev.map((n) => {
           if (n.id !== id) return n;
-          return { ...n, ...normalizedPatch, updatedAt: Date.now() };
+          let mergedContent = normalizedPatch.content !== undefined ? normalizedPatch.content : n.content;
+
+          let finalTags = n.tags || [];
+          if (normalizedPatch.tags !== undefined) {
+            finalTags = normalizedPatch.tags;
+            if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
+              mergedContent = updateFrontmatterTags(mergedContent, normalizedPatch.tags);
+            }
+          } else if (normalizedPatch.content !== undefined) {
+            const str = mergedContent || "";
+            if (typeof str === "string" && !isTiptapJson(str) && !str.trimStart().startsWith("<")) {
+              const extracted = parseFrontmatterAndTags(str).allTags;
+              finalTags = Array.from(new Set([...finalTags, ...extracted]));
+            }
+          }
+
+          return {
+            ...n,
+            ...normalizedPatch,
+            content: mergedContent,
+            tags: finalTags,
+            updatedAt: Date.now(),
+          };
         });
         saveNotes(updated);
         return updated;
@@ -176,6 +229,32 @@ export function useNotes() {
     },
     []
   );
+
+  const renameTagGlobally = useCallback((oldTag: string, newTag: string) => {
+    setNotes((prev) => {
+      const updated = prev.map((n) => {
+        const newContent = renameTagInMarkdown(n.content || "", oldTag, newTag);
+        if (newContent === n.content) return n;
+        const newTags = parseFrontmatterAndTags(newContent).allTags;
+        return { ...n, content: newContent, tags: newTags, updatedAt: Date.now() };
+      });
+      saveNotes(updated);
+      return updated;
+    });
+  }, []);
+
+  const deleteTagGlobally = useCallback((tagToDelete: string) => {
+    setNotes((prev) => {
+      const updated = prev.map((n) => {
+        const newContent = removeTagFromMarkdown(n.content || "", tagToDelete);
+        if (newContent === n.content) return n;
+        const newTags = parseFrontmatterAndTags(newContent).allTags;
+        return { ...n, content: newContent, tags: newTags, updatedAt: Date.now() };
+      });
+      saveNotes(updated);
+      return updated;
+    });
+  }, []);
 
   const deleteNote = useCallback(
     (id: string) => {
@@ -202,6 +281,8 @@ export function useNotes() {
     bulkCreateNotes,
     replaceNotes,
     updateNote,
+    renameTagGlobally,
+    deleteTagGlobally,
     deleteNote,
   };
 }

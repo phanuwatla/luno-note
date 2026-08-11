@@ -1,8 +1,12 @@
-import { Sun, Moon, Monitor } from "lucide-react";
+import { useState } from "react";
+import { Sun, Moon, Monitor, Wand, Key, Eye, EyeOff, ExternalLink } from "lucide-react";
+import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -13,6 +17,7 @@ interface SettingsBodyProps {
 export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
   const { settings, updateSetting } = useAppSettings();
   const { t } = useTranslation();
+  const [showApiKey, setShowApiKey] = useState(false);
 
   return (
     <div className="no-scrollbar flex-1 overflow-y-auto space-y-7 px-1 py-1.5">
@@ -55,20 +60,38 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
           </label>
           <div className="flex flex-wrap gap-2.5 p-1">
             {APP_THEMES.map((th) => (
-              <button
-                key={th.id}
-                type="button"
-                style={{ backgroundColor: th.color }}
-                title={t(`settings.theme${th.id.charAt(0).toUpperCase()}${th.id.slice(1)}`)}
-                onClick={() => updateSetting("theme", th.id)}
-                className={`h-7 w-7 rounded-full transition-all ${
-                  settings.theme === th.id
-                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
-                    : "opacity-70 hover:opacity-100"
-                }`}
-              />
+              <Tooltip key={th.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    style={{ backgroundColor: th.color }}
+                    onClick={() => updateSetting("theme", th.id)}
+                    className={`h-7 w-7 rounded-full transition-all ${
+                      settings.theme === th.id
+                        ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
+                        : "opacity-70 hover:opacity-100"
+                    }`}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>{t(`settings.theme${th.id.charAt(0).toUpperCase()}${th.id.slice(1)}`)}</TooltipContent>
+              </Tooltip>
             ))}
           </div>
+        </div>
+
+        <div>
+          <label htmlFor={`${idPrefix}-tagColorStyle`} className="mb-2 block text-sm font-medium text-foreground">
+            {t("settings.tagColorStyle")}
+          </label>
+          <Select value={settings.tagColorStyle} onValueChange={(v) => updateSetting("tagColorStyle", v as "multicolor" | "accent")}>
+            <SelectTrigger id={`${idPrefix}-tagColorStyle`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="multicolor">{t("settings.tagColorStyleMulticolor")}</SelectItem>
+              <SelectItem value="accent">{t("settings.tagColorStyleAccent")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -342,6 +365,48 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               checked={settings.showCodeLineNumbers}
               onCheckedChange={(checked) => updateSetting("showCodeLineNumbers", checked)}
             />
+          </div>
+        </div>
+      </div>
+
+      {/* 5. AI Assistant */}
+      <div className="space-y-4">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80 border-b border-border/50 pb-1.5 flex items-center gap-1.5">
+          {t("settings.aiAssistant")}
+        </h3>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor={`${idPrefix}-geminiApiKey`} className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <Key className="h-3.5 w-3.5 text-muted-foreground" />
+              {t("settings.geminiApiKey")}
+            </label>
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-[hsl(var(--accent))] hover:underline flex items-center gap-1 font-medium"
+            >
+              Get Gemini API Key <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("settings.geminiApiKeyDesc")}</p>
+          <div className="relative flex items-center">
+            <input
+              id={`${idPrefix}-geminiApiKey`}
+              type={showApiKey ? "text" : "password"}
+              placeholder="AIzaSy..."
+              value={settings.geminiApiKey}
+              onChange={(e) => updateSetting("geminiApiKey", e.target.value)}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="absolute right-2.5 text-muted-foreground hover:text-foreground transition-colors p-1"
+            >
+              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
           </div>
         </div>
       </div>

@@ -70,6 +70,18 @@
   }
 }
 
+:root[data-app-theme='blue'] {
+  --primary: 217 91% 53%;
+  --accent: 217 91% 53%;
+  --ring: 217 91% 53%;
+  --sidebar-primary: 217 91% 53%;
+  --sidebar-ring: 217 91% 53%;
+  --hl-tag: #2563eb;
+  --hl-attr: #7c3aed;
+  --hl-string: #059669;
+  --hl-keyword: #2563eb;
+}
+
 :root[data-app-theme='violet'] {
   --primary: 262 83% 58%;
   --accent: 262 83% 58%;
@@ -237,6 +249,18 @@
   --sidebar-ring: 174 62% 44%;
 }
 
+.dark:root[data-app-theme='blue'] {
+  --primary: 217 91% 65%;
+  --accent: 217 91% 65%;
+  --ring: 217 91% 65%;
+  --sidebar-primary: 217 91% 65%;
+  --sidebar-ring: 217 91% 65%;
+  --hl-tag: #60a5fa;
+  --hl-attr: #c084fc;
+  --hl-string: #34d399;
+  --hl-keyword: #60a5fa;
+}
+
 .dark:root[data-app-theme='violet'] {
   --primary: 262 83% 68%;
   --accent: 262 83% 68%;
@@ -307,6 +331,15 @@
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* Text selection follows accent color */
+::selection {
+  background: hsl(var(--accent) / 0.20);
+}
+
+::-moz-selection {
+  background: hsl(var(--accent) / 0.20);
 }
 
 /* Custom System Scrollbar Styling */

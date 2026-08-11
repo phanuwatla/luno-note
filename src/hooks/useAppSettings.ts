@@ -37,11 +37,15 @@ export interface AppSettings {
   lineHeight: "1.4" | "1.6" | "1.8";
   sidebarDensity: "compact" | "comfortable";
   showGuideLines: boolean;
+  tagColorStyle: "multicolor" | "accent";
 
   // Editor Settings
   showWordCount: boolean;
   autoPairBrackets: boolean;
   showCodeLineNumbers: boolean;
+
+  // AI Assistant Settings
+  geminiApiKey: string;
 }
 
 const STORAGE_KEY = "notes-app-settings";
@@ -67,10 +71,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   lineHeight: "1.6",
   sidebarDensity: "comfortable",
   showGuideLines: true,
+  tagColorStyle: "multicolor",
 
   showWordCount: true,
   autoPairBrackets: true,
   showCodeLineNumbers: true,
+
+  geminiApiKey: "",
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -95,10 +102,12 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
   const lineHeight = raw?.lineHeight === "1.4" || raw?.lineHeight === "1.8" ? raw.lineHeight : "1.6";
   const sidebarDensity = raw?.sidebarDensity === "compact" ? "compact" : "comfortable";
   const showGuideLines = raw?.showGuideLines !== false;
+  const tagColorStyle = raw?.tagColorStyle === "accent" ? "accent" : "multicolor";
 
   const showWordCount = raw?.showWordCount !== false;
   const autoPairBrackets = raw?.autoPairBrackets !== false;
   const showCodeLineNumbers = raw?.showCodeLineNumbers !== false;
+  const geminiApiKey = typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey.trim() : "";
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
@@ -117,10 +126,12 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     lineHeight,
     sidebarDensity,
     showGuideLines,
+    tagColorStyle,
 
     showWordCount,
     autoPairBrackets,
     showCodeLineNumbers,
+    geminiApiKey,
   };
 }
 
@@ -148,6 +159,11 @@ const AppSettingsContext = createContext<AppSettingsContextValue | undefined>(un
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-app-theme", settings.theme);
+    document.documentElement.setAttribute("data-app-font", settings.fontFamily);
+  }, [settings.theme, settings.fontFamily]);
 
   useEffect(() => {
     const apply = (dark: boolean) => {

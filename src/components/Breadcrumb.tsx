@@ -8,6 +8,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface BreadcrumbProps {
   note: Note | null;
@@ -240,16 +241,20 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
     <div className="flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground overflow-x-auto no-scrollbar select-none">
       <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0"
-              title={rootFolderName || "Root Folder"}
-            >
-              <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-              {rootFolderName && <span className="text-muted-foreground/90 font-normal">{rootFolderName}</span>}
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0"
+                >
+                  <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+                  {rootFolderName && <span className="text-muted-foreground/90 font-normal">{rootFolderName}</span>}
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{rootFolderName || "Root Folder"}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
             <BreadcrumbTreeView notes={notes} baseFolderPath="" activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
           </DropdownMenuContent>
@@ -284,13 +289,23 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
           <Share2 className="h-3.5 w-3.5" />
           <span>{t("breadcrumb.share")}</span>
         </button>
-        <button type="button" className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted" title={t("breadcrumb.versionHistory")}>
-          <History className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted">
+              <History className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("breadcrumb.versionHistory")}</TooltipContent>
+        </Tooltip>
         <div id="breadcrumb-editor-actions" className="flex items-center gap-2.5" />
-        <button type="button" onClick={onOpenRightPanel} className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted" title={t("breadcrumb.moreOptions")}>
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" onClick={onOpenRightPanel} className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted">
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("breadcrumb.moreOptions")}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
