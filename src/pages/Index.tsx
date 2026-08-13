@@ -11,7 +11,7 @@ import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName }
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
-import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
+import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
 import { marked } from "marked";
 import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -28,6 +28,7 @@ export default function Index() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openedFolderName, setOpenedFolderName] = useState<string | null>(null);
   const [openedRootDirHandle, setOpenedRootDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [pendingReconnectDirHandle, setPendingReconnectDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
@@ -930,6 +931,8 @@ export default function Index() {
       const dirHandle = await w.showDirectoryPicker({ mode: "readwrite" });
       setOpenedFolderName(dirHandle.name ?? null);
       setOpenedRootDirHandle(dirHandle);
+      setPendingReconnectDirHandle(null);
+      await setStoredDirectoryHandle(dirHandle);
       await syncFolderFromDisk(dirHandle);
 
       if (pending) {
@@ -945,6 +948,63 @@ export default function Index() {
       }
     }
   };
+
+  const handleReconnectFolder = async () => {
+    const targetDir = pendingReconnectDirHandle || openedRootDirHandle;
+    if (!targetDir) {
+      void handleOpenFolder();
+      return;
+    }
+    try {
+      const perm = await requestPermissionIfAvailable(targetDir, "readwrite");
+      if (perm === "granted") {
+        setOpenedFolderName(targetDir.name ?? null);
+        setOpenedRootDirHandle(targetDir);
+        setPendingReconnectDirHandle(null);
+        await setStoredDirectoryHandle(targetDir);
+        await syncFolderFromDisk(targetDir);
+        toast({
+          title: t("sidebar.reconnectSuccess" as any) || "Folder Reconnected",
+          description: targetDir.name,
+        });
+      } else {
+        void handleOpenFolder();
+      }
+    } catch {
+      void handleOpenFolder();
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    async function restoreFolderConnection() {
+      try {
+        const storedDir = await getStoredDirectoryHandle();
+        if (!storedDir || !active) return;
+
+        let permState: PermissionState | "granted" = "prompt";
+        if (typeof storedDir.queryPermission === "function") {
+          permState = await storedDir.queryPermission({ mode: "readwrite" });
+        }
+
+        if (permState === "granted") {
+          setOpenedFolderName(storedDir.name ?? null);
+          setOpenedRootDirHandle(storedDir);
+          setPendingReconnectDirHandle(null);
+          await syncFolderFromDisk(storedDir);
+        } else {
+          setOpenedFolderName(storedDir.name ?? null);
+          setPendingReconnectDirHandle(storedDir);
+        }
+      } catch (err) {
+        console.warn("Could not restore directory handle:", err);
+      }
+    }
+    void restoreFolderConnection();
+    return () => {
+      active = false;
+    };
+  }, [syncFolderFromDisk]);
 
   useEffect(() => {
     if (!openedRootDirHandle) return;
@@ -1063,6 +1123,8 @@ export default function Index() {
           folderPaths={openedFolderPaths}
           activeNoteId={activeTabId}
           openedFolderName={openedFolderName}
+          pendingReconnectFolder={Boolean(pendingReconnectDirHandle)}
+          onReconnectFolder={handleReconnectFolder}
           onSelect={openTab}
           onCreate={createNoteInFolder}
           onCreateFolder={createFolderInFolder}
@@ -1103,7 +1165,7 @@ export default function Index() {
             // ถ้า split อยู่แล้วและกดซ้ำ ให้ toggle ปิด split
             setSplitTabId(prev => prev === id ? null : id);
           }}
-          onNewTab={() => createNoteInFolder("", { fileName: "untitled.md", contentFormat: "markdown" })}
+          onNewTab={() => void createNoteInFolder()}
           onReorderTabs={reorderTabs}
         />
         <Breadcrumb

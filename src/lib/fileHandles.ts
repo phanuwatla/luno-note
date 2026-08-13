@@ -66,7 +66,34 @@ export async function removeStoredFileHandle(noteId: string) {
 
 export async function clearAllStoredFileHandles() {
   if (!canUseNativeFileSystem()) return;
+  // Keep the root directory handle when clearing file handles
+  const rootHandle = await getStoredDirectoryHandle();
   await withStore("readwrite", (store) => store.clear());
+  if (rootHandle) {
+    await setStoredDirectoryHandle(rootHandle);
+  }
+}
+
+export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+  if (!canUseNativeFileSystem()) return null;
+  try {
+    const handle = await withStore<FileSystemDirectoryHandle | undefined>("readonly", (store) =>
+      store.get("__root_dir_handle__")
+    );
+    return handle ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setStoredDirectoryHandle(handle: FileSystemDirectoryHandle) {
+  if (!canUseNativeFileSystem()) return;
+  await withStore("readwrite", (store) => store.put(handle, "__root_dir_handle__"));
+}
+
+export async function removeStoredDirectoryHandle() {
+  if (!canUseNativeFileSystem()) return;
+  await withStore("readwrite", (store) => store.delete("__root_dir_handle__"));
 }
 
 export const globalDeletedNoteIds = new Set<string>();

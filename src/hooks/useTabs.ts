@@ -1,15 +1,44 @@
 import { useState, useCallback, useRef } from "react";
 
+const TABS_STORAGE_KEY = "notes-app-open-tabs";
+const ACTIVE_TAB_STORAGE_KEY = "notes-app-active-tab";
+
+function loadSavedTabs(): { openTabIds: string[]; activeTabId: string | null } {
+  try {
+    const rawTabs = localStorage.getItem(TABS_STORAGE_KEY);
+    const rawActive = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+    const openTabIds = rawTabs ? JSON.parse(rawTabs) : [];
+    const activeTabId = rawActive ? JSON.parse(rawActive) : null;
+    return {
+      openTabIds: Array.isArray(openTabIds) ? openTabIds : [],
+      activeTabId: typeof activeTabId === "string" ? activeTabId : null,
+    };
+  } catch {
+    return { openTabIds: [], activeTabId: null };
+  }
+}
+
+function saveTabs(openTabIds: string[], activeTabId: string | null) {
+  try {
+    localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(openTabIds));
+    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, JSON.stringify(activeTabId));
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 export function useTabs() {
-  const [openTabIds, setOpenTabIds] = useState<string[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const openTabIdsRef = useRef<string[]>([]);
-  const activeTabIdRef = useRef<string | null>(null);
+  const initial = loadSavedTabs();
+  const [openTabIds, setOpenTabIds] = useState<string[]>(initial.openTabIds);
+  const [activeTabId, setActiveTabId] = useState<string | null>(initial.activeTabId);
+  const openTabIdsRef = useRef<string[]>(initial.openTabIds);
+  const activeTabIdRef = useRef<string | null>(initial.activeTabId);
 
   const syncedSetOpenTabIds = useCallback((updater: (prev: string[]) => string[]) => {
     setOpenTabIds((prev) => {
       const next = updater(prev);
       openTabIdsRef.current = next;
+      saveTabs(next, activeTabIdRef.current);
       return next;
     });
   }, []);
@@ -17,6 +46,7 @@ export function useTabs() {
   const syncedSetActiveTabId = useCallback((id: string | null) => {
     activeTabIdRef.current = id;
     setActiveTabId(id);
+    saveTabs(openTabIdsRef.current, id);
   }, []);
 
   const openTab = useCallback((id: string) => {

@@ -538,3 +538,30 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .ProseMirror.resize-cursor {
   cursor: col-resize;
 }
+
+.show-code-line-numbers .ProseMirror pre,
+.show-code-line-numbers pre {
+  position: relative;
+  padding-left: 3.2rem !important;
+}
+
+.show-code-line-numbers .ProseMirror pre[data-line-numbers]::before,
+.show-code-line-numbers pre[data-line-numbers]::before {
+  content: attr(data-line-numbers);
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2.4rem;
+  padding-right: 0.5rem;
+  text-align: right;
+  color: hsl(var(--muted-foreground) / 0.5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  padding-top: 1rem;
+  white-space: pre;
+  border-right: 1px solid hsl(var(--border) / 0.5);
+  user-select: none;
+  pointer-events: none;
+}

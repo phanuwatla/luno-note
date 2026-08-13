@@ -56,7 +56,13 @@ export function isSystemGeneratedUntitledName(name?: string): boolean {
   const trimmed = name.trim().toLowerCase();
   const dotIdx = trimmed.lastIndexOf(".");
   const baseName = dotIdx > 0 ? trimmed.slice(0, dotIdx) : trimmed;
-  return /^untitled([_\-\s]?\d+)?$/i.test(baseName);
+  // Match "untitled", "untitled-1", "untitled (1)", "untitled_1"
+  if (/^untitled([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
+  // Match "note_YYYY-MM-DD", "note_YYYY-MM-DD (1)", etc.
+  if (/^note_\d{4}-\d{2}-\d{2}([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
+  // Match "daily-YYYY-MM-DD", "daily-YYYY-MM-DD (1)", etc.
+  if (/^daily-\d{4}-\d{2}-\d{2}([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
+  return false;
 }
 
 export function getNoteTitleFromFileName(fileName?: string): string {

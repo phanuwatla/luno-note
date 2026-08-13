@@ -63,13 +63,14 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
 export function getTagColorClass(
   tag: string,
   theme: AppTheme = "emerald",
-  index?: number,
+  _index?: number,
   style: "multicolor" | "accent" = "multicolor"
 ): string {
   const palette = THEME_PALETTES[theme] || THEME_PALETTES.emerald;
   if (style === "accent") {
     return palette[0];
   }
-  const colorIndex = typeof index === "number" ? Math.abs(index) % palette.length : getHash(tag.toLowerCase()) % palette.length;
+  const cleanTag = (tag || "").trim().toLowerCase();
+  const colorIndex = getHash(cleanTag) % palette.length;
   return palette[colorIndex];
 }

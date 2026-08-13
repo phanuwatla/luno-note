@@ -80,15 +80,15 @@ function AiDiffComponent({ node, getPos, editor }: NodeViewProps) {
 
         {/* Diff content */}
         <div className="space-y-2 text-sm leading-relaxed">
-          {/* Red line for Original */}
-          <div className="flex items-start rounded-lg bg-destructive/10 p-2.5 text-destructive border border-destructive/20 line-through">
-            <span className="mr-2 select-none font-bold text-destructive">-</span>
+          {/* Muted Gray line for Original */}
+          <div className="flex items-start rounded-lg bg-muted/60 p-2.5 text-muted-foreground border border-border/80 line-through">
+            <span className="mr-2 select-none font-bold text-muted-foreground/80">-</span>
             <span className="whitespace-pre-wrap">{originalText}</span>
           </div>
 
-          {/* Green line for Proposed */}
-          <div className="flex items-start rounded-lg bg-emerald-500/10 dark:bg-emerald-950/40 p-2.5 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
-            <span className="mr-2 select-none font-bold text-emerald-600 dark:text-emerald-400">+</span>
+          {/* Theme Accent Color line for Proposed */}
+          <div className="flex items-start rounded-lg bg-[hsl(var(--accent))]/10 p-2.5 text-[hsl(var(--accent))] border border-[hsl(var(--accent))]/25">
+            <span className="mr-2 select-none font-bold text-[hsl(var(--accent))]">+</span>
             <span className="whitespace-pre-wrap">{proposedText}</span>
           </div>
         </div>

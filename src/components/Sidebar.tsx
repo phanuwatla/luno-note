@@ -22,6 +22,8 @@ interface SidebarProps {
   folderPaths?: string[];
   activeNoteId: string | null;
   openedFolderName?: string | null;
+  pendingReconnectFolder?: boolean;
+  onReconnectFolder?: () => void;
   onSelect: (id: string) => void;
   onCreate: (folderPath?: string, options?: CreateNoteOptions) => void | Promise<void>;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void;
@@ -172,7 +174,7 @@ function MarkdownIndicator({ active }: { active: boolean }) {
   );
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally }: SidebarProps) {
   const { settings, updateSetting } = useAppSettings();
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
@@ -199,6 +201,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   };
 
   const openCreateFileDialog = () => {
+    setNewFileExt(settings.defaultExtension);
     setCreateFileDialogOpen(true);
   };
 
@@ -208,7 +211,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [renameFileDialogOpen, setRenameFileDialogOpen] = useState(false);
   const [renameFolderDialogOpen, setRenameFolderDialogOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
-  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">("txt");
+  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">(() => settings.defaultExtension);
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [lastSelectedNoteId, setLastSelectedNoteId] = useState<string | null>(null);
@@ -254,8 +257,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     if (!openedFolderName) return;
 
     if (pendingCreate.kind === "file") {
-      const fileName = pendingCreate.fileName ?? `untitled.txt`;
-      const contentFormat = pendingCreate.contentFormat ?? "plain";
+      const defaultExt = settings.defaultExtension || "md";
+      const defaultFormat = defaultExt === "html" ? "html" as const : defaultExt === "txt" ? "plain" as const : "markdown" as const;
+      const fileName = pendingCreate.fileName ?? `Untitled.${defaultExt}`;
+      const contentFormat = pendingCreate.contentFormat ?? defaultFormat;
       onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     } else if (pendingCreate.kind === "folder") {
       if (onCreateFolder) onCreateFolder(selectedFolderPath || currentFolderPath, pendingCreate.folderName ?? "untitled-folder");
@@ -455,16 +460,24 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
   const handleCreateFromDialog = () => {
     const baseName = newFileName.trim();
-    const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
-    // ใช้ extension ที่เลือกเสมอ
-    const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
+    const ext = newFileExt || settings.defaultExtension;
+    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : "plain";
 
-    // If there's no opened folder yet, store pending create and trigger folder picker
+    const dateStr = new Date().toISOString().slice(0, 10);
+    let defaultBaseName = "Untitled";
+    if (settings.newFilePattern === "date") {
+      defaultBaseName = `Note_${dateStr}`;
+    } else if (settings.newFilePattern === "daily") {
+      defaultBaseName = `Daily-${dateStr}`;
+    }
+
+    const fileName = baseName ? `${baseName}.${ext}` : `${defaultBaseName}.${ext}`;
+
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "file", fileName, contentFormat });
       setCreateFileDialogOpen(false);
       setNewFileName("");
-      setNewFileExt("txt");
+      setNewFileExt(settings.defaultExtension);
       onOpenFolder({ kind: "file", fileName, contentFormat });
       return;
     }
@@ -472,7 +485,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     setCreateFileDialogOpen(false);
     setNewFileName("");
-    setNewFileExt("txt");
+    setNewFileExt(settings.defaultExtension);
   };
 
   const handleCreateFolderFromDialog = () => {
@@ -1081,6 +1094,27 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </div>
       </div>
 
+      {pendingReconnectFolder && (
+        <div className="mx-3 mb-2.5 p-2.5 rounded-xl border border-primary/30 bg-primary/10 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+            <FolderOpen className="h-4 w-4 shrink-0" />
+            <span className="truncate">{openedFolderName || "Workspace"}</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-tight">
+            {t("sidebar.reconnectPrompt")}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            className="w-full h-7 text-xs font-medium rounded-lg gap-1.5 cursor-pointer"
+            onClick={onReconnectFolder}
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            {t("sidebar.reconnectAction")}
+          </Button>
+        </div>
+      )}
+
       {/* Active Tag Filter Pill */}
       {selectedTagFilter && (
         <div className={`mx-2 mb-2 flex items-center justify-between rounded-xl px-3 py-1.5 text-xs border ${getTagColorClass(selectedTagFilter, settings.theme, undefined, settings.tagColorStyle)}`}>
@@ -1238,7 +1272,13 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 type="text"
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
-                placeholder="untitled"
+                placeholder={
+                  settings.newFilePattern === "date"
+                    ? `Note_${new Date().toISOString().slice(0, 10)}`
+                    : settings.newFilePattern === "daily"
+                    ? `Daily-${new Date().toISOString().slice(0, 10)}`
+                    : "untitled"
+                }
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>

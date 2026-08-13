@@ -65,9 +65,10 @@ export default function RightPanel({
   const [newTagInput, setNewTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
 
-  // Extract outline (headings and tables) from Tiptap editor or content
   const outlineItems = useMemo(() => {
     if (!note) return [];
+    const isTxtFile = note.fileName?.toLowerCase().endsWith(".txt") || note.contentFormat === "plain";
+    if (isTxtFile) return [];
     const items: OutlineItem[] = [];
 
     if (editor) {

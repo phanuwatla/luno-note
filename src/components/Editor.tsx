@@ -68,7 +68,9 @@ import {
   BookOpen,
   MessageCircle,
   Languages,
-  Key
+  Key,
+  Calculator,
+  Clock
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
@@ -76,7 +78,9 @@ import { WandSparklesIcon } from "@/components/icons/WandSparklesIcon";
 import { SpellCheckIcon } from "@/components/icons/SpellCheckIcon";
 import { BriefcaseBusinessIcon } from "@/components/icons/BriefcaseBusinessIcon";
 import { PenLineIcon } from "@/components/icons/PenLineIcon";
-import { AiDiffExtension } from "@/components/editor/AiDiffExtension";
+import AiAssistantPanel from "@/components/AiAssistantPanel";
+import FloatingCalculator from "@/components/FloatingCalculator";
+import FloatingClock from "@/components/FloatingClock";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -1281,8 +1285,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!openedFolderName) return;
 
     if (pendingCreate.kind === "file") {
-      const fileName = pendingCreate.fileName ?? `untitled.txt`;
-      const contentFormat = pendingCreate.contentFormat ?? "plain";
+      const defaultExt = settings.defaultExtension || "md";
+      const defaultFormat = defaultExt === "html" ? "html" as const : defaultExt === "txt" ? "plain" as const : "markdown" as const;
+      const fileName = pendingCreate.fileName ?? `Untitled.${defaultExt}`;
+      const contentFormat = pendingCreate.contentFormat ?? defaultFormat;
       if (onCreate) onCreate(undefined, { fileName, contentFormat });
     } else if (pendingCreate.kind === "folder") {
       if (onCreateFolder) onCreateFolder(undefined, pendingCreate.folderName ?? "untitled-folder");
@@ -1431,6 +1437,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [clockOpen, setClockOpen] = useState(false);
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -1617,6 +1625,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
   const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false): string | Record<string, unknown> => {
     if (typeof text !== "string" || !text.trim()) {
+      if (isTxt) return "<p></p>";
       return baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
     }
 
@@ -1630,18 +1639,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           const jsonStr = cleanText.slice(jsonStart);
           const json = JSON.parse(jsonStr);
           if (json && Array.isArray(json.content)) {
-            const firstNode = json.content[0];
-            if (!firstNode || firstNode.type !== "heading" || firstNode.attrs?.level !== 1) {
-              const h1Node: Record<string, unknown> = {
-                type: "heading",
-                attrs: { level: 1 },
-              };
-              if (baseTitle) {
-                h1Node.content = [{ type: "text", text: baseTitle }];
+            const textContent = extractTextFromTiptapJson(json).trim();
+            if (!textContent) {
+              return isTxt ? "<p></p>" : (baseTitle ? `<h1>${escHtml(baseTitle)}</h1><p></p>` : "<h1></h1><p></p>");
+            }
+            if (!isTxt) {
+              const firstNode = json.content[0];
+              if (!firstNode || firstNode.type !== "heading" || firstNode.attrs?.level !== 1) {
+                const h1Node: Record<string, unknown> = {
+                  type: "heading",
+                  attrs: { level: 1 },
+                };
+                if (baseTitle) {
+                  h1Node.content = [{ type: "text", text: baseTitle }];
+                }
+                json.content = [h1Node, ...json.content];
+              } else if (baseTitle && (!firstNode.content || firstNode.content.length === 0)) {
+                firstNode.content = [{ type: "text", text: baseTitle }];
               }
-              json.content = [h1Node, ...json.content];
-            } else if (baseTitle && (!firstNode.content || firstNode.content.length === 0)) {
-              firstNode.content = [{ type: "text", text: baseTitle }];
+            } else {
+              if (json.content.length > 0 && json.content[0]?.type === "heading") {
+                json.content.shift();
+              }
             }
             return json;
           }
@@ -1657,11 +1676,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (isTxt) {
       if (!cleanText.trim()) return "<p></p>";
-      return toEditorHtml(cleanText);
+      return toEditorHtml(cleanText, true);
     }
 
     const titleH1Html = baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
-    const editorHtml = toEditorHtml(cleanText);
+    const editorHtml = toEditorHtml(cleanText, false);
 
     if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
       return titleH1Html + editorHtml;
@@ -1736,11 +1755,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
-  const toEditorHtml = (text: string): string => {
-    if (!text.trim()) return "<h1></h1><p></p>";
+  const toEditorHtml = (text: string, isTxt: boolean = false): string => {
+    if (!text.trim()) return isTxt ? "<p></p>" : "<h1></h1><p></p>";
 
     const temp = document.createElement("div");
-    const format = note?.contentFormat ?? "markdown";
+    const format = isTxt ? "plain" : (note?.contentFormat ?? "markdown");
 
     if (format === "html") {
       temp.innerHTML = text;
@@ -1764,7 +1783,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const EDITOR_CLASSES =
-    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>*:first-child]:text-2xl [&>*:first-child]:font-semibold [&>*:first-child]:leading-tight [&>*:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -1841,11 +1860,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleFixLanguageRef = useRef<(() => void) | null>(null);
   const tRef = useRef(t);
   const isMobileRef = useRef(isMobile);
+  const noteRef = useRef(note);
 
   useEffect(() => {
     tRef.current = t;
     isMobileRef.current = isMobile;
-  }, [t, isMobile]);
+    noteRef.current = note;
+  }, [t, isMobile, note]);
 
   const executeSlashCommand = useCallback(
     (editorInstance: TiptapEditor, item: SlashMenuItem) => {
@@ -1953,7 +1974,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Toggle,
       TaskList,
       TaskItem,
-      AiDiffExtension,
       Table.configure({
         resizable: true,
       }),
@@ -1979,6 +1999,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Placeholder.configure({
         placeholder: ({ node, pos, editor: ed, hasAnchor }) => {
           if (node.type.name === "heading" && node.attrs?.level === 1 && pos === 0) {
+            if (noteRef.current?.fileName) {
+              const baseTitle = extractBaseTitleFromFileName(noteRef.current.fileName);
+              if (baseTitle) return baseTitle;
+            }
+            const pattern = settingsRef.current?.newFilePattern;
+            const dateStr = new Date().toISOString().slice(0, 10);
+            if (pattern === "date") return `Note_${dateStr}`;
+            if (pattern === "daily") return `Daily-${dateStr}`;
             return tRef.current("editor.untitled");
           }
 
@@ -2114,16 +2142,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
       }
 
-      const json = instance.getJSON();
       let savedContent = "";
       if (isTxtFile(note)) {
-        savedContent = JSON.stringify(json);
+        savedContent = getPlainTextFromHtml(instance.getHTML());
+      } else if (note.contentFormat === "html") {
+        savedContent = instance.getHTML();
       } else {
-        if (json.content && json.content.length > 0 && json.content[0].type === "heading" && json.content[0].attrs?.level === 1) {
-          savedContent = JSON.stringify({ ...json, content: json.content.slice(1) });
-        } else {
-          savedContent = JSON.stringify(json);
+        const html = instance.getHTML();
+        const temp = document.createElement("div");
+        temp.innerHTML = html;
+        const firstChild = temp.firstElementChild;
+        if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
+          firstChild.remove();
         }
+        savedContent = turndown.turndown(temp.innerHTML).trim();
       }
       onUpdate(note.id, { content: savedContent });
       if (!settings.autoSave) {
@@ -2165,7 +2197,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const lines = textBefore.split("\n");
     const line = lines.length;
     const col = (lines[lines.length - 1]?.length ?? 0) + 1;
-    const charCount = doc.textContent.length;
+    const textContent = doc.textContent;
+    const charCount = textContent.length;
+    const wordCount = textContent.trim() ? textContent.trim().split(/\s+/).length : 0;
+    const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
     let syntaxLabel = t("editor.syntaxMarkdown");
     const fileName = note?.fileName?.toLowerCase() ?? "";
@@ -2182,6 +2217,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       line,
       col,
       charCount,
+      wordCount,
+      readingTime,
       syntaxLabel,
       zoom,
       lineEnding,
@@ -2295,6 +2332,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [note?.id, flushPendingRename]);
 
   useEffect(() => {
+    if (!editor || !settings.showCodeLineNumbers) return;
+    const dom = editor.view.dom;
+    const preElements = dom.querySelectorAll("pre");
+    preElements.forEach((pre) => {
+      const code = pre.querySelector("code");
+      const text = code ? code.textContent || "" : pre.textContent || "";
+      const lineCount = Math.max(1, text.split("\n").length);
+      const lineNumbersStr = Array.from({ length: lineCount }, (_, i) => i + 1).join("\n");
+      if (pre.getAttribute("data-line-numbers") !== lineNumbersStr) {
+        pre.setAttribute("data-line-numbers", lineNumbersStr);
+      }
+    });
+  }, [editor, editorTick, settings.showCodeLineNumbers, note?.content]);
+
+  useEffect(() => {
     return () => {
       if (autoSaveDiskTimeoutRef.current) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
@@ -2390,12 +2442,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       })
     );
 
-    const firstChild = editor.state.doc.firstChild;
-    if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-      if (!firstChild.textContent.trim() && baseTitle) {
-        const tr = editor.state.tr;
-        tr.insertText(baseTitle, 1, 1);
-        editor.view.dispatch(tr);
+    if (!isTxtFile(note)) {
+      const firstChild = editor.state.doc.firstChild;
+      if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
+        if (!firstChild.textContent.trim() && baseTitle) {
+          const tr = editor.state.tr;
+          tr.insertText(baseTitle, 1, 1);
+          editor.view.dispatch(tr);
+        }
       }
     }
 
@@ -2531,6 +2585,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [aiActionPending, setAiActionPending] = useState<AiActionType | null>(null);
   const [aiErrorMsg, setAiErrorMsg] = useState("");
   const [aiKeyInputValue, setAiKeyInputValue] = useState("");
+  interface AiDiffState {
+    from: number;
+    to: number;
+    originalText: string;
+    proposedText: string;
+    action: AiActionType;
+  }
+
+  const [aiDiffState, setAiDiffState] = useState<AiDiffState | null>(null);
+
+  useEffect(() => {
+    setAiDiffState(null);
+  }, [note?.id]);
+
+  const handleAcceptDiff = useCallback(() => {
+    if (!editor || !aiDiffState) return;
+    const { from, to, proposedText } = aiDiffState;
+    editor.chain().focus().insertContentAt({ from, to }, proposedText).run();
+    setAiDiffState(null);
+  }, [editor, aiDiffState]);
+
+  const handleRejectDiff = useCallback(() => {
+    setAiDiffState(null);
+  }, []);
+
+  const handleInsertBelowDiff = useCallback(() => {
+    if (!editor || !aiDiffState) return;
+    const { to, proposedText } = aiDiffState;
+    editor.chain().focus().insertContentAt(to, `\n\n${proposedText}`).run();
+    setAiDiffState(null);
+  }, [editor, aiDiffState]);
 
   const handleAiAction = async (action: AiActionType) => {
     if (!editor) return;
@@ -2563,7 +2648,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    if (!targetText || !targetText.trim()) {
+    const trimmedTargetText = targetText.trim();
+
+    if (!trimmedTargetText) {
       showUiAlert("โปรดเลือกหรือพิมพ์ข้อความที่ต้องการให้ผู้ช่วย AI ดำเนินการ");
       return;
     }
@@ -2572,24 +2659,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setAiErrorMsg("");
 
     try {
-      const result = await runGeminiAction(settings.geminiApiKey, action, targetText);
-      setAiOutputText(result);
+      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText);
+      const cleanResult = result.trim();
+      setAiOutputText(cleanResult);
 
-      editor
-        .chain()
-        .focus()
-        .insertContentAt(
-          { from: selectionFrom, to: selectionTo },
-          {
-            type: "aiDiffNode",
-            attrs: {
-              originalText: targetText,
-              proposedText: result,
-              action: action,
-            },
-          }
-        )
-        .run();
+      setAiDiffState({
+        from: selectionFrom,
+        to: selectionTo,
+        originalText: trimmedTargetText,
+        proposedText: cleanResult,
+        action: action,
+        modelUsed: modelUsed,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("Gemini API Key") || msg.includes("API key")) {
@@ -3534,7 +3615,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       handleCreateFileFromDialog();
                     }
                   }}
-                  placeholder="untitled"
+                  placeholder={
+                    settings.newFilePattern === "date"
+                      ? `Note_${new Date().toISOString().slice(0, 10)}`
+                      : settings.newFilePattern === "daily"
+                      ? `Daily-${new Date().toISOString().slice(0, 10)}`
+                      : "untitled"
+                  }
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
@@ -3774,6 +3861,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "horizontalRule", group: "block", labelKey: "editor.horizontalRule" },
               { id: "table", group: "block", labelKey: "editor.insertTable" },
               { id: "emoji", group: "media", labelKey: "editor.insertEmoji" },
+              { id: "calculator", group: "media", labelKey: "editor.calculator" },
+              { id: "clock", group: "media", labelKey: "editor.clock" },
               { id: "link", group: "media", labelKey: "editor.link" },
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
@@ -3781,13 +3870,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             ];
 
             // For plain text (.txt) files, only keep tools that work without HTML
-            // formatting (undo/redo, aiAssistant, emoji, fixLanguage) since all other formatting
+            // formatting (undo/redo, aiAssistant, emoji, calculator, clock, fixLanguage) since all other formatting
             // is stripped on save via getPlainTextFromHtml().
             const isPlainText = note?.fileName?.toLowerCase().endsWith(".txt") ||
               (!note?.fileName && getContentFormat() === "plain");
             const TOOLBAR_ITEMS = isPlainText
               ? ALL_TOOLBAR_ITEMS.filter(item =>
-                  ["undo", "redo", "aiAssistant", "emoji", "fixLanguage"].includes(item.id)
+                  ["undo", "redo", "aiAssistant", "emoji", "calculator", "clock", "fixLanguage"].includes(item.id)
                 )
               : ALL_TOOLBAR_ITEMS;
 
@@ -4342,6 +4431,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </PopoverContent>
                     </Popover>
                   );
+                case "calculator":
+                  return (
+                    <Tooltip key="calculator">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${calculatorOpen ? "bg-primary/15 text-primary" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setCalculatorOpen((prev) => !prev)}
+                        >
+                          <Calculator className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.calculator")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.calculator")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "clock":
+                  return (
+                    <Tooltip key="clock">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${clockOpen ? "bg-primary/15 text-primary" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setClockOpen((prev) => !prev)}
+                        >
+                          <Clock className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.clock")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.clock")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "link":
                   return (
                     <Tooltip key="link">
@@ -4543,6 +4670,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuItem key="emoji" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Smile className="mr-2 h-4 w-4" />
                       <span>{t("editor.insertEmoji")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "calculator":
+                  return (
+                    <DropdownMenuItem key="calculator" onClick={() => setCalculatorOpen((prev) => !prev)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Calculator className="mr-2 h-4 w-4" />
+                      <span>{t("editor.calculator")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "clock":
+                  return (
+                    <DropdownMenuItem key="clock" onClick={() => setClockOpen((prev) => !prev)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Clock className="mr-2 h-4 w-4" />
+                      <span>{t("editor.clock")}</span>
                     </DropdownMenuItem>
                   );
                 case "link":
@@ -4887,8 +5028,30 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onDelete={(n) => onDelete(n.id)}
             />
           )}
+
+          {/* AI Assistant Right Panel */}
+          {aiDiffState && (
+            <AiAssistantPanel
+              isOpen={Boolean(aiDiffState)}
+              onClose={handleRejectDiff}
+              diffState={aiDiffState}
+              onAccept={handleAcceptDiff}
+              onReject={handleRejectDiff}
+              onInsertBelow={handleInsertBelowDiff}
+            />
+          )}
         </AnimatePresence>
       </div>
+
+      <FloatingCalculator
+        isOpen={calculatorOpen}
+        onClose={() => setCalculatorOpen(false)}
+      />
+
+      <FloatingClock
+        isOpen={clockOpen}
+        onClose={() => setClockOpen(false)}
+      />
 
 
 
