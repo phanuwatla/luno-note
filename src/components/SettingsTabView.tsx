@@ -20,8 +20,17 @@ import {
   RotateCcw,
   Check,
   Download,
-  Key
+  Key,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  Plug,
+  Unplug,
 } from "lucide-react";
+import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
+import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId } from "@/lib/googleDriveAuth";
+import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,12 +63,16 @@ interface CategoryMeta {
   desc: string;
 }
 
+import type { Note } from "@/hooks/useNotes";
+
 interface SettingsTabViewProps {
   onClose?: () => void;
   initialCategory?: SettingsCategory;
+  notes?: Note[];
+  onNotesUpdated?: (notes: Note[]) => void;
 }
 
-export default function SettingsTabView({ onClose, initialCategory = "general" }: SettingsTabViewProps) {
+export default function SettingsTabView({ onClose, initialCategory = "general", notes = [], onNotesUpdated }: SettingsTabViewProps) {
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(initialCategory);
@@ -71,6 +84,10 @@ export default function SettingsTabView({ onClose, initialCategory = "general" }
   }, [initialCategory]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
+
+  const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
 
   // Additional local state for general preferences matching the design
   const [onStartup, setOnStartup] = useState<string>("home");
@@ -718,18 +735,226 @@ export default function SettingsTabView({ onClose, initialCategory = "general" }
               {/* 9. STORAGE */}
               {activeCategory === "storage" && (
                 <div className="space-y-6">
+                  {/* Local Storage Card */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.storageGroup")}</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.storageGroup") || "Storage Provider"}</h3>
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-foreground">{t("settings.localStorageLabel")}</div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.localStorageDesc")}</p>
+                        <div className="text-xs font-semibold text-foreground">{t("settings.localStorageLabel") || "Local Storage"}</div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.localStorageDesc") || "Store notes locally in browser and local disk."}</p>
                       </div>
-                      <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold">{t("settings.connected")}</span>
+                      {(() => {
+                        let isLocalOk = false;
+                        try {
+                          const testKey = "__luno_test_storage__";
+                          localStorage.setItem(testKey, "1");
+                          localStorage.removeItem(testKey);
+                          isLocalOk = true;
+                        } catch {
+                          isLocalOk = false;
+                        }
+                        return isLocalOk ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shrink-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            {t("settings.connected") || "Connected"}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-semibold shrink-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                            {t("settings.unavailable") || "Unavailable"}
+                          </span>
+                        );
+                      })()}
                     </div>
+                  </div>
+
+                  {/* Google Drive Cloud Storage Card */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 rounded-xl bg-muted/80 border border-border/60 flex items-center justify-center shrink-0">
+                          <GoogleDriveIcon className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-foreground">Google Drive</div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {t("settings.gdriveDesc") || "Store your Luno files in your Google Drive."}
+                          </p>
+                        </div>
+                      </div>
+
+                      {isGoogleDriveConnected() ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shrink-0">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          {t("settings.connected") || "Connected"}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isConnectingDrive}
+                          onClick={async () => {
+                            try {
+                              setIsConnectingDrive(true);
+                              await requestGoogleDriveAuth();
+                              updateSetting("storageMode", "gdrive");
+                              triggerSync(notes, onNotesUpdated);
+                              toast({
+                                title: t("settings.gdriveConnectedTitle") || "Google Drive Connected",
+                                description: t("settings.gdriveConnectedDesc") || "Luno is now synced with your Google Drive.",
+                              });
+                            } catch (err: any) {
+                              toast({
+                                title: t("settings.gdriveConnectFailed") || "Connection Failed",
+                                description: err.message || "Failed to connect to Google Drive",
+                                variant: "destructive",
+                              });
+                            } finally {
+                              setIsConnectingDrive(false);
+                            }
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
+                        >
+                          {isConnectingDrive ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Plug className="h-4 w-4" />
+                          )}
+                          {t("settings.connect") || "Connect"}
+                        </button>
+                      )}
+                    </div>
+
+                    {isGoogleDriveConnected() && (
+                      <div className="space-y-4 pt-2 border-t border-border/40 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
+                          <div>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.account") || "Account"}</span>
+                            <span className="font-semibold text-foreground truncate block mt-0.5">{userProfile?.email || "Connected"}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
+                            <span className="font-semibold text-foreground block mt-0.5">Google Drive / Luno</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced") || "Last Synced"}</span>
+                            <span className="font-semibold text-foreground block mt-0.5">
+                              {lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : (t("settings.justNow") || "Just now")}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.syncState") || "Sync State"}</span>
+                            <span className="font-semibold text-primary capitalize block mt-0.5">
+                              {syncStatus === "idle"
+                                ? t("settings.syncStatusIdle") || "Idle"
+                                : syncStatus === "saving"
+                                ? t("settings.syncStatusSaving") || "Saving..."
+                                : syncStatus === "syncing"
+                                ? t("settings.syncStatusSyncing") || "Syncing..."
+                                : syncStatus === "synced"
+                                ? t("settings.syncStatusSynced") || "Synced"
+                                : syncStatus === "offline"
+                                ? t("settings.syncStatusOffline") || "Offline"
+                                : syncStatus === "error"
+                                ? t("settings.syncStatusError") || "Error"
+                                : syncStatus === "conflict"
+                                ? t("settings.syncStatusConflict") || "Conflict"
+                                : syncStatus}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4 pt-1">
+                          <div>
+                            <label className="text-xs font-semibold text-foreground">{t("settings.cloudSyncActive") || "Enable Cloud Storage Mode"}</label>
+                            <p className="text-xs text-muted-foreground mt-0.5">{t("settings.cloudSyncActiveDesc") || "Sync and save notes to Google Drive as primary storage."}</p>
+                          </div>
+                          <Switch
+                            checked={settings.storageMode === "gdrive"}
+                            onCheckedChange={(v) => {
+                              const mode = v ? "gdrive" : "local";
+                              updateSetting("storageMode", mode);
+                              if (v) triggerSync(notes, onNotesUpdated);
+                            }}
+                            className="scale-85 origin-right cursor-pointer"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border/30">
+                          <a
+                            href={folderStructure ? `https://drive.google.com/drive/folders/${folderStructure.rootId}` : "https://drive.google.com"}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {t("settings.openFolder") || "Open Folder"}
+                          </a>
+                          <button
+                            type="button"
+                            disabled={syncStatus === "syncing"}
+                            onClick={() => {
+                              triggerSync(notes, onNotesUpdated);
+                              toast({
+                                title: t("settings.syncState") || "Syncing",
+                                description: t("settings.gdriveConnectedDesc") || "Syncing notes to Google Drive...",
+                              });
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
+                            {t("settings.syncNow") || "Sync Now"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDisconnectModalOpen(true)}
+                            className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                          >
+                            <Unplug className="h-3.5 w-3.5" />
+                            {t("settings.disconnect") || "Disconnect"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
+
+              {/* Disconnect Google Drive Modal */}
+              <Dialog open={disconnectModalOpen} onOpenChange={setDisconnectModalOpen}>
+                <DialogContent className="sm:max-w-md rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle>{t("settings.disconnectModalTitle") || "Disconnect Google Drive"}</DialogTitle>
+                    <DialogDescription className="pt-2 text-xs leading-relaxed">
+                      {t("settings.disconnectModalDesc") || "Disconnecting Google Drive will stop cloud synchronization. Your files will remain in your Google Drive."}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <DialogFooter className="gap-2 sm:gap-0 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setDisconnectModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      {t("common.cancel") || "Cancel"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        disconnectGoogleDrive();
+                        updateSetting("storageMode", "local");
+                        setDisconnectModalOpen(false);
+                        toast({
+                          title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
+                          description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your files remain safe in Google Drive.",
+                        });
+                      }}
+                      className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      {t("settings.disconnect") || "Disconnect"}
+                    </button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               {/* 10. BACKUP */}
               {activeCategory === "backup" && (

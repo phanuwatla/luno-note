@@ -113,6 +113,9 @@ import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
 import { parseFrontmatterAndTags, updateFrontmatterTags } from "@/lib/frontmatter";
+import { uploadDriveAttachmentFile } from "@/lib/googleDriveApi";
+import { getStoredTokenInfo, isGoogleDriveConnected } from "@/lib/googleDriveAuth";
+import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
@@ -1483,7 +1486,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       document.title = "Luno Note";
     }
   }, [note?.fileName, note?.title, note?.id]);
-  const { t } = useTranslation();
+  const { t, language: lang } = useTranslation();
 
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
 
@@ -2759,7 +2762,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setAiErrorMsg("");
 
     try {
-      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText);
+      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText, lang);
       const cleanResult = result.trim();
       setAiOutputText(cleanResult);
 
@@ -2889,6 +2892,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       showUiAlert(t("editor.invalidImageFile"));
       event.target.value = "";
       return;
+    }
+
+    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      try {
+        const tokenInfo = getStoredTokenInfo();
+        const structure = await syncEngine.initializeSync();
+        if (tokenInfo && structure) {
+          const uploaded = await uploadDriveAttachmentFile(
+            tokenInfo.access_token,
+            structure.attachmentsId,
+            file,
+            file.name
+          );
+          const driveImgUrl = uploaded.webContentLink || `https://drive.google.com/uc?export=view&id=${uploaded.id}`;
+          const chain = getFocusedChain();
+          if (chain) chain.setImage({ src: driveImgUrl, alt: file.name }).run();
+          event.target.value = "";
+          return;
+        }
+      } catch (err) {
+        console.warn("Failed to upload image to Google Drive attachments:", err);
+      }
     }
 
     const dataUrl = await new Promise<string>((resolve, reject) => {

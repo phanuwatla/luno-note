@@ -46,6 +46,10 @@ export interface AppSettings {
 
   // AI Assistant Settings
   geminiApiKey: string;
+
+  // Cloud Storage Settings
+  storageMode: "local" | "gdrive";
+  googleDriveClientId: string;
 }
 
 const STORAGE_KEY = "notes-app-settings";
@@ -78,6 +82,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   showCodeLineNumbers: true,
 
   geminiApiKey: "",
+
+  storageMode: "local",
+  googleDriveClientId: "",
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -108,6 +115,8 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
   const autoPairBrackets = raw?.autoPairBrackets !== false;
   const showCodeLineNumbers = raw?.showCodeLineNumbers !== false;
   const geminiApiKey = typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey.trim() : "";
+  const storageMode = raw?.storageMode === "gdrive" ? "gdrive" : "local";
+  const googleDriveClientId = typeof raw?.googleDriveClientId === "string" ? raw.googleDriveClientId.trim() : "";
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
@@ -132,6 +141,8 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     autoPairBrackets,
     showCodeLineNumbers,
     geminiApiKey,
+    storageMode,
+    googleDriveClientId,
   };
 }
 

@@ -16,6 +16,8 @@ import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, ge
 import { marked } from "marked";
 import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
+import { isGoogleDriveConnected } from "@/lib/googleDriveAuth";
 
 export default function Index() {
   const { t } = useTranslation();
@@ -65,6 +67,12 @@ export default function Index() {
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
   const notesRef = useRef(notes);
 
+  const { queueSync, trashDriveNote, importDriveNotes, setRootFolderName } = useGoogleDriveSync();
+
+  useEffect(() => {
+    setRootFolderName(openedFolderName);
+  }, [openedFolderName, setRootFolderName]);
+
   const handleOpenSettings = useCallback((category: SettingsCategory = "general") => {
     setSettingsCategory(category);
     openTab("settings");
@@ -73,6 +81,29 @@ export default function Index() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  // Google Drive cloud sync triggers
+  useEffect(() => {
+    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      importDriveNotes(notesRef.current, (imported) => {
+        replaceNotes(imported);
+      });
+    }
+  }, [settings.storageMode, importDriveNotes, replaceNotes]);
+
+  const handleUpdateNote = useCallback(
+    (id: string, patch: Partial<Note>) => {
+      updateNote(id, patch);
+      const latestNotes = notesRef.current;
+      const updated = latestNotes.find((n) => n.id === id);
+      if (updated && settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+        queueSync(updated, (syncedNote) => {
+          updateNote(syncedNote.id, syncedNote);
+        });
+      }
+    },
+    [updateNote, settings.storageMode, queueSync]
+  );
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
@@ -1142,6 +1173,10 @@ export default function Index() {
     const targetNote = notes.find((n) => n.id === id);
     if (!targetNote) return false;
 
+    if (targetNote.driveFileId && settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      trashDriveNote(targetNote.driveFileId);
+    }
+
     if (targetNote.fileName) {
       const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
       trackDeletedRelativePath(relPath);
@@ -1283,7 +1318,12 @@ export default function Index() {
         )}
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
           {activeTabId === "settings" ? (
-            <SettingsTabView initialCategory={settingsCategory} onClose={() => closeTab("settings", notes.map((n) => n.id))} />
+            <SettingsTabView
+              initialCategory={settingsCategory}
+              onClose={() => closeTab("settings", notes.map((n) => n.id))}
+              notes={notes}
+              onNotesUpdated={replaceNotes}
+            />
           ) : activeTabId === "luno-ai" ? (
             <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
               <LunoAiView
@@ -1343,7 +1383,7 @@ export default function Index() {
                 <Editor
                   note={activeTabNote}
                   notes={notes}
-                  onUpdate={updateNote}
+                  onUpdate={handleUpdateNote}
                   onDelete={handleDeleteNote}
                   onCreate={handleCreateNote}
                   onCreateFolder={createFolderInFolder}
@@ -1383,7 +1423,7 @@ export default function Index() {
                 <Editor
                   note={notes.find(n => n.id === splitTabId) ?? null}
                   notes={notes}
-                  onUpdate={updateNote}
+                  onUpdate={handleUpdateNote}
                   onDelete={handleDeleteNote}
                   onCreate={handleCreateNote}
                   onCreateFolder={createFolderInFolder}
@@ -1408,7 +1448,7 @@ export default function Index() {
             <Editor
               note={activeTabNote}
               notes={notes}
-              onUpdate={updateNote}
+              onUpdate={handleUpdateNote}
               onDelete={handleDeleteNote}
               onCreate={handleCreateNote}
               onCreateFolder={createFolderInFolder}

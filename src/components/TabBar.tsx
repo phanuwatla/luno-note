@@ -28,7 +28,6 @@ export default function TabBar({
   const { t } = useTranslation();
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
     if (note.fileType === "image") return "image";
@@ -74,7 +73,6 @@ export default function TabBar({
           const isLunoAi = note.id === "luno-ai" || note.fileType === "luno-ai";
           const label = isSettings ? (t("settings.title") || "Settings") : isLunoAi ? "Luno AI" : (note.fileName || note.title?.trim() || t("editor.untitled"));
           const isDragging = draggedIndex === index;
-          const isDragOver = dragOverIndex === index;
 
           return (
             <div
@@ -90,30 +88,21 @@ export default function TabBar({
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
                 if (draggedIndex !== null && draggedIndex !== index) {
-                  setDragOverIndex(index);
-                }
-              }}
-              onDragLeave={() => {
-                if (dragOverIndex === index) {
-                  setDragOverIndex(null);
+                  if (onReorderTabs) {
+                    onReorderTabs(draggedIndex, index);
+                  }
+                  setDraggedIndex(index);
                 }
               }}
               onDrop={(e) => {
                 e.preventDefault();
-                if (draggedIndex !== null && draggedIndex !== index && onReorderTabs) {
-                  onReorderTabs(draggedIndex, index);
-                }
                 setDraggedIndex(null);
-                setDragOverIndex(null);
               }}
               onDragEnd={() => {
                 setDraggedIndex(null);
-                setDragOverIndex(null);
               }}
-              className={`group flex min-w-0 max-w-[190px] shrink-0 cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all ${
-                isDragging ? "opacity-40" : ""
-              } ${
-                isDragOver ? "border-l-2 border-l-primary bg-primary/10" : ""
+              className={`group flex min-w-0 max-w-[190px] shrink-0 cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 ${
+                isDragging ? "opacity-40 scale-[0.98] bg-muted/60" : ""
               } ${
                 isActive
                   ? "bg-background text-foreground shadow-xs border-t border-x border-border/40 font-semibold"

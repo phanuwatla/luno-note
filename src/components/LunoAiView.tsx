@@ -13,6 +13,7 @@ import {
   Plus,
   User,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   X,
   FileCode,
@@ -27,7 +28,18 @@ import {
   FilePlus,
   Loader2,
   ArrowDown,
+  ArrowRight,
   RotateCcw,
+  Mic,
+  MicOff,
+  Zap,
+  Palette,
+  Brain,
+  Minimize2,
+  Maximize2,
+  BookOpen,
+  Briefcase,
+  CheckCheck,
 } from "lucide-react";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon as Wand2 } from "@/components/icons/WandSparklesIcon";
@@ -359,6 +371,108 @@ function WorkspaceFolderTree({
   return <div className="space-y-0.5">{renderNode(tree)}</div>;
 }
 
+const renderModelIcon = (mKey: "smart" | "fast" | "creative") => {
+  if (mKey === "smart") {
+    return <Brain className="h-3.5 w-3.5 text-primary shrink-0" />;
+  }
+  if (mKey === "fast") {
+    return <Zap className="h-3.5 w-3.5 text-primary shrink-0" />;
+  }
+  return <Palette className="h-3.5 w-3.5 text-primary shrink-0" />;
+};
+
+interface AiToolItem {
+  id: string;
+  icon: React.ReactNode;
+  labelEn: string;
+  labelTh: string;
+  prefixEn: string;
+  prefixTh: string;
+}
+
+const AI_TOOLS: AiToolItem[] = [
+  {
+    id: "improve",
+    icon: <Wand2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Improve Writing",
+    labelTh: "ปรับแต่งงานเขียน",
+    prefixEn: "Improve writing: ",
+    prefixTh: "ปรับแต่งข้อความ: ",
+  },
+  {
+    id: "fix_grammar",
+    icon: <CheckCheck className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Fix Grammar",
+    labelTh: "แก้ไขไวยากรณ์และคำผิด",
+    prefixEn: "Fix spelling and grammar: ",
+    prefixTh: "แก้ไขไวยากรณ์และคำผิด: ",
+  },
+  {
+    id: "make_shorter",
+    icon: <Minimize2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Make Shorter",
+    labelTh: "สรุปให้กระชับขึ้น",
+    prefixEn: "Make shorter and concise: ",
+    prefixTh: "กระชับข้อความให้สั้นลง: ",
+  },
+  {
+    id: "make_longer",
+    icon: <Maximize2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Make Longer",
+    labelTh: "ขยายความเนื้อหา",
+    prefixEn: "Make longer and elaborate: ",
+    prefixTh: "ขยายความเนื้อหาให้ยาวขึ้น: ",
+  },
+  {
+    id: "simplify",
+    icon: <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Simplify",
+    labelTh: "ปรับให้อ่านง่ายขึ้น",
+    prefixEn: "Simplify and make easy to read: ",
+    prefixTh: "ปรับข้อความให้อ่านง่ายขึ้น: ",
+  },
+  {
+    id: "formalize",
+    icon: <Briefcase className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Formalize",
+    labelTh: "ปรับโทนให้เป็นทางการ",
+    prefixEn: "Make tone formal and professional: ",
+    prefixTh: "ปรับโทนเสียงให้เป็นทางการ: ",
+  },
+  {
+    id: "make_casual",
+    icon: <MessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Make Casual",
+    labelTh: "ปรับโทนให้เป็นกันเอง",
+    prefixEn: "Make tone casual and friendly: ",
+    prefixTh: "ปรับโทนเสียงให้เป็นกันเอง: ",
+  },
+  {
+    id: "translate",
+    icon: <Languages className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Translate",
+    labelTh: "แปลภาษา",
+    prefixEn: "Translate to English: ",
+    prefixTh: "แปลเป็นภาษาไทย: ",
+  },
+  {
+    id: "continue_writing",
+    icon: <ArrowRight className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Continue Writing",
+    labelTh: "เขียนเนื้อหาต่อ",
+    prefixEn: "Continue writing: ",
+    prefixTh: "เขียนเนื้อหาต่อจากเดิม: ",
+  },
+  {
+    id: "rewrite",
+    icon: <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />,
+    labelEn: "Rewrite",
+    labelTh: "เรียบเรียงสำนวนใหม่",
+    prefixEn: "Rewrite with fresh phrasing: ",
+    prefixTh: "เรียบเรียงข้อความใหม่: ",
+  },
+];
+
 export default function LunoAiView({
   notes = [],
   activeNote,
@@ -367,7 +481,8 @@ export default function LunoAiView({
   onCreateNewNote,
   onOpenSettings,
 }: LunoAiViewProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const lang = (language as "th" | "en") || "th";
   const { settings } = useAppSettings();
 
   const [prompt, setPrompt] = useState("");
@@ -394,14 +509,12 @@ export default function LunoAiView({
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
     try {
       const lastId = localStorage.getItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+      if (!lastId || lastId === "new") return null;
       const savedSessions = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
       const parsed: ChatSession[] = savedSessions ? JSON.parse(savedSessions) : [];
 
-      if (lastId && parsed.some((s) => s.id === lastId)) {
+      if (parsed.some((s) => s.id === lastId)) {
         return lastId;
-      }
-      if (parsed.length > 0) {
-        return parsed[0].id;
       }
     } catch {
       /* ignore */
@@ -412,10 +525,11 @@ export default function LunoAiView({
   const [messages, setMessages] = useState<MessageItem[]>(() => {
     try {
       const lastId = localStorage.getItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+      if (!lastId || lastId === "new") return [];
       const savedSessions = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
       const parsed: ChatSession[] = savedSessions ? JSON.parse(savedSessions) : [];
 
-      const targetSession = parsed.find((s) => s.id === lastId) || parsed[0];
+      const targetSession = parsed.find((s) => s.id === lastId);
       if (targetSession && targetSession.messages) {
         return targetSession.messages;
       }
@@ -440,10 +554,322 @@ export default function LunoAiView({
   const [searchWorkspaceQuery, setSearchWorkspaceQuery] = useState("");
   const [searchHistoryQuery, setSearchHistoryQuery] = useState("");
 
+  const QUICK_PREFIXES = useMemo(
+    () => [
+      "Translate to English: ",
+      "Translate to Thai: ",
+      "Summarize: ",
+      "Improve writing: ",
+      "Fix spelling and grammar: ",
+      "Make shorter and concise: ",
+      "Make longer and elaborate: ",
+      "Simplify and make easy to read: ",
+      "Make tone formal and professional: ",
+      "Make tone casual and friendly: ",
+      "Continue writing: ",
+      "Rewrite with fresh phrasing: ",
+      "Brainstorm: ",
+      "Create an outline for: ",
+      "Create outline: ",
+      "แปลเป็นภาษาอังกฤษ: ",
+      "แปลเป็นภาษาไทย: ",
+      "สรุปเนื้อหา: ",
+      "ปรับแต่งข้อความ: ",
+      "แก้ไขไวยากรณ์และคำผิด: ",
+      "กระชับข้อความให้สั้นลง: ",
+      "ขยายความเนื้อหาให้ยาวขึ้น: ",
+      "ปรับข้อความให้อ่านง่ายขึ้น: ",
+      "ปรับโทนเสียงให้เป็นทางการ: ",
+      "ปรับโทนเสียงให้เป็นกันเอง: ",
+      "เขียนเนื้อหาต่อจากเดิม: ",
+      "เรียบเรียงข้อความใหม่: ",
+      "ระดมความคิด: ",
+      "สร้างโครงร่างสำหรับ: ",
+      "สร้างโครงร่าง: ",
+    ],
+    []
+  );
+
+  const [activePrefix, setActivePrefix] = useState<string | null>(null);
+  const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  const [menuCoords, setMenuCoords] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
+
+  const slashMenuScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+  const autoScrollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const updateSlashMenuCoords = () => {
+    const activeEl = (textareaRef.current || chatInputRef.current) as HTMLElement | null;
+    if (!activeEl) return;
+    const rect = activeEl.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+
+    if (spaceAbove > 330 || spaceAbove > spaceBelow) {
+      setMenuCoords({
+        bottom: window.innerHeight - rect.top + 6,
+        left: Math.max(16, Math.min(rect.left, window.innerWidth - 220)),
+      });
+    } else {
+      setMenuCoords({
+        top: rect.bottom + 6,
+        left: Math.max(16, Math.min(rect.left, window.innerWidth - 220)),
+      });
+    }
+  };
+
+  const checkSlashMenuScroll = () => {
+    const el = slashMenuScrollRef.current;
+    if (!el) return;
+    const hasMoreUp = el.scrollTop > 2;
+    const hasMoreDown = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+    setCanScrollUp(hasMoreUp);
+    setCanScrollDown(hasMoreDown);
+  };
+
+  useEffect(() => {
+    if (isSlashMenuOpen) {
+      updateSlashMenuCoords();
+      setTimeout(checkSlashMenuScroll, 50);
+      window.addEventListener("scroll", updateSlashMenuCoords, true);
+      window.addEventListener("resize", updateSlashMenuCoords);
+      return () => {
+        window.removeEventListener("scroll", updateSlashMenuCoords, true);
+        window.removeEventListener("resize", updateSlashMenuCoords);
+      };
+    }
+  }, [isSlashMenuOpen, slashQuery]);
+
+  useEffect(() => {
+    if (isSlashMenuOpen && slashMenuScrollRef.current) {
+      const selectedEl = slashMenuScrollRef.current.querySelector(
+        `[data-slash-item="${selectedSlashIndex}"]`
+      ) as HTMLElement;
+      if (selectedEl) {
+        selectedEl.scrollIntoView({ block: "nearest" });
+        checkSlashMenuScroll();
+      }
+    }
+  }, [selectedSlashIndex, isSlashMenuOpen]);
+
+  const scrollSlashMenu = (direction: "up" | "down") => {
+    const el = slashMenuScrollRef.current;
+    if (!el) return;
+    const delta = direction === "up" ? -45 : 45;
+    el.scrollBy({ top: delta, behavior: "smooth" });
+    setTimeout(checkSlashMenuScroll, 100);
+  };
+
+  const startAutoScroll = (direction: "up" | "down") => {
+    stopAutoScroll();
+    scrollSlashMenu(direction);
+    autoScrollTimerRef.current = setInterval(() => {
+      scrollSlashMenu(direction);
+    }, 120);
+  };
+
+  const stopAutoScroll = () => {
+    if (autoScrollTimerRef.current) {
+      clearInterval(autoScrollTimerRef.current);
+      autoScrollTimerRef.current = null;
+    }
+  };
+
+  const dynamicPlaceholder = useMemo(() => {
+    if (!activePrefix) return t("lunoAi.inputPlaceholder") || "Ask anything or type / for commands";
+    if (activePrefix.includes("Translate") || activePrefix.includes("แปล")) {
+      return t("lunoAi.placeholderTranslate") || "Text to translate...";
+    }
+    if (activePrefix.includes("Summarize") || activePrefix.includes("สรุป")) {
+      return t("lunoAi.placeholderSummarize") || "Text or topic to summarize...";
+    }
+    if (activePrefix.includes("Fix") || activePrefix.includes("ไวยากรณ์")) {
+      return t("lunoAi.placeholderFixGrammar") || "Text to check spelling and grammar...";
+    }
+    if (activePrefix.includes("shorter") || activePrefix.includes("กระชับ")) {
+      return t("lunoAi.placeholderMakeShorter") || "Text to make shorter and concise...";
+    }
+    if (activePrefix.includes("longer") || activePrefix.includes("ขยายความ")) {
+      return t("lunoAi.placeholderMakeLonger") || "Text or topic to elaborate...";
+    }
+    if (activePrefix.includes("Simplify") || activePrefix.includes("อ่านง่าย")) {
+      return t("lunoAi.placeholderSimplify") || "Text to simplify and make easy to read...";
+    }
+    if (activePrefix.includes("formal") || activePrefix.includes("ทางการ")) {
+      return t("lunoAi.placeholderFormalize") || "Text to formalize into professional tone...";
+    }
+    if (activePrefix.includes("casual") || activePrefix.includes("เป็นกันเอง")) {
+      return t("lunoAi.placeholderMakeCasual") || "Text to make casual and friendly...";
+    }
+    if (activePrefix.includes("Continue") || activePrefix.includes("เขียนเนื้อหาต่อ")) {
+      return t("lunoAi.placeholderContinueWriting") || "Context or topic to continue writing...";
+    }
+    if (activePrefix.includes("Rewrite") || activePrefix.includes("เรียบเรียง")) {
+      return t("lunoAi.placeholderRewrite") || "Text to rewrite with fresh phrasing...";
+    }
+    if (activePrefix.includes("Improve") || activePrefix.includes("ปรับแต่ง")) {
+      return t("lunoAi.placeholderImprove") || "Text to improve or rewrite...";
+    }
+    if (activePrefix.includes("Brainstorm") || activePrefix.includes("ระดมความคิด")) {
+      return t("lunoAi.placeholderBrainstorm") || "Topic to brainstorm ideas...";
+    }
+    if (activePrefix.includes("outline") || activePrefix.includes("Outline") || activePrefix.includes("โครงร่าง")) {
+      return t("lunoAi.placeholderOutline") || "Topic to create outline...";
+    }
+    return t("lunoAi.inputPlaceholder") || "Ask anything or type / for commands";
+  }, [activePrefix, t]);
+
+  const filteredTools = useMemo(() => {
+    if (!slashQuery.trim()) return AI_TOOLS;
+    const q = slashQuery.toLowerCase();
+    return AI_TOOLS.filter((tool) => {
+      return (
+        tool.id.includes(q) ||
+        tool.labelEn.toLowerCase().includes(q) ||
+        tool.labelTh.toLowerCase().includes(q)
+      );
+    });
+  }, [slashQuery]);
+
+  const applySlashTool = (tool: AiToolItem) => {
+    const prefix = lang === "th" ? tool.prefixTh : tool.prefixEn;
+    setActivePrefix(prefix);
+    setPrompt("");
+    setIsSlashMenuOpen(false);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      chatInputRef.current?.focus();
+    }, 50);
+  };
+
+  const handleInputChange = (val: string) => {
+    const matched = QUICK_PREFIXES.find((p) => val.startsWith(p));
+    if (matched) {
+      setActivePrefix(matched);
+      setPrompt(val.slice(matched.length));
+      setIsSlashMenuOpen(false);
+      return;
+    }
+
+    setPrompt(val);
+
+    if (val.startsWith("/")) {
+      setIsSlashMenuOpen(true);
+      setSlashQuery(val.slice(1));
+      setSelectedSlashIndex(0);
+      setTimeout(updateSlashMenuCoords, 10);
+    } else {
+      setIsSlashMenuOpen(false);
+    }
+  };
+
+
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SpeechRecognitionClass =
+      typeof window !== "undefined"
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+
+    if (SpeechRecognitionClass) {
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event: any) => {
+        let currentTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (transcript) {
+            currentTranscript += transcript;
+          }
+        }
+
+        if (currentTranscript.trim()) {
+          setPrompt((prev) => {
+            const base = (prev || "").trim();
+            if (!base) return currentTranscript.trim();
+            if (base.endsWith(currentTranscript.trim())) return prev;
+            return `${base} ${currentTranscript.trim()}`;
+          });
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error:", event.error);
+        setIsListening(false);
+        if (event.error === "not-allowed") {
+          toast({
+            title: t("lunoAi.voiceErrorTitle") || "Microphone Error",
+            description: t("lunoAi.voiceNotAllowed") || "Microphone access denied. Please allow permission.",
+          });
+        } else if (event.error !== "no-speech") {
+          toast({
+            title: t("lunoAi.voiceErrorTitle") || "Microphone Error",
+            description: t("lunoAi.voiceErrorDesc") || "Could not recognize voice.",
+          });
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [lang, t]);
+
+  const handleToggleVoiceInput = () => {
+    if (!recognitionRef.current) {
+      toast({
+        title: t("lunoAi.voiceNotSupportedTitle") || "Voice Input Not Supported",
+        description: t("lunoAi.voiceNotSupportedDesc") || "Your browser does not support Speech Recognition. Please try Chrome, Edge, or Safari.",
+      });
+      return;
+    }
+
+    if (isListening) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.lang = lang === "th" ? "th-TH" : "en-US";
+        recognitionRef.current.start();
+        setIsListening(true);
+        toast({
+          title: t("lunoAi.voiceListeningTitle") || "Listening...",
+          description: t("lunoAi.voiceListeningDesc") || "Speak now. Your voice will be typed into the box.",
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
 
   // Save sessions to localStorage
   useEffect(() => {
@@ -460,7 +886,7 @@ export default function LunoAiView({
       if (currentSessionId) {
         localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, currentSessionId);
       } else {
-        localStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+        localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
       }
     } catch {
       /* ignore */
@@ -510,7 +936,7 @@ export default function LunoAiView({
     setMessages([]);
     setAttachedFiles([]);
     try {
-      localStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+      localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
     } catch {
       /* ignore */
     }
@@ -545,7 +971,7 @@ export default function LunoAiView({
           setCurrentSessionId(null);
           setMessages([]);
           try {
-            localStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+            localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
           } catch {
             /* ignore */
           }
@@ -561,7 +987,7 @@ export default function LunoAiView({
     setMessages([]);
     try {
       localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY);
-      localStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+      localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
     } catch {
       /* ignore */
     }
@@ -591,7 +1017,8 @@ export default function LunoAiView({
   }, [messages, isGenerating]);
 
   const handleSendPrompt = async (customPrompt?: string) => {
-    const textToSend = (customPrompt ?? prompt).trim();
+    const rawText = customPrompt ?? (activePrefix ? `${activePrefix}${prompt}` : prompt);
+    const textToSend = rawText.trim();
     if (!textToSend || isGenerating) return;
 
     if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
@@ -634,7 +1061,8 @@ export default function LunoAiView({
           historyForApi,
           textToSend,
           fileContexts,
-          model
+          model,
+          lang
         );
 
         const assistantMsg: MessageItem = {
@@ -667,7 +1095,10 @@ export default function LunoAiView({
       };
 
       setMessages((prev) => [...prev, userMessage]);
-      if (!customPrompt) setPrompt("");
+      if (!customPrompt) {
+        setPrompt("");
+        setActivePrefix(null);
+      }
       setAttachedFiles([]);
       setIsGenerating(true);
 
@@ -677,7 +1108,8 @@ export default function LunoAiView({
           messages,
           textToSend,
           fileContexts,
-          model
+          model,
+          lang
         );
 
         const assistantMsg: MessageItem = {
@@ -756,7 +1188,8 @@ export default function LunoAiView({
         historyForApi,
         targetUserMsg.content,
         undefined,
-        model
+        model,
+        lang
       );
 
       const newAssistantMsg: MessageItem = {
@@ -784,31 +1217,37 @@ export default function LunoAiView({
   };
 
   const handleQuickAction = (actionKey: "summarize" | "improve" | "brainstorm" | "outline" | "translate") => {
-    let templateText = "";
-    if (actionKey === "summarize") {
-      templateText = "Summarize: ";
-    } else if (actionKey === "improve") {
-      templateText = "Improve writing: ";
-    } else if (actionKey === "brainstorm") {
-      templateText = "Brainstorm: ";
-    } else if (actionKey === "outline") {
-      templateText = "Create an outline for: ";
-    } else if (actionKey === "translate") {
-      templateText = "Translate to English: ";
+    let prefixText = "";
+    if (lang === "th") {
+      if (actionKey === "summarize") {
+        prefixText = "สรุปเนื้อหา: ";
+      } else if (actionKey === "improve") {
+        prefixText = "ปรับแต่งข้อความ: ";
+      } else if (actionKey === "brainstorm") {
+        prefixText = "ระดมความคิด: ";
+      } else if (actionKey === "outline") {
+        prefixText = "สร้างโครงร่าง: ";
+      } else if (actionKey === "translate") {
+        prefixText = "แปลเป็นภาษาไทย: ";
+      }
+    } else {
+      if (actionKey === "summarize") {
+        prefixText = "Summarize: ";
+      } else if (actionKey === "improve") {
+        prefixText = "Improve writing: ";
+      } else if (actionKey === "brainstorm") {
+        prefixText = "Brainstorm: ";
+      } else if (actionKey === "outline") {
+        prefixText = "Create outline: ";
+      } else if (actionKey === "translate") {
+        prefixText = "Translate to English: ";
+      }
     }
 
-    setPrompt(templateText);
+    setActivePrefix(prefixText);
     setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        const len = templateText.length;
-        textareaRef.current.setSelectionRange(len, len);
-      }
-      if (chatInputRef.current) {
-        chatInputRef.current.focus();
-        const len = templateText.length;
-        chatInputRef.current.setSelectionRange(len, len);
-      }
+      textareaRef.current?.focus();
+      chatInputRef.current?.focus();
     }, 50);
   };
 
@@ -913,16 +1352,14 @@ export default function LunoAiView({
         <div className="flex-1 overflow-y-auto w-full no-scrollbar flex flex-col justify-between">
           {messages.length === 0 ? (
             /* Centered Hero Content in Hero Mode */
-            <div className="w-full max-w-3xl mx-auto px-4 py-6 flex-1 flex flex-col items-center justify-center my-auto space-y-6">
+            <div className="w-full max-w-3xl mx-auto px-4 py-8 flex-1 flex flex-col items-center justify-center -mt-8 sm:-mt-12 space-y-6">
               {/* Hero Logo & Header */}
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center text-center space-y-2 mb-2"
+                className="flex flex-col items-center text-center space-y-2.5 mb-6 sm:mb-8"
               >
-                <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center border border-primary/20 shadow-2xs">
-                  <Sparkles className="h-5 w-5" />
-                </div>
+                <Sparkles className="h-7 w-7 text-primary mb-1 shrink-0" />
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground font-krona">
                   Luno AI
                 </h1>
@@ -955,71 +1392,138 @@ export default function LunoAiView({
                 {attachedFiles.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 px-0.5">
                     {attachedFiles.map((file, idx) => (
-                      <div
-                        key={idx}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
-                          title="Remove attachment"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                      <Tooltip key={idx}>
+                        <TooltipTrigger asChild>
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
+                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>{file.name}</TooltipContent>
+                      </Tooltip>
                     ))}
                   </div>
                 )}
 
                 <div className="relative w-full rounded-2xl border border-border/80 bg-card p-3.5 shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all space-y-2.5">
-                  <textarea
-                    ref={textareaRef}
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        void handleSendPrompt();
-                      }
-                    }}
-                    placeholder={t("lunoAi.inputPlaceholder") || "Ask me anything..."}
-                    className="w-full bg-transparent text-xs sm:text-sm placeholder:text-muted-foreground outline-none resize-none min-h-[56px] max-h-[160px] leading-relaxed py-0.5"
-                  />
+                  <div className="flex flex-wrap items-baseline gap-1 min-h-[56px] max-h-[160px]">
+                    {activePrefix && (
+                      <span
+                        onClick={() => setActivePrefix(null)}
+                        className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
+                        title="Click or Backspace to remove"
+                      >
+                        {activePrefix}
+                      </span>
+                    )}
+                    <textarea
+                      ref={textareaRef}
+                      value={prompt}
+                      onChange={(e) => handleInputChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (isSlashMenuOpen && filteredTools.length > 0) {
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setSelectedSlashIndex((prev) => (prev + 1) % filteredTools.length);
+                            return;
+                          }
+                          if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setSelectedSlashIndex((prev) => (prev - 1 + filteredTools.length) % filteredTools.length);
+                            return;
+                          }
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            applySlashTool(filteredTools[selectedSlashIndex]);
+                            return;
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setIsSlashMenuOpen(false);
+                            return;
+                          }
+                        }
+
+                        if (e.key === "Backspace" && activePrefix) {
+                          const target = e.currentTarget as HTMLTextAreaElement;
+                          if (!prompt || target.selectionStart === 0) {
+                            e.preventDefault();
+                            setActivePrefix(null);
+                          }
+                        } else if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void handleSendPrompt();
+                        }
+                      }}
+                      placeholder={dynamicPlaceholder}
+                      className="flex-1 min-w-[200px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground outline-none resize-none min-h-[56px] max-h-[160px] leading-relaxed py-0.5"
+                    />
+                  </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-border/40">
                     <div className="flex items-center gap-1.5">
                       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="h-8 px-3 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer"
-                            title={t("lunoAi.attachFile") || "Attach file"}
-                          >
-                            <Paperclip className="h-3.5 w-3.5" />
-                            <span>{t("lunoAi.attachFile") || "Attach file"}</span>
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-56 rounded-xl">
+                        <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="h-8 px-3 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span>{t("lunoAi.attachFile") || "Attach file"}</span>
+                            </button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                      </Tooltip>
+                        <DropdownMenuContent align="start" className="w-auto min-w-[245px] rounded-xl">
                           <DropdownMenuItem
                             onClick={() => {
                               setSearchWorkspaceQuery("");
                               setIsWorkspacePickerOpen(true);
                             }}
-                            className="gap-2 text-xs py-2 cursor-pointer"
+                            className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap"
                           >
-                            <Folder className="h-4 w-4 text-primary" />
-                            <span>{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                            <Folder className="h-4 w-4 text-primary shrink-0" />
+                            <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2 text-xs py-2 cursor-pointer">
-                            <Upload className="h-4 w-4 text-muted-foreground" />
-                            <span>{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                          <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap">
+                            <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={handleToggleVoiceInput}
+                            className={`h-8 px-3 rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+                              isListening
+                                ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse font-semibold"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
+                            }`}
+                          >
+                            {isListening ? <MicOff className="h-3.5 w-3.5 text-red-500" /> : <Mic className="h-3.5 w-3.5 text-primary shrink-0" />}
+                            <span>{isListening ? (t("lunoAi.listening") || "Listening...") : (t("lunoAi.voiceInput") || "Voice input")}</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {isListening
+                            ? (t("lunoAi.stopListening") || "Stop listening")
+                            : (t("lunoAi.voiceInput") || "Voice input")}
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1027,13 +1531,14 @@ export default function LunoAiView({
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
-                            className="h-8 pl-3 pr-2.5 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none"
+                            className="h-8 pl-2.5 pr-2 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none shadow-2xs"
                           >
+                            {renderModelIcon(model)}
                             <span>{modelLabels[model]}</span>
                             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-36 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                        <DropdownMenuContent align="end" className="w-40 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
                           {(["smart", "fast", "creative"] as const).map((mKey) => {
                             const isSelected = model === mKey;
                             return (
@@ -1046,23 +1551,31 @@ export default function LunoAiView({
                                     : "text-foreground hover:bg-muted focus:bg-muted"
                                 }`}
                               >
-                                <span>{modelLabels[mKey]}</span>
-                                {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                                <div className="flex items-center gap-2">
+                                  {renderModelIcon(mKey)}
+                                  <span>{modelLabels[mKey]}</span>
+                                </div>
+                                {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-1.5" />}
                               </DropdownMenuItem>
                             );
                           })}
                         </DropdownMenuContent>
                       </DropdownMenu>
 
-                      <button
-                        type="button"
-                        disabled={!prompt.trim() || isGenerating}
-                        onClick={() => void handleSendPrompt()}
-                        className="h-8 px-3.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer"
-                      >
-                        <span>Send</span>
-                        <Send className="h-3.5 w-3.5" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            disabled={!prompt.trim() || isGenerating}
+                            onClick={() => void handleSendPrompt()}
+                            className="h-8 px-3.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer"
+                          >
+                            <span>{t("lunoAi.send") || "Send"}</span>
+                            <Send className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                      </Tooltip>
                     </div>
                   </div>
                 </div>
@@ -1074,9 +1587,7 @@ export default function LunoAiView({
                     onClick={() => handleQuickAction("summarize")}
                     className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
                   >
-                    <div className="h-6 w-6 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-                      <FileText className="h-3.5 w-3.5" />
-                    </div>
+                    <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                     <span className="text-[11.5px] font-semibold text-foreground transition-colors">
                       {t("lunoAi.summarizeTitle") || "Summarize"}
                     </span>
@@ -1090,9 +1601,7 @@ export default function LunoAiView({
                     onClick={() => handleQuickAction("improve")}
                     className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
                   >
-                    <div className="h-6 w-6 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-                      <Wand2 className="h-3.5 w-3.5" />
-                    </div>
+                    <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                     <span className="text-[11.5px] font-semibold text-foreground transition-colors">
                       {t("lunoAi.improveTitle") || "Improve writing"}
                     </span>
@@ -1106,9 +1615,7 @@ export default function LunoAiView({
                     onClick={() => handleQuickAction("brainstorm")}
                     className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
                   >
-                    <div className="h-6 w-6 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-                      <Lightbulb className="h-3.5 w-3.5" />
-                    </div>
+                    <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                     <span className="text-[11.5px] font-semibold text-foreground transition-colors">
                       {t("lunoAi.brainstormTitle") || "Brainstorm"}
                     </span>
@@ -1122,9 +1629,7 @@ export default function LunoAiView({
                     onClick={() => handleQuickAction("outline")}
                     className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
                   >
-                    <div className="h-6 w-6 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-                      <ListOrdered className="h-3.5 w-3.5" />
-                    </div>
+                    <ListOrdered className="h-4 w-4 text-blue-600 dark:text-blue-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                     <span className="text-[11.5px] font-semibold text-foreground transition-colors">
                       {t("lunoAi.outlineTitle") || "Create outline"}
                     </span>
@@ -1138,9 +1643,7 @@ export default function LunoAiView({
                     onClick={() => handleQuickAction("translate")}
                     className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
                   >
-                    <div className="h-6 w-6 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-                      <Languages className="h-3.5 w-3.5" />
-                    </div>
+                    <Languages className="h-4 w-4 text-teal-600 dark:text-teal-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                     <span className="text-[11.5px] font-semibold text-foreground transition-colors">
                       {t("lunoAi.translateTitle") || "Translate"}
                     </span>
@@ -1351,21 +1854,22 @@ export default function LunoAiView({
               {attachedFiles.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 px-0.5">
                   {attachedFiles.map((file, idx) => (
-                    <div
-                      key={idx}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs"
-                    >
-                      <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
-                        title="Remove attachment"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    <Tooltip key={idx}>
+                      <TooltipTrigger asChild>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
+                          <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>{file.name}</TooltipContent>
+                    </Tooltip>
                   ))}
                 </div>
               )}
@@ -1373,60 +1877,127 @@ export default function LunoAiView({
               <div className="relative w-full rounded-2xl border border-border/80 bg-card px-3.5 py-2 flex items-center gap-2 shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
                 <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
                 <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all border border-border/40 flex items-center justify-center shrink-0 cursor-pointer"
-                      title={t("lunoAi.attachFile") || "Attach file"}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56 rounded-xl">
+                  <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all border border-border/40 flex items-center justify-center shrink-0 cursor-pointer"
+                      >
+                        <Plus className="h-4 w-4 text-primary shrink-0" />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                </Tooltip>
+                  <DropdownMenuContent align="start" className="w-auto min-w-[245px] rounded-xl">
                     <DropdownMenuItem
                       onClick={() => {
                         setSearchWorkspaceQuery("");
                         setIsWorkspacePickerOpen(true);
                       }}
-                      className="gap-2 text-xs py-2 cursor-pointer"
+                      className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap"
                     >
-                      <Folder className="h-4 w-4 text-primary" />
-                      <span>{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                      <Folder className="h-4 w-4 text-primary shrink-0" />
+                      <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2 text-xs py-2 cursor-pointer">
-                      <Upload className="h-4 w-4 text-muted-foreground" />
-                      <span>{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap">
+                      <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <input
-                  ref={chatInputRef}
-                  type="text"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void handleSendPrompt();
-                    }
-                  }}
-                  placeholder={t("lunoAi.inputPlaceholder") || "Ask me anything..."}
-                  className="flex-1 bg-transparent text-xs sm:text-sm placeholder:text-muted-foreground outline-none py-1 px-1"
-                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleToggleVoiceInput}
+                      className={`h-8 w-8 rounded-xl transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
+                        isListening
+                          ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground border-border/40"
+                      }`}
+                    >
+                      {isListening ? <MicOff className="h-4 w-4 text-red-500" /> : <Mic className="h-4 w-4 text-primary shrink-0" />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isListening
+                      ? (t("lunoAi.stopListening") || "Stop listening")
+                      : (t("lunoAi.voiceInput") || "Voice input")}
+                  </TooltipContent>
+                </Tooltip>
+
+                <div className="flex-1 flex items-center gap-1.5 min-w-0 relative">
+
+                  {activePrefix && (
+                    <span
+                      onClick={() => setActivePrefix(null)}
+                      className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0 whitespace-nowrap"
+                      title="Click or Backspace to remove"
+                    >
+                      {activePrefix}
+                    </span>
+                  )}
+                  <input
+                    ref={chatInputRef}
+                    type="text"
+                    value={prompt}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (isSlashMenuOpen && filteredTools.length > 0) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setSelectedSlashIndex((prev) => (prev + 1) % filteredTools.length);
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setSelectedSlashIndex((prev) => (prev - 1 + filteredTools.length) % filteredTools.length);
+                          return;
+                        }
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applySlashTool(filteredTools[selectedSlashIndex]);
+                          return;
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setIsSlashMenuOpen(false);
+                          return;
+                        }
+                      }
+
+                      if (e.key === "Backspace" && activePrefix) {
+                        const target = e.currentTarget as HTMLInputElement;
+                        if (!prompt || target.selectionStart === 0) {
+                          e.preventDefault();
+                          setActivePrefix(null);
+                        }
+                      } else if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleSendPrompt();
+                      }
+                    }}
+                    placeholder={dynamicPlaceholder}
+                    className="flex-1 min-w-0 bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground outline-none py-1 px-1"
+                  />
+                </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="h-8 pl-3 pr-2.5 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none"
+                        className="h-8 pl-2.5 pr-2 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none shadow-2xs"
                       >
+                        {renderModelIcon(model)}
                         <span>{modelLabels[model]}</span>
                         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-36 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                    <DropdownMenuContent align="end" className="w-40 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
                       {(["smart", "fast", "creative"] as const).map((mKey) => {
                         const isSelected = model === mKey;
                         return (
@@ -1439,22 +2010,30 @@ export default function LunoAiView({
                                 : "text-foreground hover:bg-muted focus:bg-muted"
                             }`}
                           >
-                            <span>{modelLabels[mKey]}</span>
-                            {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                            <div className="flex items-center gap-2">
+                              {renderModelIcon(mKey)}
+                              <span>{modelLabels[mKey]}</span>
+                            </div>
+                            {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-1.5" />}
                           </DropdownMenuItem>
                         );
                       })}
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  <button
-                    type="button"
-                    disabled={!prompt.trim() || isGenerating}
-                    onClick={() => void handleSendPrompt()}
-                    className="h-8 w-8 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs flex items-center justify-center disabled:opacity-50 transition-all cursor-pointer"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={!prompt.trim() || isGenerating}
+                        onClick={() => void handleSendPrompt()}
+                        className="h-8 w-8 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs flex items-center justify-center disabled:opacity-50 transition-all cursor-pointer"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             </div>
@@ -1804,6 +2383,78 @@ export default function LunoAiView({
           </motion.aside>
         )}
       </AnimatePresence>
+
+      {/* Floating Slash Commands Menu (100% Identical to Editor UI) */}
+      {isSlashMenuOpen && filteredTools.length > 0 && menuCoords && (
+        <div
+          className="fixed z-[9999] w-48 sm:w-52 rounded-xl border border-border bg-popover px-0 py-1 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
+          style={{
+            ...(menuCoords.bottom !== undefined ? { bottom: `${menuCoords.bottom}px` } : { top: `${menuCoords.top}px` }),
+            left: `${menuCoords.left}px`,
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <div className="px-3 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/40 shrink-0">
+            {lang === "th" ? "คำสั่ง" : "Commands"}
+          </div>
+
+          {canScrollUp && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onMouseEnter={() => startAutoScroll("up")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollSlashMenu("up")}
+              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </div>
+          )}
+
+          <div
+            ref={slashMenuScrollRef}
+            onScroll={checkSlashMenuScroll}
+            className="overflow-y-auto no-scrollbar flex-1 py-1"
+          >
+            {filteredTools.map((tool, idx) => {
+              const isSelected = idx === selectedSlashIndex;
+              return (
+                <div
+                  key={tool.id}
+                  role="button"
+                  tabIndex={0}
+                  data-slash-item={idx}
+                  onClick={() => applySlashTool(tool)}
+                  onMouseEnter={() => setSelectedSlashIndex(idx)}
+                  className={`mx-1 flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors select-none ${
+                    isSelected
+                      ? "bg-accent/5 text-primary font-semibold"
+                      : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                  }`}
+                >
+                  {tool.icon}
+                  <span className="flex-1 truncate text-xs">
+                    {lang === "th" ? tool.labelTh : tool.labelEn}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {canScrollDown && (
+            <div
+              role="button"
+              tabIndex={-1}
+              onMouseEnter={() => startAutoScroll("down")}
+              onMouseLeave={stopAutoScroll}
+              onClick={() => scrollSlashMenu("down")}
+              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

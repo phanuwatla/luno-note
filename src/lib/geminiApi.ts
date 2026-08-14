@@ -340,7 +340,7 @@ export interface GeminiActionResult {
   modelUsed: string;
 }
 
-function parseGeminiApiError(status: number, message: string): Error {
+function parseGeminiApiError(status: number, message: string, lang: "th" | "en" = "th"): Error {
   const lowerMsg = message.toLowerCase();
 
   // 1. Token limit / Context size error
@@ -350,12 +350,20 @@ function parseGeminiApiError(status: number, message: string): Error {
     lowerMsg.includes("token limit") ||
     lowerMsg.includes("too many tokens")
   ) {
-    return new Error("เนื้อหาในแชตหรือไฟล์แนบมีขนาดใหญ่เกินกว่า Token Limit ของ Gemini กรุณาเริ่มแชตใหม่หรือลดขนาดไฟล์แนบ");
+    const text =
+      lang === "en"
+        ? "Chat content or attached files exceed Gemini Token Limit. Please start a new chat or reduce attached file sizes."
+        : "เนื้อหาในแชตหรือไฟล์แนบมีขนาดใหญ่เกินกว่า Token Limit ของ Gemini กรุณาเริ่มแชตใหม่หรือลดขนาดไฟล์แนบ";
+    return new Error(text);
   }
 
   // 2. Quota limit / Rate limit
   if (status === 429 || lowerMsg.includes("quota") || lowerMsg.includes("resource_exhausted")) {
-    return new Error("โควตา Gemini API เต็มแล้ว กรุณารอสักครู่แล้วลองใหม่อีกครั้ง หรือตรวจสอบบัญชี Google AI");
+    const text =
+      lang === "en"
+        ? "Gemini API quota exceeded. Please wait a moment and try again, or check your Google AI account."
+        : "โควตา Gemini API เต็มแล้ว กรุณารอสักครู่แล้วลองใหม่อีกครั้ง หรือตรวจสอบบัญชี Google AI";
+    return new Error(text);
   }
 
   // 3. Invalid API key error
@@ -366,17 +374,34 @@ function parseGeminiApiError(status: number, message: string): Error {
     lowerMsg.includes("unauthenticated") ||
     status === 403
   ) {
-    return new Error("Gemini API Key ไม่ถูกต้อง กรุณาตรวจสอบหรือเปลี่ยน Key ในหน้าตั้งค่า");
+    const text =
+      lang === "en"
+        ? "Invalid Gemini API Key. Please check or update your key in Settings."
+        : "Gemini API Key ไม่ถูกต้อง กรุณาตรวจสอบหรือเปลี่ยน Key ในหน้าตั้งค่า";
+    return new Error(text);
   }
 
   const cleanDetail = message.replace(/https?:\/\/[^\s]+/g, "").trim();
-  return new Error(`เกิดข้อผิดพลาดจาก Gemini API (${status}): ${cleanDetail || "ไม่สามารถประมวลผลคำตอบได้"}`);
+  const text =
+    lang === "en"
+      ? `Gemini API Error (${status}): ${cleanDetail || "Unable to process response."}`
+      : `เกิดข้อผิดพลาดจาก Gemini API (${status}): ${cleanDetail || "ไม่สามารถประมวลผลคำตอบได้"}`;
+  return new Error(text);
 }
 
-export async function runGeminiAction(apiKey: string, action: AiActionType, text: string): Promise<GeminiActionResult> {
+export async function runGeminiAction(
+  apiKey: string,
+  action: AiActionType,
+  text: string,
+  lang: "th" | "en" = "th"
+): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
-    throw new Error("Gemini API key is missing. Please add your API key in Settings.");
+    throw new Error(
+      lang === "en"
+        ? "Gemini API key is missing. Please add your API key in Settings."
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+    );
   }
 
   const promptBuilder = ACTION_PROMPTS[action];
@@ -424,7 +449,7 @@ export async function runGeminiAction(apiKey: string, action: AiActionType, text
           }
         }
 
-        throw parseGeminiApiError(response.status, message);
+        throw parseGeminiApiError(response.status, message, lang);
       }
 
       const data = await response.json();
@@ -436,33 +461,44 @@ export async function runGeminiAction(apiKey: string, action: AiActionType, text
           modelUsed: model,
         };
       }
-      throw new Error("Empty response returned by Gemini API.");
+      throw new Error(lang === "en" ? "Empty response returned by Gemini API." : "Gemini API ส่งคำตอบเป็นค่าว่าง");
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
+        lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
         lastError.message.includes("Token Limit") ||
-        lastError.message.includes("โควตา Gemini API")
+        lastError.message.includes("โควตา Gemini API") ||
+        lastError.message.includes("quota exceeded")
       ) {
         throw lastError;
       }
     }
   }
 
-  throw lastError || new Error("Failed to contact Gemini API.");
+  throw lastError || new Error(lang === "en" ? "Failed to contact Gemini API." : "ไม่สามารถเชื่อมต่อ Gemini API ได้");
 }
 
-export async function runGeminiPrompt(apiKey: string, promptText: string, selectedModel: "smart" | "fast" | "creative" = "smart"): Promise<GeminiActionResult> {
+export async function runGeminiPrompt(
+  apiKey: string,
+  promptText: string,
+  selectedModel: "smart" | "fast" | "creative" = "smart",
+  lang: "th" | "en" = "th"
+): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
-    throw new Error("Gemini API key is missing. Please add your API key in Settings.");
+    throw new Error(
+      lang === "en"
+        ? "Gemini API key is missing. Please add your API key in Settings."
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+    );
   }
 
-  let preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  let preferredModels = ["gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"];
   if (selectedModel === "fast") {
     preferredModels = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
   } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
+    preferredModels = ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
   }
 
   let lastError: Error | null = null;
@@ -471,6 +507,7 @@ export async function runGeminiPrompt(apiKey: string, promptText: string, select
     const model = preferredModels[i];
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const temp = selectedModel === "creative" ? 0.85 : selectedModel === "smart" ? 0.3 : 0.4;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -479,7 +516,7 @@ export async function runGeminiPrompt(apiKey: string, promptText: string, select
             parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
           },
           contents: [{ parts: [{ text: promptText }] }],
-          generationConfig: { temperature: selectedModel === "creative" ? 0.7 : 0.4 },
+          generationConfig: { temperature: temp },
         }),
       });
 
@@ -497,7 +534,7 @@ export async function runGeminiPrompt(apiKey: string, promptText: string, select
           }
         }
 
-        throw parseGeminiApiError(response.status, message);
+        throw parseGeminiApiError(response.status, message, lang);
       }
 
       const data = await response.json();
@@ -508,20 +545,22 @@ export async function runGeminiPrompt(apiKey: string, promptText: string, select
           modelUsed: model,
         };
       }
-      throw new Error("Empty response returned by Gemini API.");
+      throw new Error(lang === "en" ? "Empty response returned by Gemini API." : "Gemini API ส่งคำตอบเป็นค่าว่าง");
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
+        lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
         lastError.message.includes("Token Limit") ||
-        lastError.message.includes("โควตา Gemini API")
+        lastError.message.includes("โควตา Gemini API") ||
+        lastError.message.includes("quota exceeded")
       ) {
         throw lastError;
       }
     }
   }
 
-  throw lastError || new Error("Failed to contact Gemini API.");
+  throw lastError || new Error(lang === "en" ? "Failed to contact Gemini API." : "ไม่สามารถเชื่อมต่อ Gemini API ได้");
 }
 
 export interface GeminiChatMessage {
@@ -571,18 +610,23 @@ export async function runGeminiChatHistory(
   history: GeminiChatMessage[],
   newPrompt: string,
   attachedFilesContext?: string,
-  selectedModel: "smart" | "fast" | "creative" = "smart"
+  selectedModel: "smart" | "fast" | "creative" = "smart",
+  lang: "th" | "en" = "th"
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
-    throw new Error("Gemini API key is missing. Please add your API key in Settings.");
+    throw new Error(
+      lang === "en"
+        ? "Gemini API key is missing. Please add your API key in Settings."
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+    );
   }
 
-  let preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  let preferredModels = ["gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"];
   if (selectedModel === "fast") {
     preferredModels = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
   } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
+    preferredModels = ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
   }
 
   const contents = buildGeminiContents(history, newPrompt, attachedFilesContext);
@@ -593,6 +637,7 @@ export async function runGeminiChatHistory(
     const model = preferredModels[i];
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const temp = selectedModel === "creative" ? 0.85 : selectedModel === "smart" ? 0.3 : 0.4;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -601,7 +646,7 @@ export async function runGeminiChatHistory(
             parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
           },
           contents,
-          generationConfig: { temperature: selectedModel === "creative" ? 0.7 : 0.4 },
+          generationConfig: { temperature: temp },
         }),
       });
 
@@ -619,7 +664,7 @@ export async function runGeminiChatHistory(
           }
         }
 
-        throw parseGeminiApiError(response.status, message);
+        throw parseGeminiApiError(response.status, message, lang);
       }
 
       const data = await response.json();
@@ -630,18 +675,20 @@ export async function runGeminiChatHistory(
           modelUsed: model,
         };
       }
-      throw new Error("Empty response returned by Gemini API.");
+      throw new Error(lang === "en" ? "Empty response returned by Gemini API." : "Gemini API ส่งคำตอบเป็นค่าว่าง");
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
+        lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
         lastError.message.includes("Token Limit") ||
-        lastError.message.includes("โควตา Gemini API")
+        lastError.message.includes("โควตา Gemini API") ||
+        lastError.message.includes("quota exceeded")
       ) {
         throw lastError;
       }
     }
   }
 
-  throw lastError || new Error("Failed to contact Gemini API.");
+  throw lastError || new Error(lang === "en" ? "Failed to contact Gemini API." : "ไม่สามารถเชื่อมต่อ Gemini API ได้");
 }

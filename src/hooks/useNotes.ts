@@ -16,6 +16,8 @@ export interface Note {
   fileType?: "image" | "binary";
   isFavorite?: boolean;
   tags?: string[];
+  driveFileId?: string;
+  driveSyncedAt?: number;
 }
 
 const STORAGE_KEY = "notes-app-data";
@@ -196,7 +198,7 @@ export function useNotes() {
   }, []);
 
   const updateNote = useCallback(
-    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "tags">>) => {
+    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "tags" | "driveFileId" | "driveSyncedAt">>) => {
       const normalizedPatch = { ...patch };
       if (patch.fileName && normalizedPatch.title === undefined) {
         normalizedPatch.title = getNoteTitleFromFileName(patch.fileName);
