@@ -186,7 +186,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
             </div>
 
             {/* Scrollable Category Options Body */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar max-w-4xl">
+            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar w-full">
               {/* 1. GENERAL */}
               {activeCategory === "general" && (
                 <div className="space-y-6">
@@ -770,6 +770,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
 
                   {/* Google Drive Cloud Storage Card */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.cloudSyncGroup") || "Cloud Sync"}</h3>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2.5 rounded-xl bg-muted/80 border border-border/60 flex items-center justify-center shrink-0">

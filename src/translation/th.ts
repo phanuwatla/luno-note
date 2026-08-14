@@ -457,6 +457,7 @@ const th = {
     gdriveDesc: "จัดเก็บไฟล์ Luno ของคุณไว้บน Google Drive ของคุณเอง",
     notConnected: "ยังไม่ได้เชื่อมต่อ",
     clientIdLabel: "Google OAuth Client ID (ระบุเองได้หากต้องการ)",
+    cloudSyncGroup: "ซิงค์ข้อมูลบนคลาวด์",
     connectDrive: "เชื่อมต่อ Google Drive",
     connect: "เชื่อมต่อ",
     account: "บัญชี",
