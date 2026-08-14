@@ -2,18 +2,22 @@ import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { X, GripHorizontal, Copy, Check } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface FloatingCalculatorProps {
   isOpen: boolean;
   onClose: () => void;
   onInsertResult?: (result: string) => void;
+  zIndex?: number;
+  onFocusWindow?: () => void;
 }
 
 export default function FloatingCalculator({
   isOpen,
   onClose,
   onInsertResult,
+  zIndex,
+  onFocusWindow,
 }: FloatingCalculatorProps) {
   const { t } = useTranslation();
   const [display, setDisplay] = useState<string>("0");
@@ -102,10 +106,10 @@ export default function FloatingCalculator({
   const handleEquals = useCallback(() => {
     const inputValue = parseFloat(display);
 
-    if (prevOperand !== null && operator) {
+    if (operator && prevOperand !== null) {
       const result = calculate(prevOperand, inputValue, operator);
-      setHistory(`${prevOperand} ${operator} ${inputValue}`);
       setDisplay(String(result));
+      setHistory(`${prevOperand} ${operator} ${inputValue} =`);
       setPrevOperand(null);
       setOperator(null);
       setWaitingForNewOperand(true);
@@ -114,18 +118,19 @@ export default function FloatingCalculator({
 
   const handleBackspace = useCallback(() => {
     if (waitingForNewOperand) return;
-    if (display.length <= 1) {
-      setDisplay("0");
-    } else {
-      setDisplay(display.slice(0, -1));
-    }
-  }, [display, waitingForNewOperand]);
+    setDisplay((prev) => {
+      if (prev.length <= 1 || (prev.length === 2 && prev.startsWith("-"))) {
+        return "0";
+      }
+      return prev.slice(0, -1);
+    });
+  }, [waitingForNewOperand]);
 
-  const handleCopy = useCallback(() => {
+  const handleCopy = () => {
     navigator.clipboard.writeText(display);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  }, [display]);
+  };
 
   // Keyboard navigation listener
   useEffect(() => {
@@ -162,55 +167,62 @@ export default function FloatingCalculator({
   if (!isOpen) return null;
 
   return (
-    <motion.div
-      drag
-      dragMomentum={false}
-      dragElastic={0}
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
-      className="fixed z-50 w-[240px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
-      style={{ top: "15%", right: "12%", fontFamily: "var(--app-font-family, inherit)" }}
-    >
-      {/* Window Header */}
-      <div className="flex items-center justify-between pb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <GripHorizontal className="h-4 w-4 opacity-60" />
-          <span>{t("editor.calculator") || "Calculator"}</span>
+    <TooltipProvider delayDuration={150}>
+      <motion.div
+        drag
+        dragMomentum={false}
+        dragElastic={0}
+        onPointerDown={onFocusWindow}
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="fixed w-[240px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
+        style={{ top: "15%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
+      >
+        {/* Window Header */}
+        <div className="flex items-center justify-between pb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <GripHorizontal className="h-4 w-4 opacity-60" />
+            <span>{t("editor.calculator") || "Calculator"}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{copied ? "Copied!" : "Copy result"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.close") || "Close"}</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{copied ? "Copied!" : "Copy result"}</TooltipContent>
-          </Tooltip>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
 
-      {/* Screen Display */}
-      <div className="py-3 px-2 flex flex-col justify-end text-right min-h-[72px]">
-        <div className="text-xs text-primary/80 tracking-tight overflow-x-auto no-scrollbar min-h-[1.25rem]">
-          {history || "\u00A0"}
+        {/* Screen Display */}
+        <div className="py-3 px-2 flex flex-col justify-end text-right min-h-[72px]">
+          <div className="text-xs text-primary/80 tracking-tight overflow-x-auto no-scrollbar min-h-[1.25rem]">
+            {history || "\u00A0"}
+          </div>
+          <div className="text-2xl font-bold tracking-tight text-foreground overflow-x-auto no-scrollbar">
+            {display}
+          </div>
         </div>
-        <div className="text-2xl font-bold tracking-tight text-foreground overflow-x-auto no-scrollbar">
-          {display}
-        </div>
-      </div>
 
       {/* Buttons Grid */}
       <div className="grid grid-cols-4 gap-1.5 pt-1 text-sm font-medium">
@@ -358,5 +370,6 @@ export default function FloatingCalculator({
         </button>
       </div>
     </motion.div>
+  </TooltipProvider>
   );
 }

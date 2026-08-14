@@ -17,7 +17,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-colors",
+      "flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3.5 py-2 text-xs font-medium ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-all",
       className,
     )}
     {...props}
@@ -100,21 +100,24 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & { showCheck?: boolean }
+>(({ className, children, showCheck = true, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-lg py-2 pl-9 pr-3 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent/5 focus:text-primary focus:font-semibold data-[highlighted]:bg-accent/5 data-[highlighted]:text-primary data-[highlighted]:font-semibold hover:bg-accent/5 hover:text-primary hover:font-semibold",
+      "relative flex w-full cursor-pointer select-none items-center rounded-lg py-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent/5 focus:text-primary focus:font-semibold data-[highlighted]:bg-accent/5 data-[highlighted]:text-primary data-[highlighted]:font-semibold hover:bg-accent/5 hover:text-primary hover:font-semibold data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary data-[state=checked]:font-bold",
+      showCheck ? "pl-9 pr-3" : "px-3 justify-center text-center",
       className,
     )}
     {...props}
   >
-    <span className="absolute left-2.5 flex h-4 w-4 items-center justify-center text-primary">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="h-4 w-4" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
+    {showCheck && (
+      <span className="absolute left-2.5 flex h-4 w-4 items-center justify-center text-primary">
+        <SelectPrimitive.ItemIndicator>
+          <Check className="h-4 w-4" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
+    )}
 
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>

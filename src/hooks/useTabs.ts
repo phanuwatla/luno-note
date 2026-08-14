@@ -70,9 +70,9 @@ export function useTabs() {
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
   const removeTabsForDeletedNotes = useCallback((existingIds: Set<string>) => {
-    const next = openTabIdsRef.current.filter((id) => existingIds.has(id));
+    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || existingIds.has(id));
     syncedSetOpenTabIds(() => next);
-    if (activeTabIdRef.current && !existingIds.has(activeTabIdRef.current)) {
+    if (activeTabIdRef.current && activeTabIdRef.current !== "settings" && activeTabIdRef.current !== "luno-ai" && !existingIds.has(activeTabIdRef.current)) {
       syncedSetActiveTabId(next[0] ?? null);
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);

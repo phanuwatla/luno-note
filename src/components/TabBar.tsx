@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { X, FileText, FileCode, Plus, FileImage, File, FolderArchive } from "lucide-react";
+import { X, FileText, FileCode, Plus, FileImage, File, FolderArchive, Settings } from "lucide-react";
+import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import type { Note } from "@/hooks/useNotes";
 import { Columns2Icon } from "@/components/icons/Columns2Icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,6 +43,8 @@ export default function TabBar({
 
   function NoteIcon({ note, isActive }: { note: Note; isActive: boolean }) {
     const cls = `h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-primary" : "text-muted-foreground/70"}`;
+    if (note.id === "settings" || note.fileType === "settings") return <Settings className={cls} />;
+    if (note.id === "luno-ai" || note.fileType === "luno-ai") return <Sparkles className={cls} />;
     const type = getFileType(note);
     const name = note.fileName?.toLowerCase() || "";
     if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
@@ -67,7 +70,9 @@ export default function TabBar({
       <div ref={scrollRef} className="no-scrollbar flex items-end gap-0.5 overflow-x-auto bg-sidebar-accent/50 px-2 pt-2 h-11 select-none">
         {tabs.map((note, index) => {
           const isActive = note.id === activeTabId;
-          const label = note.fileName || note.title?.trim() || t("editor.untitled");
+          const isSettings = note.id === "settings" || note.fileType === "settings";
+          const isLunoAi = note.id === "luno-ai" || note.fileType === "luno-ai";
+          const label = isSettings ? (t("settings.title") || "Settings") : isLunoAi ? "Luno AI" : (note.fileName || note.title?.trim() || t("editor.untitled"));
           const isDragging = draggedIndex === index;
           const isDragOver = dragOverIndex === index;
 

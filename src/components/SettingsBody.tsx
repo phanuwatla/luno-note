@@ -375,22 +375,22 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
           {t("settings.aiAssistant")}
         </h3>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label htmlFor={`${idPrefix}-geminiApiKey`} className="text-sm font-medium text-foreground flex items-center gap-1.5">
-              <Key className="h-3.5 w-3.5 text-muted-foreground" />
+            <label htmlFor={`${idPrefix}-geminiApiKey`} className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+              <Key className="h-3.5 w-3.5 text-primary" />
               {t("settings.geminiApiKey")}
             </label>
             <a
               href="https://aistudio.google.com/app/apikey"
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-[hsl(var(--accent))] hover:underline flex items-center gap-1 font-medium"
+              className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
             >
               Get Gemini API Key <ExternalLink className="h-3 w-3" />
             </a>
           </div>
-          <p className="text-xs text-muted-foreground">{t("settings.geminiApiKeyDesc")}</p>
+          <p className="text-xs text-muted-foreground pb-0.5">{t("settings.geminiApiKeyDesc")}</p>
           <div className="relative flex items-center">
             <input
               id={`${idPrefix}-geminiApiKey`}
@@ -398,12 +398,12 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               placeholder="AIzaSy..."
               value={settings.geminiApiKey}
               onChange={(e) => updateSetting("geminiApiKey", e.target.value)}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring pr-10"
+              className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary/60 focus:ring-2 focus:ring-primary/20 shadow-2xs pr-10"
             />
             <button
               type="button"
               onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2.5 text-muted-foreground hover:text-foreground transition-colors p-1"
+              className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors p-1 cursor-pointer"
             >
               {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

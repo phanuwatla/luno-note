@@ -8,6 +8,15 @@
   font-family: 'Krona One', sans-serif;
 }
 
+/* Hide browser native password reveal eye buttons (Edge / Chrome) */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear,
+input[type="password"]::-webkit-reveal {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 .show-code-line-numbers pre code {
   counter-reset: line;
 }
@@ -564,4 +573,141 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   border-right: 1px solid hsl(var(--border) / 0.5);
   user-select: none;
   pointer-events: none;
+}
+
+/* Identical Editor Markdown Typography for Luno AI Output */
+.editor-markdown-content {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: var(--app-font-family);
+}
+
+.editor-markdown-content > *:first-child {
+  margin-top: 0 !important;
+}
+
+.editor-markdown-content > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+.editor-markdown-content p {
+  margin-top: 0.6em;
+  margin-bottom: 0.6em;
+  line-height: 1.7;
+}
+
+.editor-markdown-content h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 1.3em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+  color: hsl(var(--foreground));
+}
+
+.editor-markdown-content h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  line-height: 1.35;
+  color: hsl(var(--primary));
+}
+
+.editor-markdown-content h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  line-height: 1.4;
+  color: hsl(var(--foreground));
+}
+
+.editor-markdown-content ul {
+  list-style-type: disc;
+  padding-left: 1.35rem;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.editor-markdown-content ol {
+  list-style-type: decimal;
+  padding-left: 1.35rem;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.editor-markdown-content li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+  line-height: 1.65;
+}
+
+.editor-markdown-content li > p {
+  margin: 0;
+}
+
+.editor-markdown-content blockquote {
+  border-left: 3px solid hsl(var(--primary));
+  padding-left: 1rem;
+  margin-top: 0.85em;
+  margin-bottom: 0.85em;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.editor-markdown-content code {
+  background-color: hsl(var(--muted));
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+}
+
+.editor-markdown-content pre {
+  background-color: hsl(var(--muted) / 0.8);
+  border: 1px solid hsl(var(--border) / 0.7);
+  padding: 0.85rem 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-top: 0.85em;
+  margin-bottom: 0.85em;
+}
+
+.editor-markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.editor-markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.85em;
+  margin-bottom: 0.85em;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px hsl(var(--border) / 0.6);
+}
+
+.editor-markdown-content th,
+.editor-markdown-content td {
+  border: 1px solid hsl(var(--border) / 0.6);
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+}
+
+.editor-markdown-content th {
+  font-weight: 600;
+  background-color: hsl(var(--muted));
+}
+
+.editor-markdown-content hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
 }

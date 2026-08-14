@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import Sidebar from "@/components/Sidebar";
 import Editor from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
-import RightPanel from "@/components/RightPanel";
+import SettingsTabView from "@/components/SettingsTabView";
+import LunoAiView from "@/components/LunoAiView";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -22,7 +23,34 @@ export default function Index() {
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
   const { notes, createNote, replaceNotes, updateNote, deleteNote, renameTagGlobally, deleteTagGlobally } = useNotes();
   const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, setActiveTabId } = useTabs();
-  const activeTabNote = notes.find((n) => n.id === activeTabId) ?? null;
+
+  const SETTINGS_NOTE: Note = useMemo(
+    () => ({
+      id: "settings",
+      title: t("settings.title") || "Settings",
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("settings.title") || "Settings",
+      fileType: "settings",
+    }),
+    [t]
+  );
+
+  const LUNO_AI_NOTE: Note = useMemo(
+    () => ({
+      id: "luno-ai",
+      title: "Luno AI",
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: "Luno AI",
+      fileType: "luno-ai",
+    }),
+    []
+  );
+
+  const activeTabNote = activeTabId === "settings" ? SETTINGS_NOTE : activeTabId === "luno-ai" ? LUNO_AI_NOTE : (notes.find((n) => n.id === activeTabId) ?? null);
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -384,14 +412,17 @@ export default function Index() {
     return nextNotes;
   }, [activeTabId, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes]);
 
-  const createNoteInFolder = async (folderPath?: string, options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
+  const createNoteInFolder = async (
+    folderPath?: string,
+    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html"; initialContent?: string },
+  ): Promise<Note> => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
     const isTxt = desiredFileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
     const rawTitle = extractBaseTitleFromFileName(desiredFileName);
     const isUntitled = isSystemGeneratedUntitledName(rawTitle);
     const initialTitle = isUntitled || isTxt ? "" : rawTitle;
-    const initialContent = isTxt ? "" : (initialTitle ? `<h1>${initialTitle}</h1>` : "<h1></h1>");
+    const initialContent = options?.initialContent ?? (isTxt ? "" : (initialTitle ? `<h1>${initialTitle}</h1>` : "<h1></h1>"));
 
     // If no folder is opened, fallback to normal in-app note creation.
     if (!openedRootDirHandle) {
@@ -405,7 +436,7 @@ export default function Index() {
         contentFormat,
       });
       openTab(note.id);
-      return;
+      return note;
     }
 
     try {
@@ -420,7 +451,7 @@ export default function Index() {
       const rawFileTitle = extractBaseTitleFromFileName(fileName);
       const isFileUntitled = isSystemGeneratedUntitledName(rawFileTitle);
       const fileTitle = isFileUntitled || isFileTxt ? "" : rawFileTitle;
-      const fileContent = isFileTxt ? "" : (fileTitle ? `<h1>${fileTitle}</h1>` : "<h1></h1>");
+      const fileContent = options?.initialContent ?? (isFileTxt ? "" : (fileTitle ? `<h1>${fileTitle}</h1>` : "<h1></h1>"));
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
@@ -442,6 +473,7 @@ export default function Index() {
       await setStoredFileHandle(note.id, fileHandle);
 
       void syncFolderFromDisk(openedRootDirHandle, undefined, relPath);
+      return note;
     } catch (error) {
       console.error("Create file in folder failed", error);
       const note = createNote(normalizedPath || undefined);
@@ -454,8 +486,63 @@ export default function Index() {
         contentFormat,
       });
       openTab(note.id);
+      return note;
     }
   };
+
+  // Global App-level Keyboard Shortcuts (Ctrl+N, Ctrl+K, Ctrl+Shift+C, Ctrl+Shift+T, etc.)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      if (!isCtrlOrCmd) return;
+
+      const key = e.key.toLowerCase();
+
+      // 1. Ctrl + N / Cmd + N (New Note) -> Intercept browser "New Window"
+      if (key === "n" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void createNoteInFolder();
+        return;
+      }
+
+      // 2. Ctrl + K / Cmd + K (Quick Search) -> Intercept browser search bar focus
+      if (key === "k" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        setSidebarOpen(true);
+        setTimeout(() => {
+          const searchInput = document.querySelector<HTMLInputElement>(
+            'input[type="text"][placeholder*="Search"], input[type="text"][placeholder*="ค้นหา"]'
+          );
+          if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+          }
+        }, 50);
+        return;
+      }
+
+      // 3. Ctrl + Shift + C (Toggle Floating Calculator) -> Intercept browser Inspect Element
+      if (e.shiftKey && key === "c") {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("app:toggle-calculator"));
+        return;
+      }
+
+      // 4. Ctrl + Shift + T (Toggle Floating Clock) -> Intercept browser "Reopen Closed Tab"
+      if (e.shiftKey && key === "t") {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("app:toggle-clock"));
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown, true);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
+  }, [createNoteInFolder]);
 
   const createFolderInFolder = async (folderPath?: string, folderName?: string) => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
@@ -1029,10 +1116,21 @@ export default function Index() {
 
   // Keep open tabs in sync when notes are deleted (non-folder-sync deletions)
   useEffect(() => {
-    removeTabsForDeletedNotes(new Set(notes.map((n) => n.id)));
+    const existingSet = new Set(notes.map((n) => n.id));
+    existingSet.add("settings");
+    existingSet.add("luno-ai");
+    removeTabsForDeletedNotes(existingSet);
   }, [notes, removeTabsForDeletedNotes]);
 
-  const openTabNotes = openTabIds.map((id) => notes.find((n) => n.id === id)).filter((n): n is Note => Boolean(n));
+  const openTabNotes = useMemo(() => {
+    return openTabIds
+      .map((id) => {
+        if (id === "settings") return SETTINGS_NOTE;
+        if (id === "luno-ai") return LUNO_AI_NOTE;
+        return notes.find((n) => n.id === id);
+      })
+      .filter((n): n is Note => Boolean(n));
+  }, [openTabIds, notes, SETTINGS_NOTE, LUNO_AI_NOTE]);
 
   const handleDeleteNote = (id: string): boolean => {
     const targetNote = notes.find((n) => n.id === id);
@@ -1150,7 +1248,7 @@ export default function Index() {
           confirmBeforeDelete={settings.confirmBeforeDelete}
           onRenameTagGlobally={renameTagGlobally}
           onDeleteTagGlobally={deleteTagGlobally}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openTab("settings")}
         />
       </div>
 
@@ -1168,16 +1266,51 @@ export default function Index() {
           onNewTab={() => void createNoteInFolder()}
           onReorderTabs={reorderTabs}
         />
-        <Breadcrumb
-          note={activeTabNote}
-          rootFolderName={openedFolderName}
-          notes={notes}
-          onSelectNote={setActiveTabId}
-          onOpenRightPanel={() => setRightPanelOpen((prev) => !prev)}
-        />
+        {activeTabId !== "settings" && activeTabId !== "luno-ai" && (
+          <Breadcrumb
+            note={activeTabNote}
+            rootFolderName={openedFolderName}
+            notes={notes}
+            onSelectNote={setActiveTabId}
+            onOpenRightPanel={() => setRightPanelOpen((prev) => !prev)}
+          />
+        )}
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
-          {/* ถ้า splitTabId มีค่า ให้ render editor 2 pane ซ้าย-ขวา */}
-          {splitTabId && splitTabId !== activeTabId ? (
+          {activeTabId === "settings" ? (
+            <SettingsTabView onClose={() => closeTab("settings", notes.map((n) => n.id))} />
+          ) : activeTabId === "luno-ai" ? (
+            <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+              <LunoAiView
+                notes={notes}
+                activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings")) ?? notes[0] ?? null}
+                onInsertToActiveNote={(text) => {
+                  const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings")) ?? notes[0];
+                  if (targetNote) {
+                    updateNote(targetNote.id, { content: (targetNote.content || "") + "\n\n" + text });
+                    toast({ title: t("lunoAi.insertToNote") || "Inserted into active note!" });
+                  }
+                }}
+                onCreateNewNote={(fileName, content, folderPath) => {
+                  let targetName = fileName?.trim();
+                  if (!targetName) {
+                    targetName = `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                  }
+                  if (!/\.[a-zA-Z0-9]+$/.test(targetName)) {
+                    targetName += ".md";
+                  }
+
+                  void createNoteInFolder(folderPath || "", {
+                    fileName: targetName,
+                    initialContent: content,
+                  });
+                  toast({
+                    title: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
+                  });
+                }}
+                onOpenSettings={() => openTab("settings")}
+              />
+            </div>
+          ) : splitTabId && splitTabId !== activeTabId ? (
             <div className="flex flex-1 min-h-0 flex-row w-full">
               <div
                 className="min-w-0 border-r border-border overflow-auto"
@@ -1199,7 +1332,10 @@ export default function Index() {
                   isMobile={isMobile}
                   rootDirHandle={openedRootDirHandle}
                   settingsOpen={settingsOpen}
-                  onSettingsOpenChange={setSettingsOpen}
+                  onSettingsOpenChange={(open) => {
+                    if (open) openTab("settings");
+                    else closeTab("settings", notes.map((n) => n.id));
+                  }}
                   rightPanelOpen={rightPanelOpen}
                   onCloseRightPanel={() => setRightPanelOpen(false)}
                 />
@@ -1237,7 +1373,10 @@ export default function Index() {
                   rootDirHandle={openedRootDirHandle}
                   onCloseSplit={() => setSplitTabId(null)}
                   settingsOpen={settingsOpen}
-                  onSettingsOpenChange={setSettingsOpen}
+                  onSettingsOpenChange={(open) => {
+                    if (open) openTab("settings");
+                    else closeTab("settings", notes.map((n) => n.id));
+                  }}
                 />
               </div>
             </div>
@@ -1258,7 +1397,10 @@ export default function Index() {
               isMobile={isMobile}
               rootDirHandle={openedRootDirHandle}
               settingsOpen={settingsOpen}
-              onSettingsOpenChange={setSettingsOpen}
+              onSettingsOpenChange={(open) => {
+                if (open) openTab("settings");
+                else closeTab("settings", notes.map((n) => n.id));
+              }}
               rightPanelOpen={rightPanelOpen}
               onCloseRightPanel={() => setRightPanelOpen(false)}
             />

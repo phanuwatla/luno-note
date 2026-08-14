@@ -1,5 +1,6 @@
 import { Note } from "@/hooks/useNotes";
 import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings, Home, Compass, Star, Tag, HelpCircle, Sun, Moon, ArrowDown, X } from "lucide-react";
+import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -102,37 +103,161 @@ function formatDate(ts: number) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function getPreview(content: string, title: string, noContentLabel: string) {
-  const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-  let bodyText = "";
+function decodeHtmlEntities(str: string): string {
+  if (!str || !str.includes("&")) return str;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = str;
+  return textarea.value;
+}
 
-  if (isHtml) {
-    const parser = document.createElement("div");
-    parser.innerHTML = content;
+function stripMarkdownAndFrontmatter(content: string): string {
+  if (!content) return "";
 
-    const elements = Array.from(parser.children);
-    if (elements.length > 1) {
-      bodyText = elements
-        .slice(1)
-        .map((el) => el.textContent || "")
-        .join(" ");
-    } else {
-      bodyText = parser.textContent || parser.innerText || "";
-    }
-  } else {
-    const lines = content
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    bodyText = lines.slice(1).join(" ") || lines[0] || "";
+  let text = content;
+
+  // 1. Strip YAML frontmatter at top of file (--- ... ---)
+  text = text.replace(/^---[\s\S]*?---\s*/g, "");
+
+  // 2. Strip HTML tags
+  if (/<\/?[a-z][\s\S]*>/i.test(text)) {
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
+    text = text.replace(/<[^>]+>/g, " ");
   }
 
-  const text = bodyText.replace(/\s+/g, " ").trim();
-  if (!text) {
+  // 3. Decode HTML entities (e.g. &#39; -> ', &quot; -> ", &amp; -> &)
+  text = decodeHtmlEntities(text);
+
+  // 3. Strip Markdown headings (#, ##, etc.)
+  text = text.replace(/^#{1,6}\s+/gm, "");
+
+  // 4. Strip Markdown blockquotes (>)
+  text = text.replace(/^\s*>\s*/gm, "");
+
+  // 5. Strip Markdown list markers and checkboxes (- [ ], 1., -, *, +)
+  text = text.replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, "");
+  text = text.replace(/^\s*[-*+]\s+/gm, "");
+  text = text.replace(/^\s*\d+\.\s+/gm, "");
+
+  // 6. Strip Markdown code blocks & inline code
+  text = text.replace(/```[\s\S]*?```/g, " ");
+  text = text.replace(/`([^`]+)`/g, "$1");
+
+  // 7. Strip Markdown links and images
+  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+
+  // 8. Strip Markdown formatting (*, **, _, __, ~~)
+  text = text.replace(/(\*\*|__|[*_~]{1,2})/g, "");
+
+  // 9. Normalize multiple spaces & linebreaks to single space
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function getThemeHighlightStyles(theme: string): React.CSSProperties {
+  switch (theme) {
+    case "rose":
+      return {
+        backgroundColor: "rgba(34, 211, 238, 0.35)", // Sky Cyan
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+    case "violet":
+      return {
+        backgroundColor: "rgba(163, 230, 53, 0.35)", // Lime Green
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+    case "orange":
+      return {
+        backgroundColor: "rgba(99, 102, 241, 0.30)", // Electric Indigo Blue
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+    case "emerald":
+      return {
+        backgroundColor: "rgba(251, 191, 36, 0.35)", // Warm Golden Amber
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+    case "blue":
+      return {
+        backgroundColor: "rgba(251, 146, 60, 0.35)", // Coral Orange
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+    case "slate":
+    default:
+      return {
+        backgroundColor: "rgba(234, 179, 8, 0.35)", // Bright Gold
+        color: "inherit",
+        padding: "0 2px",
+        borderRadius: "2px",
+        fontWeight: 500,
+      };
+  }
+}
+
+function highlightMatchText(text: string, searchQuery: string, appTheme: string = "emerald"): React.ReactNode {
+  if (!searchQuery.trim() || !text) return text;
+
+  const escapedQuery = searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escapedQuery})`, "gi");
+  const parts = text.split(regex);
+  const style = getThemeHighlightStyles(appTheme);
+
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} style={style}>
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
+
+function getSearchPreviewSnippet(content: string, title: string, query: string, noContentLabel: string) {
+  const cleanText = stripMarkdownAndFrontmatter(content);
+  if (!cleanText) return title.trim() || noContentLabel;
+
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return cleanText.length > 85 ? cleanText.slice(0, 85) + "…" : cleanText;
+  }
+
+  const matchIndex = cleanText.toLowerCase().indexOf(q);
+  if (matchIndex === -1) {
+    return cleanText.length > 85 ? cleanText.slice(0, 85) + "…" : cleanText;
+  }
+
+  const start = Math.max(0, matchIndex - 20);
+  const end = Math.min(cleanText.length, matchIndex + q.length + 55);
+  let snippet = cleanText.slice(start, end);
+
+  if (start > 0) snippet = "…" + snippet;
+  if (end < cleanText.length) snippet = snippet + "…";
+
+  return snippet;
+}
+
+function getPreview(content: string, title: string, noContentLabel: string) {
+  const cleanText = stripMarkdownAndFrontmatter(content);
+  if (!cleanText) {
     const fallbackTitle = title.trim();
     return fallbackTitle || noContentLabel;
   }
-  return text.length > 80 ? text.slice(0, 80) + "…" : text;
+  return cleanText.length > 85 ? cleanText.slice(0, 85) + "…" : cleanText;
 }
 
 function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
@@ -556,7 +681,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               }}
               className={`flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"} text-left transition-colors rounded-lg ${
                 activeNoteId === note.id
-                  ? "bg-primary/10 text-primary font-medium"
+                  ? "bg-sidebar-accent text-foreground font-semibold"
                   : selectedNoteIds.has(note.id)
                     ? "bg-sidebar-accent/40 text-foreground"
                     : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
@@ -621,29 +746,35 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             onContextMenu={() => {
               if (!selectedNoteIds.has(note.id)) setSingleSelectedNote(note.id);
             }}
-            className={`mx-2 mt-2 w-[calc(100%-1rem)] rounded-xl border px-4 py-3 text-left transition-colors duration-100 ${
+            className={`w-full flex flex-col gap-1 px-3 ${
+              settings.sidebarDensity === "compact" ? "py-1.5 text-[12.5px]" : "py-2 text-[13px]"
+            } text-left transition-colors rounded-lg ${
               activeNoteId === note.id
-                ? "border-transparent bg-background shadow-sm"
+                ? "bg-sidebar-accent font-semibold"
                 : selectedNoteIds.has(note.id)
-                  ? "border-transparent bg-sidebar-accent/40"
-                  : "border-transparent bg-transparent hover:bg-sidebar-accent"
+                  ? "bg-sidebar-accent/50 text-foreground"
+                  : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
             }`}
           >
-            <div className="mb-1 flex items-baseline justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
                 <NoteIcon note={note} active={activeNoteId === note.id} />
                 <span
-                  className={`truncate text-sm ${
+                  className={`truncate text-xs ${
                     activeNoteId === note.id ? "font-semibold text-primary" : "font-medium text-foreground"
                   }`}
                 >
-                  {noteLabel}
+                  {query ? highlightMatchText(noteLabel, query, settings.theme) : noteLabel}
                 </span>
                 {isMarkdownNote && <MarkdownIndicator active={activeNoteId === note.id} />}
               </div>
               <span className="shrink-0 text-[10px] text-muted-foreground">{formatDate(note.updatedAt)}</span>
             </div>
-            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{getPreview(note.content, note.title, t("sidebar.noContent"))}</p>
+            <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90 pl-5">
+              {query
+                ? highlightMatchText(getSearchPreviewSnippet(note.content, note.title, query, t("sidebar.noContent")), query, settings.theme)
+                : getPreview(note.content, note.title, t("sidebar.noContent"))}
+            </p>
           </motion.button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-44 rounded-xl">
@@ -1014,6 +1145,21 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         </button>
         <button
           type="button"
+          onClick={() => {
+            onSelect("luno-ai");
+            if (isMobile) onClose?.();
+          }}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+            activeNoteId === "luno-ai"
+              ? "bg-sidebar-accent text-primary font-semibold"
+              : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+          }`}
+        >
+          <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+          <span>{t("sidebar.lunoAi")}</span>
+        </button>
+        <button
+          type="button"
           onClick={() => setNavFilter("favorites")}
           className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
             navFilter === "favorites" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
@@ -1136,7 +1282,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             </div>
             {vaultTagCounts.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground">
-                No tags found in workspace
+                {t("sidebar.noTags") || "ไม่พบแท็กในพื้นที่ทำงาน"}
               </div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -1186,7 +1332,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             )}
             <hr className="border-sidebar-border/60 my-2" />
             <div className="text-xs font-semibold text-muted-foreground px-1 mb-1">
-              Matching Notes ({filtered.length})
+              {t("sidebar.matchingNotes", { count: filtered.length })}
             </div>
             <AnimatePresence initial={false}>
               {filtered.map((note) => renderNote(note))}

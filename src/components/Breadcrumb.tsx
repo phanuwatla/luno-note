@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal } from "lucide-react";
+import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal, MoreVertical } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -285,27 +285,22 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
 
       <div className="flex items-center gap-2.5 shrink-0 text-[11.5px] pl-3">
         <div id="breadcrumb-save-status" className="flex items-center gap-2" />
-        <button type="button" className="flex items-center gap-1.5 text-muted-foreground/80 hover:text-foreground transition-colors ml-1 rounded p-1 hover:bg-muted">
-          <Share2 className="h-3.5 w-3.5" />
-          <span>{t("breadcrumb.share")}</span>
-        </button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted">
-              <History className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t("breadcrumb.versionHistory")}</TooltipContent>
-        </Tooltip>
         <div id="breadcrumb-editor-actions" className="flex items-center gap-2.5" />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" onClick={onOpenRightPanel} className="text-muted-foreground/80 hover:text-foreground transition-colors p-1 rounded hover:bg-muted">
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t("breadcrumb.moreOptions")}</TooltipContent>
-        </Tooltip>
+        {onOpenRightPanel && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onOpenRightPanel}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                title={t("editor.rightPanel") || "Toggle Right Panel"}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent align="end">{t("editor.rightPanel") || "Toggle Right Panel"}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

@@ -130,7 +130,7 @@ async function fetchSupportedModels(apiKey: string): Promise<string[]> {
   } catch (_) {
     // Ignore fetch failure
   }
-  return ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"];
+  return ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
 }
 
 export interface GeminiActionResult {
@@ -150,7 +150,7 @@ export async function runGeminiAction(apiKey: string, action: AiActionType, text
   }
 
   const prompt = promptBuilder(text.trim());
-  let models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro"];
+  let models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
 
   let lastError: Error | null = null;
 
@@ -183,11 +183,13 @@ export async function runGeminiAction(apiKey: string, action: AiActionType, text
         }
 
         // If model not found, query ModelService.ListModels to auto-discover available models for this key
-        if ((message.includes("not found") || response.status === 404) && i === models.length - 1) {
-          const dynamicallyDiscovered = await fetchSupportedModels(trimmedKey);
-          const newModels = dynamicallyDiscovered.filter((m) => !models.includes(m));
-          if (newModels.length > 0) {
-            models = models.concat(newModels);
+        if (message.includes("not found") || response.status === 404) {
+          if (i === models.length - 1) {
+            const dynamicallyDiscovered = await fetchSupportedModels(trimmedKey);
+            const newModels = dynamicallyDiscovered.filter((m) => !models.includes(m));
+            if (newModels.length > 0) {
+              models = models.concat(newModels);
+            }
           }
         }
 
@@ -210,6 +212,73 @@ export async function runGeminiAction(apiKey: string, action: AiActionType, text
       if (lastError.message.includes("Invalid Gemini API Key")) {
         throw lastError;
       }
+    }
+  }
+
+  throw lastError || new Error("Failed to contact Gemini API.");
+}
+
+export async function runGeminiPrompt(apiKey: string, promptText: string, selectedModel: "smart" | "fast" | "creative" = "smart"): Promise<GeminiActionResult> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) {
+    throw new Error("Gemini API key is missing. Please add your API key in Settings.");
+  }
+
+  let preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  if (selectedModel === "fast") {
+    preferredModels = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
+  } else if (selectedModel === "creative") {
+    preferredModels = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
+  }
+
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < preferredModels.length; i++) {
+    const model = preferredModels[i];
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }],
+          generationConfig: { temperature: selectedModel === "creative" ? 0.7 : 0.4 },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+        if (response.status === 400 || response.status === 403 || message.toLowerCase().includes("api key")) {
+          throw new Error(`Invalid Gemini API Key (${message})`);
+        }
+
+        // Auto-discover supported models if 404 / not found
+        if (message.includes("not found") || response.status === 404) {
+          if (i === preferredModels.length - 1) {
+            const dynamicallyDiscovered = await fetchSupportedModels(trimmedKey);
+            const newModels = dynamicallyDiscovered.filter((m) => !preferredModels.includes(m));
+            if (newModels.length > 0) {
+              preferredModels = preferredModels.concat(newModels);
+            }
+          }
+        }
+
+        throw new Error(`Gemini API Error: ${message}`);
+      }
+
+      const data = await response.json();
+      const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof candidateText === "string" && candidateText.trim()) {
+        return {
+          result: candidateText.trim(),
+          modelUsed: model,
+        };
+      }
+      throw new Error("Empty response returned by Gemini API.");
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (lastError.message.includes("Invalid Gemini API Key")) throw lastError;
     }
   }
 

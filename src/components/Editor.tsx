@@ -1439,6 +1439,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [clockOpen, setClockOpen] = useState(false);
+  const [calculatorZIndex, setCalculatorZIndex] = useState<number>(50);
+  const [clockZIndex, setClockZIndex] = useState<number>(50);
+  const nextWindowZIndexRef = useRef<number>(51);
+
+  const bringCalculatorToFront = useCallback(() => {
+    setCalculatorZIndex(nextWindowZIndexRef.current++);
+  }, []);
+
+  const bringClockToFront = useCallback(() => {
+    setClockZIndex(nextWindowZIndexRef.current++);
+  }, []);
+
+  const toggleCalculator = useCallback(() => {
+    setCalculatorOpen((prev) => {
+      const next = !prev;
+      if (next) bringCalculatorToFront();
+      return next;
+    });
+  }, [bringCalculatorToFront]);
+
+  const toggleClock = useCallback(() => {
+    setClockOpen((prev) => {
+      const next = !prev;
+      if (next) bringClockToFront();
+      return next;
+    });
+  }, [bringClockToFront]);
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -2497,17 +2524,87 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, []);
 
   const shouldUseMobileOverflow = mobileToolbarWidth > 0 && mobileToolbarWidth < MOBILE_FULL_TOOLBAR_MIN_WIDTH;
+  // Custom events for calculator and clock toggle
+  useEffect(() => {
+    const handleToggleCalc = () => {
+      setCalculatorOpen((prev) => {
+        if (!prev) bringCalculatorToFront();
+        return !prev;
+      });
+    };
+    const handleToggleClock = () => {
+      setClockOpen((prev) => {
+        if (!prev) bringClockToFront();
+        return !prev;
+      });
+    };
+
+    window.addEventListener("app:toggle-calculator", handleToggleCalc);
+    window.addEventListener("app:toggle-clock", handleToggleClock);
+    return () => {
+      window.removeEventListener("app:toggle-calculator", handleToggleCalc);
+      window.removeEventListener("app:toggle-clock", handleToggleClock);
+    };
+  }, [bringCalculatorToFront, bringClockToFront]);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
       if (!ctrl) return;
 
-      if (e.key === "s") {
+      const key = e.key.toLowerCase();
+
+      // Ctrl + S (Save Note)
+      if (key === "s" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
+        e.stopPropagation();
         handleSaveFile();
         return;
       }
+
+      // Ctrl + Shift + C (Toggle Calculator)
+      if (e.shiftKey && key === "c") {
+        e.preventDefault();
+        e.stopPropagation();
+        setCalculatorOpen((prev) => {
+          if (!prev) bringCalculatorToFront();
+          return !prev;
+        });
+        return;
+      }
+
+      // Ctrl + Shift + T (Toggle Clock)
+      if (e.shiftKey && key === "t") {
+        e.preventDefault();
+        e.stopPropagation();
+        setClockOpen((prev) => {
+          if (!prev) bringClockToFront();
+          return !prev;
+        });
+        return;
+      }
+
+      // Ctrl + B (Bold Text)
+      if (key === "b" && !e.shiftKey && !e.altKey) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleBold().run();
+        }
+        return;
+      }
+
+      // Ctrl + I (Italic Text)
+      if (key === "i" && !e.shiftKey && !e.altKey) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleItalic().run();
+        }
+        return;
+      }
+
       if (e.shiftKey && e.key === "L") {
         e.preventDefault();
         handleFixLanguage();
@@ -2515,9 +2612,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [note, editor]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [note, editor, bringCalculatorToFront, bringClockToFront]);
   const showUiAlert = (message: string) => setAlertMessage(message);
   const countMappable = (text: string, map: Record<string, string>) => [...text].reduce((count, ch) => count + (map[ch] ? 1 : 0), 0);
   const convertWithMap = (text: string, map: Record<string, string>) => [...text].map((ch) => map[ch] ?? ch).join("");
@@ -3704,32 +3801,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </AlertDialogContent>
         </AlertDialog>
 
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl p-6 sm:p-7 sm:max-w-2xl">
-            <DialogHeader className="pt-1 pb-1">
-              <DialogTitle className="text-2xl font-semibold leading-normal pt-1">{t("settings.title")}</DialogTitle>
-              <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
-            </DialogHeader>
 
-            <SettingsBody idPrefix="modal1" />
-
-            <div className="pt-2">
-              <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
-                <Keyboard className="h-4 w-4 text-primary" />
-                <span>{t("editor.shortcutsTitle")}</span>
-              </Button>
-            </div>
-
-            <DialogFooter className="sm:justify-between sm:space-x-0 pt-2">
-              <Button type="button" variant="outline" onClick={resetSettings}>
-                {t("common.reset")}
-              </Button>
-              <Button type="button" onClick={() => setSettingsOpen(false)}>
-                {t("common.save")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         <Dialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen}>
           <DialogContent className="w-[calc(100vw-2rem)] sm:w-full max-w-lg p-5 sm:p-6">
@@ -4441,7 +4513,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           size="icon"
                           className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${calculatorOpen ? "bg-primary/15 text-primary" : ""}`}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => setCalculatorOpen((prev) => !prev)}
+                          onClick={toggleCalculator}
                         >
                           <Calculator className="h-4 w-4" />
                           <span className="sr-only">{t("editor.calculator")}</span>
@@ -4460,7 +4532,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           size="icon"
                           className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${clockOpen ? "bg-primary/15 text-primary" : ""}`}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => setClockOpen((prev) => !prev)}
+                          onClick={toggleClock}
                         >
                           <Clock className="h-4 w-4" />
                           <span className="sr-only">{t("editor.clock")}</span>
@@ -4674,14 +4746,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   );
                 case "calculator":
                   return (
-                    <DropdownMenuItem key="calculator" onClick={() => setCalculatorOpen((prev) => !prev)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="calculator" onClick={toggleCalculator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Calculator className="mr-2 h-4 w-4" />
                       <span>{t("editor.calculator")}</span>
                     </DropdownMenuItem>
                   );
                 case "clock":
                   return (
-                    <DropdownMenuItem key="clock" onClick={() => setClockOpen((prev) => !prev)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="clock" onClick={toggleClock} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Clock className="mr-2 h-4 w-4" />
                       <span>{t("editor.clock")}</span>
                     </DropdownMenuItem>
@@ -4809,16 +4881,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <DialogDescription>{t("settings.aiApiKeyRequiredDesc")}</DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-2 py-1">
+              <div className="space-y-1.5 py-1">
                 <div className="flex items-center justify-between">
-                  <label htmlFor="ai-api-key-modal-input" className="block text-sm font-medium text-foreground">
+                  <label htmlFor="ai-api-key-modal-input" className="block text-sm font-semibold text-foreground">
                     Gemini API Key
                   </label>
                   <a
                     href="https://aistudio.google.com/app/apikey"
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-[hsl(var(--accent))] hover:underline flex items-center gap-1 font-medium"
+                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
                   >
                     Get Free API Key <ExternalLink className="h-3 w-3" />
                   </a>
@@ -4835,7 +4907,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   placeholder="AIzaSy..."
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary/60 focus:ring-2 focus:ring-primary/20 shadow-2xs"
                 />
                 {aiErrorMsg && (
                   <p className="text-xs text-destructive bg-destructive/10 p-2.5 rounded-xl border border-destructive/20 mt-1">
@@ -5046,11 +5118,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <FloatingCalculator
         isOpen={calculatorOpen}
         onClose={() => setCalculatorOpen(false)}
+        zIndex={calculatorZIndex}
+        onFocusWindow={bringCalculatorToFront}
       />
 
       <FloatingClock
         isOpen={clockOpen}
         onClose={() => setClockOpen(false)}
+        zIndex={clockZIndex}
+        onFocusWindow={bringClockToFront}
       />
 
 
@@ -5184,32 +5260,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="flex max-h-[86vh] flex-col rounded-2xl p-6 sm:p-7 sm:max-w-2xl">
-          <DialogHeader className="pt-1 pb-1">
-            <DialogTitle className="text-2xl font-semibold leading-normal pt-1">{t("settings.title")}</DialogTitle>
-            <DialogDescription className="leading-relaxed">{t("settings.description")}</DialogDescription>
-          </DialogHeader>
 
-          <SettingsBody idPrefix="modal2" />
-
-          <div className="pt-2">
-            <Button type="button" variant="outline" className="w-full justify-start gap-2 rounded-xl" onClick={() => setShortcutsDialogOpen(true)}>
-              <Keyboard className="h-4 w-4 text-primary" />
-              <span>{t("editor.shortcutsTitle")}</span>
-            </Button>
-          </div>
-
-          <DialogFooter className="sm:justify-between sm:space-x-0 pt-2">
-            <Button type="button" variant="outline" onClick={resetSettings}>
-              {t("common.reset")}
-            </Button>
-            <Button type="button" onClick={() => setSettingsOpen(false)}>
-              {t("common.save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Keyboard Shortcuts Dialog */}
       <Dialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen}>
