@@ -5,7 +5,7 @@ import Editor from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
-import SettingsTabView from "@/components/SettingsTabView";
+import SettingsTabView, { type SettingsCategory } from "@/components/SettingsTabView";
 import LunoAiView from "@/components/LunoAiView";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
@@ -62,7 +62,13 @@ export default function Index() {
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
   const notesRef = useRef(notes);
+
+  const handleOpenSettings = useCallback((category: SettingsCategory = "general") => {
+    setSettingsCategory(category);
+    openTab("settings");
+  }, [openTab]);
 
   useEffect(() => {
     notesRef.current = notes;
@@ -1248,7 +1254,7 @@ export default function Index() {
           confirmBeforeDelete={settings.confirmBeforeDelete}
           onRenameTagGlobally={renameTagGlobally}
           onDeleteTagGlobally={deleteTagGlobally}
-          onOpenSettings={() => openTab("settings")}
+          onOpenSettings={() => handleOpenSettings("general")}
         />
       </div>
 
@@ -1277,7 +1283,7 @@ export default function Index() {
         )}
         <div className="flex-1 flex flex-col md:flex-row min-h-0">
           {activeTabId === "settings" ? (
-            <SettingsTabView onClose={() => closeTab("settings", notes.map((n) => n.id))} />
+            <SettingsTabView initialCategory={settingsCategory} onClose={() => closeTab("settings", notes.map((n) => n.id))} />
           ) : activeTabId === "luno-ai" ? (
             <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
               <LunoAiView
@@ -1286,8 +1292,25 @@ export default function Index() {
                 onInsertToActiveNote={(text) => {
                   const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings")) ?? notes[0];
                   if (targetNote) {
-                    updateNote(targetNote.id, { content: (targetNote.content || "") + "\n\n" + text });
-                    toast({ title: t("lunoAi.insertToNote") || "Inserted into active note!" });
+                    const existingContent = targetNote.content || "";
+                    const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                    updateNote(targetNote.id, { content: updatedContent });
+                    toast({
+                      title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                      description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
+                    });
+                  }
+                }}
+                onInsertToSelectedNote={(targetNoteId, text) => {
+                  const targetNote = notes.find((n) => n.id === targetNoteId);
+                  if (targetNote) {
+                    const existingContent = targetNote.content || "";
+                    const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                    updateNote(targetNote.id, { content: updatedContent });
+                    toast({
+                      title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                      description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
+                    });
                   }
                 }}
                 onCreateNewNote={(fileName, content, folderPath) => {
@@ -1304,10 +1327,11 @@ export default function Index() {
                     initialContent: content,
                   });
                   toast({
-                    title: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
+                    title: t("lunoAi.createSuccessTitle") || "Note Created",
+                    description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
                   });
                 }}
-                onOpenSettings={() => openTab("settings")}
+                onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
               />
             </div>
           ) : splitTabId && splitTabId !== activeTabId ? (

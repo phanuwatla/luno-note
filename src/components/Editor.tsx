@@ -70,7 +70,9 @@ import {
   Languages,
   Key,
   Calculator,
-  Clock
+  Clock,
+  Share2,
+  History
 } from "lucide-react";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
@@ -1309,7 +1311,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const handleCreateFileFromDialog = () => {
-    const baseName = newFileName.trim();
+    const baseName = (newFileName || "").trim();
     const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
     const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
 
@@ -1331,7 +1333,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const handleCreateFolderFromDialog = () => {
-    const safeFolderName = newFolderName.trim().replace(/[\\/:*?"<>|]/g, "_");
+    const safeFolderName = (newFolderName || "").trim().replace(/[\\/:*?"<>|]/g, "_");
     const folderName = safeFolderName || "untitled-folder";
 
     if (!openedFolderName && onOpenFolder) {
@@ -1731,8 +1733,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       checkbox?.remove();
       const contentSpan = li.querySelector(".task-list-item-content");
       const inner = contentSpan
-        ? (contentSpan as HTMLElement).innerHTML.trim()
-        : (li as HTMLElement).innerHTML.trim();
+        ? ((contentSpan as HTMLElement).innerHTML || "").trim()
+        : ((li as HTMLElement).innerHTML || "").trim();
       const tpl = document.createElement("template");
       tpl.innerHTML = toTaskItemHtml(isChecked, inner);
       li.replaceWith(tpl.content.firstChild!);
@@ -1744,7 +1746,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (!checkbox || li.getAttribute("data-type") === "taskItem") return;
       const isChecked = (checkbox as HTMLInputElement).checked;
       checkbox.remove();
-      const inner = (li as HTMLElement).innerHTML.trim();
+      const inner = ((li as HTMLElement).innerHTML || "").trim();
       const tpl = document.createElement("template");
       tpl.innerHTML = toTaskItemHtml(isChecked, inner || "<p></p>");
       li.replaceWith(tpl.content.firstChild!);
@@ -2043,7 +2045,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             firstChild &&
             firstChild.type.name === "heading" &&
             firstChild.attrs?.level === 1 &&
-            firstChild.textContent.trim() === "";
+            (firstChild.textContent || "").trim() === "";
 
           // Check if this node is the paragraph directly under an empty top H1
           const isSecondChildAfterTopH1 =
@@ -2143,7 +2145,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const firstChild = doc.firstChild;
         let firstH1Text = "";
         if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-          firstH1Text = firstChild.textContent.trim();
+          firstH1Text = (firstChild.textContent || "").trim();
         }
 
         const currentBaseTitle = getBaseTitle(note);
@@ -2224,7 +2226,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const lines = textBefore.split("\n");
     const line = lines.length;
     const col = (lines[lines.length - 1]?.length ?? 0) + 1;
-    const textContent = doc.textContent;
+    const textContent = doc?.textContent || "";
     const charCount = textContent.length;
     const wordCount = textContent.trim() ? textContent.trim().split(/\s+/).length : 0;
     const readingTime = Math.max(1, Math.ceil(wordCount / 200));
@@ -2472,7 +2474,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!isTxtFile(note)) {
       const firstChild = editor.state.doc.firstChild;
       if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-        if (!firstChild.textContent.trim() && baseTitle) {
+        if (!(firstChild.textContent || "").trim() && baseTitle) {
           const tr = editor.state.tr;
           tr.insertText(baseTitle, 1, 1);
           editor.view.dispatch(tr);
@@ -2734,12 +2736,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       targetText = editor.state.doc.textBetween(from, to, " ");
     } else {
       const currentNode = editor.state.selection.$from.parent;
-      if (currentNode && currentNode.textContent.trim()) {
-        targetText = currentNode.textContent.trim();
+      const nodeText = currentNode?.textContent || "";
+      if (currentNode && nodeText.trim()) {
+        targetText = nodeText.trim();
         selectionFrom = editor.state.selection.$from.start();
         selectionTo = editor.state.selection.$from.end();
       } else {
-        targetText = editor.getText().trim();
+        targetText = (editor.getText() || "").trim();
         selectionFrom = 0;
         selectionTo = editor.state.doc.content.size;
       }
@@ -3625,6 +3628,53 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </DropdownMenuContent>
         </DropdownMenu>
         <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={!note}
+              className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+              onClick={() => {
+                if (note) {
+                  navigator.clipboard.writeText(window.location.href);
+                  toast({
+                    title: t("breadcrumb.share") || "Share Note",
+                    description: t("editor.linkCopied") || "Copied link to clipboard!",
+                  });
+                }
+              }}
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={!note}
+              className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+              onClick={() => {
+                if (note) {
+                  toast({
+                    title: t("breadcrumb.versionHistory") || "Version History",
+                    description: t("saveStatus.saved") || "All changes saved.",
+                  });
+                }
+              }}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span className="sr-only">{t("breadcrumb.versionHistory") || "Version History"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("breadcrumb.versionHistory") || "Version History"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
         <TooltipTrigger asChild>
         <Button
           type="button"
@@ -3719,7 +3769,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       ? `Daily-${new Date().toISOString().slice(0, 10)}`
                       : "untitled"
                   }
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
                 />
               </div>
 
@@ -3774,7 +3824,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   }
                 }}
                 placeholder="untitled-folder"
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
               />
             </div>
 
@@ -4907,7 +4957,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   placeholder="AIzaSy..."
-                  className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary/60 focus:ring-2 focus:ring-primary/20 shadow-2xs"
+                  className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none"
                 />
                 {aiErrorMsg && (
                   <p className="text-xs text-destructive bg-destructive/10 p-2.5 rounded-xl border border-destructive/20 mt-1">
@@ -5197,7 +5247,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               value={linkUrl}
               onChange={(event) => setLinkUrl(event.target.value)}
               placeholder={t("editor.linkUrlPlaceholder")}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
@@ -5227,7 +5277,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               value={imageUrl}
               onChange={(event) => setImageUrl(event.target.value)}
               placeholder={t("editor.imageUrlPlaceholder")}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
           <DialogFooter>

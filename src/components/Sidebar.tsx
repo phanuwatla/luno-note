@@ -1109,7 +1109,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
 
       {/* Search Input Box */}
       <div className="px-3 py-1">
-        <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3 py-2 border border-sidebar-border/40 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+        <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3 py-2 border border-sidebar-border/40 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
           <Search size={15} className="shrink-0 text-muted-foreground" />
           <input
             type="text"
@@ -1151,11 +1151,11 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           }}
           className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
             activeNoteId === "luno-ai"
-              ? "bg-sidebar-accent text-primary font-semibold"
+              ? "bg-sidebar-accent text-foreground font-semibold"
               : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
           }`}
         >
-          <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+          <Sparkles className={`h-4 w-4 shrink-0 ${activeNoteId === "luno-ai" ? "text-primary" : "text-foreground"}`} />
           <span>{t("sidebar.lunoAi")}</span>
         </button>
         <button
@@ -1425,7 +1425,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                     ? `Daily-${new Date().toISOString().slice(0, 10)}`
                     : "untitled"
                 }
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
               />
             </div>
 
@@ -1480,7 +1480,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 }
               }}
               placeholder="untitled-folder"
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
 
@@ -1511,7 +1511,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               type="text"
               value={renameFileName}
               onChange={(e) => setRenameFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
 
@@ -1542,7 +1542,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               type="text"
               value={renameFolderName}
               onChange={(e) => setRenameFolderName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
 

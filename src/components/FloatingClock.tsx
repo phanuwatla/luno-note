@@ -749,7 +749,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                   placeholder={t("editor.alarmLabelPlaceholder") || "Alarm label (optional)"}
                   value={newAlarmLabel}
                   onChange={(e) => setNewAlarmLabel(e.target.value)}
-                  className="bg-foreground/[0.04] border border-border/50 rounded-xl px-3 py-2 outline-none text-foreground text-xs hover:border-primary/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/50"
+                  className="bg-foreground/[0.04] border border-border/50 rounded-xl px-3 py-2 outline-none text-foreground text-xs hover:border-primary/50 focus:border-primary focus:ring-0 shadow-none transition-all placeholder:text-muted-foreground/50"
                 />
 
                 <div className="flex gap-2 pt-0.5">

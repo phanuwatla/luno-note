@@ -17,6 +17,20 @@ input[type="password"]::-webkit-reveal {
   height: 0 !important;
 }
 
+/* Sharp crisp focus border for all fields across the system (no fuzzy ring glow shadow) */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+button[role="combobox"]:focus,
+button[role="combobox"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
 .show-code-line-numbers pre code {
   counter-reset: line;
 }

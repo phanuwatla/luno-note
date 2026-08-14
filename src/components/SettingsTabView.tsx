@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   SlidersHorizontal,
   Palette,
@@ -56,12 +56,19 @@ interface CategoryMeta {
 
 interface SettingsTabViewProps {
   onClose?: () => void;
+  initialCategory?: SettingsCategory;
 }
 
-export default function SettingsTabView({ onClose }: SettingsTabViewProps) {
+export default function SettingsTabView({ onClose, initialCategory = "general" }: SettingsTabViewProps) {
   const { settings, updateSetting, resetSettings } = useAppSettings();
   const { t } = useTranslation();
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(initialCategory);
+
+  useEffect(() => {
+    if (initialCategory) {
+      setActiveCategory(initialCategory);
+    }
+  }, [initialCategory]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -655,7 +662,7 @@ export default function SettingsTabView({ onClose }: SettingsTabViewProps) {
                         placeholder="AIzaSy..."
                         value={settings.geminiApiKey}
                         onChange={(e) => updateSetting("geminiApiKey", e.target.value)}
-                        className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary/60 focus:ring-2 focus:ring-primary/20 shadow-2xs pr-10"
+                        className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none pr-10"
                       />
                       <button
                         type="button"
