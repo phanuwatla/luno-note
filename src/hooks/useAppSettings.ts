@@ -167,6 +167,30 @@ function saveSettings(settings: AppSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
+export async function saveWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle, settings: AppSettings) {
+  try {
+    const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: true });
+    const fileHandle = await metaDir.getFileHandle("settings.json", { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(settings, null, 2));
+    await writable.close();
+  } catch (err) {
+    console.warn("Failed to write .luno/settings.json", err);
+  }
+}
+
+export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle): Promise<AppSettings | null> {
+  try {
+    const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: false });
+    const fileHandle = await metaDir.getFileHandle("settings.json", { create: false });
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return normalizeSettings(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 interface AppSettingsContextValue {
   settings: AppSettings;
   updateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;

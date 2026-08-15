@@ -87,13 +87,13 @@ async function createFolder(token: string, folderName: string, parentId?: string
   return data.id as string;
 }
 
-// Get or create Luno folder hierarchy: Luno/ (Notes/, Attachments/, .luno/)
-export async function ensureLunoFolderStructure(token: string): Promise<LunoFolderStructure> {
+// Get or create Luno folder hierarchy: Luno/[Workspace]/ (notes directly inside Workspace/, attachments/, .luno/)
+export async function ensureLunoFolderStructure(token: string, projectName: string = "Workspace"): Promise<LunoFolderStructure> {
   const cached = getCachedFolderStructure();
-  if (cached) {
+  if (cached && cached.projectId) {
     // Verify cached root still exists
     try {
-      const res = await fetch(`${BASE_URL}/files/${cached.rootId}?fields=id,trashed`, {
+      const res = await fetch(`${BASE_URL}/files/${cached.projectId}?fields=id,trashed`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -111,25 +111,30 @@ export async function ensureLunoFolderStructure(token: string): Promise<LunoFold
     rootId = await createFolder(token, "Luno");
   }
 
-  // 2. Subfolders inside Luno/
-  let notesId = await findFolder(token, "Notes", rootId);
-  if (!notesId) {
-    notesId = await createFolder(token, "Notes", rootId);
+  // 2. Project Workspace folder inside Luno/ (e.g. Luno/Workspace/)
+  const cleanProjectName = projectName.trim() || "Workspace";
+  let projectId = await findFolder(token, cleanProjectName, rootId);
+  if (!projectId) {
+    projectId = await createFolder(token, cleanProjectName, rootId);
   }
 
-  let attachmentsId = await findFolder(token, "Attachments", rootId);
+  // 3. System Subfolders inside Luno/[Workspace]/
+  let attachmentsId = await findFolder(token, "attachments", projectId);
   if (!attachmentsId) {
-    attachmentsId = await createFolder(token, "Attachments", rootId);
+    attachmentsId = await findFolder(token, "Attachments", projectId);
+  }
+  if (!attachmentsId) {
+    attachmentsId = await createFolder(token, "attachments", projectId);
   }
 
-  let lunoMetaId = await findFolder(token, ".luno", rootId);
+  let lunoMetaId = await findFolder(token, ".luno", projectId);
   if (!lunoMetaId) {
-    lunoMetaId = await createFolder(token, ".luno", rootId);
+    lunoMetaId = await createFolder(token, ".luno", projectId);
   }
 
   const structure: LunoFolderStructure = {
     rootId,
-    notesId,
+    projectId,
     attachmentsId,
     lunoMetaId,
   };
@@ -222,6 +227,8 @@ export async function listDriveNoteFiles(
 
     for (const item of items) {
       if (item.mimeType === "application/vnd.google-apps.folder") {
+        const lname = item.name.toLowerCase();
+        if (lname === "attachments" || lname === ".luno" || lname === "notes") continue;
         const subPath = currentPath ? `${currentPath}/${item.name}` : item.name;
         await scanFolder(item.id, subPath);
       } else {
@@ -406,6 +413,84 @@ export async function uploadDriveAttachmentFile(
   return uploadedFile;
 }
 
+// Upload all local files in attachments/ directory to Google Drive attachments/ folder
+export async function syncLocalAttachmentsToDrive(
+  token: string,
+  attachmentsFolderId: string,
+  rootDirHandle: FileSystemDirectoryHandle
+): Promise<void> {
+  try {
+    const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: false });
+    const q = `'${attachmentsFolderId}' in parents and trashed = false`;
+    const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const existingNames = new Set<string>((data.files || []).map((f: any) => (f.name as string).toLowerCase()));
+
+    const iterator =
+      typeof (attachmentsDir as any).entries === "function"
+        ? (attachmentsDir as any).entries()
+        : (attachmentsDir as unknown as AsyncIterable<[string, FileSystemHandle]>);
+
+    for await (const [name, handle] of iterator) {
+      if (handle.kind === "file" && !existingNames.has(name.toLowerCase())) {
+        try {
+          const fileHandle = handle as FileSystemFileHandle;
+          const file = await fileHandle.getFile();
+          await uploadDriveAttachmentFile(token, attachmentsFolderId, file, name);
+        } catch (err) {
+          console.warn(`Failed to sync attachment ${name} to Drive:`, err);
+        }
+      }
+    }
+  } catch {
+    // attachments folder unreadable or does not exist locally
+  }
+}
+
+// Download missing attachment files from Google Drive attachments/ folder into local attachments/ directory
+export async function syncDriveAttachmentsToLocal(
+  token: string,
+  attachmentsFolderId: string,
+  rootDirHandle: FileSystemDirectoryHandle
+): Promise<void> {
+  try {
+    const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+    const q = `'${attachmentsFolderId}' in parents and trashed = false`;
+    const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const driveFiles = (data.files || []) as DriveFileItem[];
+
+    for (const item of driveFiles) {
+      try {
+        await attachmentsDir.getFileHandle(item.name, { create: false });
+      } catch {
+        try {
+          const fileRes = await fetch(`${BASE_URL}/files/${item.id}?alt=media`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (fileRes.ok) {
+            const blob = await fileRes.blob();
+            const localHandle = await attachmentsDir.getFileHandle(item.name, { create: true });
+            const writable = await localHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          }
+        } catch (err) {
+          console.warn(`Failed to download attachment ${item.name} from Drive:`, err);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 // Rename file on Google Drive without changing ID
 export async function renameDriveFile(token: string, driveFileId: string, newFileName: string): Promise<DriveFileItem> {
   const cleanName = newFileName.endsWith(".md") || newFileName.endsWith(".txt") || newFileName.endsWith(".html") ? newFileName : `${newFileName}.md`;
@@ -443,8 +528,11 @@ export async function trashDriveFile(token: string, driveFileId: string): Promis
 }
 
 // Clean up duplicate files in Luno/Notes/ (Keep newest, move older duplicates to Drive Trash)
-export async function cleanDriveDuplicates(token: string, notesFolderId: string): Promise<number> {
+export async function cleanDriveDuplicates(token: string, notesFolderId: string, parentFolderId?: string): Promise<number> {
   try {
+    let trashedCount = 0;
+
+    // 1. Clean duplicate files inside notes/
     const files = await listDriveNoteFiles(token, notesFolderId);
     const filesByName = new Map<string, DriveFileItem[]>();
 
@@ -456,15 +544,54 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string)
       filesByName.get(lowerName)!.push(f);
     }
 
-    let trashedCount = 0;
-
     for (const [, group] of filesByName) {
       if (group.length > 1) {
-        // Sort by modifiedTime descending (newest first)
         group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
-        // Keep group[0] (newest), move group[1..n] to Drive Trash
         for (let i = 1; i < group.length; i++) {
           await trashDriveFile(token, group[i].id);
+          trashedCount++;
+        }
+      }
+    }
+
+    // 2. Clean duplicate folders inside parentFolderId if provided
+    if (parentFolderId) {
+      const q = `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        const folders = (data.files || []) as DriveFileItem[];
+        const foldersByName = new Map<string, DriveFileItem[]>();
+        for (const f of folders) {
+          const lowerName = f.name.toLowerCase();
+          if (!foldersByName.has(lowerName)) foldersByName.set(lowerName, []);
+          foldersByName.get(lowerName)!.push(f);
+        }
+        for (const [, group] of foldersByName) {
+          if (group.length > 1) {
+            group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+            for (let i = 1; i < group.length; i++) {
+              await trashDriveFile(token, group[i].id);
+              trashedCount++;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Remove legacy notes subfolder if created inside Workspace/
+    const qNotes = `'${notesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const resNotes = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qNotes)}&fields=files(id,name)`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (resNotes.ok) {
+      const dataNotes = await resNotes.json();
+      const subfolders = (dataNotes.files || []) as DriveFileItem[];
+      for (const sf of subfolders) {
+        const lname = sf.name.toLowerCase();
+        if (lname === "notes") {
+          await trashDriveFile(token, sf.id);
           trashedCount++;
         }
       }

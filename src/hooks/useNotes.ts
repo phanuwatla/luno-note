@@ -48,7 +48,11 @@ function loadNotes(): Note[] {
 }
 
 function saveNotes(notes: Note[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  } catch (err) {
+    console.error("Failed to save notes to LocalStorage (QuotaExceededError or disabled):", err);
+  }
 }
 
 export function extractBaseTitleFromFileName(fileName?: string): string {

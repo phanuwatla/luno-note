@@ -51,6 +51,10 @@ export function useGoogleDriveSync() {
     syncEngine.triggerFullSync(notes, onNotesUpdated);
   }, []);
 
+  const setRootDirHandle = useCallback((handle: FileSystemDirectoryHandle | null) => {
+    syncEngine.setRootDirHandle(handle);
+  }, []);
+
   return {
     status: syncState.status,
     lastSyncedAt: syncState.lastSyncedAt,
@@ -66,5 +70,6 @@ export function useGoogleDriveSync() {
     resolveConflict,
     triggerSync,
     setRootFolderName,
+    setRootDirHandle,
   };
 }

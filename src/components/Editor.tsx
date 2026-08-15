@@ -123,6 +123,7 @@ import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
+import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
 import { createLowlight, common } from "lowlight";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -137,11 +138,46 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
+
+/** Preprocess Markdown to prevent 4-space indented paragraphs from becoming Code Blocks while preserving fenced ``` code blocks */
+export function preprocessMarkdownForEditor(markdown: string): string {
+  if (!markdown) return "";
+  const lines = markdown.split("\n");
+  let inFencedCode = false;
+  const resultLines: string[] = [];
+
+  for (const line of lines) {
+    if (/^\s*(?:`{3,}|~{3,})/.test(line)) {
+      inFencedCode = !inFencedCode;
+      resultLines.push(line);
+      continue;
+    }
+
+    if (!inFencedCode) {
+      const match = line.match(/^([ \t]{2,4}|\u00A0{2,4}|\u2003{1,4})(.*)/);
+      if (match) {
+        const raw = match[1];
+        const count = raw.includes("\t") ? 4 : raw.length;
+        if (count >= 2) {
+          resultLines.push(`\u2003\u2003${match[2]}`);
+          continue;
+        }
+      }
+    }
+
+    resultLines.push(line);
+  }
+
+  return resultLines.join("\n");
+}
+
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
+import { compressImageFile } from "@/lib/imageCompressor";
+import { saveImageToIndexedDb } from "@/lib/imageStore";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -547,7 +583,7 @@ const IndentKeymap = Extension.create({
         if (editor.can().sinkListItem("taskItem") && editor.chain().focus().sinkListItem("taskItem").run()) {
           return true;
         }
-        return editor.chain().focus().insertContent("  ").run();
+        return editor.chain().focus().insertContent("\u2003\u2003").run();
       },
       "Shift-Tab": ({ editor }) => {
         if (editor.can().liftListItem("listItem") && editor.chain().focus().liftListItem("listItem").run()) {
@@ -560,6 +596,12 @@ const IndentKeymap = Extension.create({
         const { selection } = state;
         const { $from } = selection;
         const lineText = $from.nodeBefore ? $from.nodeBefore.text || "" : "";
+        if (lineText.endsWith("\u2003\u2003")) {
+          return editor.chain().focus().deleteRange({ from: $from.pos - 2, to: $from.pos }).run();
+        }
+        if (lineText.endsWith("\u2003")) {
+          return editor.chain().focus().deleteRange({ from: $from.pos - 1, to: $from.pos }).run();
+        }
         if (lineText.endsWith("  ")) {
           return editor.chain().focus().deleteRange({ from: $from.pos - 2, to: $from.pos }).run();
         }
@@ -1494,6 +1536,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const { t, language: lang } = useTranslation();
 
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
+  const assetBlobUrlMap = useRef<Map<string, string>>(new Map());
 
   const turndown = useMemo(() => {
     const td = new TurndownService({
@@ -1501,6 +1544,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       bulletListMarker: "-",
       codeBlockStyle: "fenced",
       fence: "```",
+    });
+
+    // Save first-line Em-Space indented paragraphs back to 4-space indented Markdown for disk
+    td.addRule("firstLineEmSpaceIndent", {
+      filter: (node) => node.nodeName === "P" && !!(node.textContent && /^[\u2003\u00A0]{2,}/.test(node.textContent)),
+      replacement: (content) => `\n\n    ${content.replace(/^[\u2003\u00A0]+/, "").trim()}\n\n`,
+    });
+
+    // Convert HTML images back to Markdown, preserving relative asset paths
+    td.addRule("relativeImage", {
+      filter: "img",
+      replacement: (_content, node) => {
+        const img = node as HTMLImageElement;
+        const alt = img.getAttribute("alt") || "";
+        const title = img.getAttribute("title");
+        const relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap.current.get(img.src) || img.getAttribute("src") || "";
+        const titleAttr = title ? ` "${title}"` : "";
+        return `![${alt}](${relSrc}${titleAttr})`;
+      },
     });
 
     // Preserve ```javascript fenced code blocks when converting HTML to Markdown for disk
@@ -1810,6 +1872,50 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     });
 
+    // Unwrap paragraphs containing ONLY an image to prevent ProseMirror from splitting <p> into an extra empty paragraph
+    root.querySelectorAll("p").forEach((p) => {
+      if (p.children.length === 1 && p.firstElementChild?.tagName === "IMG" && !p.textContent?.trim()) {
+        p.replaceWith(p.firstElementChild);
+      }
+    });
+
+    // Preserve and resolve relative image sources
+    root.querySelectorAll("img").forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
+        img.setAttribute("data-relative-src", src);
+        const cachedBlobUrl = assetBlobUrlMap.current.get(src);
+        if (cachedBlobUrl) {
+          img.setAttribute("src", cachedBlobUrl);
+        }
+      }
+    });
+
+    // Clean up empty paragraph before an image if it was created by Markdown block splitting
+    root.querySelectorAll("p").forEach((p) => {
+      if (!p.textContent?.trim() && !p.querySelector("img, input, label")) {
+        const next = p.nextElementSibling;
+        if (next && next.tagName === "IMG") {
+          p.remove();
+        }
+      }
+    });
+
+    // Preserve first-line Em-Space indentation (\u2003\u2003) for text paragraphs matching Obsidian
+    root.querySelectorAll("p").forEach((p) => {
+      if (p.childNodes.length > 0 && p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
+        const text = p.firstChild.nodeValue || "";
+        const match = text.match(/^([\u00A0\u2003 \t]{2,})/);
+        if (match) {
+          const raw = match[1];
+          const count = raw.includes("\t") ? 4 : raw.length;
+          if (count >= 2) {
+            p.firstChild.nodeValue = text.replace(/^[\u00A0\u2003 \t]+/, "\u2003\u2003");
+          }
+        }
+      }
+    });
+
     root.querySelectorAll("details").forEach((details) => {
       const summary = details.querySelector("summary");
       const title = summary?.textContent?.trim() || "";
@@ -1844,7 +1950,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else {
       try {
         const textWithTableAttr = text.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
-        const parsed = marked.parse(textWithTableAttr, { async: false, gfm: true, breaks: true });
+        const preprocessed = preprocessMarkdownForEditor(textWithTableAttr);
+        const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true });
         temp.innerHTML = typeof parsed === "string" ? parsed : text;
       } catch {
         temp.innerHTML = text;
@@ -1858,7 +1965,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const EDITOR_CLASSES =
-    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-5 [&_p]:mt-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -2043,6 +2150,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const [editorTick, setEditorTick] = useState(0);
 
+  const processAndInsertImageFileRef = useRef<((file: File) => Promise<void>) | null>(null);
+  const debouncedContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveContentRef = useRef<{ id: string; content: string } | null>(null);
+
+  const flushDebouncedContentSave = useCallback(() => {
+    if (debouncedContentSaveTimeoutRef.current) {
+      clearTimeout(debouncedContentSaveTimeoutRef.current);
+      debouncedContentSaveTimeoutRef.current = null;
+    }
+    if (pendingSaveContentRef.current && noteRef.current) {
+      const { id, content } = pendingSaveContentRef.current;
+      pendingSaveContentRef.current = null;
+      onUpdate(id, { content });
+    }
+  }, [onUpdate]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -2076,7 +2199,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           target: "_blank",
         },
       }),
-      Image.configure({
+      Image.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            "data-relative-src": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-relative-src") || element.getAttribute("src"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-relative-src"]) return {};
+                return {
+                  "data-relative-src": attributes["data-relative-src"],
+                };
+              },
+            },
+          };
+        },
+      }).configure({
         HTMLAttributes: {
           class: "my-4 h-auto max-w-full rounded-xl border border-border",
         },
@@ -2140,9 +2279,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     ],
     content: parseEditorContent(note?.content ?? "", getBaseTitle(note), isTxtFile(note)),
     editorProps: {
+      parseOptions: {
+        preserveWhitespace: "full",
+      },
       attributes: {
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
         class: EDITOR_CLASSES,
+      },
+      handleDrop: (_view, event) => {
+        if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+          const file = event.dataTransfer.files[0];
+          if (file && file.type.startsWith("image/")) {
+            event.preventDefault();
+            void processAndInsertImageFileRef.current?.(file);
+            return true;
+          }
+        }
+        return false;
+      },
+      handlePaste: (_view, event) => {
+        if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length > 0) {
+          const file = event.clipboardData.files[0];
+          if (file && file.type.startsWith("image/")) {
+            event.preventDefault();
+            void processAndInsertImageFileRef.current?.(file);
+            return true;
+          }
+        }
+        return false;
       },
       handleKeyDown: (view, event) => {
         if (event.key === "Enter") {
@@ -2183,6 +2347,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onBlur: () => {
       flushPendingRename();
+      flushDebouncedContentSave();
     },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
@@ -2219,8 +2384,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             if (safeName && !isSystemGeneratedUntitledName(safeName)) {
               const newFileName = `${safeName}${ext}`;
               if (newFileName !== note.fileName) {
-                // Queue pending title update & disk rename - runs ONLY when user finishes typing (on Blur/Enter)
                 pendingRenameRef.current = { note, firstH1Text, newFileName };
+                if (debounceRenameTimeoutRef.current) {
+                  clearTimeout(debounceRenameTimeoutRef.current);
+                }
+                debounceRenameTimeoutRef.current = setTimeout(() => {
+                  debounceRenameTimeoutRef.current = null;
+                  flushPendingRename();
+                }, 800);
               }
             } else {
               pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
@@ -2249,13 +2420,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
         savedContent = turndown.turndown(temp.innerHTML).trim();
       }
-      onUpdate(note.id, { content: savedContent });
-      if (!settings.autoSave) {
-        setSaveStatus("unsaved");
-        return;
+
+      pendingSaveContentRef.current = { id: note.id, content: savedContent };
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
       }
-      setSaveStatus("auto_saving");
-      scheduleAutoSaveDiskRef.current?.();
+      debouncedContentSaveTimeoutRef.current = setTimeout(() => {
+        if (pendingSaveContentRef.current) {
+          const { id, content } = pendingSaveContentRef.current;
+          pendingSaveContentRef.current = null;
+          onUpdate(id, { content });
+        }
+        if (!settings.autoSave) {
+          setSaveStatus("unsaved");
+          return;
+        }
+        setSaveStatus("auto_saving");
+        scheduleAutoSaveDiskRef.current?.();
+      }, 300);
     },
   });
 
@@ -2529,7 +2711,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
-    editor.commands.setContent(parsed as string);
+    editor.commands.setContent(parsed as string, false, { preserveWhitespace: "full" });
+    void resolveRelativeImagesInEditor(editor);
     // Reset undo/redo history so that undoing does not bring back content
     // from a previously opened note.
     editor.view.updateState(
@@ -2558,6 +2741,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!editor) return;
     editor.setOptions({
       editorProps: {
+        parseOptions: {
+          preserveWhitespace: "full",
+        },
         attributes: {
           style: `font-size:${editorFontSize}px;`,
           class: EDITOR_CLASSES,
@@ -2926,6 +3112,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     openImageDialogRef.current = openImageDialog;
     triggerImageUploadRef.current = triggerImageUpload;
     handleFixLanguageRef.current = handleFixLanguage;
+    processAndInsertImageFileRef.current = processAndInsertImageFile;
   });
 
   const handleApplyImageUrl = () => {
@@ -2949,13 +3136,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setImageUrl("");
   };
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const getUniqueAttachmentFileName = async (attachmentsDir: FileSystemDirectoryHandle, originalName: string): Promise<string> => {
+    try {
+      await attachmentsDir.getFileHandle(originalName);
+    } catch {
+      return originalName;
+    }
 
+    const lastDot = originalName.lastIndexOf(".");
+    const baseName = lastDot > 0 ? originalName.slice(0, lastDot) : originalName;
+    const ext = lastDot > 0 ? originalName.slice(lastDot) : "";
+
+    let counter = 1;
+    while (counter < 1000) {
+      const candidate = `${baseName} ${counter}${ext}`;
+      try {
+        await attachmentsDir.getFileHandle(candidate);
+        counter++;
+      } catch {
+        return candidate;
+      }
+    }
+    return `${baseName}_${Date.now()}${ext}`;
+  };
+
+  const getRelativeAttachmentPath = (attachmentFileName: string) => {
+    const depth = (note?.folderPath ?? "").split("/").filter(Boolean).length;
+    const prefix = depth > 0 ? "../".repeat(depth) : "";
+    return `${prefix}attachments/${attachmentFileName}`;
+  };
+
+  const processAndInsertImageFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       showUiAlert(t("editor.invalidImageFile"));
-      event.target.value = "";
       return;
     }
 
@@ -2973,7 +3186,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           const driveImgUrl = uploaded.webContentLink || `https://drive.google.com/uc?export=view&id=${uploaded.id}`;
           const chain = getFocusedChain();
           if (chain) chain.setImage({ src: driveImgUrl, alt: file.name }).run();
-          event.target.value = "";
           return;
         }
       } catch (err) {
@@ -2981,22 +3193,56 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-      reader.onerror = () => reject(reader.error ?? new Error("Failed to read image"));
-      reader.readAsDataURL(file);
-    }).catch(() => "");
-
-    if (!dataUrl) {
-      showUiAlert(t("editor.invalidImageFile"));
-      event.target.value = "";
-      return;
+    let compressed: { dataUrl: string; blob: Blob; fileName: string } | null = null;
+    try {
+      compressed = await compressImageFile(file);
+    } catch (err) {
+      console.warn("Failed to compress image file:", err);
     }
 
-    const chain = getFocusedChain();
-    if (!chain) return;
-    chain.setImage({ src: dataUrl, alt: file.name }).run();
+    const finalDataUrl = compressed?.dataUrl;
+    const finalBlob = compressed?.blob || file;
+    const finalFileName = file.name;
+
+    if (rootDirHandle) {
+      try {
+        const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+        const attachmentFileName = await getUniqueAttachmentFileName(attachmentsDir, finalFileName);
+        const fileHandle = await attachmentsDir.getFileHandle(attachmentFileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(finalBlob);
+        await writable.close();
+
+        const relPath = getRelativeAttachmentPath(attachmentFileName);
+        const blobUrl = URL.createObjectURL(finalBlob);
+        assetBlobUrlMap.current.set(relPath, blobUrl);
+        assetBlobUrlMap.current.set(blobUrl, relPath);
+
+        const chain = getFocusedChain();
+        if (chain) {
+          chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath }).run();
+        }
+        return;
+      } catch (err) {
+        console.warn("Failed to save attachment to workspace folder:", err);
+      }
+    }
+
+    if (finalDataUrl) {
+      const chain = getFocusedChain();
+      if (chain) chain.setImage({ src: finalDataUrl, alt: file.name }).run();
+
+      const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      void saveImageToIndexedDb(imgId, finalBlob);
+    } else {
+      showUiAlert(t("editor.invalidImageFile"));
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await processAndInsertImageFile(file);
     event.target.value = "";
   };
 
@@ -3012,7 +3258,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     const parsedFm = parseFrontmatterAndTags(text);
     const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : text;
-    const content = format === "plain" ? cleanText : (marked.parse(cleanText, { async: false, gfm: true, breaks: true }) as string);
+    const preprocessed = preprocessMarkdownForEditor(cleanText);
+    const content = format === "plain" ? cleanText : (marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string);
     const tags = Array.from(new Set([...(note.tags || []), ...parsedFm.allTags]));
     onUpdate(note.id, { content, contentFormat: format, tags });
   };
@@ -3108,6 +3355,71 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!current || !("getFile" in current)) return null;
     return current as FileSystemFileHandle;
   };
+
+  const resolveRelativeImagesInEditor = useCallback(async (instance: TiptapEditor | null) => {
+    if (!instance || instance.isDestroyed || !rootDirHandle || !note) return;
+
+    const { doc, tr } = instance.state;
+    const tasks: Array<{ pos: number; relPath: string }> = [];
+
+    doc.descendants((node, pos) => {
+      if (node.type.name === "image") {
+        const src = (node.attrs.src as string) || "";
+        const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
+        const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
+
+        if (relPath && !/^(https?:\/\/|data:|blob:)/i.test(relPath)) {
+          tasks.push({ pos, relPath });
+        }
+      }
+    });
+
+    if (tasks.length === 0) return;
+
+    let modified = false;
+
+    for (const { pos, relPath } of tasks) {
+      let blobUrl = assetBlobUrlMap.current.get(relPath);
+      if (!blobUrl) {
+        try {
+          const handle = await resolveAssetHandle(relPath);
+          if (handle && typeof handle.getFile === "function") {
+            const file = await handle.getFile();
+            blobUrl = URL.createObjectURL(file);
+            assetBlobUrlMap.current.set(relPath, blobUrl);
+            assetBlobUrlMap.current.set(blobUrl, relPath);
+          }
+        } catch (err) {
+          console.warn("Failed to resolve relative image in ProseMirror doc:", relPath, err);
+        }
+      }
+
+      if (blobUrl) {
+        const currentNode = instance.state.doc.nodeAt(pos);
+        if (currentNode && currentNode.type.name === "image") {
+          if (currentNode.attrs.src !== blobUrl || currentNode.attrs["data-relative-src"] !== relPath) {
+            tr.setNodeMarkup(pos, undefined, {
+              ...currentNode.attrs,
+              src: blobUrl,
+              "data-relative-src": relPath,
+            });
+            modified = true;
+          }
+        }
+      }
+    }
+
+    if (modified && !instance.isDestroyed) {
+      instance.view.dispatch(tr);
+      setEditorTick((v) => v + 1);
+    }
+  }, [rootDirHandle, note]);
+
+  useEffect(() => {
+    if (editor) {
+      void resolveRelativeImagesInEditor(editor);
+    }
+  }, [editor, note?.id, rootDirHandle, resolveRelativeImagesInEditor]);
 
   const fileToDataUrl = async (file: File) => {
     return await new Promise<string>((resolve, reject) => {

@@ -8,6 +8,8 @@ import {
   renameDriveFile,
   trashDriveFile,
   cleanDriveDuplicates,
+  syncLocalAttachmentsToDrive,
+  syncDriveAttachmentsToLocal,
   LunoFolderStructure,
   DriveFileItem,
 } from "./googleDriveApi";
@@ -21,15 +23,8 @@ export type CloudSyncStatus =
   | "error"
   | "conflict";
 
-export function getFullDriveFolderPath(note: Note, rootFolderName?: string | null): string {
-  const noteFolderPath = (note.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
-  const rootName = (rootFolderName || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
-
-  if (!rootName) return noteFolderPath;
-  if (!noteFolderPath) return rootName;
-  if (noteFolderPath.toLowerCase().startsWith(rootName.toLowerCase())) return noteFolderPath;
-
-  return `${rootName}/${noteFolderPath}`;
+export function getFullDriveFolderPath(note: Note): string {
+  return (note.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
 }
 
 export interface SyncConflictInfo {
@@ -63,10 +58,14 @@ class GoogleDriveSyncEngine {
   private saveDebounceTimer: NodeJS.Timeout | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
   private isSyncing = false;
-  private rootFolderName: string | null = null;
+  private rootDirHandle: FileSystemDirectoryHandle | null = null;
 
   public setRootFolderName(name: string | null): void {
     this.rootFolderName = name;
+  }
+
+  public setRootDirHandle(handle: FileSystemDirectoryHandle | null): void {
+    this.rootDirHandle = handle;
   }
 
   constructor() {
@@ -116,7 +115,7 @@ class GoogleDriveSyncEngine {
 
     try {
       this.updateState({ status: "syncing", errorMessage: undefined });
-      const structure = await ensureLunoFolderStructure(tokenInfo.access_token);
+      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
       const profile = getStoredUserProfile();
 
       this.updateState({
@@ -167,9 +166,13 @@ class GoogleDriveSyncEngine {
       if (!structure) return;
 
       // Clean up any pre-existing duplicate files on Google Drive first
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.notesId);
+      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId);
 
-      const driveFiles = await listDriveNoteFiles(tokenInfo.access_token, structure.notesId);
+      if (this.rootDirHandle) {
+        void syncDriveAttachmentsToLocal(tokenInfo.access_token, structure.attachmentsId, this.rootDirHandle);
+      }
+
+      const driveFiles = await listDriveNoteFiles(tokenInfo.access_token, structure.projectId);
       const localByDriveId = new Map<string, Note>();
       const localByFileName = new Map<string, Note>();
 
@@ -263,16 +266,16 @@ class GoogleDriveSyncEngine {
     try {
       let structure = this.state.folderStructure;
       if (!structure) {
-        structure = await ensureLunoFolderStructure(tokenInfo.access_token);
+        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
         this.updateState({ folderStructure: structure });
       }
 
       const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
-      const targetFolderPath = getFullDriveFolderPath(note, this.rootFolderName);
+      const targetFolderPath = getFullDriveFolderPath(note);
 
       const uploaded = await uploadDriveNoteFile(
         tokenInfo.access_token,
-        structure.notesId,
+        structure.projectId,
         fileName,
         note.content,
         note.driveFileId,
@@ -340,7 +343,7 @@ class GoogleDriveSyncEngine {
     try {
       const driveFiles = await listDriveNoteFiles(
         tokenInfo.access_token,
-        this.state.folderStructure.notesId
+        this.state.folderStructure.projectId
       );
 
       this.updateState({ lastSyncedAt: Date.now() });
@@ -376,18 +379,25 @@ class GoogleDriveSyncEngine {
     try {
       let structure = this.state.folderStructure;
       if (!structure) {
-        structure = await ensureLunoFolderStructure(tokenInfo.access_token);
+        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
         this.updateState({ folderStructure: structure });
       }
 
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.notesId);
+      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId, structure.rootId);
+
+      if (this.rootDirHandle) {
+        void syncLocalAttachmentsToDrive(tokenInfo.access_token, structure.attachmentsId, this.rootDirHandle);
+      }
 
       const updatedNotesMap = new Map<string, Note>();
       notes.forEach((n) => updatedNotesMap.set(n.id, { ...n }));
 
-      const validNotes = notes.filter(
-        (n) => n.id !== "settings" && n.id !== "luno-ai" && n.fileType !== "settings" && n.fileType !== "luno-ai"
-      );
+      const validNotes = notes.filter((n) => {
+        if (n.id === "settings" || n.id === "luno-ai" || n.fileType === "settings" || n.fileType === "luno-ai") return false;
+        const fp = (n.folderPath || "").toLowerCase();
+        if (fp === "attachments" || fp.startsWith("attachments/") || fp === ".luno" || fp.startsWith(".luno/")) return false;
+        return true;
+      });
 
       // Process parallel chunks of 5 notes for ultra-fast sync speed
       const CHUNK_SIZE = 5;
@@ -397,11 +407,11 @@ class GoogleDriveSyncEngine {
           chunk.map(async (note) => {
             try {
               const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
-              const targetFolderPath = getFullDriveFolderPath(note, this.rootFolderName);
+              const targetFolderPath = getFullDriveFolderPath(note);
 
               const uploaded = await uploadDriveNoteFile(
                 tokenInfo.access_token,
-                structure.notesId,
+                structure.projectId,
                 fileName,
                 note.content,
                 note.driveFileId,

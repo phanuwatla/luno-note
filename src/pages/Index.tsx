@@ -9,7 +9,7 @@ import SettingsTabView, { type SettingsCategory } from "@/components/SettingsTab
 import LunoAiView from "@/components/LunoAiView";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { useAppSettings } from "@/hooks/useAppSettings";
+import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
@@ -68,11 +68,12 @@ export default function Index() {
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
   const notesRef = useRef(notes);
 
-  const { queueSync, trashDriveNote, importDriveNotes, setRootFolderName } = useGoogleDriveSync();
+  const { queueSync, trashDriveNote, importDriveNotes, setRootFolderName, setRootDirHandle } = useGoogleDriveSync();
 
   useEffect(() => {
     setRootFolderName(openedFolderName);
-  }, [openedFolderName, setRootFolderName]);
+    setRootDirHandle(openedRootDirHandle);
+  }, [openedFolderName, openedRootDirHandle, setRootFolderName, setRootDirHandle]);
 
   const handleOpenSettings = useCallback((category: SettingsCategory = "general") => {
     setSettingsCategory(category);
@@ -264,6 +265,9 @@ export default function Index() {
 
     const MAX_FILES = 2500;
     const IGNORED_FOLDERS = new Set([
+      "attachments",
+      "Attachments",
+      ".luno",
       "node_modules",
       ".git",
       ".next",
@@ -377,7 +381,10 @@ export default function Index() {
     const nextItems: Array<{ id?: string; content: string; fileName: string; contentFormat: "plain" | "markdown" | "html"; isLinkedFile: true; folderPath: string; fileType?: "image" | "binary" }> = [];
 
     for (const entry of filteredEntries) {
-      const existing = existingByPath.get(entry.relativePath);
+      let existing = existingByPath.get(entry.relativePath);
+      if (!existing && selectRelativePath && entry.relativePath === selectRelativePath) {
+        existing = activeNoteRef || currentNotes.find((n) => openTabNoteIds.includes(n.id));
+      }
 
       if (existing) {
         nextItems.push({
@@ -648,6 +655,9 @@ export default function Index() {
       }
 
       await setStoredFileHandle(note.id, newHandle);
+      notesRef.current = notesRef.current.map((n) =>
+        n.id === note.id ? { ...n, fileName: finalName, title: extractBaseTitleFromFileName(finalName) } : n
+      );
       updateNote(note.id, { fileName: finalName, title: extractBaseTitleFromFileName(finalName) });
       await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
     } catch (error) {
@@ -1158,6 +1168,40 @@ export default function Index() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [openedRootDirHandle, syncFolderFromDisk]);
+
+  const { updateSetting } = useAppSettings();
+
+  // Load .luno/settings.json when workspace opens
+  useEffect(() => {
+    if (!openedRootDirHandle) return;
+    let active = true;
+    const loadMeta = async () => {
+      const workspaceSettings = await loadWorkspaceSettings(openedRootDirHandle);
+      if (active && workspaceSettings) {
+        Object.entries(workspaceSettings).forEach(([k, v]) => {
+          updateSetting(k as keyof AppSettings, v as AppSettings[keyof AppSettings]);
+        });
+      } else if (active && settings) {
+        await saveWorkspaceSettings(openedRootDirHandle, settings);
+      }
+    };
+    void loadMeta();
+    return () => {
+      active = false;
+    };
+  }, [openedRootDirHandle]);
+
+  // Sync project workspace name with Google Drive sync engine
+  useEffect(() => {
+    setRootFolderName(openedFolderName || "My Luno Project");
+  }, [openedFolderName, setRootFolderName]);
+
+  // Save settings to .luno/settings.json whenever settings change
+  useEffect(() => {
+    if (openedRootDirHandle && settings) {
+      void saveWorkspaceSettings(openedRootDirHandle, settings);
+    }
+  }, [openedRootDirHandle, settings]);
 
   // Keep open tabs in sync when notes are deleted (non-folder-sync deletions)
   useEffect(() => {
