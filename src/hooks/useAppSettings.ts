@@ -31,6 +31,7 @@ export interface AppSettings {
   // File Settings
   defaultExtension: "md" | "txt" | "html";
   newFilePattern: "untitled" | "date" | "daily";
+  defaultNoteTemplate: "blank" | "meeting" | "daily" | "project" | "todo" | "study" | "bug";
 
   // Appearance Settings
   editorWidth: "compact" | "standard" | "full";
@@ -70,6 +71,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
   defaultExtension: "md",
   newFilePattern: "untitled",
+  defaultNoteTemplate: "blank",
 
   editorWidth: "standard",
   lineHeight: "1.6",
@@ -104,6 +106,10 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
 
   const defaultExtension = raw?.defaultExtension === "txt" || raw?.defaultExtension === "html" ? raw.defaultExtension : "md";
   const newFilePattern = raw?.newFilePattern === "date" || raw?.newFilePattern === "daily" ? raw.newFilePattern : "untitled";
+  const validTemplates = ["blank", "meeting", "daily", "project", "todo", "study", "bug"];
+  const defaultNoteTemplate = raw?.defaultNoteTemplate && validTemplates.includes(raw.defaultNoteTemplate)
+    ? (raw.defaultNoteTemplate as any)
+    : "blank";
 
   const editorWidth = raw?.editorWidth === "compact" || raw?.editorWidth === "full" ? raw.editorWidth : "standard";
   const lineHeight = raw?.lineHeight === "1.4" || raw?.lineHeight === "1.8" ? raw.lineHeight : "1.6";
@@ -130,6 +136,7 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
 
     defaultExtension,
     newFilePattern,
+    defaultNoteTemplate,
 
     editorWidth,
     lineHeight,

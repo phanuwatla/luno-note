@@ -18,6 +18,7 @@ import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { isGoogleDriveConnected } from "@/lib/googleDriveAuth";
+import { getNoteTemplateContent } from "@/lib/templates";
 
 export default function Index() {
   const { t } = useTranslation();
@@ -459,7 +460,10 @@ export default function Index() {
     const rawTitle = extractBaseTitleFromFileName(desiredFileName);
     const isUntitled = isSystemGeneratedUntitledName(rawTitle);
     const initialTitle = isUntitled || isTxt ? "" : rawTitle;
-    const initialContent = options?.initialContent ?? (isTxt ? "" : (initialTitle ? `<h1>${initialTitle}</h1>` : "<h1></h1>"));
+    const targetExt = desiredFileName.split(".").pop()?.toLowerCase() || settings.defaultExtension;
+    const resolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (targetExt === "html" ? "html" : isTxt || targetExt === "txt" ? "plain" : "markdown")) as any;
+    const templateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, resolvedFormat);
+    const initialContent = options?.initialContent ?? (templateContent ? templateContent : (isTxt ? "" : (initialTitle ? `<h1>${initialTitle}</h1>` : "<h1></h1>")));
 
     // If no folder is opened, fallback to normal in-app note creation.
     if (!openedRootDirHandle) {
@@ -488,7 +492,10 @@ export default function Index() {
       const rawFileTitle = extractBaseTitleFromFileName(fileName);
       const isFileUntitled = isSystemGeneratedUntitledName(rawFileTitle);
       const fileTitle = isFileUntitled || isFileTxt ? "" : rawFileTitle;
-      const fileContent = options?.initialContent ?? (isFileTxt ? "" : (fileTitle ? `<h1>${fileTitle}</h1>` : "<h1></h1>"));
+      const isFileHtml = fileName.toLowerCase().endsWith(".html") || contentFormat === "html";
+      const fileResolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (isFileHtml ? "html" : isFileTxt || fileName.toLowerCase().endsWith(".txt") ? "plain" : "markdown")) as any;
+      const fileTemplateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, fileResolvedFormat);
+      const fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isFileTxt ? "" : (fileTitle ? `<h1>${fileTitle}</h1>` : "<h1></h1>")));
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
@@ -508,8 +515,6 @@ export default function Index() {
       });
       openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
-
-      void syncFolderFromDisk(openedRootDirHandle, undefined, relPath);
       return note;
     } catch (error) {
       console.error("Create file in folder failed", error);
@@ -995,22 +1000,25 @@ export default function Index() {
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
-      const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
+      const isFileHtml = fileName.toLowerCase().endsWith(".html") || contentFormat === "html";
+      const fileResolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (isFileHtml ? "html" : isFileTxt ? "plain" : "markdown")) as any;
+      const templateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, fileResolvedFormat);
+      const fileContent = isFileTxt ? "" : templateContent;
       const writable = await fileHandle.createWritable();
-      await writable.write("");
+      await writable.write(fileContent);
       await writable.close();
 
       const note = createNote(normalizedPath || undefined);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName,
+        title: fileTitle || extractBaseTitleFromFileName(fileName),
+        content: fileContent,
         isLinkedFile: true,
         contentFormat,
       });
       openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
-
-      void syncFolderFromDisk(targetRootDirHandle, undefined, relPath);
     } catch (error) {
       console.error("Create file in target folder failed", error);
     }

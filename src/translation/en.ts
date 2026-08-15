@@ -429,6 +429,10 @@ const en = {
     optBlankDocument: "Blank Document",
     optMeetingNotes: "Meeting Notes",
     optDailyJournal: "Daily Journal",
+    optProjectPlanning: "Project Planning",
+    optTodoList: "To-Do List",
+    optStudyNotes: "Study & Learning Notes",
+    optBugReport: "Bug & Issue Report",
 
     getKeyFree: "Get Gemini API Key",
     getKeyDesc: "Required for Luno AI tools. Get a free API key from Google AI Studio.",

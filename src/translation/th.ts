@@ -431,6 +431,10 @@ const th = {
     optBlankDocument: "เอกสารเปล่า",
     optMeetingNotes: "บันทึกการประชุม",
     optDailyJournal: "ไดอารี่ประจำวัน",
+    optProjectPlanning: "วางแผนโปรเจกต์",
+    optTodoList: "รายการงานที่ต้องทำ",
+    optStudyNotes: "บันทึกการเรียนรู้",
+    optBugReport: "รายงานปัญหาและบั๊ก",
 
     getKeyFree: "รับ Gemini API Key ฟรี",
     getKeyDesc: "จำเป็นสำหรับการใช้งานฟังก์ชันผู้ช่วย Luno AI สามารถขอรับ API Key ฟรีได้จาก Google AI Studio",

@@ -112,7 +112,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
-import { parseFrontmatterAndTags, updateFrontmatterTags } from "@/lib/frontmatter";
+import { parseFrontmatterAndTags, updateFrontmatterTags, isMarkdownNote } from "@/lib/frontmatter";
 import { uploadDriveAttachmentFile } from "@/lib/googleDriveApi";
 import { getStoredTokenInfo, isGoogleDriveConnected } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
@@ -124,6 +124,11 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import StarterKit from "@tiptap/starter-kit";
+import { createLowlight, common } from "lowlight";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import CodeBlockNodeView from "@/components/CodeBlockNodeView";
+
+const lowlight = createLowlight(common);
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -1491,7 +1496,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
 
   const turndown = useMemo(() => {
-    const td = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
+    const td = new TurndownService({
+      headingStyle: "atx",
+      bulletListMarker: "-",
+      codeBlockStyle: "fenced",
+      fence: "```",
+    });
+
+    // Preserve ```javascript fenced code blocks when converting HTML to Markdown for disk
+    td.addRule("fencedCodeBlock", {
+      filter: (node) => node.nodeName === "PRE",
+      replacement: (_content, node) => {
+        const pre = node as HTMLElement;
+        const code = pre.querySelector("code") || pre;
+        const className = code.getAttribute("class") || "";
+        const langMatch = className.match(/language-([a-zA-Z0-9_-]+)/);
+        const lang = langMatch ? langMatch[1] : "";
+        const codeText = (code.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+        return `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
+      },
+    });
 
     // Convert HTML tables back into clean GFM Markdown tables unless originally HTML or using merged cells
     td.addRule("table", {
@@ -1607,6 +1631,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return false;
   }, []);
 
+  const isHtmlFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.contentFormat === "html") return true;
+    const fileName = targetNote.fileName?.toLowerCase() ?? "";
+    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) return true;
+    return false;
+  }, []);
+
   const getBaseTitle = useCallback((targetNote: Note | null): string => {
     if (!targetNote || isTxtFile(targetNote)) return "";
     if (targetNote.title === "") {
@@ -1655,7 +1687,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isTiptapJson = (text: string) => typeof text === "string" && (text.trimStart().startsWith('{"type":"doc"') || text.includes('{"type":"doc"'));
 
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
-  const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false): string | Record<string, unknown> => {
+  const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false, isHtml: boolean = false): string | Record<string, unknown> => {
+    if (isHtml) {
+      return typeof text === "string" ? text : "";
+    }
     if (typeof text !== "string" || !text.trim()) {
       if (isTxt) return "<p></p>";
       return baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
@@ -1766,6 +1801,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const prepareDomForEditor = (root: HTMLElement) => {
     migrateDomTaskLists(root);
+
+    // Clean up extra leading/trailing newlines in code blocks from marked output
+    root.querySelectorAll("pre code, pre").forEach((el) => {
+      if (el.tagName === "CODE" || (el.tagName === "PRE" && !el.querySelector("code"))) {
+        const cleaned = (el.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+        el.textContent = cleaned;
+      }
+    });
 
     root.querySelectorAll("details").forEach((details) => {
       const summary = details.querySelector("summary");
@@ -2002,7 +2045,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        codeBlock: false,
+      }),
+      CodeBlockLowlight.extend({
+        addNodeView() {
+          return ReactNodeViewRenderer(CodeBlockNodeView);
+        },
+      }).configure({
+        lowlight,
+        defaultLanguage: "plaintext",
+      }),
       Toggle,
       TaskList,
       TaskItem,
@@ -2030,6 +2083,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
       Placeholder.configure({
         placeholder: ({ node, pos, editor: ed, hasAnchor }) => {
+          if (node.type.name === "codeBlock") {
+            return "";
+          }
+
           if (node.type.name === "heading" && node.attrs?.level === 1 && pos === 0) {
             if (noteRef.current?.fileName) {
               const baseTitle = extractBaseTitleFromFileName(noteRef.current.fileName);
@@ -2174,11 +2231,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
       }
 
+      if (isHtmlFile(note)) {
+        // Raw HTML / Code notes are edited in HtmlCodeEditor — Tiptap MUST NOT overwrite note.content!
+        return;
+      }
+
       let savedContent = "";
       if (isTxtFile(note)) {
         savedContent = getPlainTextFromHtml(instance.getHTML());
-      } else if (note.contentFormat === "html") {
-        savedContent = instance.getHTML();
       } else {
         const html = instance.getHTML();
         const temp = document.createElement("div");
@@ -2458,9 +2518,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
+    if (isHtmlFile(note)) {
+      editorActiveNoteIdRef.current = note.id;
+      return;
+    }
+
     const noteContent = note.content ?? "";
     const baseTitle = getBaseTitle(note);
-    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note));
+    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note));
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
@@ -2937,6 +3002,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const parseAndSetContent = (text: string, format?: "plain" | "markdown") => {
     if (!note) return;
+    if (isHtmlFile(note)) {
+      onUpdate(note.id, { content: text, contentFormat: "html", tags: [] });
+      return;
+    }
+    if (!isMarkdownNote(note)) {
+      onUpdate(note.id, { content: text, contentFormat: format, tags: [] });
+      return;
+    }
     const parsedFm = parseFrontmatterAndTags(text);
     const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : text;
     const content = format === "plain" ? cleanText : (marked.parse(cleanText, { async: false, gfm: true, breaks: true }) as string);
@@ -3104,6 +3177,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
     if (!note) return "";
+    if (isHtmlFile(note)) {
+      return note.content || "";
+    }
     const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
 
     let rawHtml = "";
@@ -3146,7 +3222,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else {
       // For markdown, convert HTML back to markdown using turndown rules
       let mdText = isLikelyHtml(htmlContent) ? getMarkdownFromHtml(htmlContent) : htmlContent;
-      mdText = updateFrontmatterTags(mdText, note.tags || []);
+      if (isMarkdownNote(note)) {
+        mdText = updateFrontmatterTags(mdText, note.tags || []);
+      }
       return mdText;
     }
   };
@@ -3418,16 +3496,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   function handleExportPdf() {
     if (!note) return;
-    const content = editor?.getHTML() ?? note.content;
+    const content = isHtmlFile(note) ? note.content : (editor?.getHTML() ?? note.content);
+
     const win = window.open("", "_blank");
     if (!win) return;
     const docTitle = note.fileName || note.title?.trim() || t("editor.untitled");
     win.document.write(
-      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${docTitle}</title>` +
-      `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
-      `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
-      `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
-      `</head><body>${content}</body></html>`
+      isHtmlFile(note)
+        ? content
+        : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${docTitle}</title>` +
+          `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
+          `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
+          `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
+          `</head><body>${content}</body></html>`
     );
     win.document.close();
     win.focus();
@@ -3436,7 +3517,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   function handleExportWord() {
     if (!note) return;
-    const content = editor?.getHTML() ?? note.content;
+    const content = isHtmlFile(note) ? note.content : (editor?.getHTML() ?? note.content);
     const html =
       `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
       `<head><meta charset="UTF-8"></head><body>${content}</body></html>`;
@@ -5090,7 +5171,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <div className={`flex w-full min-w-0 flex-col overflow-x-hidden px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto ${
               settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
             } ${settings.showCodeLineNumbers ? "show-code-line-numbers" : ""}`}>
-              {note.tags && note.tags.length > 0 && (
+              {isMarkdownNote(note) && note.tags && note.tags.length > 0 && (
                 <div className="mb-3 flex flex-wrap items-center gap-1.5">
                   {note.tags.map((tag, idx) => (
                     <span

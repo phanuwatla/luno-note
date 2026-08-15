@@ -19,6 +19,28 @@ export function isTiptapJson(text: string): boolean {
   return trimmed.startsWith('{"type":"doc"') || trimmed.includes('{"type":"doc"');
 }
 
+export function isMarkdownFileName(fileName?: string, contentFormat?: string, fileType?: string): boolean {
+  if (fileType === "image" || fileType === "binary") return false;
+  if (fileName) {
+    const ext = fileName.toLowerCase().split('.').pop();
+    if (ext && ext !== "md" && ext !== "markdown") {
+      return false;
+    }
+    if (fileName.toLowerCase().endsWith(".md") || fileName.toLowerCase().endsWith(".markdown")) {
+      return true;
+    }
+  }
+  if (contentFormat) {
+    return contentFormat === "markdown";
+  }
+  return true;
+}
+
+export function isMarkdownNote(note?: { fileName?: string; contentFormat?: string; fileType?: string } | null): boolean {
+  if (!note) return false;
+  return isMarkdownFileName(note.fileName, note.contentFormat, note.fileType);
+}
+
 /**
  * Normalizes a single tag:
  * - Trims whitespace

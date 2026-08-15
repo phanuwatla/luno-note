@@ -1,7 +1,14 @@
 import { useState, useCallback, useEffect } from "react";
 import { docxToHtml } from "@/lib/docxUtils";
 import { markNoteAsDeleted } from "@/lib/fileHandles";
-import { parseFrontmatterAndTags, updateFrontmatterTags, renameTagInMarkdown, removeTagFromMarkdown, isTiptapJson } from "@/lib/frontmatter";
+import {
+  parseFrontmatterAndTags,
+  updateFrontmatterTags,
+  renameTagInMarkdown,
+  removeTagFromMarkdown,
+  isTiptapJson,
+  isMarkdownNote,
+} from "@/lib/frontmatter";
 
 export interface Note {
   id: string;
@@ -28,10 +35,11 @@ function loadNotes(): Note[] {
     if (!raw) return [];
     const loaded: Note[] = JSON.parse(raw);
     return loaded.map((n) => {
-      const extracted = (!n.content || isTiptapJson(n.content)) ? [] : parseFrontmatterAndTags(n.content).allTags;
+      const isMd = isMarkdownNote(n);
+      const extracted = (isMd && n.content && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content).allTags : [];
       return {
         ...n,
-        tags: Array.from(new Set([...(n.tags || []), ...extracted])),
+        tags: isMd ? Array.from(new Set([...(n.tags || []), ...extracted])) : [],
       };
     });
   } catch {
@@ -132,7 +140,8 @@ export function useNotes() {
           // fallback: treat as binary
         }
       }
-      const parsedTags = (typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
+      const isMd = isMarkdownNote(item);
+      const parsedTags = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
       newNotes.push({
         id: item.id ?? crypto.randomUUID(),
         title: getNoteTitleFromFileName(item.fileName),
@@ -144,7 +153,7 @@ export function useNotes() {
         contentFormat: item.contentFormat,
         folderPath: item.folderPath,
         fileType: item.fileType,
-        tags: parsedTags,
+        tags: isMd ? parsedTags : [],
       });
     }
     setNotes((prev) => {
@@ -172,8 +181,9 @@ export function useNotes() {
         const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName) : "";
         const existingNote = prevNotesMap.get(id) || (relPath ? prevNotesMap.get(relPath) : undefined);
 
-        const extractedTags = (typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
-        const mergedTags = item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]));
+        const isMd = isMarkdownNote(item);
+        const extractedTags = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
+        const mergedTags = isMd ? (item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]))) : [];
 
         return {
           id,
@@ -209,17 +219,27 @@ export function useNotes() {
           if (n.id !== id) return n;
           let mergedContent = normalizedPatch.content !== undefined ? normalizedPatch.content : n.content;
 
-          let finalTags = n.tags || [];
-          if (normalizedPatch.tags !== undefined) {
-            finalTags = normalizedPatch.tags;
-            if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
-              mergedContent = updateFrontmatterTags(mergedContent, normalizedPatch.tags);
-            }
-          } else if (normalizedPatch.content !== undefined) {
-            const str = mergedContent || "";
-            if (typeof str === "string" && !isTiptapJson(str) && !str.trimStart().startsWith("<")) {
-              const extracted = parseFrontmatterAndTags(str).allTags;
-              finalTags = Array.from(new Set([...finalTags, ...extracted]));
+          const updatedNoteMeta = {
+            fileName: normalizedPatch.fileName !== undefined ? normalizedPatch.fileName : n.fileName,
+            contentFormat: normalizedPatch.contentFormat !== undefined ? normalizedPatch.contentFormat : n.contentFormat,
+            fileType: normalizedPatch.fileType !== undefined ? normalizedPatch.fileType : n.fileType,
+          };
+          const isMd = isMarkdownNote(updatedNoteMeta);
+
+          let finalTags: string[] = [];
+          if (isMd) {
+            finalTags = n.tags || [];
+            if (normalizedPatch.tags !== undefined) {
+              finalTags = normalizedPatch.tags;
+              if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
+                mergedContent = updateFrontmatterTags(mergedContent, normalizedPatch.tags);
+              }
+            } else if (normalizedPatch.content !== undefined) {
+              const str = mergedContent || "";
+              if (typeof str === "string" && !isTiptapJson(str) && !str.trimStart().startsWith("<")) {
+                const extracted = parseFrontmatterAndTags(str).allTags;
+                finalTags = Array.from(new Set([...finalTags, ...extracted]));
+              }
             }
           }
 
@@ -241,6 +261,7 @@ export function useNotes() {
   const renameTagGlobally = useCallback((oldTag: string, newTag: string) => {
     setNotes((prev) => {
       const updated = prev.map((n) => {
+        if (!isMarkdownNote(n)) return n;
         const newContent = renameTagInMarkdown(n.content || "", oldTag, newTag);
         if (newContent === n.content) return n;
         const newTags = parseFrontmatterAndTags(newContent).allTags;
@@ -254,6 +275,7 @@ export function useNotes() {
   const deleteTagGlobally = useCallback((tagToDelete: string) => {
     setNotes((prev) => {
       const updated = prev.map((n) => {
+        if (!isMarkdownNote(n)) return n;
         const newContent = removeTagFromMarkdown(n.content || "", tagToDelete);
         if (newContent === n.content) return n;
         const newTags = parseFrontmatterAndTags(newContent).allTags;

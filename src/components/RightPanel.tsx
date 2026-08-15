@@ -22,7 +22,7 @@ import type { Editor } from "@tiptap/react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson } from "@/lib/frontmatter";
+import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson, isMarkdownNote } from "@/lib/frontmatter";
 import { getTagColorClass } from "@/lib/tagColors";
 
 interface RightPanelProps {
@@ -323,58 +323,61 @@ export default function RightPanel({
                 </div>
               )}
 
-              <hr className="border-border/60" />
-
               {/* SECTION: TAGS */}
-              <div className="space-y-2.5">
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("rightPanel.tagsSection")}</h4>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {(note.tags || []).map((tag, idx) => (
-                    <span
-                      key={tag}
-                      className={`group flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
-                    >
-                      <span>#{tag}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveTag(tag)}
-                        className="opacity-60 hover:opacity-100 transition-opacity"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
-
-                  {isAddingTag ? (
-                    <input
-                      type="text"
-                      autoFocus
-                      placeholder="Tag..."
-                      value={newTagInput}
-                      onChange={(e) => setNewTagInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleAddTag();
-                        if (e.key === "Escape") setIsAddingTag(false);
-                      }}
-                      onBlur={handleAddTag}
-                      className="h-6 w-20 rounded-md border border-primary bg-transparent px-2 text-xs text-foreground outline-none"
-                    />
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => setIsAddingTag(true)}
-                          className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              {isMarkdownNote(note) && (
+                <>
+                  <hr className="border-border/60" />
+                  <div className="space-y-2.5">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("rightPanel.tagsSection")}</h4>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(note.tags || []).map((tag, idx) => (
+                        <span
+                          key={tag}
+                          className={`group flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
                         >
-                          <Plus className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("rightPanel.addTag")}</TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
-              </div>
+                          <span>#{tag}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTag(tag)}
+                            className="opacity-60 hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+
+                      {isAddingTag ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="Tag..."
+                          value={newTagInput}
+                          onChange={(e) => setNewTagInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleAddTag();
+                            if (e.key === "Escape") setIsAddingTag(false);
+                          }}
+                          onBlur={handleAddTag}
+                          className="h-6 w-20 rounded-md border border-primary bg-transparent px-2 text-xs text-foreground outline-none"
+                        />
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => setIsAddingTag(true)}
+                              className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("rightPanel.addTag")}</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <hr className="border-border/60" />
 

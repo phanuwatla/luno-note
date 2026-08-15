@@ -1,0 +1,124 @@
+import React, { useState } from "react";
+import { NodeViewWrapper, NodeViewContent, NodeViewProps } from "@tiptap/react";
+import { Code2, Copy, Check } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { toast } from "@/hooks/use-toast";
+
+const LANGUAGES = [
+  { value: "plaintext", label: "Plain Text" },
+  { value: "javascript", label: "JavaScript" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "html", label: "HTML" },
+  { value: "css", label: "CSS" },
+  { value: "python", label: "Python" },
+  { value: "json", label: "JSON" },
+  { value: "bash", label: "Bash" },
+  { value: "sql", label: "SQL" },
+  { value: "cpp", label: "C++" },
+  { value: "c", label: "C" },
+  { value: "java", label: "Java" },
+  { value: "go", label: "Go" },
+  { value: "rust", label: "Rust" },
+  { value: "php", label: "PHP" },
+  { value: "ruby", label: "Ruby" },
+  { value: "yaml", label: "YAML" },
+  { value: "markdown", label: "Markdown" },
+];
+
+export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
+  node,
+  updateAttributes,
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const rawLang = node.attrs.language || "";
+  const foundLang = LANGUAGES.find(
+    (l) =>
+      l.value === rawLang.toLowerCase() ||
+      (l.value === "plaintext" && (rawLang.toLowerCase() === "text" || !rawLang))
+  );
+  const displayLabel = foundLang
+    ? foundLang.label
+    : rawLang
+    ? rawLang.charAt(0).toUpperCase() + rawLang.slice(1)
+    : "Plain Text";
+
+  const handleCopy = () => {
+    const textContent = node.textContent || "";
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(textContent);
+      setCopied(true);
+      toast({
+        title: "Copied to clipboard",
+        description: "Code block content copied.",
+      });
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <NodeViewWrapper className="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-2xs transition-all">
+      {/* Seamless Header Bar with System Select & Tooltip UI */}
+      <div className="flex items-center justify-between px-3.5 pt-2 pb-0.5 text-[11px] select-none">
+        <Select
+          value={rawLang ? rawLang.toLowerCase() : "plaintext"}
+          onValueChange={(val) => updateAttributes({ language: val })}
+        >
+          <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 gap-1.5 font-medium text-muted-foreground/80 hover:text-foreground outline-none shadow-none focus:ring-0 focus:ring-offset-0 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <Code2 className="h-3.5 w-3.5 opacity-60 shrink-0 text-foreground" />
+              <span className="font-semibold text-muted-foreground/90">{displayLabel}</span>
+            </div>
+          </SelectTrigger>
+          <SelectContent align="start" className="w-36 max-h-56 p-1 text-xs z-50">
+            {LANGUAGES.map((l) => (
+              <SelectItem key={l.value} value={l.value} className="text-xs py-1.5 cursor-pointer">
+                {l.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="flex items-center gap-1 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-background/40 transition-all cursor-pointer outline-none"
+                aria-label="Copy code"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-[11px] px-2 py-1">
+              {copied ? "Copied!" : "Copy code"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      {/* Code Content Area with 13.5px font size (larger than header) */}
+      <div className="px-3.5 pt-0.5 pb-2.5 overflow-x-auto font-mono text-[13.5px] leading-relaxed text-foreground">
+        <NodeViewContent as="pre" className="outline-none focus:outline-none bg-transparent p-0 m-0 border-0" />
+      </div>
+    </NodeViewWrapper>
+  );
+};
+
+export default CodeBlockNodeView;

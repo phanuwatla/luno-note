@@ -487,9 +487,22 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   margin-bottom: 1.2em;
 }
 
-.ProseMirror pre {
-  margin-top: 1.2em;
-  margin-bottom: 1.2em;
+.ProseMirror .code-block-wrapper {
+  margin-top: 1.6em !important;
+  margin-bottom: 1.6em !important;
+}
+
+.ProseMirror > pre {
+  margin-top: 1.6em !important;
+  margin-bottom: 1.6em !important;
+}
+
+.code-block-wrapper pre,
+.ProseMirror .code-block-wrapper pre {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 .ProseMirror hr {
@@ -565,7 +578,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .show-code-line-numbers .ProseMirror pre,
 .show-code-line-numbers pre {
   position: relative;
-  padding-left: 3.2rem !important;
+  padding-left: 2.2rem !important;
 }
 
 .show-code-line-numbers .ProseMirror pre[data-line-numbers]::before,
@@ -575,16 +588,16 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 2.4rem;
-  padding-right: 0.5rem;
+  width: 1.6rem;
+  padding-right: 0.4rem;
   text-align: right;
-  color: hsl(var(--muted-foreground) / 0.5);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  padding-top: 1rem;
+  color: hsl(var(--muted-foreground) / 0.4);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding-top: 0 !important;
   white-space: pre;
-  border-right: 1px solid hsl(var(--border) / 0.5);
+  border-right: 1px solid hsl(var(--border) / 0.3);
   user-select: none;
   pointer-events: none;
 }
@@ -724,4 +737,112 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   border-top: 1px solid hsl(var(--border));
   margin-top: 1.5em;
   margin-bottom: 1.5em;
+}
+
+/* Custom CodeBlock UI & Syntax Highlighting matching UI mockup */
+.code-block-wrapper .is-empty::before,
+.code-block-wrapper pre.is-empty::before,
+.code-block-wrapper code.is-empty::before {
+  display: none !important;
+  content: "" !important;
+}
+
+.code-block-wrapper pre code {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst {
+  color: #a855f7;
+  font-weight: 500;
+}
+
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-subst {
+  color: #c084fc;
+}
+
+.hljs-string,
+.hljs-title.class_,
+.hljs-section,
+.hljs-attribute,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-addition {
+  color: #10b981;
+}
+
+.dark .hljs-string,
+.dark .hljs-title.class_,
+.dark .hljs-section,
+.dark .hljs-attribute,
+.dark .hljs-template-tag,
+.dark .hljs-template-variable,
+.dark .hljs-type,
+.dark .hljs-addition {
+  color: #34d399;
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-name,
+.hljs-built_in {
+  color: #2563eb;
+}
+
+.dark .hljs-title,
+.dark .hljs-title.function_,
+.dark .hljs-name,
+.dark .hljs-built_in {
+  color: #60a5fa;
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-property {
+  color: #475569;
+}
+
+.dark .hljs-variable,
+.dark .hljs-template-variable,
+.dark .hljs-attr,
+.dark .hljs-property {
+  color: #cbd5e1;
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion,
+.hljs-meta {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.dark .hljs-comment,
+.dark .hljs-quote,
+.dark .hljs-deletion,
+.dark .hljs-meta {
+  color: #64748b;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-literal,
+.hljs-link {
+  color: #f59e0b;
+}
+
+.dark .hljs-number,
+.dark .hljs-symbol,
+.dark .hljs-bullet,
+.dark .hljs-literal,
+.dark .hljs-link {
+  color: #fbbf24;
 }

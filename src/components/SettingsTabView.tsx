@@ -637,7 +637,10 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                         <label className="text-xs font-semibold text-foreground">{t("settings.defaultTemplate")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.defaultTemplateDesc")}</p>
                       </div>
-                      <Select defaultValue="blank">
+                      <Select
+                        value={settings.defaultNoteTemplate}
+                        onValueChange={(val) => updateSetting("defaultNoteTemplate", val as any)}
+                      >
                         <SelectTrigger className="w-48 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
@@ -645,6 +648,10 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                           <SelectItem value="blank">{t("settings.optBlankDocument")}</SelectItem>
                           <SelectItem value="meeting">{t("settings.optMeetingNotes")}</SelectItem>
                           <SelectItem value="daily">{t("settings.optDailyJournal")}</SelectItem>
+                          <SelectItem value="project">{t("settings.optProjectPlanning")}</SelectItem>
+                          <SelectItem value="todo">{t("settings.optTodoList")}</SelectItem>
+                          <SelectItem value="study">{t("settings.optStudyNotes")}</SelectItem>
+                          <SelectItem value="bug">{t("settings.optBugReport")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

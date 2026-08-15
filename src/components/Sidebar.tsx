@@ -16,6 +16,7 @@ import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { getTagColorClass } from "@/lib/tagColors";
+import { isMarkdownNote } from "@/lib/frontmatter";
 import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 
 interface SidebarProps {
@@ -399,7 +400,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const vaultTagCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of notes) {
-      if (n.tags) {
+      if (isMarkdownNote(n) && n.tags) {
         for (const t of n.tags) {
           const norm = t.trim();
           if (!norm) continue;
@@ -411,7 +412,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     const result: Array<{ tag: string; lower: string; count: number }> = [];
     const seenLower = new Set<string>();
     for (const n of notes) {
-      if (n.tags) {
+      if (isMarkdownNote(n) && n.tags) {
         for (const t of n.tags) {
           const norm = t.trim();
           const lower = norm.toLowerCase();
