@@ -115,7 +115,7 @@ export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
 
       {/* Code Content Area with 13.5px font size (larger than header) */}
       <div className="px-3.5 pt-0.5 pb-2.5 overflow-x-auto font-mono text-[13.5px] leading-relaxed text-foreground">
-        <NodeViewContent as="pre" className="outline-none focus:outline-none bg-transparent p-0 m-0 border-0" />
+        <NodeViewContent as={("pre" as any)} className="outline-none focus:outline-none bg-transparent p-0 m-0 border-0" />
       </div>
     </NodeViewWrapper>
   );

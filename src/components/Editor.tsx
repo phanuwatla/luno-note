@@ -118,6 +118,7 @@ import { getStoredTokenInfo, isGoogleDriveConnected } from "@/lib/googleDriveAut
 import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
+export type { AiActionType };
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
@@ -154,7 +155,7 @@ export function preprocessMarkdownForEditor(markdown: string): string {
     }
 
     if (!inFencedCode) {
-      const match = line.match(/^([ \t]{2,4}|\u00A0{2,4}|\u2003{1,4})(.*)/);
+      const match = line.match(/^([ \t\u00A0\u2003]{2,4}|\t+)(.*)/);
       if (match) {
         const raw = match[1];
         const count = raw.includes("\t") ? 4 : raw.length;
@@ -1548,8 +1549,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     // Save first-line Em-Space indented paragraphs back to 4-space indented Markdown for disk
     td.addRule("firstLineEmSpaceIndent", {
-      filter: (node) => node.nodeName === "P" && !!(node.textContent && /^[\u2003\u00A0]{2,}/.test(node.textContent)),
-      replacement: (content) => `\n\n    ${content.replace(/^[\u2003\u00A0]+/, "").trim()}\n\n`,
+      filter: (node) => node.nodeName === "P" && !!(node.textContent && /^([\u2003\u00A0 \t]{2,}|\t+)/.test(node.textContent)),
+      replacement: (content) => `\n\n    ${content.replace(/^[\u2003\u00A0 \t]+/, "").trim()}\n\n`,
     });
 
     // Convert HTML images back to Markdown, preserving relative asset paths
@@ -1669,7 +1670,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           innerHtml = clone.innerHTML;
         }
 
-        const innerMarkdown = td.turndown(innerHtml).trim();
+        const innerMarkdown = td.turndown(innerHtml).replace(/^[\r\n]+|[\r\n]+$/g, "");
         const bodyContent = innerMarkdown || "<p></p>";
 
         return `\n\n<details${isOpen ? " open" : ""}><summary>${title}</summary><div>\n\n${bodyContent}\n\n</div></details>\n\n`;
@@ -1965,7 +1966,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const EDITOR_CLASSES =
-    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-5 [&_p]:mt-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -2278,10 +2279,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
     ],
     content: parseEditorContent(note?.content ?? "", getBaseTitle(note), isTxtFile(note)),
+    parseOptions: {
+      preserveWhitespace: "full",
+    },
     editorProps: {
-      parseOptions: {
-        preserveWhitespace: "full",
-      },
       attributes: {
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
         class: EDITOR_CLASSES,
@@ -2418,7 +2419,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
           firstChild.remove();
         }
-        savedContent = turndown.turndown(temp.innerHTML).trim();
+        savedContent = turndown.turndown(temp.innerHTML).replace(/^[\r\n]+|[\r\n]+$/g, "");
       }
 
       pendingSaveContentRef.current = { id: note.id, content: savedContent };
@@ -2711,7 +2712,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
-    editor.commands.setContent(parsed as string, false, { preserveWhitespace: "full" });
+    (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
     void resolveRelativeImagesInEditor(editor);
     // Reset undo/redo history so that undoing does not bring back content
     // from a previously opened note.
@@ -2740,10 +2741,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     if (!editor) return;
     editor.setOptions({
+      parseOptions: {
+        preserveWhitespace: "full",
+      },
       editorProps: {
-        parseOptions: {
-          preserveWhitespace: "full",
-        },
         attributes: {
           style: `font-size:${editorFontSize}px;`,
           class: EDITOR_CLASSES,
@@ -2944,6 +2945,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     originalText: string;
     proposedText: string;
     action: AiActionType;
+    modelUsed?: string;
   }
 
   const [aiDiffState, setAiDiffState] = useState<AiDiffState | null>(null);
@@ -3220,7 +3222,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         const chain = getFocusedChain();
         if (chain) {
-          chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath }).run();
+          chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath } as any).run();
         }
         return;
       } catch (err) {
@@ -3284,7 +3286,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const getMarkdownFromHtml = (html: string): string => {
-    return turndown.turndown(html);
+    return turndown.turndown(html).replace(/^[\r\n]+|[\r\n]+$/g, "");
   };
 
   const getPlainTextFromHtml = (html: string): string => {

@@ -20,7 +20,7 @@ export interface Note {
   isLinkedFile?: boolean;
   contentFormat?: "plain" | "markdown" | "html";
   folderPath?: string;
-  fileType?: "image" | "binary";
+  fileType?: "image" | "binary" | "settings" | "luno-ai";
   isFavorite?: boolean;
   tags?: string[];
   driveFileId?: string;
@@ -118,12 +118,12 @@ export function useNotes() {
     return note;
   }, []);
 
-  const bulkCreateNotes = useCallback(async (items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" }>) => {
+  const bulkCreateNotes = useCallback(async (items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>) => {
     const now = Date.now();
     const newNotes: Note[] = [];
     for (const item of items) {
       // If .docx file, convert to HTML
-      if (item.fileName?.toLowerCase().endsWith('.docx') && typeof window !== 'undefined' && typeof File !== 'undefined' && item.content instanceof ArrayBuffer) {
+      if (item.fileName?.toLowerCase().endsWith('.docx') && typeof window !== 'undefined' && typeof File !== 'undefined' && (item.content as unknown) instanceof ArrayBuffer) {
         try {
           const file = new File([item.content], item.fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
           const html = await docxToHtml(file);
@@ -168,7 +168,7 @@ export function useNotes() {
     return newNotes;
   }, []);
 
-  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary"; tags?: string[] }>) => {
+  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>) => {
     const now = Date.now();
     let resultNotes: Note[] = [];
 
@@ -212,7 +212,7 @@ export function useNotes() {
   }, []);
 
   const updateNote = useCallback(
-    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "tags" | "driveFileId" | "driveSyncedAt">>) => {
+    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "fileType" | "tags" | "driveFileId" | "driveSyncedAt">>) => {
       const normalizedPatch = { ...patch };
       if (patch.fileName && normalizedPatch.title === undefined) {
         normalizedPatch.title = getNoteTitleFromFileName(patch.fileName);

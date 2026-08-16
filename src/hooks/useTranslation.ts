@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { translations, type TranslationSchema } from "@/translation";
 
-type NestedRecord = Record<string, string | NestedRecord>;
+interface NestedRecord {
+  [key: string]: string | NestedRecord;
+}
 
 function getValue(obj: NestedRecord, path: string): string {
   const value = path.split(".").reduce<string | NestedRecord | undefined>((acc, key) => {

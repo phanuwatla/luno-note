@@ -10,7 +10,8 @@ export interface DriveFileItem {
 
 export interface LunoFolderStructure {
   rootId: string;
-  notesId: string;
+  projectId: string;
+  notesId?: string;
   attachmentsId: string;
   lunoMetaId: string;
 }
@@ -18,45 +19,123 @@ export interface LunoFolderStructure {
 const BASE_URL = "https://www.googleapis.com/drive/v3";
 const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3";
 
-const FOLDER_STRUCTURE_CACHE_KEY = "luno_gdrive_folder_ids";
+const getFolderStructureCacheKey = (projectName?: string) => {
+  const clean = (projectName || "Workspace").trim().toLowerCase();
+  return `luno_gdrive_folder_ids_${clean}`;
+};
 
-export function getCachedFolderStructure(): LunoFolderStructure | null {
+const inMemoryFolderStructureCache = new Map<string, string>();
+
+export function getCachedFolderStructure(projectName?: string): LunoFolderStructure | null {
   try {
-    const raw = localStorage.getItem(FOLDER_STRUCTURE_CACHE_KEY);
+    const key = getFolderStructureCacheKey(projectName);
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(key) : inMemoryFolderStructureCache.get(key);
     return raw ? (JSON.parse(raw) as LunoFolderStructure) : null;
   } catch {
     return null;
   }
 }
 
-export function cacheFolderStructure(structure: LunoFolderStructure): void {
+export function cacheFolderStructure(structure: LunoFolderStructure, projectName?: string): void {
   try {
-    localStorage.setItem(FOLDER_STRUCTURE_CACHE_KEY, JSON.stringify(structure));
+    const key = getFolderStructureCacheKey(projectName);
+    const str = JSON.stringify(structure);
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(key, str);
+    }
+    inMemoryFolderStructureCache.set(key, str);
   } catch {
     // ignore
   }
 }
 
-// Find a folder by name inside a parent folder
+// Helper to move all items from a duplicate folder into primary folder, then trash the duplicate
+async function mergeAndTrashDuplicateFolder(
+  token: string,
+  targetFolderId: string,
+  duplicateFolderId: string
+): Promise<void> {
+  if (!targetFolderId || !duplicateFolderId || targetFolderId === duplicateFolderId) return;
+  try {
+    const q = `'${duplicateFolderId}' in parents and trashed = false`;
+    const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const files = (data.files || []) as DriveFileItem[];
+      for (const file of files) {
+        try {
+          await fetch(
+            `${BASE_URL}/files/${file.id}?addParents=${targetFolderId}&removeParents=${duplicateFolderId}&fields=id`,
+            {
+              method: "PATCH",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+        } catch {
+          // ignore individual item move errors
+        }
+      }
+    }
+    await trashDriveFile(token, duplicateFolderId);
+  } catch (err) {
+    console.warn(`Failed to merge duplicate folder ${duplicateFolderId}:`, err);
+  }
+}
+
+// Find a folder by name inside a parent folder (deduplicates if multiple found)
 async function findFolder(token: string, folderName: string, parentId?: string): Promise<string | null> {
-  let q = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  let q = `name = '${folderName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   if (parentId) {
     q += ` and '${parentId}' in parents`;
   }
-  const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+  const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
 
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  if (!res.ok) {
-    throw new Error(`Drive API error (${res.status}): ${res.statusText}`);
+  if (res.ok) {
+    const data = await res.json();
+    const files: DriveFileItem[] = data.files || [];
+    if (files.length > 0) {
+      const primaryId = files[0].id;
+      if (files.length > 1) {
+        for (let i = 1; i < files.length; i++) {
+          void mergeAndTrashDuplicateFolder(token, primaryId, files[i].id);
+        }
+      }
+      return primaryId;
+    }
   }
 
-  const data = await res.json();
-  if (data.files && data.files.length > 0) {
-    return data.files[0].id as string;
+  // Case-insensitive search fallback if exact match query found 0 items
+  if (parentId) {
+    try {
+      const qAll = `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      const resAll = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qAll)}&fields=files(id,name,modifiedTime)&pageSize=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resAll.ok) {
+        const dataAll = await resAll.json();
+        const filesAll: DriveFileItem[] = dataAll.files || [];
+        const matches = filesAll.filter((f) => f.name.toLowerCase() === folderName.toLowerCase());
+        if (matches.length > 0) {
+          const primaryId = matches[0].id;
+          if (matches.length > 1) {
+            for (let i = 1; i < matches.length; i++) {
+              void mergeAndTrashDuplicateFolder(token, primaryId, matches[i].id);
+            }
+          }
+          return primaryId;
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
+
   return null;
 }
 
@@ -87,63 +166,87 @@ async function createFolder(token: string, folderName: string, parentId?: string
   return data.id as string;
 }
 
+const lunoFolderCreationPromises = new Map<string, Promise<LunoFolderStructure>>();
+
 // Get or create Luno folder hierarchy: Luno/[Workspace]/ (notes directly inside Workspace/, attachments/, .luno/)
 export async function ensureLunoFolderStructure(token: string, projectName: string = "Workspace"): Promise<LunoFolderStructure> {
-  const cached = getCachedFolderStructure();
-  if (cached && cached.projectId) {
-    // Verify cached root still exists
-    try {
-      const res = await fetch(`${BASE_URL}/files/${cached.projectId}?fields=id,trashed`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const file = await res.json();
-        if (!file.trashed) return cached;
-      }
-    } catch {
-      // cache invalid, re-fetch
-    }
-  }
-
-  // 1. Root Luno/ folder
-  let rootId = await findFolder(token, "Luno");
-  if (!rootId) {
-    rootId = await createFolder(token, "Luno");
-  }
-
-  // 2. Project Workspace folder inside Luno/ (e.g. Luno/Workspace/)
   const cleanProjectName = projectName.trim() || "Workspace";
-  let projectId = await findFolder(token, cleanProjectName, rootId);
-  if (!projectId) {
-    projectId = await createFolder(token, cleanProjectName, rootId);
+  const lockKey = `${token.slice(-10)}:${cleanProjectName.toLowerCase()}`;
+  if (lunoFolderCreationPromises.has(lockKey)) {
+    return await lunoFolderCreationPromises.get(lockKey)!;
   }
 
-  // 3. System Subfolders inside Luno/[Workspace]/
-  let attachmentsId = await findFolder(token, "attachments", projectId);
-  if (!attachmentsId) {
-    attachmentsId = await findFolder(token, "Attachments", projectId);
-  }
-  if (!attachmentsId) {
-    attachmentsId = await createFolder(token, "attachments", projectId);
-  }
+  const promise = (async () => {
+    const cached = getCachedFolderStructure(cleanProjectName);
+    if (cached && cached.projectId) {
+      // Verify cached root still exists AND folder name matches cleanProjectName
+      try {
+        const res = await fetch(`${BASE_URL}/files/${cached.projectId}?fields=id,name,trashed`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const file = await res.json();
+          if (!file.trashed && file.name.toLowerCase() === cleanProjectName.toLowerCase()) {
+            return cached;
+          }
+        }
+      } catch {
+        // cache invalid, re-fetch
+      }
+    }
 
-  let lunoMetaId = await findFolder(token, ".luno", projectId);
-  if (!lunoMetaId) {
-    lunoMetaId = await createFolder(token, ".luno", projectId);
-  }
+    // 1. Root Luno/ folder
+    let rootId = await findFolder(token, "Luno");
+    if (!rootId) {
+      rootId = await createFolder(token, "Luno");
+    }
 
-  const structure: LunoFolderStructure = {
-    rootId,
-    projectId,
-    attachmentsId,
-    lunoMetaId,
-  };
-  cacheFolderStructure(structure);
-  return structure;
+    // 2. Project Workspace folder inside Luno/ (e.g. Luno/Workspace/)
+    let projectId = await findFolder(token, cleanProjectName, rootId);
+    if (!projectId) {
+      projectId = await createFolder(token, cleanProjectName, rootId);
+    }
+
+    // 3. System Subfolders inside Luno/[Workspace]/
+    let attachmentsId = await findFolder(token, "attachments", projectId);
+    if (!attachmentsId) {
+      attachmentsId = await findFolder(token, "Attachments", projectId);
+    }
+    if (!attachmentsId) {
+      attachmentsId = await createFolder(token, "attachments", projectId);
+    }
+
+    let lunoMetaId = await findFolder(token, ".luno", projectId);
+    if (!lunoMetaId) {
+      lunoMetaId = await createFolder(token, ".luno", projectId);
+    }
+
+    const structure: LunoFolderStructure = {
+      rootId,
+      projectId,
+      attachmentsId,
+      lunoMetaId,
+    };
+    cacheFolderStructure(structure, cleanProjectName);
+    return structure;
+  })();
+
+  lunoFolderCreationPromises.set(lockKey, promise);
+  try {
+    return await promise;
+  } finally {
+    lunoFolderCreationPromises.delete(lockKey);
+  }
 }
 
 // Cache folder paths to avoid redundant Drive queries
 const folderPathCache = new Map<string, string>();
+const folderCreationPromises = new Map<string, Promise<string>>();
+
+export function clearFolderPathCache(): void {
+  folderPathCache.clear();
+  folderCreationPromises.clear();
+}
 
 // Ensure nested subfolder path exists on Google Drive (e.g. "Projects/Luno")
 export async function ensureDriveFolderPath(
@@ -154,55 +257,82 @@ export async function ensureDriveFolderPath(
   const normalized = folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
   if (!normalized) return baseFolderId;
 
-  const cacheKey = `${baseFolderId}:${normalized}`;
+  const cacheKey = `${baseFolderId}:${normalized.toLowerCase()}`;
   if (folderPathCache.has(cacheKey)) {
     return folderPathCache.get(cacheKey)!;
   }
-
-  const segments = normalized.split("/").filter(Boolean);
-  let currentParentId = baseFolderId;
-
-  for (const segment of segments) {
-    const cleanSegment = segment.replace(/'/g, "\\'");
-    const q = `'${currentParentId}' in parents and name = '${cleanSegment}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-    const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1`;
-
-    const res = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.files && data.files.length > 0) {
-        currentParentId = data.files[0].id;
-        continue;
-      }
-    }
-
-    // Create subfolder on Drive
-    const createRes = await fetch(`${BASE_URL}/files?fields=id,name`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: segment,
-        mimeType: "application/vnd.google-apps.folder",
-        parents: [currentParentId],
-      }),
-    });
-
-    if (!createRes.ok) {
-      throw new Error(`Failed to create subfolder ${segment} on Drive (${createRes.status})`);
-    }
-
-    const created = await createRes.json();
-    currentParentId = created.id;
+  if (folderCreationPromises.has(cacheKey)) {
+    return await folderCreationPromises.get(cacheKey)!;
   }
 
-  folderPathCache.set(cacheKey, currentParentId);
-  return currentParentId;
+  const promise = (async () => {
+    const segments = normalized.split("/").filter(Boolean);
+    let currentParentId = baseFolderId;
+
+    for (const segment of segments) {
+      const segCacheKey = `${currentParentId}:${segment.toLowerCase()}`;
+      if (folderPathCache.has(segCacheKey)) {
+        currentParentId = folderPathCache.get(segCacheKey)!;
+        continue;
+      }
+
+      const cleanSegment = segment.replace(/'/g, "\\'");
+      const q = `'${currentParentId}' in parents and name = '${cleanSegment}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
+
+      const res = await fetch(searchUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const files: DriveFileItem[] = data.files || [];
+        if (files.length > 0) {
+          currentParentId = files[0].id;
+          folderPathCache.set(segCacheKey, currentParentId);
+
+          if (files.length > 1) {
+            for (let i = 1; i < files.length; i++) {
+              void mergeAndTrashDuplicateFolder(token, currentParentId, files[i].id);
+            }
+          }
+          continue;
+        }
+      }
+
+      // Create subfolder on Drive
+      const createRes = await fetch(`${BASE_URL}/files?fields=id,name`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: segment,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [currentParentId],
+        }),
+      });
+
+      if (!createRes.ok) {
+        throw new Error(`Failed to create subfolder ${segment} on Drive (${createRes.status})`);
+      }
+
+      const created = await createRes.json();
+      currentParentId = created.id;
+      folderPathCache.set(segCacheKey, currentParentId);
+    }
+
+    folderPathCache.set(cacheKey, currentParentId);
+    return currentParentId;
+  })();
+
+  folderCreationPromises.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    folderCreationPromises.delete(cacheKey);
+  }
 }
 
 // List all files in Luno/Notes/ folder recursively including subfolders
@@ -280,14 +410,42 @@ export async function uploadDriveNoteFile(
   if (!targetDriveId) {
     try {
       const q = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
-      const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1`;
+      const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
       const res = await fetch(searchUrl, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.files && data.files.length > 0) {
-          targetDriveId = data.files[0].id;
+        const files: DriveFileItem[] = data.files || [];
+        if (files.length > 0) {
+          targetDriveId = files[0].id;
+          if (files.length > 1) {
+            for (let i = 1; i < files.length; i++) {
+              void trashDriveFile(token, files[i].id);
+            }
+          }
+        }
+      }
+
+      if (!targetDriveId) {
+        const qAll = `'${targetFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
+        const searchUrlAll = `${BASE_URL}/files?q=${encodeURIComponent(qAll)}&fields=files(id,name,modifiedTime)&pageSize=100`;
+        const resAll = await fetch(searchUrlAll, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resAll.ok) {
+          const dataAll = await resAll.json();
+          const filesAll: DriveFileItem[] = dataAll.files || [];
+          const matches = filesAll.filter((f) => f.name.toLowerCase() === cleanName.toLowerCase());
+          if (matches.length > 0) {
+            matches.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+            targetDriveId = matches[0].id;
+            if (matches.length > 1) {
+              for (let i = 1; i < matches.length; i++) {
+                void trashDriveFile(token, matches[i].id);
+              }
+            }
+          }
         }
       }
     } catch {
@@ -527,24 +685,53 @@ export async function trashDriveFile(token: string, driveFileId: string): Promis
   }
 }
 
-// Clean up duplicate files in Luno/Notes/ (Keep newest, move older duplicates to Drive Trash)
+// Clean up duplicate files and folders in Luno/Workspace/ (Merge duplicate folders, keep newest files)
 export async function cleanDriveDuplicates(token: string, notesFolderId: string, parentFolderId?: string): Promise<number> {
   try {
     let trashedCount = 0;
 
-    // 1. Clean duplicate files inside notes/
-    const files = await listDriveNoteFiles(token, notesFolderId);
-    const filesByName = new Map<string, DriveFileItem[]>();
+    // 1. Clean duplicate subfolders inside notesFolderId (Workspace/)
+    const qSubfolders = `'${notesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const resSub = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qSubfolders)}&fields=files(id,name,modifiedTime)&pageSize=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (resSub.ok) {
+      const dataSub = await resSub.json();
+      const subfolders = (dataSub.files || []) as DriveFileItem[];
+      const subfoldersByName = new Map<string, DriveFileItem[]>();
 
-    for (const f of files) {
-      const lowerName = f.name.toLowerCase();
-      if (!filesByName.has(lowerName)) {
-        filesByName.set(lowerName, []);
+      for (const f of subfolders) {
+        const lowerName = f.name.toLowerCase();
+        if (lowerName === "notes") continue;
+        if (!subfoldersByName.has(lowerName)) subfoldersByName.set(lowerName, []);
+        subfoldersByName.get(lowerName)!.push(f);
       }
-      filesByName.get(lowerName)!.push(f);
+
+      for (const [, group] of subfoldersByName) {
+        if (group.length > 1) {
+          group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+          const primaryFolder = group[0];
+          for (let i = 1; i < group.length; i++) {
+            await mergeAndTrashDuplicateFolder(token, primaryFolder.id, group[i].id);
+            trashedCount++;
+          }
+        }
+      }
     }
 
-    for (const [, group] of filesByName) {
+    // 2. Clean duplicate files inside notes/ (by relative path and name)
+    const files = await listDriveNoteFiles(token, notesFolderId);
+    const filesByPathAndName = new Map<string, DriveFileItem[]>();
+
+    for (const f of files) {
+      const pathKey = `${(f.folderPath || "").toLowerCase()}/${f.name.toLowerCase()}`;
+      if (!filesByPathAndName.has(pathKey)) {
+        filesByPathAndName.set(pathKey, []);
+      }
+      filesByPathAndName.get(pathKey)!.push(f);
+    }
+
+    for (const [, group] of filesByPathAndName) {
       if (group.length > 1) {
         group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
         for (let i = 1; i < group.length; i++) {
@@ -554,7 +741,7 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string,
       }
     }
 
-    // 2. Clean duplicate folders inside parentFolderId if provided
+    // 3. Clean duplicate folders inside parentFolderId if provided (e.g. Luno/ root)
     if (parentFolderId) {
       const q = `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
       const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`;
@@ -571,8 +758,9 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string,
         for (const [, group] of foldersByName) {
           if (group.length > 1) {
             group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+            const primary = group[0];
             for (let i = 1; i < group.length; i++) {
-              await trashDriveFile(token, group[i].id);
+              await mergeAndTrashDuplicateFolder(token, primary.id, group[i].id);
               trashedCount++;
             }
           }
@@ -580,7 +768,7 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string,
       }
     }
 
-    // 3. Remove legacy notes subfolder if created inside Workspace/
+    // 4. Remove legacy notes subfolder if created inside Workspace/
     const qNotes = `'${notesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
     const resNotes = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qNotes)}&fields=files(id,name)`, {
       headers: { Authorization: `Bearer ${token}` },

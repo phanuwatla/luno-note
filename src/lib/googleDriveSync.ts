@@ -10,6 +10,7 @@ import {
   cleanDriveDuplicates,
   syncLocalAttachmentsToDrive,
   syncDriveAttachmentsToLocal,
+  clearFolderPathCache,
   LunoFolderStructure,
   DriveFileItem,
 } from "./googleDriveApi";
@@ -59,9 +60,16 @@ class GoogleDriveSyncEngine {
   private pollInterval: NodeJS.Timeout | null = null;
   private isSyncing = false;
   private rootDirHandle: FileSystemDirectoryHandle | null = null;
+  private rootFolderName: string | null = null;
 
   public setRootFolderName(name: string | null): void {
-    this.rootFolderName = name;
+    const cleanName = (name || "").trim();
+    const prevCleanName = (this.rootFolderName || "").trim();
+    if (cleanName !== prevCleanName) {
+      this.rootFolderName = name;
+      clearFolderPathCache();
+      this.updateState({ folderStructure: null });
+    }
   }
 
   public setRootDirHandle(handle: FileSystemDirectoryHandle | null): void {

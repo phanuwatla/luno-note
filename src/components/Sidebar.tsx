@@ -312,7 +312,9 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [deleteTagModalOpen, setDeleteTagModalOpen] = useState(false);
   const [deleteTagTarget, setDeleteTagTarget] = useState("");
 
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() =>
+    openedFolderName ? new Set(["__opened_root__"]) : new Set()
+  );
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -395,7 +397,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     setPendingCreate(null);
   }, [openedFolderName, pendingCreate, onCreate, onCreateFolder, selectedFolderPath, currentFolderPath]);
 
-  const hasTreeView = useMemo(() => notes.some((n) => n.folderPath !== undefined) || folderPaths.length > 0, [notes, folderPaths]);
+  const hasTreeView = useMemo(
+    () => Boolean(openedFolderName) || notes.some((n) => n.folderPath !== undefined) || folderPaths.length > 0,
+    [openedFolderName, notes, folderPaths]
+  );
 
   const vaultTagCounts = useMemo(() => {
     const map = new Map<string, number>();

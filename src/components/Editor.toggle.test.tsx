@@ -3,7 +3,7 @@ import { Toggle } from "@/components/Editor";
 
 describe("Toggle node serialization", () => {
   it("should keep the open attribute absent for a collapsed toggle", () => {
-    const attributes = Toggle.config.addAttributes();
+    const attributes = (Toggle.config.addAttributes?.call(Toggle) ?? {}) as Record<string, any>;
     const openAttribute = attributes.open as {
       default: boolean;
       renderHTML: (attrs: { open?: boolean }) => Record<string, string>;

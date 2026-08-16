@@ -138,7 +138,7 @@ export default function RightPanel({
 
   // Format Dates
   const formattedDates = useMemo(() => {
-    const formatDate = (val?: string) => {
+    const formatDate = (val?: string | number) => {
       if (!val) return "Today 09:41";
       const date = new Date(val);
       if (isNaN(date.getTime())) return "Today";
@@ -357,7 +357,7 @@ export default function RightPanel({
                             if (e.key === "Enter") handleAddTag();
                             if (e.key === "Escape") setIsAddingTag(false);
                           }}
-                          onBlur={handleAddTag}
+                          onBlur={() => handleAddTag()}
                           className="h-6 w-20 rounded-md border border-primary bg-transparent px-2 text-xs text-foreground outline-none"
                         />
                       ) : (

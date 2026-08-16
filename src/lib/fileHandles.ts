@@ -153,6 +153,7 @@ export type OpenFolderPending = {
 export type CreateNoteOptions = {
   fileName?: string;
   contentFormat?: "plain" | "markdown" | "html";
+  initialContent?: string;
 };
 
 export async function requestPermissionIfAvailable(

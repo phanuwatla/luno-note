@@ -12,6 +12,7 @@ import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName }
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
+import type { CreateNoteOptions } from "@/lib/fileHandles";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
 import { marked } from "marked";
 import { toast } from "@/hooks/use-toast";
@@ -71,7 +72,8 @@ export default function Index() {
   const { queueSync, trashDriveNote, importDriveNotes, setRootFolderName, setRootDirHandle } = useGoogleDriveSync();
 
   useEffect(() => {
-    setRootFolderName(openedFolderName);
+    const folderName = openedFolderName || "My Luno Project";
+    setRootFolderName(folderName);
     setRootDirHandle(openedRootDirHandle);
   }, [openedFolderName, openedRootDirHandle, setRootFolderName, setRootDirHandle]);
 
@@ -383,7 +385,7 @@ export default function Index() {
     for (const entry of filteredEntries) {
       let existing = existingByPath.get(entry.relativePath);
       if (!existing && selectRelativePath && entry.relativePath === selectRelativePath) {
-        existing = activeNoteRef || currentNotes.find((n) => openTabNoteIds.includes(n.id));
+        existing = activeNoteRef || currentNotes.find((n) => openTabIds.includes(n.id));
       }
 
       if (existing) {
@@ -459,7 +461,7 @@ export default function Index() {
 
   const createNoteInFolder = async (
     folderPath?: string,
-    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html"; initialContent?: string },
+    options?: CreateNoteOptions,
   ): Promise<Note> => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
@@ -1007,6 +1009,9 @@ export default function Index() {
       }
 
       const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
+      const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
+      const isFileTxt = fileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+      const fileTitle = extractBaseTitleFromFileName(fileName);
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
@@ -1071,9 +1076,12 @@ export default function Index() {
 
     try {
       const dirHandle = await w.showDirectoryPicker({ mode: "readwrite" });
-      setOpenedFolderName(dirHandle.name ?? null);
+      const folderName = dirHandle.name ?? null;
+      setOpenedFolderName(folderName);
       setOpenedRootDirHandle(dirHandle);
       setPendingReconnectDirHandle(null);
+      setRootFolderName(folderName || "My Luno Project");
+      setRootDirHandle(dirHandle);
       await setStoredDirectoryHandle(dirHandle);
       await syncFolderFromDisk(dirHandle);
 
@@ -1100,9 +1108,12 @@ export default function Index() {
     try {
       const perm = await requestPermissionIfAvailable(targetDir, "readwrite");
       if (perm === "granted") {
-        setOpenedFolderName(targetDir.name ?? null);
+        const folderName = targetDir.name ?? null;
+        setOpenedFolderName(folderName);
         setOpenedRootDirHandle(targetDir);
         setPendingReconnectDirHandle(null);
+        setRootFolderName(folderName || "My Luno Project");
+        setRootDirHandle(targetDir);
         await setStoredDirectoryHandle(targetDir);
         await syncFolderFromDisk(targetDir);
         toast({
@@ -1129,13 +1140,17 @@ export default function Index() {
           permState = await storedDir.queryPermission({ mode: "readwrite" });
         }
 
+        const folderName = storedDir.name ?? null;
         if (permState === "granted") {
-          setOpenedFolderName(storedDir.name ?? null);
+          setOpenedFolderName(folderName);
           setOpenedRootDirHandle(storedDir);
           setPendingReconnectDirHandle(null);
+          setRootFolderName(folderName || "My Luno Project");
+          setRootDirHandle(storedDir);
           await syncFolderFromDisk(storedDir);
         } else {
-          setOpenedFolderName(storedDir.name ?? null);
+          setOpenedFolderName(folderName);
+          setRootFolderName(folderName || "My Luno Project");
           setPendingReconnectDirHandle(storedDir);
         }
       } catch (err) {
@@ -1146,7 +1161,7 @@ export default function Index() {
     return () => {
       active = false;
     };
-  }, [syncFolderFromDisk]);
+  }, [syncFolderFromDisk, setRootFolderName, setRootDirHandle]);
 
   useEffect(() => {
     if (!openedRootDirHandle) return;
@@ -1190,11 +1205,6 @@ export default function Index() {
       active = false;
     };
   }, [openedRootDirHandle]);
-
-  // Sync project workspace name with Google Drive sync engine
-  useEffect(() => {
-    setRootFolderName(openedFolderName || "My Luno Project");
-  }, [openedFolderName, setRootFolderName]);
 
   // Save settings to .luno/settings.json whenever settings change
   useEffect(() => {
@@ -1317,7 +1327,7 @@ export default function Index() {
           pendingReconnectFolder={Boolean(pendingReconnectDirHandle)}
           onReconnectFolder={handleReconnectFolder}
           onSelect={openTab}
-          onCreate={createNoteInFolder}
+          onCreate={(fp, opt) => { void createNoteInFolder(fp, opt); }}
           onCreateFolder={createFolderInFolder}
           onDeleteFile={deleteFileInFolder}
           onDeleteFolder={deleteFolderInFolder}
