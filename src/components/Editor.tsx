@@ -2,22 +2,26 @@ import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import RightPanel from "@/components/RightPanel";
 import { AnimatePresence } from "framer-motion";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
   Check,
   CheckCircle2,
   Circle,
   Code,
+  CodeXml,
+  SquareCode,
   Eye,
   Download,
   ExternalLink,
   File,
   FileCode,
-  Code2,
   FileText,
   FileImage,
   FolderArchive,
+  Images,
   ImagePlus,
+  Mic,
   Italic,
   Wrench,
   Link2,
@@ -38,6 +42,7 @@ import {
   Strikethrough,
   Quote,
   Smile,
+  Star,
   Upload,
   Trash2,
   Trash,
@@ -63,17 +68,27 @@ import {
   X,
   Wand,
   Scissors,
+  Underline as UnderlineIcon,
+  Highlighter,
+  Target,
   Maximize2,
   Minimize2,
   BookOpen,
+  PenLine,
   MessageCircle,
   Languages,
   Key,
   Calculator,
   Clock,
   Share2,
-  History
+  History,
+  Globe,
+  Search,
+  GlobeOff,
+  Lock,
+  Unlock,
 } from "lucide-react";
+import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon } from "@/components/icons/WandSparklesIcon";
@@ -82,7 +97,10 @@ import { BriefcaseBusinessIcon } from "@/components/icons/BriefcaseBusinessIcon"
 import { PenLineIcon } from "@/components/icons/PenLineIcon";
 import AiAssistantPanel from "@/components/AiAssistantPanel";
 import FloatingCalculator from "@/components/FloatingCalculator";
+import FloatingTranslator from "@/components/FloatingTranslator";
 import FloatingClock from "@/components/FloatingClock";
+import FloatingAudioRecorder from "@/components/FloatingAudioRecorder";
+import AudioExtension from "@/components/editor/AudioExtension";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -98,6 +116,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,16 +132,18 @@ import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
 import { parseFrontmatterAndTags, updateFrontmatterTags, isMarkdownNote } from "@/lib/frontmatter";
-import { uploadDriveAttachmentFile } from "@/lib/googleDriveApi";
-import { getStoredTokenInfo, isGoogleDriveConnected } from "@/lib/googleDriveAuth";
+import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare } from "@/lib/googleDriveApi";
+import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
 export type { AiActionType };
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
-import { EditorState, TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection, Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import Image from "@tiptap/extension-image";
+import ImageNodeView from "@/components/editor/ImageNodeView";
 import Link from "@tiptap/extension-link";
 import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
@@ -139,41 +160,443 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
+import { countWords, countCharacters } from "@/lib/wordCount";
+import { Underline, Highlight } from "@/lib/tiptapCustomMarks";
 
-/** Preprocess Markdown to prevent 4-space indented paragraphs from becoming Code Blocks while preserving fenced ``` code blocks */
+/** Preserves full ProseMirror undo/redo history and document state per note across tab switching */
+export const noteEditorStateMap = new Map<string, EditorState>();
+
+/** Set of note IDs that have been explicitly closed and should not be resurrected by transition saves */
+export const closedNoteIds = new Set<string>();
+
+/** Preserves scroll position (scrollTop) per note across tab switching while tab is open */
+export const noteScrollPositionMap = new Map<string, number>();
+
+export function getNoteScrollPosition(noteId: string): number {
+  if (!noteId || closedNoteIds.has(noteId)) return 0;
+  if (noteScrollPositionMap.has(noteId)) {
+    return noteScrollPositionMap.get(noteId) ?? 0;
+  }
+  return 0;
+}
+
+export function setNoteScrollPosition(noteId: string, top: number) {
+  if (!noteId || closedNoteIds.has(noteId)) return;
+  const cleanTop = Math.max(0, Math.round(top || 0));
+  noteScrollPositionMap.set(noteId, cleanTop);
+  try {
+    sessionStorage.setItem(`luno_scroll_${noteId}`, String(cleanTop));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearNoteEditorHistory(noteId: string) {
+  if (!noteId) return;
+  closedNoteIds.add(noteId);
+  noteEditorStateMap.delete(noteId);
+  noteScrollPositionMap.delete(noteId);
+  try {
+    sessionStorage.removeItem(`luno_scroll_${noteId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
+export const clearNoteEditorState = clearNoteEditorHistory;
+
+/** Preprocess Markdown to preserve paragraph first-line indentation and empty paragraphs while preserving code blocks and syntax */
 export function preprocessMarkdownForEditor(markdown: string): string {
   if (!markdown) return "";
   const lines = markdown.split("\n");
   let inFencedCode = false;
+  let fenceChar = "";
+  let fenceLength = 0;
   const resultLines: string[] = [];
 
-  for (const line of lines) {
-    if (/^\s*(?:`{3,}|~{3,})/.test(line)) {
-      inFencedCode = !inFencedCode;
-      resultLines.push(line);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
+    if (fenceMatch) {
+      const fenceStr = fenceMatch[2];
+      if (!inFencedCode) {
+        inFencedCode = true;
+        fenceChar = fenceStr[0];
+        fenceLength = fenceStr.length;
+        resultLines.push(line);
+        continue;
+      } else if (fenceStr[0] === fenceChar && fenceStr.length >= fenceLength && !fenceMatch[3].trim()) {
+        inFencedCode = false;
+        fenceChar = "";
+        fenceLength = 0;
+        resultLines.push(line);
+        continue;
+      }
+    }
+
+    if (inFencedCode) {
+      // Unescape legacy double-escaped HTML entities stored in code blocks by previous versions
+      const unescapedLine = line.replace(/&(?:lt|gt|amp|quot|#39);/gi, (match) => {
+        if (match === "&lt;") return "<";
+        if (match === "&gt;") return ">";
+        if (match === "&amp;") return "&";
+        if (match === "&quot;") return '"';
+        if (match === "&#39;") return "'";
+        return match;
+      });
+      resultLines.push(unescapedLine);
       continue;
     }
 
-    if (!inFencedCode) {
+    // Handle empty or blank lines (Obsidian compatibility: every blank line becomes an editable empty paragraph)
+    if (!line.trim()) {
+      // Find the next non-empty line to check if it's an indented list / continuation block
+      let nextNonEmptyIdx = i + 1;
+      while (nextNonEmptyIdx < lines.length && !lines[nextNonEmptyIdx].trim()) {
+        nextNonEmptyIdx++;
+      }
+      const nextNonEmptyLine = nextNonEmptyIdx < lines.length ? lines[nextNonEmptyIdx] : "";
+      const isNextIndented = /^[ \t]{2,}/.test(nextNonEmptyLine);
+
+      if (isNextIndented || (line.length > 0 && /^[ \t]{2,}/.test(line))) {
+        // Indented continuation inside list / nested block: preserve as plain blank line so Markdown parser handles indentation as nested list
+        resultLines.push("");
+        continue;
+      }
+
+      // Count consecutive blank lines (cap at 50 to prevent freezing on massive corrupted whitespace files)
+      let blankCount = 1;
+      while (i + 1 < lines.length && !lines[i + 1].trim()) {
+        const nextCandidate = lines[i + 1];
+        if (nextCandidate.length > 0 && /^[ \t]{2,}/.test(nextCandidate)) {
+          break;
+        }
+        blankCount++;
+        i++;
+      }
+      blankCount = Math.min(blankCount, 50);
+      if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
+        resultLines.push("");
+      }
+      for (let b = 0; b < blankCount; b++) {
+        resultLines.push("<p></p>");
+      }
+      resultLines.push("");
+      continue;
+    }
+
+    // Do NOT alter indentation for Markdown structural syntax:
+    // lists (- *, 1.), blockquotes (>), headings (#), horizontal rules (--- *** ___ * * *), tables (|)
+    const isMarkdownSyntax = /^\s*(?:[-*+]\s|\d+[\.\)]\s|>\s|#{1,6}\s|\||---|[*]{3,}|_{3,}|[*]\s[*]\s[*]|-\s-\s-)/.test(line);
+
+    // Only convert leading spaces/tabs for prose text lines (e.g. Thai text) outside code blocks
+    const hasProseText = /[\u0E00-\u0E7F]/.test(line);
+
+    let processedLine = line;
+    if (!isMarkdownSyntax && hasProseText) {
       const match = line.match(/^([ \t\u00A0\u2003]{2,4}|\t+)(.*)/);
       if (match) {
         const raw = match[1];
         const count = raw.includes("\t") ? 4 : raw.length;
         if (count >= 2) {
-          resultLines.push(`\u2003\u2003${match[2]}`);
-          continue;
+          processedLine = `\u2003\u2003${match[2]}`;
         }
       }
     }
 
-    resultLines.push(line);
+    // Convert Wikilinks [[Target]] or [[Target|Alias]] outside code blocks into standard HTML links
+    processedLine = processedLine.replace(/\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g, (_m, target, alias) => {
+      const cleanTarget = (target || "").trim();
+      const cleanAlias = (alias || "").trim() || cleanTarget;
+      return `<a href="wikilink:${encodeURIComponent(cleanTarget)}" data-wikilink="${cleanTarget}" class="internal-wikilink text-primary underline underline-offset-4 cursor-pointer">${cleanAlias}</a>`;
+    });
+
+    // Convert ==highlight== outside code blocks into standard HTML mark tags
+    processedLine = processedLine.replace(/==([^=\r\n]+)==/g, '<mark class="luno-highlight">$1</mark>');
+
+    // Convert sized Markdown images ![alt|300](url) outside code blocks into HTML img tags with width
+    processedLine = processedLine.replace(
+      /!\[([^\]|\r\n]*)\|(\d+)(?:x\d+)?\]\(([^)\r\n]+)\)/g,
+      (_m, alt, width, src) => {
+        const cleanSrc = (src || "").trim();
+        const cleanAlt = (alt || "").trim();
+        return `<img src="${cleanSrc}" alt="${cleanAlt}" width="${width}" data-relative-src="${cleanSrc}" style="width: ${width}px; max-width: 100%;" />`;
+      }
+    );
+
+    resultLines.push(processedLine);
   }
 
   return resultLines.join("\n");
 }
 
+function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
+  const decorations: Decoration[] = [];
+  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+
+  doc.descendants((node: any, pos: number, parent: any) => {
+    if (node.isText) {
+      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) {
+        return;
+      }
+      if (node.marks && node.marks.some((m: any) => m.type.name === "code")) {
+        return;
+      }
+
+      const text = node.text || "";
+      let match: RegExpExecArray | null;
+      tagRegex.lastIndex = 0;
+
+      while ((match = tagRegex.exec(text)) !== null) {
+        const rawTag = match[1];
+        if (/^\d+$/.test(rawTag)) continue;
+
+        const hashIndex = match[0].indexOf("#");
+        const startPos = pos + match.index + hashIndex;
+        const endPos = startPos + 1 + rawTag.length;
+
+        const colorClass = getTagColorClass(rawTag, theme, undefined, tagColorStyle);
+
+        decorations.push(
+          Decoration.inline(startPos, endPos, {
+            class: `inline-tag-badge border ${colorClass}`,
+          })
+        );
+      }
+    }
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+const hashtagPluginKey = new PluginKey("hashtagDecoration");
+
+export const HashtagDecoration = Extension.create({
+  name: "hashtagDecoration",
+
+  addOptions() {
+    return {
+      theme: "emerald",
+      tagColorStyle: "multicolor",
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const options = this.options;
+    return [
+      new Plugin({
+        key: hashtagPluginKey,
+        state: {
+          init(_, { doc }) {
+            return createHashtagDecorations(doc, options.theme, options.tagColorStyle);
+          },
+          apply(tr, oldState) {
+            return tr.docChanged ? createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle) : oldState;
+          },
+        },
+        props: {
+          decorations(state) {
+            return hashtagPluginKey.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
+
+function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet {
+  if (!enabled) return DecorationSet.empty;
+  const decorations: Decoration[] = [];
+
+  doc.descendants((node: any, pos: number) => {
+    if (
+      node.type.name === "codeBlock" ||
+      node.type.name === "codeBlockLowlight" ||
+      node.type.name === "mathBlock" ||
+      node.type.name === "image"
+    ) {
+      return false;
+    }
+
+    if (node.isText && node.text) {
+      const text = node.text;
+
+      // 1. Thai Misspellings check
+      for (const misspelled of Object.keys(THAI_SPELL_CORRECTIONS)) {
+        let sIdx = text.indexOf(misspelled);
+        while (sIdx !== -1) {
+          const from = pos + sIdx;
+          const to = from + misspelled.length;
+          decorations.push(
+            Decoration.inline(from, to, {
+              class: "luno-spell-error",
+              "data-spell-word": misspelled,
+            })
+          );
+          sIdx = text.indexOf(misspelled, sIdx + 1);
+        }
+      }
+
+      // 2. English words check
+      const latinRegex = /[A-Za-z']+/g;
+      let match: RegExpExecArray | null;
+      while ((match = latinRegex.exec(text)) !== null) {
+        const word = match[0];
+        if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
+          if (isWordMisspelled(word)) {
+            const from = pos + match.index;
+            const to = from + word.length;
+            decorations.push(
+              Decoration.inline(from, to, {
+                class: "luno-spell-error",
+                "data-spell-word": word,
+              })
+            );
+          }
+        }
+      }
+    }
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+export const SpellCheckDecoration = Extension.create({
+  name: "spellCheckDecoration",
+
+  addOptions() {
+    return {
+      enabled: true,
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const options = this.options;
+    return [
+      new Plugin({
+        key: spellCheckPluginKey,
+        state: {
+          init(_, { doc }) {
+            return createSpellCheckDecorations(doc, options.enabled);
+          },
+          apply(tr, oldState) {
+            return tr.docChanged ? createSpellCheckDecorations(tr.doc, options.enabled) : oldState;
+          },
+        },
+        props: {
+          decorations(state) {
+            return spellCheckPluginKey.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+function parseLowlightAst(
+  nodes: any[],
+  currentPos: number,
+  decorations: Decoration[],
+  parentClasses: string[] = []
+): number {
+  let pos = currentPos;
+  for (const node of nodes) {
+    if (node.type === "text") {
+      const text = node.value || "";
+      const textLen = text.length;
+      if (textLen > 0 && parentClasses.length > 0) {
+        decorations.push(
+          Decoration.inline(pos, pos + textLen, {
+            class: parentClasses.join(" "),
+          })
+        );
+      }
+      pos += textLen;
+    } else if (node.type === "element") {
+      const nodeClasses = Array.isArray(node.properties?.className)
+        ? node.properties.className
+        : [];
+      const merged = [...parentClasses, ...nodeClasses];
+      pos = parseLowlightAst(node.children || [], pos, decorations, merged);
+    }
+  }
+  return pos;
+}
+
+function createInlineCodeDecorations(doc: any) {
+  const decorations: Decoration[] = [];
+
+  doc.descendants((node: any, pos: number, parent: any) => {
+    if (node.isText) {
+      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) {
+        return;
+      }
+      const hasCodeMark = node.marks && node.marks.some((m: any) => m.type.name === "code");
+      if (!hasCodeMark) return;
+
+      const text = node.text || "";
+      if (!text.trim()) return;
+
+      try {
+        const result = lowlight.highlightAuto(text);
+        if (result && result.children && result.children.length > 0) {
+          parseLowlightAst(result.children, pos, decorations, []);
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    }
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+const inlineCodeHighlightPluginKey = new PluginKey("inlineCodeHighlight");
+
+export interface InlineCodeHighlightOptions {
+  enabled: boolean;
+}
+
+export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>({
+  name: "inlineCodeHighlight",
+
+  addOptions() {
+    return {
+      enabled: false,
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const extension = this;
+    return [
+      new Plugin({
+        key: inlineCodeHighlightPluginKey,
+        state: {
+          init(_, { doc }) {
+            return extension.options.enabled ? createInlineCodeDecorations(doc) : DecorationSet.empty;
+          },
+          apply(tr, oldState) {
+            if (!extension.options.enabled) return DecorationSet.empty;
+            return tr.docChanged ? createInlineCodeDecorations(tr.doc) : oldState;
+          },
+        },
+        props: {
+          decorations(state) {
+            return inlineCodeHighlightPluginKey.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
+
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
+import { WorkspaceImagePickerDialog } from "@/components/editor/WorkspaceImagePickerDialog";
+import { LockedNoteViewer } from "@/components/LockedNoteViewer";
+import { encryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
@@ -186,8 +609,20 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
+import { Heading3Icon } from "@/components/icons/Heading3Icon";
+import { Heading4Icon } from "@/components/icons/Heading4Icon";
+import { Heading5Icon } from "@/components/icons/Heading5Icon";
+import { Heading6Icon } from "@/components/icons/Heading6Icon";
 import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
 import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
 import { PanelRightCloseIcon } from "./icons/PanelRightCloseIcon";
@@ -414,8 +849,11 @@ export type SlashMenuItem = {
     helpers: {
       openLinkDialog: () => void;
       openImageDialog: () => void;
+      openWorkspaceImageDialog?: () => void;
       triggerImageUpload: () => void;
+      openAudioRecorder: () => void;
       handleFixLanguage: () => void;
+      openTranslator?: () => void;
     }
   ) => void;
 };
@@ -453,6 +891,34 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run(),
   },
   {
+    id: "h3",
+    titleKey: "editor.heading3",
+    icon: <Heading3Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h3", "heading3", "header3", "หัวข้อ3", "หัวข้อ 3"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run(),
+  },
+  {
+    id: "h4",
+    titleKey: "editor.heading4",
+    icon: <Heading4Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h4", "heading4", "header4", "หัวข้อ4", "หัวข้อ 4"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 4 }).run(),
+  },
+  {
+    id: "h5",
+    titleKey: "editor.heading5",
+    icon: <Heading5Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h5", "heading5", "header5", "หัวข้อ5", "หัวข้อ 5"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 5 }).run(),
+  },
+  {
+    id: "h6",
+    titleKey: "editor.heading6",
+    icon: <Heading6Icon className="mr-2 h-4 w-4" />,
+    keywords: ["h6", "heading6", "header6", "หัวข้อ6", "หัวข้อ 6"],
+    action: (editor) => editor.chain().focus().toggleHeading({ level: 6 }).run(),
+  },
+  {
     id: "bold",
     titleKey: "editor.bold",
     icon: <Bold className="mr-2 h-4 w-4" />,
@@ -467,11 +933,25 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (editor) => editor.chain().focus().toggleItalic().run(),
   },
   {
+    id: "underline",
+    titleKey: "editor.underline",
+    icon: <UnderlineIcon className="mr-2 h-4 w-4" />,
+    keywords: ["underline", "u", "ขีดเส้นใต้", "เส้นใต้"],
+    action: (editor) => editor.chain().focus().toggleUnderline().run(),
+  },
+  {
     id: "strike",
     titleKey: "editor.strikethrough",
     icon: <Strikethrough className="mr-2 h-4 w-4" />,
     keywords: ["strike", "strikethrough", "s", "ขีดฆ่า"],
     action: (editor) => editor.chain().focus().toggleStrike().run(),
+  },
+  {
+    id: "highlight",
+    titleKey: "editor.highlight",
+    icon: <Highlighter className="mr-2 h-4 w-4" />,
+    keywords: ["highlight", "mark", "hl", "ไฮไลต์", "ไฮไลท์", "เน้นข้อความ", "ป้าย"],
+    action: (editor) => editor.chain().focus().toggleHighlight().run(),
   },
   {
     id: "bulletList",
@@ -504,14 +984,14 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "code",
     titleKey: "editor.inlineCode",
-    icon: <Code className="mr-2 h-4 w-4" />,
+    icon: <CodeXml className="mr-2 h-4 w-4" />,
     keywords: ["code", "inline", "โค้ด"],
     action: (editor) => editor.chain().focus().toggleCode().run(),
   },
   {
     id: "codeBlock",
     titleKey: "editor.codeBlock",
-    icon: <Code2 className="mr-2 h-4 w-4" />,
+    icon: <SquareCode className="mr-2 h-4 w-4" />,
     keywords: ["codeblock", "code", "block", "โค้ด", "บล็อกโค้ด"],
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
@@ -551,11 +1031,25 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (_editor, helpers) => helpers.openImageDialog(),
   },
   {
+    id: "imageWorkspace",
+    titleKey: "editor.insertImageFromWorkspace",
+    icon: <Images className="mr-2 h-4 w-4" />,
+    keywords: ["image", "workspace", "attachment", "attachments", "รูป", "ไฟล์แนบ", "คลังภาพ"],
+    action: (_editor, helpers) => helpers.openWorkspaceImageDialog?.(),
+  },
+  {
     id: "imageUpload",
     titleKey: "editor.uploadImage",
     icon: <Upload className="mr-2 h-4 w-4" />,
     keywords: ["upload", "file", "image", "img", "อัปโหลด", "อัพโหลด", "รูป", "ไฟล์"],
     action: (_editor, helpers) => helpers.triggerImageUpload(),
+  },
+  {
+    id: "audio",
+    titleKey: "editor.recordAudio",
+    icon: <Mic className="mr-2 h-4 w-4" />,
+    keywords: ["audio", "record", "voice", "sound", "mic", "อัดเสียง", "เสียง", "บันทึกเสียง", "ไมค์"],
+    action: (_editor, helpers) => helpers.openAudioRecorder(),
   },
   {
     id: "table",
@@ -570,6 +1064,13 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     icon: <Wrench className="mr-2 h-4 w-4" />,
     keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา"],
     action: (_editor, helpers) => helpers.handleFixLanguage(),
+  },
+  {
+    id: "translator",
+    titleKey: "editor.translator",
+    icon: <Languages className="mr-2 h-4 w-4" />,
+    keywords: ["translate", "translator", "language", "แปล", "แปลภาษา", "ดิกชันนารี", "ภาษา"],
+    action: (_editor, helpers) => helpers.openTranslator?.(),
   },
 ];
 
@@ -666,10 +1167,12 @@ export interface EditorProps {
   note: Note | null;
   onUpdate: (id: string, updates: Partial<Note>) => void;
   onDelete: (id: string) => void;
+  onDeleteFile?: (note: Note) => void | Promise<void>;
   onCreate?: (folderPath?: string, opts?: CreateNoteOptions) => Note | void | Promise<Note | void>;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void | Promise<void>;
   onOpenFolder?: (pending?: OpenFolderPending) => void | Promise<void>;
   onRenameFile?: (note: Note, nextName: string) => void | Promise<void>;
+  onDuplicateFile?: (note: Note) => void | Promise<void>;
   openedFolderName?: string | null;
   onOpenSidebar: () => void;
   isSidebarOpen?: boolean;
@@ -682,6 +1185,12 @@ export interface EditorProps {
   onSettingsOpenChange?: (open: boolean) => void;
   rightPanelOpen?: boolean;
   onCloseRightPanel?: () => void;
+  onSelectNote?: (id: string) => void;
+  onOpenWebTab?: (url: string) => void;
+  onUnlockNote?: (noteId: string, pin: string) => Promise<boolean>;
+  onRelockNote?: (noteId: string) => void;
+  onGetActivePin?: (noteId: string) => string | undefined;
+  paneId?: string;
 }
 
 interface SaveSnapshot {
@@ -690,6 +1199,7 @@ interface SaveSnapshot {
 }
 
 function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
+  if (!editor || !editor.isEditable) return null;
   const { t } = useTranslation();
   const [tableRect, setTableRect] = useState<DOMRect | null>(null);
   const [cellRect, setCellRect] = useState<DOMRect | null>(null);
@@ -1322,8 +1832,364 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
   );
 }
 
+export function createTurndownService(assetBlobUrlMap?: Map<string, string>): TurndownService {
+  const td = new TurndownService({
+    headingStyle: "atx",
+    bulletListMarker: "-",
+    codeBlockStyle: "fenced",
+    fence: "```",
+  });
+
+  // Preserve raw Markdown content without escaping dots after numbers (e.g. ## 8. Ordered Lists) or brackets
+  td.escape = (str: string) => str;
+
+  // Serialize empty paragraphs using a placeholder token so Turndown cannot collapse consecutive blank lines
+  td.addRule("emptyParagraph", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.nodeName === "P" &&
+        !el.textContent?.trim() &&
+        !el.querySelector("img, audio, input, label") &&
+        !el.closest("table, li, blockquote, [data-type='taskItem']")
+      );
+    },
+    replacement: () => "\n<!--luno:blank-->",
+  });
+
+  // Serialize headings matching Obsidian line structure
+  td.addRule("heading", {
+    filter: ["h1", "h2", "h3", "h4", "h5", "h6"],
+    replacement: (content, node) => {
+      const h = node as HTMLElement;
+      const level = Number(h.nodeName.charAt(1)) || 1;
+      const prefix = "#".repeat(level);
+      return `\n${prefix} ${content}\n`;
+    },
+  });
+
+  // Serialize normal non-empty paragraphs matching Obsidian line structure
+  td.addRule("paragraph", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.nodeName === "P" &&
+        Boolean(el.textContent?.trim() || el.querySelector("img, audio, input, label")) &&
+        !el.closest("table, li, blockquote, [data-type='taskItem']")
+      );
+    },
+    replacement: (content) => `\n${content}\n`,
+  });
+
+  // Serialize lists matching CommonMark block boundaries
+  td.addRule("list", {
+    filter: ["ul", "ol"],
+    replacement: (content, node) => {
+      const parent = node.parentNode;
+      if (parent && parent.nodeName === "LI") {
+        return "\n" + content;
+      }
+      return `\n${content}\n`;
+    },
+  });
+
+  // Serialize blockquotes matching Obsidian line structure
+  td.addRule("blockquote", {
+    filter: "blockquote",
+    replacement: (content) => {
+      const clean = content.trim().replace(/^/gm, "> ");
+      return `\n${clean}\n`;
+    },
+  });
+
+  // Serialize horizontal rules matching Obsidian line structure
+  td.addRule("horizontalRule", {
+    filter: "hr",
+    replacement: () => `\n---\n`,
+  });
+
+  // Override Turndown built-in fencedCodeBlock, codeBlock, and code rules in-place so td.rules.array uses them
+  if (td.rules.fencedCodeBlock) {
+    td.rules.fencedCodeBlock.filter = (node, options) => {
+      return options.codeBlockStyle === "fenced" && node.nodeName === "PRE";
+    };
+    td.rules.fencedCodeBlock.replacement = (_content, node, options) => {
+      const codeEl = ((node as HTMLElement).querySelector("code") || node) as HTMLElement;
+      const className = codeEl?.getAttribute("class") || "";
+      const language = (className.match(/language-(\S+)/) || [null, ""])[1];
+      const rawCode = codeEl?.textContent || "";
+      const cleanCode = rawCode.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+      const fence = options.fence || "```";
+      return `\n${fence}${language}\n${cleanCode}\n${fence}\n`;
+    };
+  }
+
+  if (td.rules.codeBlock) {
+    td.rules.codeBlock.filter = () => false;
+  }
+
+  if (td.rules.code) {
+    td.rules.code.filter = (node) => {
+      const hasSiblings = node.previousSibling || node.nextSibling;
+      const isCodeBlock = node.parentNode && node.parentNode.nodeName === "PRE" && !hasSiblings;
+      return node.nodeName === "CODE" && !isCodeBlock;
+    };
+    td.rules.code.replacement = (content) => {
+      if (!content.trim()) return "";
+      let delimiter = "`";
+      const matches = content.match(/`+/gm) || [];
+      while (matches.indexOf(delimiter) !== -1) delimiter = delimiter + "`";
+      return delimiter + content + delimiter;
+    };
+  }
+
+  const defaultBlankReplacement = td.rules.blankRule.replacement;
+  td.rules.blankRule.replacement = (content, node, options) => {
+    const el = node as HTMLElement;
+    if (
+      el.nodeName === "P" &&
+      !el.textContent?.trim() &&
+      !el.closest("table, li, blockquote, [data-type='taskItem']")
+    ) {
+      return "\n<!--luno:blank-->";
+    }
+    return defaultBlankReplacement ? defaultBlankReplacement.call(td.rules.blankRule, content, node, options) : "\n<!--luno:blank-->";
+  };
+
+  // Convert <u> to <u>text</u> in markdown
+  td.addRule("underline", {
+    filter: "u",
+    replacement: (content) => `<u>${content}</u>`,
+  });
+
+  // Convert <mark> or .luno-highlight to ==text== in markdown
+  td.addRule("highlight", {
+    filter: (node) =>
+      node.nodeName === "MARK" ||
+      (node.nodeName === "SPAN" && (node as HTMLElement).classList?.contains("luno-highlight")),
+    replacement: (content) => `==${content}==`,
+  });
+
+  // Convert HTML images back to Markdown, preserving relative asset paths and width
+  td.addRule("relativeImage", {
+    filter: "img",
+    replacement: (_content, node) => {
+      const img = node as HTMLImageElement;
+      const alt = img.getAttribute("alt") || "";
+      const title = img.getAttribute("title");
+      const rawWidth = img.getAttribute("width") || img.style.width || "";
+      const widthMatch = rawWidth ? String(rawWidth).match(/\d+/) : null;
+      const width = widthMatch ? widthMatch[0] : "";
+      const relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap?.get(img.src) || img.getAttribute("src") || "";
+      const titleAttr = title ? ` "${title}"` : "";
+      if (width) {
+        return `![${alt}|${width}](${relSrc}${titleAttr})`;
+      }
+      return `![${alt}](${relSrc}${titleAttr})`;
+    },
+  });
+
+  // Convert HTML audio back to Markdown audio
+  td.addRule("audio", {
+    filter: "audio",
+    replacement: (_content, node) => {
+      const el = node as HTMLElement;
+      const src = el.getAttribute("src") || "";
+      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
+      const titleAttr = title ? ` data-title="${title.replace(/"/g, "&quot;")}"` : "";
+      if (!src) return "";
+      return `\n\n<audio controls src="${src}"${titleAttr}></audio>\n\n`;
+    },
+  });
+
+  // Convert Wikilinks (<a href="wikilink:..." data-wikilink="...">) back into standard [[Target]] or [[Target|Alias]]
+  td.addRule("wikilink", {
+    filter: (node) => {
+      if (node.nodeName !== "A") return false;
+      const href = (node.getAttribute("href") || "").trim();
+      const dataWiki = node.getAttribute("data-wikilink");
+      return Boolean(dataWiki) || href.startsWith("wikilink:");
+    },
+    replacement: (content, node) => {
+      const rawTarget =
+        node.getAttribute("data-wikilink") ||
+        decodeURIComponent((node.getAttribute("href") || "").replace(/^wikilink:/, ""));
+      const target = rawTarget.trim();
+      const text = (content || node.textContent || "").trim();
+      if (!target) return text;
+      if (!text || text === target) {
+        return `[[${target}]]`;
+      }
+      return `[[${target}|${text}]]`;
+    },
+  });
+
+  // Clean list item formatting to prevent loose lists with blank lines and broken indentation
+  td.addRule("cleanListItem", {
+    filter: (node) => node.nodeName === "LI" && node.getAttribute("data-type") !== "taskItem",
+    replacement: (content, node, options) => {
+      const cleanContent = content
+        .replace(/^\n+/, "")
+        .replace(/\n+$/, "")
+        .replace(/\n/gm, "\n    ");
+
+      const parent = node.parentNode;
+      const isOrdered = parent && parent.nodeName === "OL";
+      let prefix = options.bulletListMarker + " ";
+      if (isOrdered) {
+        const start = (parent as HTMLElement).getAttribute("start");
+        const index = Array.from(parent.children).filter((c) => c.nodeName === "LI").indexOf(node) + 1;
+        prefix = (start ? Number(start) + index - 1 : index) + ". ";
+      }
+      return (
+        prefix + cleanContent + (node.nextSibling && !/\n$/.test(cleanContent) ? "\n" : "")
+      );
+    },
+  });
+
+  // Prevent Turndown built-in inline `code`, `span`, and other element rules from processing children inside <pre> and splitting code blocks
+  td.addRule("insidePreCode", {
+    filter: (node) => {
+      let curr: Node | null = node.parentNode;
+      while (curr) {
+        if (curr.nodeName === "PRE" || (curr.nodeName === "DIV" && (curr as HTMLElement).classList.contains("code-block-wrapper"))) return true;
+        curr = curr.parentNode;
+      }
+      return false;
+    },
+    replacement: (_content, node) => node.textContent || "",
+  });
+
+  // Preserve fenced code blocks when converting HTML to Markdown for disk, intercepting .code-block-wrapper cleanly
+  td.addRule("fencedCodeBlock", {
+    filter: (node) => {
+      if (node.nodeName === "PRE") {
+        // If pre is inside a code-block-wrapper, let the parent wrapper handle it
+        let parent: Node | null = node.parentNode;
+        while (parent) {
+          if (parent.nodeName === "DIV" && (parent as HTMLElement).classList?.contains("code-block-wrapper")) {
+            return false;
+          }
+          parent = parent.parentNode;
+        }
+        return true;
+      }
+      return node.nodeName === "DIV" && (node as HTMLElement).classList?.contains("code-block-wrapper");
+    },
+    replacement: (_content, node) => {
+      const el = node as HTMLElement;
+      const codeEl = el.querySelector("code") || el.querySelector("pre") || el;
+      const className = codeEl.getAttribute("class") || el.getAttribute("class") || "";
+      const langMatch = className.match(/language-([a-zA-Z0-9_-]+)/);
+      const lang = langMatch ? langMatch[1] : "";
+      const rawText = codeEl.textContent || "";
+      const codeText = rawText.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+      return `\n\`\`\`${lang}\n${codeText}\n\`\`\`\n`;
+    },
+  });
+
+  // Convert HTML tables back into clean GFM Markdown tables unless originally HTML or using merged cells
+  td.addRule("table", {
+    filter: "table",
+    replacement: (_content, node) => {
+      const table = node as HTMLElement;
+
+      const hasSpans = Boolean(table.querySelector('[colspan]:not([colspan="1"]), [rowspan]:not([rowspan="1"])'));
+      const isOriginalHtmlTable = table.getAttribute("data-original-html-table") === "true";
+
+      if (isOriginalHtmlTable || hasSpans) {
+        const clone = table.cloneNode(true) as HTMLElement;
+        clone.removeAttribute("data-original-html-table");
+        return `\n${clone.outerHTML}\n`;
+      }
+
+      const rows = Array.from(table.querySelectorAll("tr"));
+      if (rows.length === 0) return "";
+
+      const matrix: string[][] = [];
+      let maxCols = 0;
+
+      rows.forEach((row) => {
+        const cells = Array.from(row.querySelectorAll("th, td"));
+        const rowData = cells.map((cell) => {
+          const text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
+          return text;
+        });
+        if (rowData.length > maxCols) maxCols = rowData.length;
+        matrix.push(rowData);
+      });
+
+      if (matrix.length === 0 || maxCols === 0) return "";
+
+      const header = matrix[0];
+      while (header.length < maxCols) header.push("");
+      const headerLine = `| ${header.join(" | ")} |`;
+      const separatorLine = `| ${Array(maxCols).fill("---").join(" | ")} |`;
+
+      const bodyLines = matrix.slice(1).map((row) => {
+        while (row.length < maxCols) row.push("");
+        return `| ${row.join(" | ")} |`;
+      });
+
+      const lines = [headerLine, separatorLine, ...bodyLines];
+      return `\n${lines.join("\n")}\n`;
+    },
+  });
+
+  // Suppress individual taskItem processing – handled wholesale by taskList rule below
+  td.addRule("taskItem", {
+    filter: (node: HTMLElement) =>
+      node.nodeName === "LI" && node.getAttribute("data-type") === "taskItem",
+    replacement: () => "",
+  });
+
+  // Convert Tiptap's <ul data-type="taskList"> to markdown checkboxes
+  td.addRule("taskList", {
+    filter: (node: HTMLElement) =>
+      node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
+    replacement: (_content: string, node: TurndownService.Node) => {
+      const ul = node as HTMLElement;
+      const items = Array.from(ul.querySelectorAll('li[data-type="taskItem"]')).map((li) => {
+        const checked = (li as HTMLElement).getAttribute("data-checked") === "true" ? "x" : " ";
+        const contentDiv = li.querySelector("div");
+        const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : "";
+        return `- [${checked}] ${text}`;
+      });
+      return "\n" + items.join("\n") + "\n";
+    },
+  });
+
+  // Preserve Tiptap <details><summary>title</summary>...<details> in markdown
+  td.addRule("toggle", {
+    filter: (node: HTMLElement) => node.nodeName === "DETAILS",
+    replacement: (_content: string, node: TurndownService.Node) => {
+      const el = node as HTMLElement;
+      const summary = el.querySelector("summary");
+      const title = summary?.textContent?.trim() || "";
+      const isOpen = el.hasAttribute("open");
+
+      const div = el.querySelector("div");
+      let innerHtml = "";
+      if (div) {
+        innerHtml = div.innerHTML;
+      } else {
+        const clone = el.cloneNode(true) as HTMLElement;
+        clone.querySelector("summary")?.remove();
+        innerHtml = clone.innerHTML;
+      }
+
+      const innerMarkdown = td.turndown(innerHtml).replace(/^[\r\n]+|[\r\n]+$/g, "");
+      const bodyContent = innerMarkdown || "<p></p>";
+
+      return `\n<details${isOpen ? " open" : ""}><summary>${title}</summary><div>\n\n${bodyContent}\n\n</div></details>\n`;
+    },
+  });
+
+  return td;
+}
+
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onCreate, onCreateFolder, onOpenFolder, onRenameFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel } = props;
+  const { note, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
 
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -1331,6 +2197,178 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">("txt");
   const [newFolderName, setNewFolderName] = useState("");
   const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
+  const [isReadingMode, setIsReadingMode] = useState(false);
+  const [htmlCursor, setHtmlCursor] = useState({ line: 1, col: 1 });
+
+  // Share via Google Drive State
+  const [shareSyncDialogOpen, setShareSyncDialogOpen] = useState(false);
+  const [shareSuccessDialogOpen, setShareSuccessDialogOpen] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const [isSharingLoading, setIsSharingLoading] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
+
+  const handleShareClick = async () => {
+    if (!note) return;
+
+    // 1. If note already has a driveFileId and Google Drive is connected -> get share link directly!
+    if (note.driveFileId && isGoogleDriveConnected()) {
+      setIsSharingLoading(true);
+      try {
+        const tokenInfo = getStoredTokenInfo();
+        if (tokenInfo?.access_token) {
+          const link = await getDriveFileShareLink(tokenInfo.access_token, note.driveFileId);
+          setShareLink(link);
+          try {
+            await navigator.clipboard.writeText(link);
+            setCopiedShareLink(true);
+            setTimeout(() => setCopiedShareLink(false), 3000);
+          } catch {}
+          setShareSuccessDialogOpen(true);
+          toast({
+            title: t("shareDialog.shareViaDrive") || "Share via Google Drive",
+            description: t("shareDialog.copied") || "Link copied to clipboard!",
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn("Failed getting Drive share link:", err);
+      } finally {
+        setIsSharingLoading(false);
+      }
+    }
+
+    // 2. Otherwise (local note, not synced or storageMode !== 'gdrive') -> Ask user to sync workspace to Google Drive
+    setShareSyncDialogOpen(true);
+  };
+
+  const handleConfirmSyncAndShare = async () => {
+    if (!note) return;
+    setIsSharingLoading(true);
+
+    try {
+      // 1. Connect to Google Drive if not connected
+      if (!isGoogleDriveConnected()) {
+        await requestGoogleDriveAuth();
+      }
+
+      if (!isGoogleDriveConnected()) {
+        setIsSharingLoading(false);
+        return;
+      }
+
+      // 2. Switch storageMode to 'gdrive'
+      updateSettings({ storageMode: "gdrive" });
+
+      const tokenInfo = getStoredTokenInfo();
+      if (!tokenInfo?.access_token) {
+        setIsSharingLoading(false);
+        return;
+      }
+
+      // 3. Sync note / workspace to Google Drive to ensure it has driveFileId
+      let targetFileId = note.driveFileId;
+      if (!targetFileId) {
+        await new Promise<void>((resolve) => {
+          syncEngine.queueNoteSync(
+            note,
+            (syncedNote) => {
+              targetFileId = syncedNote.driveFileId;
+              onUpdate(syncedNote.id, {
+                driveFileId: syncedNote.driveFileId,
+                driveSyncedAt: syncedNote.driveSyncedAt,
+              });
+              resolve();
+            },
+            0
+          );
+        });
+
+        // Also trigger full workspace sync in background
+        void syncEngine.syncAllNotes(notes || [note]);
+      }
+
+      // If we now have a driveFileId:
+      if (targetFileId) {
+        const link = await getDriveFileShareLink(tokenInfo.access_token, targetFileId);
+        setShareLink(link);
+        try {
+          await navigator.clipboard.writeText(link);
+          setCopiedShareLink(true);
+          setTimeout(() => setCopiedShareLink(false), 3000);
+        } catch {}
+        setShareSyncDialogOpen(false);
+        setShareSuccessDialogOpen(true);
+        toast({
+          title: t("shareDialog.shareViaDrive") || "Share via Google Drive",
+          description: t("shareDialog.copied") || "Link copied to clipboard!",
+        });
+      } else {
+        // Fallback: full sync and get structure
+        await syncEngine.syncAllNotes(notes || [note]);
+        const updated = (notes || []).find((n) => n.id === note.id);
+        const finalId = updated?.driveFileId || note.driveFileId;
+        if (finalId) {
+          const link = await getDriveFileShareLink(tokenInfo.access_token, finalId);
+          setShareLink(link);
+          try {
+            await navigator.clipboard.writeText(link);
+            setCopiedShareLink(true);
+            setTimeout(() => setCopiedShareLink(false), 3000);
+          } catch {}
+          setShareSyncDialogOpen(false);
+          setShareSuccessDialogOpen(true);
+        }
+      }
+    } catch (err) {
+      console.warn("Sync and share error:", err);
+      toast({
+        title: t("shareDialog.title") || "Share",
+        description: t("shareDialog.error") || "Failed to generate share link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSharingLoading(false);
+    }
+  };
+
+  const [isRevokingShare, setIsRevokingShare] = useState(false);
+
+  const handleRevokeShare = async () => {
+    if (!note) return;
+    const targetFileId = note.driveFileId;
+    if (!targetFileId) return;
+
+    setIsRevokingShare(true);
+    try {
+      const tokenInfo = getStoredTokenInfo();
+      if (!tokenInfo?.access_token) return;
+
+      const success = await revokeDriveFileShare(tokenInfo.access_token, targetFileId);
+      if (success) {
+        setShareLink("");
+        setShareSuccessDialogOpen(false);
+        toast({
+          title: t("shareDialog.revokeSuccessTitle") || "Sharing Stopped",
+          description: t("shareDialog.revokeSuccessDesc") || "Public access to this note has been revoked.",
+        });
+      } else {
+        toast({
+          title: t("shareDialog.title") || "Share",
+          description: t("shareDialog.revokeError") || "Failed to stop sharing. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      console.warn("Revoke share error:", err);
+      toast({
+        title: t("shareDialog.title") || "Share",
+        description: t("shareDialog.revokeError") || "Failed to stop sharing. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRevokingShare(false);
+    }
+  };
 
   // Complete pending creation when a folder gets opened
   useEffect(() => {
@@ -1344,7 +2382,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const contentFormat = pendingCreate.contentFormat ?? defaultFormat;
       if (onCreate) onCreate(undefined, { fileName, contentFormat });
     } else if (pendingCreate.kind === "folder") {
-      if (onCreateFolder) onCreateFolder(undefined, pendingCreate.folderName ?? "untitled-folder");
+      if (onCreateFolder) onCreateFolder(undefined, pendingCreate.folderName ?? "Untitled");
     }
 
     setPendingCreate(null);
@@ -1364,7 +2402,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleCreateFileFromDialog = () => {
     const baseName = (newFileName || "").trim();
     const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
-    const fileName = baseName ? `${baseName}.${newFileExt}` : `untitled.${newFileExt}`;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    let defaultBaseName = "Untitled";
+    if (settings.newFilePattern === "date") {
+      defaultBaseName = `Note_${dateStr}`;
+    } else if (settings.newFilePattern === "daily") {
+      defaultBaseName = `Daily-${dateStr}`;
+    }
+    const fileName = baseName ? `${baseName}.${newFileExt}` : `${defaultBaseName}.${newFileExt}`;
 
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "file", fileName, contentFormat });
@@ -1385,7 +2430,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleCreateFolderFromDialog = () => {
     const safeFolderName = (newFolderName || "").trim().replace(/[\\/:*?"<>|]/g, "_");
-    const folderName = safeFolderName || "untitled-folder";
+    const folderName = safeFolderName || "Untitled";
 
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "folder", folderName });
@@ -1464,17 +2509,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
-  const editorActiveNoteIdRef = useRef<string | null>(null);
+  const loadingNoteIdRef = useRef<string | null>(null);
+  const isNoteCurrentlyLocked = Boolean((note?.isLocked && !note?.isDecrypted) || (note?.content && isEncryptedNote(note.content)));
+  const editorActiveNoteIdRef = useRef<string | null>(isNoteCurrentlyLocked ? null : (note?.id ?? null));
   const fileHandleByNoteIdRef = useRef<Record<string, FileSystemFileHandle>>({});
   const deletedNoteIdsRef = useRef<Set<string>>(new Set());
   const editorSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [lineEnding, setLineEnding] = useState<"LF" | "CRLF">("LF");
   const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const [linkTab, setLinkTab] = useState<"workspace" | "external">("workspace");
   const [linkUrl, setLinkUrl] = useState("");
+  const [linkDisplayText, setLinkDisplayText] = useState("");
+  const [selectedWorkspaceNote, setSelectedWorkspaceNote] = useState<Note | null>(null);
+  const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
+  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const [workspaceImageDialogOpen, setWorkspaceImageDialogOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
+  const [audioRecorderOpen, setAudioRecorderOpen] = useState(false);
+
+  const filteredWorkspaceNotes = useMemo(() => {
+    if (!notes || notes.length === 0) return [];
+    const query = workspaceSearchQuery.trim().toLowerCase();
+    return notes.filter((n) => {
+      if (n.fileType === "image" || n.fileType === "binary") return false;
+      if (!query) return true;
+      const title = (n.fileName || n.title || "").toLowerCase();
+      const folder = (n.folderPath || "").toLowerCase();
+      return title.includes(query) || folder.includes(query);
+    });
+  }, [notes, workspaceSearchQuery]);
   const [savedSnapshotByNoteId, setSavedSnapshotByNoteId] = useState<Record<string, SaveSnapshot>>({});
   const [pendingSaveAction, setPendingSaveAction] = useState<"save" | "saveas" | null>(null);
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
@@ -1488,12 +2554,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [isImageZoomed, setIsImageZoomed] = useState(false);
+  const [canZoomImage, setCanZoomImage] = useState(false);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [clockOpen, setClockOpen] = useState(false);
   const [calculatorZIndex, setCalculatorZIndex] = useState<number>(50);
   const [clockZIndex, setClockZIndex] = useState<number>(50);
+  const [audioRecorderZIndex, setAudioRecorderZIndex] = useState<number>(50);
+  const [translatorOpen, setTranslatorOpen] = useState(false);
+  const [translatorInitialText, setTranslatorInitialText] = useState("");
+  const [translatorZIndex, setTranslatorZIndex] = useState<number>(50);
   const nextWindowZIndexRef = useRef<number>(51);
 
   const bringCalculatorToFront = useCallback(() => {
@@ -1502,6 +2574,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const bringClockToFront = useCallback(() => {
     setClockZIndex(nextWindowZIndexRef.current++);
+  }, []);
+
+  const bringAudioRecorderToFront = useCallback(() => {
+    setAudioRecorderZIndex(nextWindowZIndexRef.current++);
+  }, []);
+
+  const bringTranslatorToFront = useCallback(() => {
+    setTranslatorZIndex(nextWindowZIndexRef.current++);
   }, []);
 
   const toggleCalculator = useCallback(() => {
@@ -1519,7 +2599,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return next;
     });
   }, [bringClockToFront]);
+
   const { settings, updateSetting, resetSettings } = useAppSettings();
+  const spellCheckEnabled = settings.spellCheck !== false;
   const settingsRef = useRef(settings);
   useEffect(() => {
     settingsRef.current = settings;
@@ -1540,144 +2622,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const assetBlobUrlMap = useRef<Map<string, string>>(new Map());
 
   const turndown = useMemo(() => {
-    const td = new TurndownService({
-      headingStyle: "atx",
-      bulletListMarker: "-",
-      codeBlockStyle: "fenced",
-      fence: "```",
-    });
-
-    // Save first-line Em-Space indented paragraphs back to 4-space indented Markdown for disk
-    td.addRule("firstLineEmSpaceIndent", {
-      filter: (node) => node.nodeName === "P" && !!(node.textContent && /^([\u2003\u00A0 \t]{2,}|\t+)/.test(node.textContent)),
-      replacement: (content) => `\n\n    ${content.replace(/^[\u2003\u00A0 \t]+/, "").trim()}\n\n`,
-    });
-
-    // Convert HTML images back to Markdown, preserving relative asset paths
-    td.addRule("relativeImage", {
-      filter: "img",
-      replacement: (_content, node) => {
-        const img = node as HTMLImageElement;
-        const alt = img.getAttribute("alt") || "";
-        const title = img.getAttribute("title");
-        const relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap.current.get(img.src) || img.getAttribute("src") || "";
-        const titleAttr = title ? ` "${title}"` : "";
-        return `![${alt}](${relSrc}${titleAttr})`;
-      },
-    });
-
-    // Preserve ```javascript fenced code blocks when converting HTML to Markdown for disk
-    td.addRule("fencedCodeBlock", {
-      filter: (node) => node.nodeName === "PRE",
-      replacement: (_content, node) => {
-        const pre = node as HTMLElement;
-        const code = pre.querySelector("code") || pre;
-        const className = code.getAttribute("class") || "";
-        const langMatch = className.match(/language-([a-zA-Z0-9_-]+)/);
-        const lang = langMatch ? langMatch[1] : "";
-        const codeText = (code.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-        return `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
-      },
-    });
-
-    // Convert HTML tables back into clean GFM Markdown tables unless originally HTML or using merged cells
-    td.addRule("table", {
-      filter: "table",
-      replacement: (_content, node) => {
-        const table = node as HTMLElement;
-
-        const hasSpans = Boolean(table.querySelector('[colspan]:not([colspan="1"]), [rowspan]:not([rowspan="1"])'));
-        const isOriginalHtmlTable = table.getAttribute("data-original-html-table") === "true";
-
-        if (isOriginalHtmlTable || hasSpans) {
-          const clone = table.cloneNode(true) as HTMLElement;
-          clone.removeAttribute("data-original-html-table");
-          return `\n\n${clone.outerHTML}\n\n`;
-        }
-
-        const rows = Array.from(table.querySelectorAll("tr"));
-        if (rows.length === 0) return "";
-
-        const matrix: string[][] = [];
-        let maxCols = 0;
-
-        rows.forEach((row) => {
-          const cells = Array.from(row.querySelectorAll("th, td"));
-          const rowData = cells.map((cell) => {
-            const text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
-            return text;
-          });
-          if (rowData.length > maxCols) maxCols = rowData.length;
-          matrix.push(rowData);
-        });
-
-        if (matrix.length === 0 || maxCols === 0) return "";
-
-        const header = matrix[0];
-        while (header.length < maxCols) header.push("");
-        const headerLine = `| ${header.join(" | ")} |`;
-        const separatorLine = `| ${Array(maxCols).fill("---").join(" | ")} |`;
-
-        const bodyLines = matrix.slice(1).map((row) => {
-          while (row.length < maxCols) row.push("");
-          return `| ${row.join(" | ")} |`;
-        });
-
-        const lines = [headerLine, separatorLine, ...bodyLines];
-        return `\n\n${lines.join("\n")}\n\n`;
-      },
-    });
-
-    // Suppress individual taskItem processing – handled wholesale by taskList rule below
-    td.addRule("taskItem", {
-      filter: (node: HTMLElement) =>
-        node.nodeName === "LI" && node.getAttribute("data-type") === "taskItem",
-      replacement: () => "",
-    });
-
-    // Convert Tiptap's <ul data-type="taskList"> to markdown checkboxes
-    td.addRule("taskList", {
-      filter: (node: HTMLElement) =>
-        node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
-      replacement: (_content: string, node: TurndownService.Node) => {
-        const ul = node as HTMLElement;
-        const items = Array.from(ul.querySelectorAll('li[data-type="taskItem"]')).map((li) => {
-          const checked = (li as HTMLElement).getAttribute("data-checked") === "true" ? "x" : " ";
-          const contentDiv = li.querySelector("div");
-          const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : "";
-          return `- [${checked}] ${text}`;
-        });
-        return "\n\n" + items.join("\n") + "\n\n";
-      },
-    });
-
-    // Preserve Tiptap <details><summary>title</summary>...<details> in markdown
-    td.addRule("toggle", {
-      filter: (node: HTMLElement) => node.nodeName === "DETAILS",
-      replacement: (_content: string, node: TurndownService.Node) => {
-        const el = node as HTMLElement;
-        const summary = el.querySelector("summary");
-        const title = summary?.textContent?.trim() || "";
-        const isOpen = el.hasAttribute("open");
-
-        const div = el.querySelector("div");
-        let innerHtml = "";
-        if (div) {
-          innerHtml = div.innerHTML;
-        } else {
-          const clone = el.cloneNode(true) as HTMLElement;
-          clone.querySelector("summary")?.remove();
-          innerHtml = clone.innerHTML;
-        }
-
-        const innerMarkdown = td.turndown(innerHtml).replace(/^[\r\n]+|[\r\n]+$/g, "");
-        const bodyContent = innerMarkdown || "<p></p>";
-
-        return `\n\n<details${isOpen ? " open" : ""}><summary>${title}</summary><div>\n\n${bodyContent}\n\n</div></details>\n\n`;
-      },
-    });
-
-    return td;
+    return createTurndownService(assetBlobUrlMap.current);
   }, []);
 
   const isLikelyHtml = (text: string) => /<\/?[a-z][\s\S]*>/i.test(text);
@@ -1704,21 +2649,30 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const getBaseTitle = useCallback((targetNote: Note | null): string => {
     if (!targetNote || isTxtFile(targetNote)) return "";
-    if (targetNote.title === "") {
-      return "";
-    }
-    let rawName = "";
-    if (targetNote.title && targetNote.title.trim()) {
-      rawName = targetNote.title.trim();
-    } else if (targetNote.fileName) {
+    
+    // Priority 1: Check note.fileName first (if linked file or has fileName)
+    if (targetNote.fileName) {
       const name = targetNote.fileName.trim();
       const lastDot = name.lastIndexOf(".");
-      rawName = lastDot > 0 ? name.slice(0, lastDot) : name;
+      const baseFromFileName = lastDot > 0 ? name.slice(0, lastDot) : name;
+      if (baseFromFileName && !isSystemGeneratedUntitledName(baseFromFileName)) {
+        return baseFromFileName;
+      }
     }
-    if (isSystemGeneratedUntitledName(rawName)) {
-      return "";
+
+    // Priority 2: Check note.title
+    if (targetNote.title && targetNote.title.trim() && !isSystemGeneratedUntitledName(targetNote.title)) {
+      return targetNote.title.trim();
     }
-    return rawName;
+
+    // Priority 3: Fallback to fileName base (even if default name)
+    if (targetNote.fileName) {
+      const name = targetNote.fileName.trim();
+      const lastDot = name.lastIndexOf(".");
+      return lastDot > 0 ? name.slice(0, lastDot) : name;
+    }
+
+    return targetNote.title || "";
   }, [isTxtFile]);
 
   const flushPendingRename = useCallback(() => {
@@ -1757,6 +2711,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (typeof text !== "string" || !text.trim()) {
       if (isTxt) return "<p></p>";
       return baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
+    }
+
+    if (isEncryptedNote(text)) {
+      return isTxt ? "<p></p>" : (baseTitle ? `<h1>${escHtml(baseTitle)}</h1><p></p>` : "<h1></h1><p></p>");
     }
 
     let cleanText = text;
@@ -1810,12 +2768,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     const titleH1Html = baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
-    const editorHtml = toEditorHtml(cleanText, false);
+    let editorHtml = toEditorHtml(cleanText, false);
 
-    if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
-      return titleH1Html + editorHtml;
+    if (baseTitle && /^\s*<h1[^>]*>[\s\S]*?<\/h1>/i.test(editorHtml)) {
+      editorHtml = editorHtml.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>/i, titleH1Html);
+    } else if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
+      editorHtml = titleH1Html + editorHtml;
     }
-    return editorHtml;
+    return editorHtml.replace(/>\s+</g, "><");
   };
 
   /** Convert one task-list line/element to a Tiptap taskItem <li> string */
@@ -1865,17 +2825,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const prepareDomForEditor = (root: HTMLElement) => {
     migrateDomTaskLists(root);
 
-    // Clean up extra leading/trailing newlines in code blocks from marked output
+    // Clean up extra leading/trailing newlines in code blocks from marked output and ensure no double HTML entity encoding
     root.querySelectorAll("pre code, pre").forEach((el) => {
       if (el.tagName === "CODE" || (el.tagName === "PRE" && !el.querySelector("code"))) {
-        const cleaned = (el.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-        el.textContent = cleaned;
+        const rawText = (el.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+        // Cleanly set innerHTML to escHtml so DOM Parser reads exact unescaped characters with zero double-escaping
+        el.innerHTML = escHtml(rawText);
       }
     });
 
-    // Unwrap paragraphs containing ONLY an image to prevent ProseMirror from splitting <p> into an extra empty paragraph
+    // Unwrap paragraphs containing audio elements or image elements to ensure they are parsed as top-level block nodes
     root.querySelectorAll("p").forEach((p) => {
-      if (p.children.length === 1 && p.firstElementChild?.tagName === "IMG" && !p.textContent?.trim()) {
+      const audio = p.querySelector("audio");
+      if (audio) {
+        if (p.children.length === 1 && !p.textContent?.trim()) {
+          p.replaceWith(audio);
+        } else {
+          p.parentElement?.insertBefore(audio, p);
+          if (!p.textContent?.trim() && !p.children.length) {
+            p.remove();
+          }
+        }
+      } else if (p.children.length === 1 && p.firstElementChild?.tagName === "IMG" && !p.textContent?.trim()) {
         p.replaceWith(p.firstElementChild);
       }
     });
@@ -1892,12 +2863,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     });
 
-    // Clean up empty paragraph before an image if it was created by Markdown block splitting
+    // Clean up empty paragraph before an image or audio if it was created by Markdown block splitting
     root.querySelectorAll("p").forEach((p) => {
-      if (!p.textContent?.trim() && !p.querySelector("img, input, label")) {
+      if (!p.textContent?.trim() && !p.querySelector("img, audio, input, label")) {
         const next = p.nextElementSibling;
-        if (next && next.tagName === "IMG") {
+        if (next && (next.tagName === "IMG" || next.tagName === "AUDIO")) {
           p.remove();
+        }
+      }
+    });
+
+    // Preserve spaces between inline code tags so ProseMirror DOMParser does not collapse the space and merge adjacent code marks
+    root.querySelectorAll("code").forEach((code) => {
+      if (code.closest("pre")) return;
+      const next = code.nextSibling;
+      if (next && next.nodeType === Node.TEXT_NODE && next.nodeValue) {
+        if (/^\s+/.test(next.nodeValue)) {
+          next.nodeValue = next.nodeValue.replace(/^ +/, (spaces) => "\u00A0".repeat(spaces.length));
         }
       }
     });
@@ -1906,16 +2888,109 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     root.querySelectorAll("p").forEach((p) => {
       if (p.childNodes.length > 0 && p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
         const text = p.firstChild.nodeValue || "";
-        const match = text.match(/^([\u00A0\u2003 \t]{2,})/);
+        const match = text.match(/^([\u00A0\u2003]{2,})/);
         if (match) {
-          const raw = match[1];
-          const count = raw.includes("\t") ? 4 : raw.length;
-          if (count >= 2) {
-            p.firstChild.nodeValue = text.replace(/^[\u00A0\u2003 \t]+/, "\u2003\u2003");
-          }
+          p.firstChild.nodeValue = text.replace(/^[\u00A0\u2003]+/, "\u2003\u2003");
         }
       }
     });
+
+    // Convert inline hashtags (#tag) outside code blocks, headings, links into pill badges
+    const inlineTagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+    const formatHashtagsInNode = (element: Node) => {
+      const children = Array.from(element.childNodes);
+      for (const child of children) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = (child as HTMLElement).tagName.toLowerCase();
+          if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
+            continue;
+          }
+          formatHashtagsInNode(child);
+        } else if (child.nodeType === Node.TEXT_NODE) {
+          const text = child.nodeValue || "";
+          inlineTagRegex.lastIndex = 0;
+          if (inlineTagRegex.test(text)) {
+            const frag = document.createDocumentFragment();
+            inlineTagRegex.lastIndex = 0;
+            let lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = inlineTagRegex.exec(text)) !== null) {
+              const rawTag = match[1];
+              if (/^\d+$/.test(rawTag)) continue;
+              const hashIndex = match[0].indexOf("#");
+              const matchStart = match.index + hashIndex;
+              const matchEnd = matchStart + 1 + rawTag.length;
+
+              if (matchStart > lastIndex) {
+                frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+              }
+
+              const badge = document.createElement("span");
+              const colorClass = getTagColorClass(rawTag, settingsRef.current?.theme, undefined, settingsRef.current?.tagColorStyle);
+              badge.className = `inline-tag-badge border ${colorClass}`;
+              badge.textContent = `#${rawTag}`;
+              frag.appendChild(badge);
+
+              lastIndex = matchEnd;
+            }
+            if (lastIndex < text.length) {
+              frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+            child.replaceWith(frag);
+          }
+        }
+      }
+    };
+    formatHashtagsInNode(root);
+
+    // Convert inline Wikilinks [[Target]] or [[Target|Alias]] outside code blocks / pre into internal links
+    const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
+    const formatWikilinksInNode = (element: Node) => {
+      const children = Array.from(element.childNodes);
+      for (const child of children) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = (child as HTMLElement).tagName.toLowerCase();
+          if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
+            continue;
+          }
+          formatWikilinksInNode(child);
+        } else if (child.nodeType === Node.TEXT_NODE) {
+          const text = child.nodeValue || "";
+          wikilinkRegex.lastIndex = 0;
+          if (wikilinkRegex.test(text)) {
+            const frag = document.createDocumentFragment();
+            wikilinkRegex.lastIndex = 0;
+            let lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = wikilinkRegex.exec(text)) !== null) {
+              const fullMatch = match[0];
+              const target = (match[1] || "").trim();
+              const alias = (match[2] || "").trim();
+              const matchStart = match.index;
+              const matchEnd = matchStart + fullMatch.length;
+
+              if (matchStart > lastIndex) {
+                frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+              }
+
+              const link = document.createElement("a");
+              link.href = `wikilink:${encodeURIComponent(target)}`;
+              link.setAttribute("data-wikilink", target);
+              link.className = "internal-wikilink text-primary underline underline-offset-4 cursor-pointer hover:opacity-80";
+              link.textContent = alias || target;
+              frag.appendChild(link);
+
+              lastIndex = matchEnd;
+            }
+            if (lastIndex < text.length) {
+              frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+            child.replaceWith(frag);
+          }
+        }
+      }
+    };
+    formatWikilinksInNode(root);
 
     root.querySelectorAll("details").forEach((details) => {
       const summary = details.querySelector("summary");
@@ -1960,13 +3035,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     prepareDomForEditor(temp);
-    // Cleanup any legacy/corrupted <hr><p>tags:</p>... inserted at the top of temp
-    const cleanHtml = temp.innerHTML.replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "");
+    const cleanHtml = temp.innerHTML
+      .replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "")
+      .replace(/>\s+</g, "><");
     return cleanHtml;
   };
 
   const EDITOR_CLASSES =
-    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none leading-7 text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-[hsl(var(--accent))] [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_p]:leading-7 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
     " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
 
@@ -2039,8 +3115,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const openLinkDialogRef = useRef<(() => void) | null>(null);
   const openImageDialogRef = useRef<(() => void) | null>(null);
+  const openWorkspaceImageDialogRef = useRef<(() => void) | null>(null);
   const triggerImageUploadRef = useRef<(() => void) | null>(null);
+  const openAudioRecorderRef = useRef<(() => void) | null>(null);
   const handleFixLanguageRef = useRef<(() => void) | null>(null);
+  const openTranslatorRef = useRef<(() => void) | null>(null);
   const tRef = useRef(t);
   const isMobileRef = useRef(isMobile);
   const noteRef = useRef(note);
@@ -2062,8 +3141,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       item.action(editorInstance, {
         openLinkDialog: () => openLinkDialogRef.current?.(),
         openImageDialog: () => openImageDialogRef.current?.(),
+        openWorkspaceImageDialog: () => openWorkspaceImageDialogRef.current?.(),
         triggerImageUpload: () => triggerImageUploadRef.current?.(),
+        openAudioRecorder: () => openAudioRecorderRef.current?.(),
         handleFixLanguage: () => handleFixLanguageRef.current?.(),
+        openTranslator: () => openTranslatorRef.current?.(),
       });
     },
     [],
@@ -2154,16 +3236,45 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const processAndInsertImageFileRef = useRef<((file: File) => Promise<void>) | null>(null);
   const debouncedContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveContentRef = useRef<{ id: string; content: string } | null>(null);
+  const userEditedRef = useRef(false);
+
+  const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const restoreScrollPosition = useCallback((noteId: string) => {
+    if (!noteId) return;
+    const targetTop = getNoteScrollPosition(noteId);
+    
+    const applyScroll = () => {
+      if (editorScrollContainerRef.current) {
+        editorScrollContainerRef.current.scrollTop = targetTop;
+      }
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+    setTimeout(applyScroll, 25);
+    setTimeout(applyScroll, 75);
+    setTimeout(applyScroll, 150);
+  }, []);
+
+  const handleEditorScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!note?.id) return;
+    const top = e.currentTarget.scrollTop;
+    setNoteScrollPosition(note.id, top);
+  }, [note?.id]);
 
   const flushDebouncedContentSave = useCallback(() => {
     if (debouncedContentSaveTimeoutRef.current) {
       clearTimeout(debouncedContentSaveTimeoutRef.current);
       debouncedContentSaveTimeoutRef.current = null;
     }
-    if (pendingSaveContentRef.current && noteRef.current) {
+    if (userEditedRef.current && pendingSaveContentRef.current && noteRef.current) {
       const { id, content } = pendingSaveContentRef.current;
       pendingSaveContentRef.current = null;
       onUpdate(id, { content });
+      userEditedRef.current = false;
+    } else if (!userEditedRef.current) {
+      pendingSaveContentRef.current = null;
     }
   }, [onUpdate]);
 
@@ -2171,6 +3282,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     extensions: [
       StarterKit.configure({
         codeBlock: false,
+        dropcursor: {
+          color: "hsl(var(--border))",
+          width: 1,
+          class: "prosemirror-dropcursor",
+        },
       }),
       CodeBlockLowlight.extend({
         addNodeView() {
@@ -2180,9 +3296,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         lowlight,
         defaultLanguage: "plaintext",
       }),
+      HashtagDecoration.configure({
+        theme: settings.theme,
+        tagColorStyle: settings.tagColorStyle,
+      }),
+      SpellCheckDecoration.configure({
+        enabled: settings.spellCheck !== false,
+      }),
+      InlineCodeHighlight.configure({
+        enabled: settings.highlightInlineCode === true,
+      }),
+      Underline,
+      Highlight,
       Toggle,
       TaskList,
       TaskItem,
+      AudioExtension,
       Table.configure({
         resizable: true,
       }),
@@ -2190,10 +3319,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       TableHeader,
       TableCell,
       IndentKeymap,
-      Link.configure({
+      Link.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            "data-wikilink": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-wikilink"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-wikilink"]) return {};
+                return {
+                  "data-wikilink": attributes["data-wikilink"],
+                };
+              },
+            },
+          };
+        },
+      }).configure({
         openOnClick: false,
         autolink: true,
         defaultProtocol: "https",
+        protocols: ["http", "https", "ftp", "mailto", "tel", "wikilink"],
+        validate: () => true,
         HTMLAttributes: {
           class: "text-primary underline underline-offset-4",
           rel: "noopener noreferrer nofollow",
@@ -2204,6 +3351,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         addAttributes() {
           return {
             ...this.parent?.(),
+            width: {
+              default: null,
+              parseHTML: (element) => {
+                const w = element.getAttribute("width") || element.style.width;
+                if (!w) return null;
+                const parsed = parseInt(w, 10);
+                return isNaN(parsed) ? null : parsed;
+              },
+              renderHTML: (attributes) => {
+                if (!attributes.width) return {};
+                return {
+                  width: attributes.width,
+                  style: `width: ${attributes.width}px; max-width: 100%;`,
+                };
+              },
+            },
             "data-relative-src": {
               default: null,
               parseHTML: (element) => element.getAttribute("data-relative-src") || element.getAttribute("src"),
@@ -2216,10 +3379,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             },
           };
         },
-      }).configure({
-        HTMLAttributes: {
-          class: "my-4 h-auto max-w-full rounded-xl border border-border",
+        addNodeView() {
+          return ReactNodeViewRenderer(ImageNodeView);
         },
+      }).configure({
+        allowBase64: true,
       }),
       Placeholder.configure({
         placeholder: ({ node, pos, editor: ed, hasAnchor }) => {
@@ -2278,33 +3442,131 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         emptyNodeClass: "is-empty",
       }),
     ],
-    content: parseEditorContent(note?.content ?? "", getBaseTitle(note), isTxtFile(note)),
+    content: (note?.isLocked && !note?.isDecrypted) || isEncryptedNote(note?.content)
+      ? (isTxtFile(note) ? "<p></p>" : (getBaseTitle(note) ? `<h1>${escHtml(getBaseTitle(note))}</h1><p></p>` : "<h1></h1><p></p>"))
+      : parseEditorContent(note?.content ?? "", getBaseTitle(note), isTxtFile(note)),
     parseOptions: {
       preserveWhitespace: "full",
     },
     editorProps: {
       attributes: {
+        spellcheck: "false",
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
-        class: EDITOR_CLASSES,
+        class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
+          settings.accentHeadings
+            ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
+            : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
+        }`,
+      },
+      handleClick: (view, pos, event) => {
+        const target = (event.target as HTMLElement).closest("a");
+        if (!target) return false;
+
+        const href = target.getAttribute("href") || "";
+        const dataWiki = target.getAttribute("data-wikilink");
+        const wikilinkTarget = dataWiki || (href.startsWith("wikilink:") ? decodeURIComponent(href.replace(/^wikilink:/, "")) : null);
+
+        if (wikilinkTarget) {
+          event.preventDefault();
+          event.stopPropagation();
+          const cleanTarget = wikilinkTarget.trim().toLowerCase();
+          const baseClean = cleanTarget.replace(/\.[^/.]+$/, "");
+
+          const currentNotes = (notes || []);
+          const matchedNote = currentNotes.find((n) => {
+            const nameWithoutExt = (n.fileName || n.title || "").replace(/\.[^/.]+$/, "").toLowerCase();
+            const fullFileName = (n.fileName || "").toLowerCase();
+            const title = (n.title || "").toLowerCase();
+            return (
+              nameWithoutExt === baseClean ||
+              fullFileName === cleanTarget ||
+              title === cleanTarget ||
+              (n.folderPath && `${n.folderPath.toLowerCase()}/${nameWithoutExt}` === baseClean)
+            );
+          });
+
+          if (matchedNote) {
+            onSelectNote?.(matchedNote.id);
+            return true;
+          } else {
+            toast({
+              title: t("editor.noteNotFound") || "Note not found",
+              description: `[[${wikilinkTarget}]]`,
+            });
+            return true;
+          }
+        } else if (href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:") || href.startsWith("tel:"))) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (href.startsWith("http://") || href.startsWith("https://")) {
+            if (onOpenWebTab) {
+              onOpenWebTab(href);
+            } else {
+              window.open(href, "_blank", "noopener,noreferrer");
+            }
+          } else {
+            window.open(href, "_blank", "noopener,noreferrer");
+          }
+          return true;
+        }
+        return false;
       },
       handleDrop: (_view, event) => {
-        if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length > 0) {
-          const file = event.dataTransfer.files[0];
-          if (file && file.type.startsWith("image/")) {
-            event.preventDefault();
-            void processAndInsertImageFileRef.current?.(file);
-            return true;
+        if (event.dataTransfer) {
+          const files = event.dataTransfer.files;
+          if (files && files.length > 0) {
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              if (file && file.type.startsWith("image/")) {
+                event.preventDefault();
+                void processAndInsertImageFileRef.current?.(file);
+                return true;
+              }
+            }
+          }
+          const items = event.dataTransfer.items;
+          if (items && items.length > 0) {
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              if (item && item.kind === "file" && item.type.startsWith("image/")) {
+                const file = item.getAsFile();
+                if (file) {
+                  event.preventDefault();
+                  void processAndInsertImageFileRef.current?.(file);
+                  return true;
+                }
+              }
+            }
           }
         }
         return false;
       },
       handlePaste: (_view, event) => {
-        if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length > 0) {
-          const file = event.clipboardData.files[0];
-          if (file && file.type.startsWith("image/")) {
-            event.preventDefault();
-            void processAndInsertImageFileRef.current?.(file);
-            return true;
+        if (event.clipboardData) {
+          const files = event.clipboardData.files;
+          if (files && files.length > 0) {
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              if (file && file.type.startsWith("image/")) {
+                event.preventDefault();
+                void processAndInsertImageFileRef.current?.(file);
+                return true;
+              }
+            }
+          }
+          const items = event.clipboardData.items;
+          if (items && items.length > 0) {
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              if (item && item.kind === "file" && item.type.startsWith("image/")) {
+                const file = item.getAsFile();
+                if (file) {
+                  event.preventDefault();
+                  void processAndInsertImageFileRef.current?.(file);
+                  return true;
+                }
+              }
+            }
           }
         }
         return false;
@@ -2346,13 +3608,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return false;
       },
     },
+    onCreate: ({ editor: instance }) => {
+      if ((note?.isLocked && !note?.isDecrypted) || isEncryptedNote(note?.content)) {
+        if (note?.id) noteEditorStateMap.delete(note.id);
+        return;
+      }
+      const savedState = note?.id ? noteEditorStateMap.get(note.id) : null;
+      if (savedState) {
+        instance.view.updateState(savedState);
+      } else {
+        // Ensure initial editor state has a clean history (undoDepth: 0)
+        const cleanState = EditorState.create({
+          doc: instance.state.doc,
+          plugins: instance.state.plugins,
+        });
+        instance.view.updateState(cleanState);
+        if (note?.id) {
+          noteEditorStateMap.set(note.id, instance.state);
+        }
+      }
+    },
     onBlur: () => {
+      if (note?.id && editor?.state) {
+        noteEditorStateMap.set(note.id, editor.state);
+      }
       flushPendingRename();
       flushDebouncedContentSave();
     },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       setEditorTick((v) => v + 1);
+      if (note?.id) {
+        noteEditorStateMap.set(note.id, instance.state);
+      }
       const { from } = instance.state.selection;
       if (from > (instance.state.doc.firstChild?.nodeSize ?? 0)) {
         flushPendingRename();
@@ -2361,8 +3649,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     onUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       setEditorTick((v) => v + 1);
-      setLastEditedTime(Date.now());
+      if (note?.id) {
+        noteEditorStateMap.set(note.id, instance.state);
+      }
       if (!note || syncingFromNote.current || isNoteDeleted(note.id)) return;
+      if (loadingNoteIdRef.current === note.id) return;
+      userEditedRef.current = true;
+      setLastEditedTime(Date.now());
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
       if (note.fileType === "image" || note.fileType === "binary") return;
 
@@ -2419,18 +3712,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
           firstChild.remove();
         }
-        savedContent = turndown.turndown(temp.innerHTML).replace(/^[\r\n]+|[\r\n]+$/g, "");
+        savedContent = normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
       }
 
       pendingSaveContentRef.current = { id: note.id, content: savedContent };
+      try {
+        if (savedContent) {
+          localStorage.setItem(`luno_backup_${note.id}`, savedContent);
+          if (note.fileName) {
+            localStorage.setItem(`luno_backup_fn_${note.fileName}`, savedContent);
+          }
+        }
+      } catch {
+        /* ignore localStorage quota */
+      }
       if (debouncedContentSaveTimeoutRef.current) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
       }
       debouncedContentSaveTimeoutRef.current = setTimeout(() => {
-        if (pendingSaveContentRef.current) {
+        if (userEditedRef.current && pendingSaveContentRef.current) {
           const { id, content } = pendingSaveContentRef.current;
           pendingSaveContentRef.current = null;
           onUpdate(id, { content });
+          userEditedRef.current = false;
+        } else if (!userEditedRef.current) {
+          pendingSaveContentRef.current = null;
         }
         if (!settings.autoSave) {
           setSaveStatus("unsaved");
@@ -2442,18 +3748,234 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
   });
 
-  const editorStats = useMemo(() => {
-    if (!editor) {
-      const charCount = note?.content ? note.content.length : 0;
-      const wordCount = note?.content?.trim() ? note.content.trim().split(/\s+/).length : 0;
-      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
-      let syntaxLabel = t("editor.syntaxMarkdown");
-      const fileName = note?.fileName?.toLowerCase() ?? "";
-      if (fileName.endsWith(".html") || note?.contentFormat === "html") {
-        syntaxLabel = t("editor.syntaxHtml");
-      } else if (fileName.endsWith(".txt")) {
-        syntaxLabel = t("editor.syntaxText");
+  const toggleTranslator = useCallback(() => {
+    setTranslatorOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        bringTranslatorToFront();
+        if (editor && !editor.state.selection.empty) {
+          const selectedText = editor.state.doc.textBetween(
+            editor.state.selection.from,
+            editor.state.selection.to,
+            " ",
+            " ",
+          );
+          setTranslatorInitialText(selectedText);
+        } else {
+          setTranslatorInitialText("");
+        }
       }
+      return next;
+    });
+  }, [editor, bringTranslatorToFront]);
+
+  const openTranslatorWithSelection = useCallback(() => {
+    let selectedText = "";
+    if (editor && !editor.state.selection.empty) {
+      selectedText = editor.state.doc.textBetween(
+        editor.state.selection.from,
+        editor.state.selection.to,
+        " ",
+        " ",
+      );
+    }
+    setTranslatorInitialText(selectedText);
+    bringTranslatorToFront();
+    setTranslatorOpen(true);
+  }, [editor, bringTranslatorToFront]);
+
+  const handleInsertTranslation = useCallback((textToInsert: string) => {
+    if (!textToInsert) return;
+    if (editor) {
+      editor.chain().focus().insertContent(textToInsert).run();
+    } else if (note && onUpdate) {
+      onUpdate(note.id, { content: (note.content || "") + "\n" + textToInsert });
+    }
+  }, [editor, note, onUpdate]);
+
+  const [contextSpellData, setContextSpellData] = useState<{
+    word: string;
+    suggestions: string[];
+    from: number;
+    to: number;
+  } | null>(null);
+
+  const handleEditorContextMenu = (event: React.MouseEvent) => {
+    if (!editor || settings.spellCheck === false) {
+      setContextSpellData(null);
+      return;
+    }
+
+    // 1. Check if user already highlighted a word
+    const { from: selFrom, to: selTo, empty } = editor.state.selection;
+    if (!empty && selTo - selFrom < 100) {
+      const selectedText = editor.state.doc.textBetween(selFrom, selTo, "\n", "\n").trim();
+      if (selectedText) {
+        const suggestions = getSpellingSuggestions(selectedText);
+        if (suggestions.length > 0) {
+          setContextSpellData({
+            word: selectedText,
+            suggestions,
+            from: selFrom,
+            to: selTo,
+          });
+          return;
+        }
+      }
+    }
+
+    // 2. Find position under mouse cursor
+    const view = editor.view;
+    const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
+    if (!pos) {
+      setContextSpellData(null);
+      return;
+    }
+    const $pos = view.state.doc.resolve(pos.pos);
+    const parentText = $pos.parent.textContent;
+    const offsetInParent = $pos.parentOffset;
+    const parentStartPos = $pos.start();
+    if (!parentText) {
+      setContextSpellData(null);
+      return;
+    }
+
+    // 3. Try Intl.Segmenter (word level segmentation for Thai/English)
+    if (typeof Intl !== "undefined" && (Intl as any).Segmenter) {
+      try {
+        const segmenter = new (Intl as any).Segmenter(["th", "en"], { granularity: "word" });
+        for (const seg of segmenter.segment(parentText)) {
+          if (seg.isWordLike) {
+            const start = seg.index;
+            const end = seg.index + seg.segment.length;
+            if (offsetInParent >= start && offsetInParent <= end) {
+              const suggestions = getSpellingSuggestions(seg.segment);
+              if (suggestions.length > 0) {
+                setContextSpellData({
+                  word: seg.segment,
+                  suggestions,
+                  from: parentStartPos + start,
+                  to: parentStartPos + end,
+                });
+                return;
+              }
+            }
+          }
+        }
+      } catch {
+        // continue to next detection strategy
+      }
+    }
+
+    // 4. Check known Thai misspelled entries directly in parentText around offset
+    for (const [misspelled, corrects] of Object.entries(THAI_SPELL_CORRECTIONS)) {
+      let searchIdx = parentText.indexOf(misspelled);
+      while (searchIdx !== -1) {
+        const start = searchIdx;
+        const end = searchIdx + misspelled.length;
+        if (offsetInParent >= start - 1 && offsetInParent <= end + 1) {
+          const suggestions = corrects.filter((s) => s !== misspelled);
+          if (suggestions.length > 0) {
+            setContextSpellData({
+              word: misspelled,
+              suggestions,
+              from: parentStartPos + start,
+              to: parentStartPos + end,
+            });
+            return;
+          }
+        }
+        searchIdx = parentText.indexOf(misspelled, searchIdx + 1);
+      }
+    }
+
+    // 5. English / latin word regex boundary around offset
+    const latinWordRegex = /[A-Za-z0-9_']+/g;
+    let match: RegExpExecArray | null;
+    while ((match = latinWordRegex.exec(parentText)) !== null) {
+      const start = match.index;
+      const end = match.index + match[0].length;
+      if (offsetInParent >= start && offsetInParent <= end) {
+        const word = match[0];
+        const suggestions = getSpellingSuggestions(word);
+        if (suggestions.length > 0) {
+          setContextSpellData({
+            word,
+            suggestions,
+            from: parentStartPos + start,
+            to: parentStartPos + end,
+          });
+          return;
+        }
+        break;
+      }
+    }
+
+    setContextSpellData(null);
+  };
+
+  useEffect(() => {
+    if (!(window as any).electronAPI?.onNativeSpellSuggestions) return;
+    const unsub = (window as any).electronAPI.onNativeSpellSuggestions((data: { word: string; suggestions: string[] }) => {
+      if (!data || !data.suggestions || data.suggestions.length === 0) return;
+      setContextSpellData((prev) => {
+        if (prev) {
+          const merged = Array.from(new Set([...data.suggestions, ...prev.suggestions]));
+          return { ...prev, suggestions: merged };
+        }
+        if (!editor || !data.word) return null;
+        const { from } = editor.state.selection;
+        const $pos = editor.state.doc.resolve(from);
+        const parentText = $pos.parent.textContent;
+        const idx = parentText.indexOf(data.word);
+        if (idx !== -1) {
+          const wordFrom = $pos.start() + idx;
+          const wordTo = wordFrom + data.word.length;
+          return {
+            word: data.word,
+            suggestions: data.suggestions,
+            from: wordFrom,
+            to: wordTo,
+          };
+        }
+        return null;
+      });
+    });
+    return () => unsub();
+  }, [editor]);
+
+  const editorStats = useMemo(() => {
+    let syntaxLabel = t("editor.formatMarkdown") || "Markdown";
+    const fileName = note?.fileName?.toLowerCase() ?? "";
+    if (fileName.endsWith(".html") || note?.contentFormat === "html") {
+      syntaxLabel = "HTML";
+    } else if (fileName.endsWith(".txt")) {
+      syntaxLabel = t("editor.formatText") || "Plain Text";
+    }
+
+    const currentFontSize = settings.editorFontSize || editorFontSize || 15;
+    const zoom = Math.round((currentFontSize / 15) * 100);
+
+    if (note?.contentFormat === "html") {
+      const textContent = note?.content || "";
+      const charCount = countCharacters(textContent);
+      const wordCount = countWords(textContent);
+      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
+      return {
+        line: htmlCursor.line,
+        col: htmlCursor.col,
+        charCount,
+        wordCount,
+        readingTime,
+        syntaxLabel: "HTML",
+        zoom,
+      };
+    }
+
+    if (!editor) {
+      const charCount = note?.content ? countCharacters(note.content) : 0;
+      const wordCount = note?.content ? countWords(note.content) : 0;
+      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
       return {
         line: 1,
         col: 1,
@@ -2461,8 +3983,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         wordCount,
         readingTime,
         syntaxLabel,
-        zoom: Math.round((editorFontSize / 15) * 100),
-        lineEnding: "Windows (CRLF)",
+        zoom,
       };
     }
 
@@ -2473,20 +3994,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const line = lines.length;
     const col = (lines[lines.length - 1]?.length ?? 0) + 1;
     const textContent = doc?.textContent || "";
-    const charCount = textContent.length;
-    const wordCount = textContent.trim() ? textContent.trim().split(/\s+/).length : 0;
+    const charCount = countCharacters(textContent);
+    const wordCount = countWords(textContent);
     const readingTime = Math.max(1, Math.ceil(wordCount / 200));
-
-    let syntaxLabel = t("editor.syntaxMarkdown");
-    const fileName = note?.fileName?.toLowerCase() ?? "";
-    if (fileName.endsWith(".html") || note?.contentFormat === "html") {
-      syntaxLabel = t("editor.syntaxHtml");
-    } else if (fileName.endsWith(".txt")) {
-      syntaxLabel = t("editor.syntaxText");
-    }
-
-    const zoom = Math.round((editorFontSize / 15) * 100);
-    const lineEnding = "Windows (CRLF)";
 
     return {
       line,
@@ -2496,9 +4006,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       readingTime,
       syntaxLabel,
       zoom,
-      lineEnding,
     };
-  }, [editor, editorTick, note, editorFontSize, t]);
+  }, [editor, editorTick, note, editorFontSize, settings.editorFontSize, htmlCursor]);
 
   const getFreshFileHandle = useCallback(async (targetNote: Note, allowCreate = false): Promise<FileSystemFileHandle | null> => {
     if (!targetNote || isNoteDeleted(targetNote.id) || deletedNoteIdsRef.current.has(targetNote.id)) {
@@ -2547,14 +4056,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const opId = ++saveOpIdRef.current;
     setSaveStatus("auto_saving");
 
-    const freshHandle = await getFreshFileHandle(note);
-    if (!freshHandle?.createWritable) {
-      if (saveOpIdRef.current === opId) {
-        setSaveStatus("auto_saved");
-      }
-      return;
-    }
-
     const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
     if (relPath && isRelativePathDeleted(relPath)) {
       if (saveOpIdRef.current === opId) {
@@ -2567,15 +4068,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const ext = getPreferredExtension() as "md" | "txt" | "html";
       const content = getContentToSave(ext);
       await performSave(content, ext, true);
-      if (saveOpIdRef.current === opId) {
-        setSaveStatus("auto_saved");
-      }
     } catch {
       if (saveOpIdRef.current === opId) {
         setSaveStatus("failed");
       }
     }
-  }, [note, editor, settings.autoSave, notes, getFreshFileHandle]);
+  }, [note, editor, settings.autoSave, notes]);
 
   const scheduleAutoSaveDisk = useCallback(() => {
     if (autoSaveDiskTimeoutRef.current) {
@@ -2583,7 +4081,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     autoSaveDiskTimeoutRef.current = setTimeout(() => {
       void saveLinkedFileToDisk();
-    }, 400);
+    }, 200);
   }, [saveLinkedFileToDisk]);
 
   useEffect(() => {
@@ -2629,6 +4127,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
   }, [note?.id]);
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingRename();
+      flushDebouncedContentSave();
+      if (pendingSaveContentRef.current) {
+        const { id, content } = pendingSaveContentRef.current;
+        pendingSaveContentRef.current = null;
+        onUpdate(id, { content });
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [flushPendingRename, flushDebouncedContentSave, onUpdate]);
+
   type SaveStatus =
     | "saved"
     | "auto_saved"
@@ -2647,14 +4159,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [statusPortalTarget, setStatusPortalTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (onCloseSplit) return;
+    const actionId = `breadcrumb-editor-actions-${paneId}`;
+    const statusId = `breadcrumb-save-status-${paneId}`;
 
     const findTargets = () => {
-      const target = document.getElementById("breadcrumb-editor-actions");
+      const target = document.getElementById(actionId);
       if (target) {
         setPortalTarget((prev) => (prev !== target ? target : prev));
       }
-      const statusTarget = document.getElementById("breadcrumb-save-status");
+      const statusTarget = document.getElementById(statusId);
       if (statusTarget) {
         setStatusPortalTarget((prev) => (prev !== statusTarget ? statusTarget : prev));
       }
@@ -2670,7 +4183,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       clearInterval(interval);
       observer.disconnect();
     };
-  }, [onCloseSplit]);
+  }, [paneId]);
+
+  useEffect(() => {
+    if (note?.content) {
+      setLineEnding(note.content.includes("\r\n") ? "CRLF" : "LF");
+    }
+  }, [note?.id]);
+
+  const handleToggleLineEnding = () => {
+    const nextEnding: "LF" | "CRLF" = lineEnding === "LF" ? "CRLF" : "LF";
+    setLineEnding(nextEnding);
+    if (note && onUpdate) {
+      const currentContent = note.content || "";
+      const updatedContent = nextEnding === "CRLF"
+        ? currentContent.replace(/\r?\n/g, "\r\n")
+        : currentContent.replace(/\r\n/g, "\n");
+      if (updatedContent !== currentContent) {
+        onUpdate(note.id, { content: updatedContent });
+      }
+    }
+  };
 
   useEffect(() => {
     if (!note) return;
@@ -2696,8 +4229,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     if (!editor || !note) return;
 
-    // If editor is already showing content for this exact active note, do not re-set content or disrupt selection cursor!
+    if ((note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content)) {
+      editorActiveNoteIdRef.current = null;
+      noteEditorStateMap.delete(note.id);
+      return;
+    }
+
+    const baseTitle = getBaseTitle(note);
+
+    // If editor is already showing content for this exact active note, sync Title H1 if fileName was changed externally
     if (editorActiveNoteIdRef.current === note.id) {
+      if (!isTxtFile(note)) {
+        const firstChild = editor.state.doc.firstChild;
+        if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
+          const currentH1 = (firstChild.textContent || "").trim();
+          if (baseTitle && currentH1 !== baseTitle) {
+            syncingFromNote.current = true;
+            const tr = editor.state.tr;
+            const from = 1;
+            const to = 1 + firstChild.nodeSize - 2;
+            tr.replaceWith(from, to, editor.schema.text(baseTitle));
+            editor.view.dispatch(tr);
+            syncingFromNote.current = false;
+          }
+        }
+      }
       return;
     }
 
@@ -2706,37 +4262,132 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    const noteContent = note.content ?? "";
-    const baseTitle = getBaseTitle(note);
+    // Save previous active note's state and scroll position into map before switching to new note
+    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) {
+      const prevId = editorActiveNoteIdRef.current;
+      if (!closedNoteIds.has(prevId)) {
+        if (editor.state) {
+          noteEditorStateMap.set(prevId, editor.state);
+        }
+        if (editorScrollContainerRef.current) {
+          setNoteScrollPosition(prevId, editorScrollContainerRef.current.scrollTop);
+        }
+      }
+    }
+
+    // Since this note is now active and being viewed/edited, remove it from closedNoteIds
+    closedNoteIds.delete(note.id);
+
+    // Check if this note already has a preserved editor state (from an open tab)
+    const savedState = noteEditorStateMap.get(note.id);
+    if (savedState) {
+      syncingFromNote.current = true;
+      editorActiveNoteIdRef.current = note.id;
+      editor.view.updateState(savedState);
+      syncingFromNote.current = false;
+      loadingNoteIdRef.current = null;
+      setEditorTick((v) => v + 1);
+      restoreScrollPosition(note.id);
+      return;
+    }
+
+    loadingNoteIdRef.current = note.id;
+    let noteContent = note.content ?? "";
+    if (!noteContent.trim()) {
+      try {
+        const backup = localStorage.getItem(`luno_backup_${note.id}`) ||
+                       (note.fileName ? localStorage.getItem(`luno_backup_fn_${note.fileName}`) : null);
+        if (backup && backup.trim()) {
+          noteContent = backup;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note));
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
     (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
     void resolveRelativeImagesInEditor(editor);
-    // Reset undo/redo history so that undoing does not bring back content
-    // from a previously opened note.
-    editor.view.updateState(
-      EditorState.create({
-        doc: editor.state.doc,
-        plugins: editor.state.plugins,
-      })
-    );
 
     if (!isTxtFile(note)) {
       const firstChild = editor.state.doc.firstChild;
       if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-        if (!(firstChild.textContent || "").trim() && baseTitle) {
+        const currentH1 = (firstChild.textContent || "").trim();
+        if (baseTitle && currentH1 !== baseTitle) {
           const tr = editor.state.tr;
-          tr.insertText(baseTitle, 1, 1);
+          const from = 1;
+          const to = 1 + firstChild.nodeSize - 2;
+          tr.replaceWith(from, to, editor.schema.text(baseTitle));
           editor.view.dispatch(tr);
         }
       }
     }
 
+    // Reset history stack for the freshly loaded note document so undo/redo are clean (depth: 0)
+    const cleanState = EditorState.create({
+      doc: editor.state.doc,
+      plugins: editor.state.plugins,
+    });
+    editor.view.updateState(cleanState);
+    noteEditorStateMap.set(note.id, editor.state);
+
     setEditorTick((v) => v + 1);
     syncingFromNote.current = false;
-  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle]);
+    loadingNoteIdRef.current = null;
+    restoreScrollPosition(note.id);
+  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition]);
+
+  useEffect(() => {
+    return () => {
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
+        debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+        autoSaveDiskTimeoutRef.current = null;
+      }
+      if (pendingSaveContentRef.current) {
+        const pending = pendingSaveContentRef.current;
+        pendingSaveContentRef.current = null;
+        if (userEditedRef.current && pending.id === note?.id) {
+          onUpdate(pending.id, { content: pending.content });
+        }
+        userEditedRef.current = false;
+      }
+    };
+  }, [note?.id, onUpdate]);
+
+  // Save active note state on unmount & flush pending save
+  useEffect(() => {
+    return () => {
+      if (note?.id && !closedNoteIds.has(note.id)) {
+        if (editor && !editor.isDestroyed) {
+          noteEditorStateMap.set(note.id, editor.state);
+        }
+        if (editorScrollContainerRef.current) {
+          setNoteScrollPosition(note.id, editorScrollContainerRef.current.scrollTop);
+        }
+      }
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
+        debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+        autoSaveDiskTimeoutRef.current = null;
+      }
+      if (editorActiveNoteIdRef.current && editor && !editor.isDestroyed) {
+        if (pendingSaveContentRef.current) {
+          const { id, content } = pendingSaveContentRef.current;
+          pendingSaveContentRef.current = null;
+          onUpdate(id, { content });
+        }
+      }
+    };
+  }, [editor, onUpdate, note?.id]);
 
   useEffect(() => {
     if (!editor) return;
@@ -2746,12 +4397,36 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       },
       editorProps: {
         attributes: {
-          style: `font-size:${editorFontSize}px;`,
-          class: EDITOR_CLASSES,
+          style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
+          class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
+            settings.accentHeadings
+              ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
+              : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
+          }`,
+          spellcheck: "false",
         },
       },
     });
-  }, [editor, editorFontSize]);
+    if (editor?.view?.dom) {
+      editor.view.dom.setAttribute("spellcheck", "false");
+    }
+  }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.setEditable(!isReadingMode);
+  }, [editor, isReadingMode]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.extensionManager.extensions.forEach((ext) => {
+      if (ext.name === "spellCheckDecoration") {
+        ext.options.enabled = spellCheckEnabled;
+      }
+    });
+    editor.view.dispatch(editor.state.tr);
+  }, [editor, spellCheckEnabled]);
+
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -2795,14 +4470,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return !prev;
       });
     };
+    const handleToggleTranslator = () => {
+      toggleTranslator();
+    };
 
     window.addEventListener("app:toggle-calculator", handleToggleCalc);
     window.addEventListener("app:toggle-clock", handleToggleClock);
+    window.addEventListener("app:toggle-translator", handleToggleTranslator);
     return () => {
       window.removeEventListener("app:toggle-calculator", handleToggleCalc);
       window.removeEventListener("app:toggle-clock", handleToggleClock);
+      window.removeEventListener("app:toggle-translator", handleToggleTranslator);
     };
-  }, [bringCalculatorToFront, bringClockToFront]);
+  }, [bringCalculatorToFront, bringClockToFront, toggleTranslator]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -2810,10 +4490,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const ctrl = e.ctrlKey || e.metaKey;
       if (!ctrl) return;
 
-      const key = e.key.toLowerCase();
+      const key = e.key ? e.key.toLowerCase() : "";
+      const code = e.code || "";
 
       // Ctrl + S (Save Note)
-      if (key === "s" && !e.shiftKey && !e.altKey) {
+      if ((key === "s" || code === "KeyS") && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         handleSaveFile();
@@ -2821,7 +4502,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       // Ctrl + Shift + C (Toggle Calculator)
-      if (e.shiftKey && key === "c") {
+      if (e.shiftKey && (key === "c" || code === "KeyC")) {
         e.preventDefault();
         e.stopPropagation();
         setCalculatorOpen((prev) => {
@@ -2832,7 +4513,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       // Ctrl + Shift + T (Toggle Clock)
-      if (e.shiftKey && key === "t") {
+      if (e.shiftKey && (key === "t" || code === "KeyT")) {
         e.preventDefault();
         e.stopPropagation();
         setClockOpen((prev) => {
@@ -2842,8 +4523,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return;
       }
 
+      // Ctrl + Shift + L (Fix Mistyped Language TH/EN)
+      if (e.shiftKey && (key === "l" || code === "KeyL")) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleFixLanguage();
+        return;
+      }
+
       // Ctrl + B (Bold Text)
-      if (key === "b" && !e.shiftKey && !e.altKey) {
+      if ((key === "b" || code === "KeyB") && !e.shiftKey && !e.altKey) {
         if (editor && !editor.isDestroyed) {
           e.preventDefault();
           e.stopPropagation();
@@ -2853,7 +4542,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       // Ctrl + I (Italic Text)
-      if (key === "i" && !e.shiftKey && !e.altKey) {
+      if ((key === "i" || code === "KeyI") && !e.shiftKey && !e.altKey) {
         if (editor && !editor.isDestroyed) {
           e.preventDefault();
           e.stopPropagation();
@@ -2862,16 +4551,120 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return;
       }
 
-      if (e.shiftKey && e.key === "L") {
-        e.preventDefault();
-        handleFixLanguage();
+      // Ctrl + U (Underline Text)
+      if ((key === "u" || code === "KeyU") && !e.shiftKey && !e.altKey) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleUnderline().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + X or Alt + Shift + 5 (Strikethrough)
+      if ((e.shiftKey && (key === "x" || code === "KeyX")) || (e.altKey && e.shiftKey && (key === "5" || code === "Digit5"))) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleStrike().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + H (Highlight Text)
+      if (e.shiftKey && (key === "h" || code === "KeyH")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleHighlight().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + E or Ctrl + ` (Inline Code)
+      if ((e.shiftKey && (key === "e" || code === "KeyE")) || key === "`" || code === "Backquote") {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleCode().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + 7 (Numbered List)
+      if (e.shiftKey && (key === "7" || code === "Digit7" || code === "Numpad7")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleOrderedList().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + 8 (Bullet List)
+      if (e.shiftKey && (key === "8" || key === "*" || code === "Digit8" || code === "Numpad8")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleBulletList().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + 9 (Task / Todo List)
+      if (e.shiftKey && (key === "9" || code === "Digit9" || code === "Numpad9")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleTaskList().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + Q (Blockquote)
+      if (e.shiftKey && (key === "q" || code === "KeyQ")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleBlockquote().run();
+        }
+        return;
+      }
+
+      // Ctrl + Alt + C (Code Block)
+      if (e.altKey && (key === "c" || code === "KeyC")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleCodeBlock().run();
+        }
+        return;
+      }
+
+      // Ctrl + K (Insert / Edit Link in Editor)
+      if ((key === "k" || code === "KeyK") && !e.shiftKey && !e.altKey) {
+        if (editor && !editor.isDestroyed && editor.isFocused) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleOpenLinkDialog();
+          return;
+        }
+      }
+
+      // Ctrl + Shift + N (Clear Formatting)
+      if (e.shiftKey && (key === "n" || code === "KeyN")) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().unsetAllMarks().clearNodes().run();
+        }
         return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [note, editor, bringCalculatorToFront, bringClockToFront]);
+  }, [note, editor, bringCalculatorToFront, bringClockToFront, handleSaveFile]);
   const showUiAlert = (message: string) => setAlertMessage(message);
   const countMappable = (text: string, map: Record<string, string>) => [...text].reduce((count, ch) => count + (map[ch] ? 1 : 0), 0);
   const convertWithMap = (text: string, map: Record<string, string>) => [...text].map((ch) => map[ch] ?? ch).join("");
@@ -3059,35 +4852,120 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const openLinkDialog = () => {
     if (!editor) return;
     rememberSelection();
-    setLinkUrl(editor.getAttributes("link").href ?? "");
+
+    const attrs = editor.getAttributes("link");
+    const existingHref = attrs.href ?? "";
+    const selectedText = editor.state.doc.textBetween(
+      editor.state.selection.from,
+      editor.state.selection.to,
+      " "
+    );
+
+    setLinkDisplayText(selectedText || "");
+    setWorkspaceSearchQuery("");
+
+    if (existingHref.startsWith("wikilink:") || attrs["data-wikilink"]) {
+      setLinkTab("workspace");
+      const targetName = decodeURIComponent(existingHref.replace(/^wikilink:/, "")) || attrs["data-wikilink"] || "";
+      const found = (notes || []).find((n) => {
+        const base = (n.fileName || n.title || "").replace(/\.[^/.]+$/, "").toLowerCase();
+        return base === targetName.toLowerCase() || (n.fileName || "").toLowerCase() === targetName.toLowerCase();
+      });
+      setSelectedWorkspaceNote(found || null);
+      setLinkUrl("");
+    } else if (existingHref) {
+      setLinkTab("external");
+      setLinkUrl(existingHref);
+      setSelectedWorkspaceNote(null);
+    } else {
+      setLinkTab(notes && notes.length > 0 ? "workspace" : "external");
+      setLinkUrl("");
+      setSelectedWorkspaceNote(null);
+    }
+
     setLinkDialogOpen(true);
   };
 
   const handleApplyLink = () => {
     if (!editor) return;
-
-    const nextUrl = normalizeUrl(linkUrl);
-    if (!nextUrl) {
-      const chain = getFocusedChain();
-      if (!chain) return;
-      chain.extendMarkRange("link").unsetLink().run();
-      setLinkDialogOpen(false);
-      setLinkUrl("");
-      return;
-    }
-
-    try {
-      new URL(nextUrl, window.location.origin);
-    } catch {
-      showUiAlert(t("editor.invalidLinkUrl"));
-      return;
-    }
-
     const chain = getFocusedChain();
     if (!chain) return;
-    chain.extendMarkRange("link").setLink({ href: nextUrl }).run();
+
+    if (linkTab === "external") {
+      const nextUrl = normalizeUrl(linkUrl);
+      if (!nextUrl) {
+        chain.extendMarkRange("link").unsetLink().run();
+        setLinkDialogOpen(false);
+        setLinkUrl("");
+        setLinkDisplayText("");
+        return;
+      }
+
+      try {
+        new URL(nextUrl, window.location.origin);
+      } catch {
+        showUiAlert(t("editor.invalidLinkUrl"));
+        return;
+      }
+
+      const displayText = linkDisplayText.trim();
+      if (displayText && editor.state.selection.empty) {
+        chain
+          .insertContent({
+            type: "text",
+            text: displayText,
+            marks: [{ type: "link", attrs: { href: nextUrl } }],
+          })
+          .run();
+      } else {
+        chain.extendMarkRange("link").setLink({ href: nextUrl }).run();
+      }
+    } else {
+      // Workspace Note link
+      if (!selectedWorkspaceNote) {
+        showUiAlert(t("editor.selectNoteFirst") || "Please select a note from your workspace.");
+        return;
+      }
+
+      const noteTitle = (selectedWorkspaceNote.fileName || selectedWorkspaceNote.title || "").replace(/\.[^/.]+$/, "").trim();
+      const href = `wikilink:${encodeURIComponent(noteTitle)}`;
+      const displayText = linkDisplayText.trim() || noteTitle;
+
+      if (editor.state.selection.empty) {
+        chain
+          .insertContent({
+            type: "text",
+            text: displayText,
+            marks: [
+              {
+                type: "link",
+                attrs: {
+                  href,
+                  "data-wikilink": noteTitle,
+                  class: "internal-wikilink text-primary underline underline-offset-4 cursor-pointer",
+                },
+              },
+            ],
+          })
+          .run();
+      } else {
+        chain
+          .extendMarkRange("link")
+          .setLink({
+            href,
+          })
+          .updateAttributes("link", {
+            "data-wikilink": noteTitle,
+            class: "internal-wikilink text-primary underline underline-offset-4 cursor-pointer",
+          })
+          .run();
+      }
+    }
+
     setLinkDialogOpen(false);
     setLinkUrl("");
+    setLinkDisplayText("");
+    setSelectedWorkspaceNote(null);
   };
 
   const handleRemoveLink = () => {
@@ -3096,6 +4974,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     chain.extendMarkRange("link").unsetLink().run();
     setLinkDialogOpen(false);
     setLinkUrl("");
+    setLinkDisplayText("");
+    setSelectedWorkspaceNote(null);
   };
 
   const openImageDialog = () => {
@@ -3103,6 +4983,36 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setImageUrl("");
     setImageDialogOpen(true);
   };
+
+  const openWorkspaceImageDialog = useCallback(() => {
+    rememberSelection();
+    setWorkspaceImageDialogOpen(true);
+  }, [rememberSelection]);
+
+  const handleInsertWorkspaceImage = useCallback(
+    (targetNote: Note, relativePath: string, blobUrl?: string) => {
+      const fileName = targetNote.fileName || targetNote.title || "image.png";
+      const finalBlobUrl = blobUrl || assetBlobUrlMap.current.get(relativePath) || relativePath;
+      if (blobUrl) {
+        assetBlobUrlMap.current.set(relativePath, blobUrl);
+        assetBlobUrlMap.current.set(blobUrl, relativePath);
+      }
+      const chain = getFocusedChain();
+      if (chain) {
+        chain.setImage({ src: finalBlobUrl, alt: fileName, "data-relative-src": relativePath } as any).run();
+      }
+    },
+    [getFocusedChain]
+  );
+
+  const openAudioRecorder = useCallback(() => {
+    rememberSelection();
+    setAudioRecorderOpen((prev) => {
+      const next = !prev;
+      if (next) bringAudioRecorderToFront();
+      return next;
+    });
+  }, [rememberSelection, bringAudioRecorderToFront]);
 
   const triggerImageUpload = useCallback(() => {
     rememberSelection();
@@ -3112,8 +5022,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     openLinkDialogRef.current = openLinkDialog;
     openImageDialogRef.current = openImageDialog;
+    openWorkspaceImageDialogRef.current = openWorkspaceImageDialog;
     triggerImageUploadRef.current = triggerImageUpload;
+    openAudioRecorderRef.current = openAudioRecorder;
     handleFixLanguageRef.current = handleFixLanguage;
+    openTranslatorRef.current = toggleTranslator;
     processAndInsertImageFileRef.current = processAndInsertImageFile;
   });
 
@@ -3206,6 +5119,49 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const finalBlob = compressed?.blob || file;
     const finalFileName = file.name;
 
+    // 1. Electron Desktop Workspace Support
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const rawBase64 = finalDataUrl?.includes("base64,") ? finalDataUrl.split("base64,")[1] : "";
+          if (rawBase64) {
+            let uniqueName = finalFileName;
+            const attachmentsFolder = `${saved.folderPath}/attachments`;
+            if (electronAPI.readDirectoryFiles) {
+              const existing: string[] = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+              const lastDot = finalFileName.lastIndexOf(".");
+              const baseName = lastDot > 0 ? finalFileName.slice(0, lastDot) : finalFileName;
+              const ext = lastDot > 0 ? finalFileName.slice(lastDot) : "";
+              let counter = 1;
+              while (existing.includes(uniqueName)) {
+                uniqueName = `${baseName} ${counter}${ext}`;
+                counter++;
+              }
+            }
+
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueName}`;
+            await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+
+            const relPath = getRelativeAttachmentPath(uniqueName);
+            const blobUrl = URL.createObjectURL(finalBlob);
+            assetBlobUrlMap.current.set(relPath, blobUrl);
+            assetBlobUrlMap.current.set(blobUrl, relPath);
+
+            const chain = getFocusedChain();
+            if (chain) {
+              chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath } as any).run();
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to save attachment in Electron workspace:", err);
+      }
+    }
+
+    // 2. Web File System Access API Support
     if (rootDirHandle) {
       try {
         const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
@@ -3260,8 +5216,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     const parsedFm = parseFrontmatterAndTags(text);
     const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : text;
-    const preprocessed = preprocessMarkdownForEditor(cleanText);
-    const content = format === "plain" ? cleanText : (marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string);
+    const content = format === "plain" ? cleanText : toEditorHtml(cleanText, false);
     const tags = Array.from(new Set([...(note.tags || []), ...parsedFm.allTags]));
     onUpdate(note.id, { content, contentFormat: format, tags });
   };
@@ -3285,8 +5240,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return `${safeTitle}.${ext}`;
   };
 
+  const normalizeSerializedMarkdown = (markdown: string): string => {
+    let clean = markdown.replace(/\r\n?/g, "\n");
+    clean = clean.replace(/\n*<!--luno:blank-->/g, "\n");
+    clean = clean.replace(/<!--luno:blank-->/g, "");
+    return clean.replace(/^[\r\n]+|[\r\n]+$/g, "");
+  };
+
   const getMarkdownFromHtml = (html: string): string => {
-    return turndown.turndown(html).replace(/^[\r\n]+|[\r\n]+$/g, "");
+    return normalizeSerializedMarkdown(turndown.turndown(html));
   };
 
   const getPlainTextFromHtml = (html: string): string => {
@@ -3308,7 +5270,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return Array.from(temp.childNodes)
       .map(walk)
       .join("")
-      .replace(/\n{3,}/g, "\n\n")
       .trimEnd();
   };
 
@@ -3358,8 +5319,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return current as FileSystemFileHandle;
   };
 
+  const resolveAssetDataUrl = async (assetPath: string): Promise<string | null> => {
+    if (!note) return null;
+    const resolvedRelPath = resolveAssetPath(note.folderPath || "", assetPath);
+    if (!resolvedRelPath) return null;
+
+    // 1. Electron Desktop Native Support
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const fullPath = `${saved.folderPath}/${resolvedRelPath}`;
+          const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+          if (dataUrl) return dataUrl;
+        }
+      } catch (err) {
+        console.warn("Electron asset resolution failed:", assetPath, err);
+      }
+    }
+
+    // 2. Web File System Access API
+    if (rootDirHandle) {
+      try {
+        const handle = await resolveAssetHandle(assetPath);
+        if (handle && typeof handle.getFile === "function") {
+          const file = await handle.getFile();
+          return await fileToDataUrl(file);
+        }
+      } catch (err) {
+        console.warn("Web asset resolution failed:", assetPath, err);
+      }
+    }
+
+    return null;
+  };
+
   const resolveRelativeImagesInEditor = useCallback(async (instance: TiptapEditor | null) => {
-    if (!instance || instance.isDestroyed || !rootDirHandle || !note) return;
+    if (!instance || instance.isDestroyed || !note) return;
 
     const { doc, tr } = instance.state;
     const tasks: Array<{ pos: number; relPath: string }> = [];
@@ -3384,10 +5381,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let blobUrl = assetBlobUrlMap.current.get(relPath);
       if (!blobUrl) {
         try {
-          const handle = await resolveAssetHandle(relPath);
-          if (handle && typeof handle.getFile === "function") {
-            const file = await handle.getFile();
-            blobUrl = URL.createObjectURL(file);
+          const resolvedUrl = await resolveAssetDataUrl(relPath);
+          if (resolvedUrl) {
+            blobUrl = resolvedUrl;
             assetBlobUrlMap.current.set(relPath, blobUrl);
             assetBlobUrlMap.current.set(blobUrl, relPath);
           }
@@ -3442,10 +5438,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       const rewritten = await rewriteHtmlForPreview(note.content, async (assetPath) => {
-        const handle = await resolveAssetHandle(assetPath);
-        if (!handle || typeof handle.getFile !== "function") return null;
-        const file = await handle.getFile();
-        return await fileToDataUrl(file);
+        return await resolveAssetDataUrl(assetPath);
       });
 
       if (!cancelled) setPreviewHtml(rewritten);
@@ -3580,8 +5573,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" = "txt") => {
     if (!note) return;
 
+    const normalizedContent = lineEnding === "CRLF"
+      ? markdown.replace(/\r?\n/g, "\r\n")
+      : markdown.replace(/\r\n/g, "\n");
+
     const blobType = ext === "txt" ? "text/plain;charset=utf-8" : ext === "html" ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8";
-    const blob = new Blob([markdown], { type: blobType });
+    const blob = new Blob([normalizedContent], { type: blobType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     const safeTitle = (note?.title || "note").trim().replace(/[\\/:*?"<>|]/g, "_") || "note";
@@ -3596,12 +5593,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       description: t("editor.saveToastDownloaded", { file: anchor.download }),
     });
 
-    setSavedSnapshot(note.id, ext, markdown);
+    setSavedSnapshot(note.id, ext, normalizedContent);
   };
 
   const performSave = async (content: string, ext: "md" | "txt" | "html", isSilent = false) => {
     if (!note || isNoteDeleted(note.id) || deletedNoteIdsRef.current.has(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
+
+    const normalizedContent = lineEnding === "CRLF"
+      ? content.replace(/\r?\n/g, "\r\n")
+      : content.replace(/\r\n/g, "\n");
 
     const currentOpId = ++saveOpIdRef.current;
     if (!isSilent) setSaveStatus("saving");
@@ -3612,9 +5613,56 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
+    let finalPayloadToDisk = normalizedContent;
+    if (note.isLocked) {
+      const activePin = onGetActivePin?.(note.id);
+      if (activePin) {
+        try {
+          finalPayloadToDisk = await encryptNoteContent(normalizedContent, activePin);
+        } catch (err) {
+          console.error("Failed to encrypt note before disk save:", err);
+        }
+      }
+    }
+
+    // 1. Electron Desktop Native Direct Disk Save
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
+      const saved = await electronAPI.getSavedWorkspace();
+      if (saved?.folderPath && note.fileName) {
+        const fullPath = note.folderPath
+          ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
+          : `${saved.folderPath}/${note.fileName}`;
+
+        const ok = await electronAPI.writeFileContent({ fullPath, content: finalPayloadToDisk });
+        if (ok) {
+          setSavedSnapshot(note.id, ext, normalizedContent);
+          if (saveOpIdRef.current === currentOpId) {
+            setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
+          }
+          if (!isSilent) {
+            toast({
+              title: t("editor.saveToastTitle") || "Saved",
+              description: note.fileName,
+            });
+          }
+          return;
+        }
+      }
+    }
+
     const existingHandle = await getFreshFileHandle(note, true);
     if (!existingHandle?.createWritable) {
-      if (saveOpIdRef.current === currentOpId) setSaveStatus("unavailable");
+      if (saveOpIdRef.current === currentOpId) {
+        setSavedSnapshot(note.id, ext, normalizedContent);
+        setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
+        if (!isSilent) {
+          toast({
+            title: t("editor.saveToastTitle") || "Saved",
+            description: note.fileName || note.title || "Note",
+          });
+        }
+      }
       return;
     }
 
@@ -3623,14 +5671,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (!isSilent) {
         const permission = await requestPermissionIfAvailable(existingHandle, "readwrite");
         if (permission !== "granted") {
-          downloadMarkdown(content, ext);
+          downloadMarkdown(finalPayloadToDisk, ext);
           if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
           return;
         }
       }
 
       writable = await existingHandle.createWritable();
-      await writable.write(content);
+      await writable.write(finalPayloadToDisk);
       await writable.close();
       writable = null;
       await setStoredFileHandle(note.id, existingHandle);
@@ -3642,7 +5690,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           description: t("editor.saveToastSuccess", { file: savedFile.name }),
         });
       }
-      setSavedSnapshot(note.id, ext, content);
+      setSavedSnapshot(note.id, ext, normalizedContent);
       if (saveOpIdRef.current === currentOpId) {
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
       }
@@ -3659,75 +5707,131 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if ((error as Error)?.name === "NotFoundError" || (error as Error)?.name === "NotAllowedError") {
         await clearLinkedMetadata();
       }
-      if (!isSilent) downloadMarkdown(content, ext);
+      if (!isSilent) downloadMarkdown(normalizedContent, ext);
     }
   };
 
-  const performSaveAs = async (content: string, ext: "md" | "txt" | "html") => {
+  const performSaveAs = async (customContent?: string, customExt?: "md" | "txt" | "html") => {
     if (!note || isNoteDeleted(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
+
+    const preferredExt = customExt || (getPreferredExtension() as "md" | "txt" | "html");
+    const rawContent = customContent ?? getContentToSave(preferredExt);
+    const content = lineEnding === "CRLF"
+      ? rawContent.replace(/\r?\n/g, "\r\n")
+      : rawContent.replace(/\r\n/g, "\n");
+    const baseName = getSuggestedFileName().replace(/\.(md|txt|html)$/i, "");
+    const defaultFileName = `${baseName}.${preferredExt}`;
 
     const currentOpId = ++saveOpIdRef.current;
     setSaveStatus("saving");
 
-    if (!canUseNativeFs()) {
-      downloadMarkdown(content, ext);
-      if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
-      return;
-    }
+    // 1. Electron Desktop Native Save As Dialog
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.showSaveDialog && electronAPI?.writeFileContent) {
+      try {
+        const filePath = await electronAPI.showSaveDialog({
+          title: t("editor.saveAs") || "Save As",
+          defaultPath: defaultFileName,
+          filters: [
+            { name: "Markdown Document (*.md)", extensions: ["md", "markdown"] },
+            { name: "Plain Text Document (*.txt)", extensions: ["txt"] },
+            { name: "HTML Document (*.html)", extensions: ["html", "htm"] },
+            { name: "All Files (*.*)", extensions: ["*"] },
+          ],
+        });
 
-    try {
-      const w = window as unknown as { showSaveFilePicker: (options?: unknown) => Promise<FileSystemFileHandle> };
-      const extDesc = ext === "md" ? "Markdown" : ext === "html" ? "HTML" : "Text";
-      const extAccept = ext === "md" ? ".md" : ext === "html" ? ".html" : ".txt";
-      const mimeType = ext === "md" ? "text/markdown" : ext === "html" ? "text/html" : "text/plain";
-      const handle = await w.showSaveFilePicker({
-        suggestedName: getSuggestedFileName().replace(/\.(md|txt|html)$/, `.${ext}`),
-        types: [
-          {
-            description: `${extDesc} files`,
-            accept: { [mimeType]: [extAccept] },
-          },
-        ],
-      });
+        if (!filePath) {
+          if (saveOpIdRef.current === currentOpId) setSaveStatus("saved");
+          return;
+        }
 
-      const writable = await handle.createWritable();
-      await writable.write(content);
-      await writable.close();
-      let targetNoteId = note.id;
-
-      // Save As on a linked note should create a new note entry, keeping the original linked file.
-      if (note.isLinkedFile && onCreate) {
-        const result = onCreate(note.folderPath ?? undefined);
-        const createdNote = result instanceof Promise ? await result : result;
-        if (createdNote && "id" in createdNote) {
-          targetNoteId = createdNote.id;
-          onUpdate(targetNoteId, {
-            content: ext === "txt" ? content : note.content,
-            contentFormat: ext === "txt" ? "plain" : ext === "html" ? "html" : "markdown",
-            isLinkedFile: false,
-            fileName: undefined,
+        const selectedExt = (filePath.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html";
+        const finalContent = getContentToSave(selectedExt === "html" || selectedExt === "txt" ? selectedExt : "md");
+        const ok = await electronAPI.writeFileContent({ fullPath: filePath, content: finalContent });
+        if (ok) {
+          setSavedSnapshot(note.id, selectedExt, finalContent);
+          if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
+          const justName = filePath.replace(/\\/g, "/").split("/").pop() || defaultFileName;
+          toast({
+            title: t("editor.saveToastTitle") || "Saved",
+            description: justName,
           });
         }
+        return;
+      } catch (err) {
+        console.error("Electron Save As failed:", err);
       }
-
-      fileHandleByNoteIdRef.current[targetNoteId] = handle;
-      await setStoredFileHandle(targetNoteId, handle);
-      const savedFile = await handle.getFile();
-      updateLinkedMetadata(targetNoteId, savedFile.name);
-      toast({
-        title: t("editor.saveToastTitle"),
-        description: t("editor.saveToastSuccess", { file: savedFile.name }),
-      });
-      setSavedSnapshot(targetNoteId, ext, content);
-      if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
-    } catch (error) {
-      if ((error as DOMException)?.name !== "AbortError") {
-        console.error("Save file failed", error);
-        if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
-      }
-      downloadMarkdown(content, ext);
     }
+
+    // 2. Web Browser Native Save As File Picker
+    if (typeof (window as any).showSaveFilePicker === "function") {
+      try {
+        const w = window as unknown as { showSaveFilePicker: (options?: unknown) => Promise<FileSystemFileHandle> };
+        const handle = await w.showSaveFilePicker({
+          suggestedName: defaultFileName,
+          types: [
+            {
+              description: "Markdown Document (*.md)",
+              accept: { "text/markdown": [".md", ".markdown"] },
+            },
+            {
+              description: "Plain Text Document (*.txt)",
+              accept: { "text/plain": [".txt"] },
+            },
+            {
+              description: "HTML Document (*.html)",
+              accept: { "text/html": [".html", ".htm"] },
+            },
+          ],
+        });
+
+        const file = await handle.getFile();
+        const chosenExt = (file.name.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html";
+        const finalContent = getContentToSave(chosenExt === "html" || chosenExt === "txt" ? chosenExt : "md");
+
+        const writable = await handle.createWritable();
+        await writable.write(finalContent);
+        await writable.close();
+
+        let targetNoteId = note.id;
+        if (note.isLinkedFile && onCreate) {
+          const result = onCreate(note.folderPath ?? undefined);
+          const createdNote = result instanceof Promise ? await result : result;
+          if (createdNote && "id" in createdNote) {
+            targetNoteId = createdNote.id;
+            onUpdate(targetNoteId, {
+              content: chosenExt === "txt" ? finalContent : note.content,
+              contentFormat: chosenExt === "txt" ? "plain" : chosenExt === "html" ? "html" : "markdown",
+              isLinkedFile: false,
+              fileName: undefined,
+            });
+          }
+        }
+
+        fileHandleByNoteIdRef.current[targetNoteId] = handle;
+        await setStoredFileHandle(targetNoteId, handle);
+        updateLinkedMetadata(targetNoteId, file.name);
+        toast({
+          title: t("editor.saveToastTitle") || "Saved",
+          description: file.name,
+        });
+        setSavedSnapshot(targetNoteId, chosenExt, finalContent);
+        if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
+        return;
+      } catch (error: any) {
+        if (error?.name === "AbortError") {
+          // User clicked Cancel in native dialog
+          if (saveOpIdRef.current === currentOpId) setSaveStatus("saved");
+          return;
+        }
+        console.warn("Save file picker failed, falling back to download:", error);
+      }
+    }
+
+    // 3. Browser fallback
+    downloadMarkdown(content, preferredExt);
+    if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
   };
 
 
@@ -3739,6 +5843,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let objectUrl: string | null = null;
 
     const hydrateHandle = async () => {
+      // 1. Electron Desktop Native Support
+      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath && note?.fileName) {
+            const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+            const fullPath = `${saved.folderPath}/${relPath}`;
+            if (note.fileType === "image") {
+              const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+              if (dataUrl && !cancelled) {
+                setImageBlobUrl(dataUrl);
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Electron hydrate image failed:", err);
+        }
+      }
+
       let storedHandle = await getStoredFileHandle(note.id);
       if (!storedHandle && rootDirHandle && note.fileName) {
         try {
@@ -3793,6 +5918,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
 
     setImageBlobUrl(null);
+    setIsImageZoomed(false);
+    setCanZoomImage(false);
     void hydrateHandle();
 
     return () => {
@@ -3848,9 +5975,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
     const ext = getPreferredExtension() as "md" | "txt" | "html";
     const content = getContentToSave(ext);
+
+    // 1. Electron Desktop Native Direct Save to Disk
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
+      const saved = await electronAPI.getSavedWorkspace();
+      if (saved?.folderPath && note.fileName) {
+        setSaveStatus("saving");
+        const fullPath = note.folderPath
+          ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
+          : `${saved.folderPath}/${note.fileName}`;
+
+        const ok = await electronAPI.writeFileContent({ fullPath, content });
+        if (ok) {
+          setSaveStatus("manually_saved");
+          setSavedSnapshot(note.id, ext, content);
+          toast({
+            title: t("editor.saveToastTitle") || "Saved",
+            description: note.fileName,
+          });
+          return;
+        }
+      }
+    }
+
+    // 2. Web Browser File Handle Save or Cloud / Workspace Save
+    if (settings.storageMode === "gdrive" || rootDirHandle || note.fileName) {
+      await performSave(content, ext, false);
+      return;
+    }
+
+    const existingHandle = fileHandleByNoteIdRef.current[note.id] ?? (await getStoredFileHandle(note.id));
 
     if (!existingHandle?.createWritable) {
       setPendingSaveAction("saveas");
@@ -3858,7 +6015,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    await performSave(content, ext);
+    await performSave(content, ext, false);
   }
 
   async function handleExtensionSelected(ext: "md" | "txt" | "html") {
@@ -3885,7 +6042,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     await clearLinkedMetadata();
 
     setDeleteConfirmOpen(false);
-    onDelete(note.id);
+    if (onDeleteFile) {
+      await onDeleteFile(note);
+    } else {
+      onDelete(note.id);
+    }
   }
 
   function renderSaveStatusIndicator() {
@@ -3894,8 +6055,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       note.fileType === "image" ||
       note.fileType === "binary" ||
       note.fileName?.toLowerCase()?.endsWith(".zip") ||
-      note.fileName?.toLowerCase()?.endsWith(".pdf") ||
-      saveStatus === "unavailable";
+      note.fileName?.toLowerCase()?.endsWith(".pdf");
 
     if (isNonEditable) {
       return null;
@@ -3958,14 +6118,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return t("saveStatus.editedAt", { time: t("saveStatus.hoursAgo", { count: diffHr }) });
     };
 
+    const isIconOnly = paneId !== "main";
+
     return (
-      <div className="flex items-center gap-2 select-none">
-        <div className={`flex items-center gap-1.5 ${textClass}`}>
-          {icon}
-          <span>{text}</span>
-        </div>
-        <span className="text-muted-foreground/30 font-light">|</span>
-        <span className="text-muted-foreground/70">{getLastEditedLabel()}</span>
+      <div className="flex items-center gap-1.5 select-none text-[11.5px] shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={`flex items-center gap-1 cursor-default ${textClass}`}>
+              {icon}
+              {!isIconOnly && <span className="hidden sm:inline">{text}</span>}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>{text}</TooltipContent>
+        </Tooltip>
+        {!isIconOnly && (
+          <>
+            <span className="hidden md:inline text-muted-foreground/30 font-light">|</span>
+            <span className="hidden md:inline text-muted-foreground/70">{getLastEditedLabel()}</span>
+          </>
+        )}
       </div>
     );
   }
@@ -3985,7 +6156,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }`}
             >
               <Code className="h-3 w-3" />
-              <span>{t("editor.modeEditor")}</span>
+              <span className="hidden sm:inline">{t("editor.modeEditor")}</span>
             </button>
             <button
               type="button"
@@ -3997,9 +6168,71 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }`}
             >
               <Eye className="h-3 w-3" />
-              <span>{t("editor.modePreview")}</span>
+              <span className="hidden sm:inline">{t("editor.modePreview")}</span>
             </button>
           </div>
+        )}
+        {note?.contentFormat !== "html" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={!note}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus-visible:ring-0 focus-visible:outline-none focus:outline-none"
+                onClick={() => {
+                  const currentTop = editorScrollContainerRef.current?.scrollTop || 0;
+                  if (note?.id && currentTop > 0) {
+                    setNoteScrollPosition(note.id, currentTop);
+                  }
+                  setIsReadingMode((prev) => {
+                    const next = !prev;
+                    requestAnimationFrame(() => {
+                      if (editorScrollContainerRef.current && currentTop > 0) {
+                        editorScrollContainerRef.current.scrollTop = currentTop;
+                      }
+                    });
+                    setTimeout(() => {
+                      if (editorScrollContainerRef.current && currentTop > 0) {
+                        editorScrollContainerRef.current.scrollTop = currentTop;
+                      }
+                    }, 50);
+                    return next;
+                  });
+                }}
+              >
+                {isReadingMode ? (
+                  <PenLine className="h-3.5 w-3.5" />
+                ) : (
+                  <BookOpen className="h-3.5 w-3.5" />
+                )}
+                <span className="sr-only">
+                  {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {note && note.isLocked && note.isDecrypted && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => onRelockNote?.(note.id)}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+          </Tooltip>
         )}
         <DropdownMenu>
           <Tooltip>
@@ -4018,32 +6251,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <Save className="h-4 w-4" />
               <span>{t("editor.save")}</span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!note} onClick={() => { setPendingSaveAction("saveas"); setExtensionDialogOpen(true); }} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <DropdownMenuItem disabled={!note} onClick={() => void performSaveAs()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
               <File className="h-4 w-4" />
               <span>{t("editor.saveAs")}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <Tooltip>
-          <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
-              <Download className="h-3.5 w-3.5" />
-              <span className="sr-only">{t("editor.exportFile")}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>{t("editor.exportFile")}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-52 rounded-xl px-0 py-2">
-            <DropdownMenuItem disabled={!note} onClick={handleExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-              <FileText className="h-4 w-4" />
-              <span>{t("editor.exportPdf")}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={!note} onClick={handleExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-              <FileCode className="h-4 w-4" />
-              <span>{t("editor.exportWord")}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -4053,19 +6263,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               type="button"
               variant="ghost"
               size="icon"
-              disabled={!note}
-              className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
-              onClick={() => {
-                if (note) {
-                  navigator.clipboard.writeText(window.location.href);
-                  toast({
-                    title: t("breadcrumb.share") || "Share Note",
-                    description: t("editor.linkCopied") || "Copied link to clipboard!",
-                  });
-                }
-              }}
+              disabled={!note || isSharingLoading}
+              className="hidden sm:inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              onClick={handleShareClick}
             >
-              <Share2 className="h-3.5 w-3.5" />
+              {isSharingLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Share2 className="h-3.5 w-3.5" />
+              )}
               <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
             </Button>
           </TooltipTrigger>
@@ -4078,7 +6284,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               variant="ghost"
               size="icon"
               disabled={!note}
-              className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+              className="hidden md:inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
               onClick={() => {
                 if (note) {
                   toast({
@@ -4093,28 +6299,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t("breadcrumb.versionHistory") || "Version History"}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-        <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={!note}
-          className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
-          onClick={() => {
-            if (settings.confirmBeforeDelete) {
-              setDeleteConfirmOpen(true);
-            } else {
-              void handleDeleteNote();
-            }
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          <span className="sr-only">{t("editor.deleteNote")}</span>
-        </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.deleteNote")}</TooltipContent>
         </Tooltip>
       </Fragment>
     );
@@ -4145,18 +6329,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {/* ปุ่มปิด split เฉพาะ editor ฝั่งขวา */}
-          {onCloseSplit && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button type="button" size="icon" variant="ghost" className="absolute top-2 right-2" onClick={onCloseSplit}>
-                  <span className="sr-only">ปิด split</span>
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 5L13 13M13 5L5 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>ปิด split</TooltipContent>
-            </Tooltip>
-          )}
         </div>
 
         <Dialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>
@@ -4187,7 +6359,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       ? `Note_${new Date().toISOString().slice(0, 10)}`
                       : settings.newFilePattern === "daily"
                       ? `Daily-${new Date().toISOString().slice(0, 10)}`
-                      : "untitled"
+                      : "Untitled"
                   }
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
                 />
@@ -4243,7 +6415,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     handleCreateFolderFromDialog();
                   }
                 }}
-                placeholder="untitled-folder"
+                placeholder="Untitled"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
               />
             </div>
@@ -4342,45 +6514,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-        {/* ...ปุ่ม close split เดิมถูกลบออก... */}
-        <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
-        <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3 md:hidden">
-          <div>
-            <p className="text-base font-semibold uppercase tracking-[0.08em] text-muted-foreground">LUNO</p>
-            <p className="text-xs text-muted-foreground">{t("editor.mobileWritingMode")}</p>
-          </div>
-          <div className="min-w-0 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground relative">
-            <span className="flex items-center gap-1.5">
-              {(note.fileType === "image" || note.fileType === "binary") ? (
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-              ) : isSaved ? (
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-              ) : (
-                <CircleDotDashedIcon className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-              )}
-              <span className="sr-only">{saveStatusLabel}</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <span className="block max-w-[126px] truncate cursor-pointer" tabIndex={0}>{displayFileName}</span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" sideOffset={4} className="w-64 rounded-xl px-0 py-2">
-                  <div className="px-4 py-2 text-sm">
-                    <div><b>Name:</b> {note.fileName || t("editor.untitled")}</div>
-                    <div><b>Type:</b> {note.fileType || "-"}</div>
-                    <div><b>Format:</b> {note.contentFormat || "-"}</div>
-                    {note.fileName && <div><b>Extension:</b> {note.fileName.split('.').pop()}</div>}
-                    {note.isLinkedFile && <div><b>Linked File:</b> Yes</div>}
-                    {note.folderPath && <div><b>Folder:</b> {note.folderPath}</div>}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
+          <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+            <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
-          {/* Hide toolbar if not txt or md */}
-          {((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
+          {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
               group: "history" | "heading" | "inline" | "list" | "block" | "media" | "ai";
@@ -4390,9 +6527,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "redo", group: "history", labelKey: "editor.redo" },
               { id: "h1", group: "heading", labelKey: "editor.heading1" },
               { id: "h2", group: "heading", labelKey: "editor.heading2" },
+              { id: "h3", group: "heading", labelKey: "editor.heading3" },
+              { id: "h4", group: "heading", labelKey: "editor.heading4" },
+              { id: "h5", group: "heading", labelKey: "editor.heading5" },
+              { id: "h6", group: "heading", labelKey: "editor.heading6" },
               { id: "bold", group: "inline", labelKey: "editor.bold" },
               { id: "italic", group: "inline", labelKey: "editor.italic" },
+              { id: "underline", group: "inline", labelKey: "editor.underline" },
               { id: "strike", group: "inline", labelKey: "editor.strikethrough" },
+              { id: "highlight", group: "inline", labelKey: "editor.highlight" },
               { id: "bulletList", group: "list", labelKey: "editor.bulletList" },
               { id: "orderedList", group: "list", labelKey: "editor.numberedList" },
               { id: "taskList", group: "list", labelKey: "editor.checkbox" },
@@ -4404,23 +6547,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "table", group: "block", labelKey: "editor.insertTable" },
               { id: "emoji", group: "media", labelKey: "editor.insertEmoji" },
               { id: "calculator", group: "media", labelKey: "editor.calculator" },
+              { id: "translator", group: "media", labelKey: "editor.translator" },
               { id: "clock", group: "media", labelKey: "editor.clock" },
               { id: "link", group: "media", labelKey: "editor.link" },
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
+              { id: "audio", group: "media", labelKey: "editor.recordAudio" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
               { id: "aiAssistant", group: "ai", labelKey: "settings.aiAssistant" },
             ];
 
+            const toolbarOrder = settings.toolbarItemsOrder || [];
+            const hiddenSet = new Set(settings.hiddenToolbarItems || []);
+
+            const sortedAllItems = [...ALL_TOOLBAR_ITEMS]
+              .filter(item => !hiddenSet.has(item.id))
+              .sort((a, b) => {
+                const idxA = toolbarOrder.indexOf(a.id);
+                const idxB = toolbarOrder.indexOf(b.id);
+                const posA = idxA === -1 ? 999 : idxA;
+                const posB = idxB === -1 ? 999 : idxB;
+                return posA - posB;
+              });
+
             // For plain text (.txt) files, only keep tools that work without HTML
-            // formatting (undo/redo, aiAssistant, emoji, calculator, clock, fixLanguage) since all other formatting
+            // formatting (undo/redo, aiAssistant, emoji, calculator, translator, clock, fixLanguage) since all other formatting
             // is stripped on save via getPlainTextFromHtml().
             const isPlainText = note?.fileName?.toLowerCase().endsWith(".txt") ||
               (!note?.fileName && getContentFormat() === "plain");
             const TOOLBAR_ITEMS = isPlainText
-              ? ALL_TOOLBAR_ITEMS.filter(item =>
-                  ["undo", "redo", "aiAssistant", "emoji", "calculator", "clock", "fixLanguage"].includes(item.id)
+              ? sortedAllItems.filter(item =>
+                  ["undo", "redo", "aiAssistant", "emoji", "calculator", "translator", "clock", "fixLanguage"].includes(item.id)
                 )
-              : ALL_TOOLBAR_ITEMS;
+              : sortedAllItems;
 
             const BUTTON_WIDTH = 36;
             const SEP_WIDTH = 9;
@@ -4612,6 +6770,86 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.heading2")}</TooltipContent>
                     </Tooltip>
                   );
+                case "h3":
+                  return (
+                    <Tooltip key="h3">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 3 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+                        >
+                          <Heading3Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading3")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading3")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "h4":
+                  return (
+                    <Tooltip key="h4">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 4 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
+                        >
+                          <Heading4Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading4")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading4")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "h5":
+                  return (
+                    <Tooltip key="h5">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 5 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
+                        >
+                          <Heading5Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading5")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading5")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "h6":
+                  return (
+                    <Tooltip key="h6">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 6 }) ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
+                        >
+                          <Heading6Icon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.heading6")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.heading6")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "bold":
                   return (
                     <Tooltip key="bold">
@@ -4652,6 +6890,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.italic")}</TooltipContent>
                     </Tooltip>
                   );
+                case "underline":
+                  return (
+                    <Tooltip key="underline">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("underline") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleUnderline().run()}
+                        >
+                          <UnderlineIcon className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.underline")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.underline")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "strike":
                   return (
                     <Tooltip key="strike">
@@ -4670,6 +6928,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t("editor.strikethrough")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "highlight":
+                  return (
+                    <Tooltip key="highlight">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("highlight") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleHighlight().run()}
+                        >
+                          <Highlighter className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.highlight")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.highlight")}</TooltipContent>
                     </Tooltip>
                   );
                 case "bulletList":
@@ -4765,7 +7043,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleCode().run()}
                         >
-                          <Code className="h-4 w-4" />
+                          <CodeXml className="h-4 w-4" />
                           <span className="sr-only">{t("editor.code")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -4785,7 +7063,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                         >
-                          <Code2 className="h-4 w-4" />
+                          <SquareCode className="h-4 w-4" />
                           <span className="sr-only">{t("editor.codeBlock")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -4992,6 +7270,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.calculator")}</TooltipContent>
                     </Tooltip>
                   );
+                case "translator":
+                  return (
+                    <Tooltip key="translator">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${translatorOpen ? "bg-primary/15 text-primary" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={toggleTranslator}
+                        >
+                          <Languages className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.translator")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.translator")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "clock":
                   return (
                     <Tooltip key="clock">
@@ -5052,10 +7349,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("editor.image")}</TooltipContent>
                       </Tooltip>
-                      <DropdownMenuContent align="start" className="w-52 rounded-xl px-0 py-2">
+                      <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
                         <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                           <ImagePlus className="mr-2 h-4 w-4" />
                           <span>{t("editor.insertImageByUrl")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={openWorkspaceImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                          <Images className="mr-2 h-4 w-4" />
+                          <span>{t("editor.insertImageFromWorkspace")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => {
@@ -5069,6 +7370,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                  );
+                case "audio":
+                  return (
+                    <Tooltip key="audio">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={openAudioRecorder}
+                        >
+                          <Mic className="h-4 w-4" />
+                          <span className="sr-only">{t("editor.recordAudio")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.recordAudio")}</TooltipContent>
+                    </Tooltip>
                   );
                 case "fixLanguage":
                   return (
@@ -5125,6 +7446,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.heading2")}</span>
                     </DropdownMenuItem>
                   );
+                case "h3":
+                  return (
+                    <DropdownMenuItem key="h3" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading3Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading3")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "h4":
+                  return (
+                    <DropdownMenuItem key="h4" onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading4Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading4")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "h5":
+                  return (
+                    <DropdownMenuItem key="h5" onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading5Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading5")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "h6":
+                  return (
+                    <DropdownMenuItem key="h6" onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Heading6Icon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.heading6")}</span>
+                    </DropdownMenuItem>
+                  );
                 case "bold":
                   return (
                     <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
@@ -5139,11 +7488,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.italic")}</span>
                     </DropdownMenuItem>
                   );
+                case "underline":
+                  return (
+                    <DropdownMenuItem key="underline" onClick={() => editor?.chain().focus().toggleUnderline().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <UnderlineIcon className="mr-2 h-4 w-4" />
+                      <span>{t("editor.underline")}</span>
+                    </DropdownMenuItem>
+                  );
                 case "strike":
                   return (
                     <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
                       <Strikethrough className="mr-2 h-4 w-4" />
                       <span>{t("editor.strikethrough")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "highlight":
+                  return (
+                    <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Highlighter className="mr-2 h-4 w-4" />
+                      <span>{t("editor.highlight")}</span>
                     </DropdownMenuItem>
                   );
                 case "bulletList":
@@ -5177,7 +7540,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 case "code":
                   return (
                     <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Code className="mr-2 h-4 w-4" />
+                      <CodeXml className="mr-2 h-4 w-4" />
                       <span>{t("editor.inlineCode")}</span>
                     </DropdownMenuItem>
                   );
@@ -5221,6 +7584,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.calculator")}</span>
                     </DropdownMenuItem>
                   );
+                case "translator":
+                  return (
+                    <DropdownMenuItem key="translator" onClick={toggleTranslator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <Languages className="mr-2 h-4 w-4" />
+                      <span>{t("editor.translator")}</span>
+                    </DropdownMenuItem>
+                  );
                 case "clock":
                   return (
                     <DropdownMenuItem key="clock" onClick={toggleClock} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
@@ -5242,6 +7612,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         <ImagePlus className="mr-2 h-4 w-4" />
                         <span>{t("editor.insertImageByUrl")}</span>
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={openWorkspaceImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                        <Images className="mr-2 h-4 w-4" />
+                        <span>{t("editor.insertImageFromWorkspace")}</span>
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => {
                           rememberSelection();
@@ -5253,6 +7627,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         <span>{t("editor.uploadImage")}</span>
                       </DropdownMenuItem>
                     </Fragment>
+                  );
+                case "audio":
+                  return (
+                    <DropdownMenuItem
+                      key="audio"
+                      onClick={openAudioRecorder}
+                      className="mx-1 cursor-pointer rounded-lg px-4 py-2"
+                    >
+                      <Mic className="mr-2 h-4 w-4" />
+                      <span>{t("editor.recordAudio")}</span>
+                    </DropdownMenuItem>
                   );
                 case "fixLanguage":
                   return (
@@ -5274,7 +7659,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             };
 
             return (
-              <div className="flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1">
+              <div data-editor-toolbar="true" className="flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1">
                 {visibleItems.map((item, index) => {
                   const showSeparator = index > 0 && item.group !== visibleItems[index - 1].group;
                   return (
@@ -5360,7 +7745,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     href="https://aistudio.google.com/app/apikey"
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                    onClick={(e) => {
+                      if (onOpenWebTab) {
+                        e.preventDefault();
+                        onOpenWebTab("https://aistudio.google.com/app/apikey");
+                      }
+                    }}
+                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
                   >
                     Get Free API Key <ExternalLink className="h-3 w-3" />
                   </a>
@@ -5398,16 +7789,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </Dialog>
 
 
-          {onCloseSplit && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full" onClick={onCloseSplit} aria-label={t("editor.closeSplit")}> 
-                  <X className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.closeSplit")}</TooltipContent>
-            </Tooltip>
-          )}
+
           </div>
         </div>
       </div>
@@ -5415,20 +7797,61 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <div
+          ref={editorScrollContainerRef}
+          onScroll={handleEditorScroll}
           onClick={(e) => {
-            if (e.target === e.currentTarget && editor) {
-              editor.commands.focus("end");
+            const target = e.target as HTMLElement;
+            if (
+              editor &&
+              !target.closest("button, a, input, textarea, select, [role='button'], [role='menuitem'], summary, .code-block-wrapper, table")
+            ) {
+              if (target === e.currentTarget || target.closest("[data-editor-bottom-area]")) {
+                editor.commands.focus("end");
+              }
             }
           }}
-          className={`flex flex-col cursor-text ${note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto"} w-full`}
+          className={`flex flex-col cursor-text ${
+            note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto overflow-x-hidden"
+          } w-full`}
         >
-          {note.fileType === "image" ? (
-            <div className="flex min-h-full w-full flex-col items-center justify-center p-6">
+          {(note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content) ? (
+            <LockedNoteViewer
+              note={note}
+              onUnlock={async (pin) => {
+                if (onUnlockNote) {
+                  return await onUnlockNote(note.id, pin);
+                }
+                return false;
+              }}
+            />
+          ) : note.fileType === "image" ? (
+            <div className={`flex min-h-full w-full ${isImageZoomed && canZoomImage ? "items-start justify-center p-4 overflow-auto" : "items-center justify-center p-4 overflow-hidden"}`}>
               {imageBlobUrl ? (
                 <img
                   src={imageBlobUrl}
                   alt={note.fileName}
-                  className="max-h-full max-w-full rounded-lg object-contain shadow"
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    const container = img.parentElement;
+                    if (container) {
+                      const maxW = container.clientWidth;
+                      const maxH = container.clientHeight;
+                      const isLarge = img.naturalWidth > maxW || img.naturalHeight > maxH;
+                      setCanZoomImage(isLarge);
+                    }
+                  }}
+                  onClick={() => {
+                    if (canZoomImage) {
+                      setIsImageZoomed((prev) => !prev);
+                    }
+                  }}
+                  className={`object-contain select-none ${
+                    !canZoomImage
+                      ? "max-h-full max-w-full cursor-default"
+                      : isImageZoomed
+                        ? "max-h-none max-w-none cursor-zoom-out"
+                        : "max-h-full max-w-full cursor-zoom-in"
+                  }`}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">{note.fileName}</p>
@@ -5479,64 +7902,397 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 value={note.content}
                 onChange={(val) => onUpdate(note.id, { content: val })}
                 fontSize={editorFontSize}
+                onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+                spellCheck={spellCheckEnabled}
+                noteId={note.id}
               />
             )
           ) : (
-            <div className={`flex w-full min-w-0 flex-col overflow-x-hidden px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto ${
-              settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
-            } ${settings.showCodeLineNumbers ? "show-code-line-numbers" : ""}`}>
-              {isMarkdownNote(note) && note.tags && note.tags.length > 0 && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                  {note.tags.map((tag, idx) => (
-                    <span
-                      key={tag}
-                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
-                    >
-                      #{tag}
-                    </span>
-                  ))}
+            <ContextMenu>
+              <ContextMenuTrigger asChild onContextMenuCapture={handleEditorContextMenu}>
+                <div className={`flex w-full min-w-0 flex-col ${
+                  settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
+                } px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto min-h-full ${
+                  settings.showCodeLineNumbers ? "show-code-line-numbers" : ""
+                }`}>
+                  {isMarkdownNote(note) && note.tags && note.tags.length > 0 && (
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                      {note.tags.map((tag, idx) => (
+                        <span
+                          key={tag}
+                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border ${getTagColorClass(tag, settings.theme, idx, settings.tagColorStyle)}`}
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {editor && !isReadingMode && <TableInteractiveOverlay editor={editor} />}
+                  <EditorContent
+                    editor={editor}
+                    className="w-full min-w-0 max-w-full"
+                    onClickCapture={(e) => {
+                      const target = (e.target as HTMLElement).closest("a");
+                      if (!target) return;
+                      const href = target.getAttribute("href") || "";
+                      const dataWiki = target.getAttribute("data-wikilink");
+                      const wikilinkTarget = dataWiki || (href.startsWith("wikilink:") ? decodeURIComponent(href.replace(/^wikilink:/, "")) : null);
+                      if (wikilinkTarget) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const cleanTarget = wikilinkTarget.trim().toLowerCase();
+                        const baseClean = cleanTarget.replace(/\.[^/.]+$/, "");
+                        const currentNotes = (notes || []);
+                        const matchedNote = currentNotes.find((n) => {
+                          const nameWithoutExt = (n.fileName || n.title || "").replace(/\.[^/.]+$/, "").toLowerCase();
+                          const fullFileName = (n.fileName || "").toLowerCase();
+                          const title = (n.title || "").toLowerCase();
+                          return (
+                            nameWithoutExt === baseClean ||
+                            fullFileName === cleanTarget ||
+                            title === cleanTarget ||
+                            (n.folderPath && `${n.folderPath.toLowerCase()}/${nameWithoutExt}` === baseClean)
+                          );
+                        });
+                        if (matchedNote) {
+                          onSelectNote?.(matchedNote.id);
+                        } else {
+                          toast({
+                            title: t("editor.noteNotFound") || "Note not found",
+                            description: `[[${wikilinkTarget}]]`,
+                          });
+                        }
+                      }
+                    }}
+                  />
+                  <div
+                    data-editor-bottom-area="true"
+                    onClick={() => {
+                      if (editor) {
+                        editor.commands.focus("end");
+                      }
+                    }}
+                    className="h-10 sm:h-12 md:h-14 w-full shrink-0 cursor-text"
+                  />
                 </div>
-              )}
-              {editor && <TableInteractiveOverlay editor={editor} />}
-              <EditorContent editor={editor} className="w-full min-w-0 max-w-full" />
-              <div className="h-6 sm:h-8 md:h-10 lg:h-12 w-full shrink-0 pointer-events-none" />
-            </div>
+              </ContextMenuTrigger>
+
+              <ContextMenuContent className="w-56 rounded-xl">
+                {contextSpellData && contextSpellData.suggestions.length > 0 && (
+                  <>
+                    <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1">
+                      <span>{t("settings.spellCheckSetting") || "Spell Suggestions"}</span>
+                      <span className="text-[10px] text-muted-foreground/60 italic font-mono">({contextSpellData.word})</span>
+                    </div>
+                    {contextSpellData.suggestions.map((suggestion) => (
+                      <ContextMenuItem
+                        key={suggestion}
+                        onClick={() => {
+                          if (!editor) return;
+                          editor
+                            .chain()
+                            .focus()
+                            .setTextSelection({ from: contextSpellData.from, to: contextSpellData.to })
+                            .insertContent(suggestion)
+                            .run();
+                          setContextSpellData(null);
+                        }}
+                        className="gap-2 font-medium text-primary focus:text-primary focus:bg-primary/10"
+                      >
+                        <Check className="h-4 w-4 shrink-0" />
+                        <span>{suggestion}</span>
+                      </ContextMenuItem>
+                    ))}
+                    <ContextMenuSeparator />
+                  </>
+                )}
+
+                <ContextMenuItem
+                  onClick={() => editor?.chain().focus().undo().run()}
+                  disabled={!editor?.can().undo()}
+                  className="gap-2"
+                >
+                  <Undo2 className="h-4 w-4" />
+                  <span>{t("editor.undo") || "Undo"}</span>
+                  <ContextMenuShortcut>Ctrl+Z</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                <ContextMenuItem
+                  onClick={() => editor?.chain().focus().redo().run()}
+                  disabled={!editor?.can().redo()}
+                  className="gap-2"
+                >
+                  <Redo2 className="h-4 w-4" />
+                  <span>{t("editor.redo") || "Redo"}</span>
+                  <ContextMenuShortcut>Ctrl+Y</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                <ContextMenuSeparator />
+
+                <ContextMenuItem
+                  onClick={() => {
+                    if (!editor) return;
+                    const { from, to, empty } = editor.state.selection;
+                    if (!empty) {
+                      const text = editor.state.doc.textBetween(from, to, "\n", "\n");
+                      void navigator.clipboard.writeText(text);
+                      editor.chain().focus().deleteSelection().run();
+                    }
+                  }}
+                  disabled={!editor || editor.state.selection.empty}
+                  className="gap-2"
+                >
+                  <Scissors className="h-4 w-4" />
+                  <span>{t("editor.cut") || "Cut"}</span>
+                  <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                <ContextMenuItem
+                  onClick={() => {
+                    if (!editor) return;
+                    const { from, to, empty } = editor.state.selection;
+                    if (!empty) {
+                      const text = editor.state.doc.textBetween(from, to, "\n", "\n");
+                      void navigator.clipboard.writeText(text);
+                    }
+                  }}
+                  disabled={!editor || editor.state.selection.empty}
+                  className="gap-2"
+                >
+                  <Copy className="h-4 w-4" />
+                  <span>{t("editor.copy") || "Copy"}</span>
+                  <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                <ContextMenuItem
+                  onClick={async () => {
+                    if (!editor) return;
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      if (text) {
+                        editor.chain().focus().insertContent(text).run();
+                      }
+                    } catch {
+                      // clipboard fallback
+                    }
+                  }}
+                  className="gap-2"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  <span>{t("editor.paste") || "Paste"}</span>
+                  <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                <ContextMenuSeparator />
+
+                <ContextMenuItem
+                  onClick={() => editor?.chain().focus().selectAll().run()}
+                  className="gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>{t("editor.selectAll") || "Select All"}</span>
+                  <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                {editor && !editor.state.selection.empty && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onClick={openTranslatorWithSelection}
+                      className="gap-2"
+                    >
+                      <Languages className="h-4 w-4" />
+                      <span>{t("editor.translateSelection") || "Translate"}</span>
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={handleFixLanguage}
+                      className="gap-2"
+                    >
+                      <Wrench className="h-4 w-4" />
+                      <span>{t("editor.fixLanguage") || "Fix Language (TH/EN)"}</span>
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           )}
         </div>
         </div>
 
         {/* Editor Status Bar */}
         {note && (
-          <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-muted/20 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
-            <div className="flex items-center gap-3 shrink-0">
-              <span>{`Ln ${editorStats.line}, Col ${editorStats.col}`}</span>
-              {settings.showWordCount && (
+          <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-card/60 dark:bg-card/40 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
+            {/* Left side: Ln 1, Col 1 | (words | characters if not HTML) | Markdown/HTML */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                    {t("editor.lineCol", { line: editorStats.line, col: editorStats.col }) || `Ln ${editorStats.line}, Col ${editorStats.col}`}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.cursorPosition", { line: editorStats.line, col: editorStats.col })}
+                </TooltipContent>
+              </Tooltip>
+
+              {note?.contentFormat !== "html" && (
                 <>
                   <div className="h-3 w-[1px] bg-border/60" />
-                  <span>{`${editorStats.wordCount} words`}</span>
-                </>
-              )}
-              <div className="h-3 w-[1px] bg-border/60" />
-              <span>{`${editorStats.charCount} ${t("editor.charCountUnit")}`}</span>
-              {settings.showWordCount && (
-                <>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-default hover:text-foreground transition-colors">
+                        {editorStats.wordCount === 1
+                          ? t("editor.wordCountSingle", { count: 1 })
+                          : t("editor.wordsCount", { count: editorStats.wordCount.toLocaleString() })}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("rightPanel.wordCount")}
+                    </TooltipContent>
+                  </Tooltip>
+
                   <div className="h-3 w-[1px] bg-border/60" />
-                  <span>{`${editorStats.readingTime} min read`}</span>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-default hover:text-foreground transition-colors">
+                        {editorStats.charCount === 1
+                          ? t("editor.characterCountSingle", { count: 1 })
+                          : t("editor.charactersCount", { count: editorStats.charCount.toLocaleString() })}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("rightPanel.characterCount")}
+                    </TooltipContent>
+                  </Tooltip>
                 </>
               )}
+
               <div className="h-3 w-[1px] bg-border/60" />
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-[10px] tracking-tight">M↓</span>
-                <span>{editorStats.syntaxLabel}</span>
-              </div>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                    {editorStats.syntaxLabel}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.syntaxMode", { syntax: editorStats.syntaxLabel })}
+                </TooltipContent>
+              </Tooltip>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
-              <span>{`${editorStats.zoom}%`}</span>
-              <div className="h-3 w-[1px] bg-border/60" />
-              <span>{editorStats.lineEnding}</span>
-              <div className="h-3 w-[1px] bg-border/60" />
-              <span>UTF-8</span>
+            {/* Right side: 100% - + UTF-8 LF | (Spell if not HTML) */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Clickable % to reset zoom to 100% */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => updateSetting("editorFontSize", 15)}
+                    className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60"
+                  >
+                    {`${editorStats.zoom}%`}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.zoomReset")}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Zoom out button - */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => updateSetting("editorFontSize", Math.max(13, (settings.editorFontSize || 15) - 1))}
+                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
+                  >
+                    -
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.zoomOut")}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Zoom in button + */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => updateSetting("editorFontSize", Math.min(22, (settings.editorFontSize || 15) + 1))}
+                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
+                  >
+                    +
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.zoomIn")}
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-muted-foreground font-normal cursor-default hover:text-foreground transition-colors px-1">
+                    UTF-8
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.encoding")}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Line Ending toggle */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleToggleLineEnding}
+                    className="hover:text-foreground text-muted-foreground transition-colors cursor-pointer font-normal rounded px-1 py-0.5 hover:bg-muted/60"
+                  >
+                    {lineEnding}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("editor.lineEndingToggle", { lineEnding })}
+                </TooltipContent>
+              </Tooltip>
+
+              {note?.contentFormat !== "html" && (
+                <>
+                  <div className="h-3 w-[1px] bg-border/60" />
+
+                  {/* Spellcheck toggle: status bar pill with tooltip */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting("spellCheck", !spellCheckEnabled)}
+                        className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                      >
+                        <Check
+                          className={`h-3 w-3 transition-colors ${
+                            spellCheckEnabled
+                              ? "text-primary stroke-[2.5]"
+                              : "opacity-30 text-muted-foreground"
+                          }`}
+                        />
+                        <span className={spellCheckEnabled ? "text-muted-foreground font-normal" : "text-muted-foreground/60 line-through"}>
+                          {t("editor.spellCheck")}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      <p className="font-semibold">{t("settings.spellCheckSetting")}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {spellCheckEnabled ? t("editor.spellCheckDisable") : t("editor.spellCheckEnable")}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -5550,24 +8306,42 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               note={note}
               editor={editor}
               notes={notes}
+              onSelectNote={onSelectNote}
               onUpdateNote={onUpdate}
               onFavorite={(id) => {
                 const n = notes?.find((item) => item.id === id);
                 if (n && onUpdate) onUpdate(id, { isFavorite: !n.isFavorite });
               }}
-              onDuplicate={(n) => {
+              onDuplicate={async (targetNote) => {
+                const target = targetNote || note;
+                if (!target) return;
+                if (onDuplicateFile && target.fileName) {
+                  await onDuplicateFile(target);
+                  return;
+                }
                 if (onCreate) {
-                  const baseName = n.fileName || "untitled.md";
+                  const baseName = target.fileName || "untitled.md";
                   const newName = baseName.includes(".")
                     ? baseName.replace(/(\.[^/.]+)$/, " copy$1")
                     : `${baseName} copy`;
-                  onCreate(n.folderPath || "", {
+                  onCreate(target.folderPath || "", {
                     fileName: newName,
-                    contentFormat: n.contentFormat || "markdown",
+                    title: target.title ? `${target.title} copy` : "Untitled",
+                    content: target.content,
+                    tags: target.tags,
+                    contentFormat: target.contentFormat || "markdown",
                   });
                 }
               }}
-              onDelete={(n) => onDelete(n.id)}
+              onDelete={() => {
+                if (settings.confirmBeforeDelete) {
+                  setDeleteConfirmOpen(true);
+                } else {
+                  void handleDeleteNote();
+                }
+              }}
+              onExportPdf={handleExportPdf}
+              onExportWord={handleExportWord}
             />
           )}
 
@@ -5597,6 +8371,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         onClose={() => setClockOpen(false)}
         zIndex={clockZIndex}
         onFocusWindow={bringClockToFront}
+      />
+
+      <FloatingTranslator
+        isOpen={translatorOpen}
+        onClose={() => setTranslatorOpen(false)}
+        initialText={translatorInitialText}
+        onInsertTranslation={handleInsertTranslation}
+        zIndex={translatorZIndex}
+        onFocusWindow={bringTranslatorToFront}
       />
 
 
@@ -5652,25 +8435,145 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </Dialog>
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="sm:max-w-md rounded-2xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>{t("editor.link")}</DialogTitle>
             <DialogDescription>{t("editor.linkDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-1">
-            <label htmlFor="link-url" className="block text-sm font-medium text-foreground">
-              {t("editor.linkUrl")}
-            </label>
-            <input
-              id="link-url"
-              type="url"
-              value={linkUrl}
-              onChange={(event) => setLinkUrl(event.target.value)}
-              placeholder={t("editor.linkUrlPlaceholder")}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
-            />
+
+          {/* Segmented Pill Toggle Switcher */}
+          <div className="flex rounded-xl bg-muted/60 p-1 text-xs font-semibold select-none border border-border/40">
+            <button
+              type="button"
+              onClick={() => setLinkTab("workspace")}
+              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                linkTab === "workspace"
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>{t("editor.workspaceNote")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLinkTab("external")}
+              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                linkTab === "external"
+                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span>{t("editor.externalLink")}</span>
+            </button>
           </div>
-          <DialogFooter className="gap-2 sm:justify-between">
+
+          {linkTab === "workspace" ? (
+            <div className="space-y-3 py-1 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <label className="block text-xs font-medium text-muted-foreground">
+                  {t("editor.searchNotes")}
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={workspaceSearchQuery}
+                    onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                    placeholder={t("editor.searchNotes")}
+                    className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Note List Selector */}
+              <div className="max-h-44 overflow-y-auto space-y-1 rounded-xl border border-border/60 bg-muted/30 p-1.5 min-w-0">
+                {filteredWorkspaceNotes.length > 0 ? (
+                  filteredWorkspaceNotes.map((n) => {
+                    const isSelected = selectedWorkspaceNote?.id === n.id;
+                    const title = (n.fileName || n.title || "Untitled").replace(/\.[^/.]+$/, "");
+                    return (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedWorkspaceNote(n);
+                          if (!linkDisplayText) {
+                            setLinkDisplayText(title);
+                          }
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-left transition-colors cursor-pointer min-w-0 ${
+                          isSelected
+                            ? "bg-primary/10 text-primary font-semibold border border-primary/30"
+                            : "hover:bg-muted/80 text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                          <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                          <span className="text-xs truncate min-w-0">{title}</span>
+                          {n.folderPath && (
+                            <span className="text-[10px] text-muted-foreground/70 truncate shrink-0">
+                              ({n.folderPath})
+                            </span>
+                          )}
+                        </div>
+                        {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="py-4 text-center text-xs text-muted-foreground">
+                    {t("editor.noNotesFound")}
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Display Text */}
+              <div className="space-y-1.5 min-w-0">
+                <label className="block text-xs font-medium text-muted-foreground">
+                  {t("editor.linkDisplayText")}
+                </label>
+                <input
+                  type="text"
+                  value={linkDisplayText}
+                  onChange={(e) => setLinkDisplayText(e.target.value)}
+                  placeholder={selectedWorkspaceNote ? (selectedWorkspaceNote.fileName || selectedWorkspaceNote.title || "").replace(/\.[^/.]+$/, "") : "Display text..."}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 py-1 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <label htmlFor="link-url" className="block text-xs font-medium text-muted-foreground">
+                  {t("editor.linkUrl")}
+                </label>
+                <input
+                  id="link-url"
+                  type="url"
+                  value={linkUrl}
+                  onChange={(event) => setLinkUrl(event.target.value)}
+                  placeholder={t("editor.linkUrlPlaceholder")}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
+                />
+              </div>
+              <div className="space-y-1.5 min-w-0">
+                <label className="block text-xs font-medium text-muted-foreground">
+                  {t("editor.linkDisplayText")}
+                </label>
+                <input
+                  type="text"
+                  value={linkDisplayText}
+                  onChange={(e) => setLinkDisplayText(e.target.value)}
+                  placeholder="Display text..."
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between pt-1">
             <Button type="button" variant="outline" onClick={handleRemoveLink}>
               {t("editor.removeLink")}
             </Button>
@@ -5684,36 +8587,75 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <Dialog open={imageDialogOpen} onOpenChange={setImageDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>{t("editor.image")}</DialogTitle>
+            <DialogTitle>{t("editor.insertImageByUrl")}</DialogTitle>
             <DialogDescription>{t("editor.imageDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-1">
-            <label htmlFor="image-url" className="block text-sm font-medium text-foreground">
-              {t("editor.imageUrl")}
-            </label>
-            <input
-              id="image-url"
-              type="url"
-              value={imageUrl}
-              onChange={(event) => setImageUrl(event.target.value)}
-              placeholder={t("editor.imageUrlPlaceholder")}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
-            />
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label htmlFor="image-url" className="block text-xs font-medium text-muted-foreground">
+                {t("editor.imageUrl")}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="image-url"
+                  type="url"
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyImageUrl();
+                    }
+                  }}
+                  placeholder={t("editor.imageUrlPlaceholder")}
+                  className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
+                />
+                <Button type="button" onClick={handleApplyImageUrl} disabled={!imageUrl.trim()}>
+                  {t("editor.insertImage")}
+                </Button>
+              </div>
+            </div>
           </div>
-          <DialogFooter>
-            <Button type="button" onClick={handleApplyImageUrl}>
-              {t("editor.insertImage")}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WorkspaceImagePickerDialog
+        isOpen={workspaceImageDialogOpen}
+        onClose={() => setWorkspaceImageDialogOpen(false)}
+        notes={notes}
+        currentNote={note}
+        rootDirHandle={rootDirHandle}
+        assetBlobUrlMap={assetBlobUrlMap}
+        onSelectImage={handleInsertWorkspaceImage}
+      />
+
+      <FloatingAudioRecorder
+        isOpen={audioRecorderOpen}
+        onClose={() => setAudioRecorderOpen(false)}
+        zIndex={audioRecorderZIndex}
+        onFocusWindow={bringAudioRecorderToFront}
+        rootDirHandle={rootDirHandle}
+        onInsertAudio={({ src, title }) => {
+          if (!editor) return;
+          userEditedRef.current = true;
+          editorSelectionRef.current = null;
+          editor.chain().focus().setAudio({ src, title }).run();
+          setLastEditedTime(Date.now());
+          if (settings.autoSave) {
+            setSaveStatus("auto_saving");
+            scheduleAutoSaveDiskRef.current?.();
+          } else {
+            setSaveStatus("unsaved");
+          }
+        }}
+      />
 
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("editor.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {note.isLinkedFile ? t("editor.deleteLinkedDescription") : t("editor.deleteDescription")}
+              {t("sidebar.deleteFilesDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -5785,7 +8727,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       {/* Floating Slash Commands Menu */}
       {slashMenuState.open && slashMenuState.coords && (
         <div
-          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground"
+          role="menu"
+          data-slash-menu="true"
+          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
           style={{
             top: `${Math.min(slashMenuState.coords.top + 6, window.innerHeight - 300)}px`,
             left: `${Math.min(slashMenuState.coords.left, window.innerWidth - 240)}px`,
@@ -5826,17 +8770,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 return (
                   <div
                     key={item.id}
-                    role="button"
+                    role="menuitem"
                     tabIndex={0}
                     data-slash-item={idx}
+                    data-selected={isSelected ? "true" : undefined}
                     onMouseEnter={() => {
                       setSlashMenuState((prev) => ({ ...prev, selectedIndex: idx }));
                       slashMenuStateRef.current.selectedIndex = idx;
                     }}
-                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-sm transition-all select-none gap-2.5 ${
                       isSelected
-                        ? "bg-accent/5 text-primary font-semibold"
-                        : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                        ? "bg-primary/10 text-primary font-semibold shadow-2xs"
+                        : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
                     }`}
                     onClick={() => {
                       if (editor) {
@@ -5844,7 +8789,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }
                     }}
                   >
-                    {item.icon}
+                    <span className="shrink-0">{item.icon}</span>
                     <span className="truncate flex-1">{t(item.titleKey)}</span>
                   </div>
                 );
@@ -5866,6 +8811,139 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           )}
         </div>
       )}
+
+      {/* Share Dialog 1: Ask user if they want to sync workspace to Google Drive for sharing */}
+      <Dialog open={shareSyncDialogOpen} onOpenChange={setShareSyncDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <GoogleDriveIcon className="h-5 w-5 shrink-0" />
+              <span>{t("shareDialog.syncRequiredTitle") || "Sync to Google Drive Required"}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-1.5 leading-relaxed">
+              {t("shareDialog.syncRequiredDesc") ||
+                "This note is currently stored locally on this machine. To generate a shareable link, this workspace needs to be synced to Google Drive. Would you like to sync it now?"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSharingLoading}
+              onClick={() => setShareSyncDialogOpen(false)}
+              className="rounded-xl text-xs cursor-pointer"
+            >
+              {t("common.cancel") || "Cancel"}
+            </Button>
+            <Button
+              type="button"
+              disabled={isSharingLoading}
+              onClick={handleConfirmSyncAndShare}
+              className="rounded-xl text-xs gap-1.5 cursor-pointer"
+            >
+              {isSharingLoading ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>{t("shareDialog.syncing") || "Syncing to Drive..."}</span>
+                </>
+              ) : (
+                <>
+                  <GoogleDriveIcon className="h-3.5 w-3.5" />
+                  <span>{t("shareDialog.syncAndShareBtn") || "Sync & Share Note"}</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Dialog 2: Share link generated successfully */}
+      <Dialog open={shareSuccessDialogOpen} onOpenChange={setShareSuccessDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <GoogleDriveIcon className="h-5 w-5 shrink-0" />
+              <span>{t("shareDialog.shareLinkTitle") || "Google Drive Share Link"}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
+              {t("shareDialog.shareLinkDesc") || "Anyone with this link can view this document on Google Drive."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center gap-2 pt-2">
+            <Input
+              readOnly
+              value={shareLink}
+              className="font-mono text-xs select-all rounded-xl"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={async () => {
+                await navigator.clipboard.writeText(shareLink);
+                setCopiedShareLink(true);
+                setTimeout(() => setCopiedShareLink(false), 3000);
+              }}
+              className="rounded-xl shrink-0 gap-1.5 text-xs cursor-pointer"
+            >
+              {copiedShareLink ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-white stroke-[2.5]" />
+                  <span>{t("common.copied") || "Copied"}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span>{t("shareDialog.copyLink") || "Copy Link"}</span>
+                </>
+              )}
+            </Button>
+          </div>
+
+          <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShareSuccessDialogOpen(false)}
+              className="rounded-xl text-xs cursor-pointer"
+            >
+              {t("common.close") || "Close"}
+            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isRevokingShare}
+                onClick={handleRevokeShare}
+                className="rounded-xl text-xs cursor-pointer gap-1.5"
+              >
+                {isRevokingShare ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>{t("shareDialog.revoking") || "Stopping share..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <GlobeOff className="h-3.5 w-3.5" />
+                    <span>{t("shareDialog.revokeShare") || "Stop Sharing"}</span>
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => window.open(shareLink, "_blank")}
+                className="rounded-xl text-xs gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>{t("shareDialog.openDrive") || "Open in Google Drive"}</span>
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </TooltipProvider>
     </>
   );

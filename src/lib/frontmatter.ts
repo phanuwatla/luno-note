@@ -83,15 +83,19 @@ export function dedupeTags(tags: string[]): string[] {
 export function parseInlineTags(content: string): string[] {
   if (!content) return [];
 
-  // Remove code blocks (```...```)
+  // Remove code blocks (```...``` and ~~~...~~~)
   let clean = content.replace(/```[\s\S]*?```/g, "");
+  clean = clean.replace(/~~~[\s\S]*?~~~/g, "");
+  // Remove HTML <pre>...</pre> and <code>...</code> blocks (e.g. TipTap code blocks)
+  clean = clean.replace(/<pre[\s\S]*?<\/pre>/gi, "");
+  clean = clean.replace(/<code[\s\S]*?<\/code>/gi, "");
   // Remove inline code (`...`)
   clean = clean.replace(/`[^`\n]+`/g, "");
 
   // Match #tag, #tag/subtag, #thai_tag
-  // Regex: Matches # followed by word chars, hyphens, slashes, or Thai unicode chars
-  // Must be preceded by start of line or whitespace/punctuation, and NOT followed by space (which would be a Markdown heading)
-  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=$|[\s)\]},.!?:;])/g;
+  // Must be followed by whitespace (\s, \r, \n) or boundary punctuation [)\]},.!?:;]
+  // This prevents incomplete tags (e.g. #k, #kk while typing) from being extracted until space or punctuation is entered
+  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
 
   const found: string[] = [];
   let match: RegExpExecArray | null;

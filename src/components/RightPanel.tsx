@@ -16,14 +16,23 @@ import {
   AlignLeft,
   Link2,
   Wand,
+  FileCode,
+  ChevronRight,
 } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import type { Editor } from "@tiptap/react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson, isMarkdownNote } from "@/lib/frontmatter";
 import { getTagColorClass } from "@/lib/tagColors";
+import { countWords, countCharacters, calculateReadingTime } from "@/lib/wordCount";
 
 interface RightPanelProps {
   isOpen: boolean;
@@ -36,12 +45,14 @@ interface RightPanelProps {
   onDuplicate?: (note: Note) => void;
   onDelete?: (note: Note) => void;
   onExport?: () => void;
+  onExportPdf?: () => void;
+  onExportWord?: () => void;
   onSelectNote?: (id: string) => void;
 }
 
 interface OutlineItem {
   id: string;
-  level: "h1" | "h2" | "h3" | "table";
+  level: "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "table";
   text: string;
   pos?: number;
 }
@@ -57,6 +68,8 @@ export default function RightPanel({
   onDuplicate,
   onDelete,
   onExport,
+  onExportPdf,
+  onExportWord,
   onSelectNote,
 }: RightPanelProps) {
   const { t } = useTranslation();
@@ -74,7 +87,8 @@ export default function RightPanel({
     if (editor) {
       editor.state.doc.descendants((node, pos) => {
         if (node.type.name === "heading") {
-          const level = `h${node.attrs.level}` as "h1" | "h2" | "h3";
+          const lvl = Math.min(Math.max(node.attrs.level || 1, 1), 6);
+          const level = `h${lvl}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
           items.push({
             id: `heading-${pos}`,
             level,
@@ -94,12 +108,10 @@ export default function RightPanel({
       const lines = note.content.split("\n");
       lines.forEach((line, idx) => {
         const trimmed = line.trim();
-        if (trimmed.startsWith("# ")) {
-          items.push({ id: `line-${idx}`, level: "h1", text: trimmed.replace(/^#\s+/, "") });
-        } else if (trimmed.startsWith("## ")) {
-          items.push({ id: `line-${idx}`, level: "h2", text: trimmed.replace(/^##\s+/, "") });
-        } else if (trimmed.startsWith("### ")) {
-          items.push({ id: `line-${idx}`, level: "h3", text: trimmed.replace(/^###\s+/, "") });
+        const match = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (match) {
+          const level = `h${match[1].length}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+          items.push({ id: `line-${idx}`, level, text: match[2].trim() });
         } else if (trimmed.includes("<table") || trimmed.startsWith("|")) {
           items.push({ id: `table-${idx}`, level: "table", text: "Table" });
         }
@@ -109,51 +121,100 @@ export default function RightPanel({
     return items;
   }, [editor, note]);
 
-  // Backlinks (notes that link to or mention the current note title)
+  // Backlinks (notes that link to or mention the current note title via Wikilinks or Markdown links)
   const backlinks = useMemo(() => {
     if (!note || !notes.length) return [];
-    const noteTitle = (note.fileName || note.title || "").replace(/\.[^/.]+$/, "").toLowerCase();
-    if (!noteTitle) return [];
+    const baseName = (note.fileName || note.title || "").replace(/\.[^/.]+$/, "").trim();
+    const fullName = (note.fileName || note.title || "").trim();
+    if (!baseName && !fullName) return [];
+
+    const baseLower = baseName.toLowerCase();
+    const fullLower = fullName.toLowerCase();
 
     return notes.filter((other) => {
       if (other.id === note.id) return false;
-      const content = (other.content || "").toLowerCase();
-      return content.includes(`[[${noteTitle}]]`) || content.includes(noteTitle);
+      const content = other.content || "";
+      const contentLower = content.toLowerCase();
+
+      // Check standard wikilink [[note]] or [[note|alias]] or encoded/data attributes
+      const hasWikilink =
+        contentLower.includes(`[[${baseLower}]]`) ||
+        contentLower.includes(`[[${baseLower}|`) ||
+        contentLower.includes(`[[${fullLower}]]`) ||
+        contentLower.includes(`[[${fullLower}|`) ||
+        contentLower.includes(`data-wikilink="${baseLower}"`) ||
+        contentLower.includes(`data-wikilink="${fullLower}"`) ||
+        contentLower.includes(`wikilink:${encodeURIComponent(baseLower)}`) ||
+        contentLower.includes(`wikilink:${encodeURIComponent(fullLower)}`);
+
+      if (hasWikilink) return true;
+
+      // Check markdown link targets [text](name) or [text](name.md)
+      if (contentLower.includes(`](${baseLower})`) || contentLower.includes(`](${fullLower})`)) {
+        return true;
+      }
+
+      // Check full mention if title is unique and at least 3 characters
+      if (baseLower.length >= 3 && contentLower.includes(baseLower)) {
+        return true;
+      }
+
+      return false;
     });
   }, [note, notes]);
 
-  // Compute Word & Character Stats
+  // Compute Word & Character Stats accurately for Thai and all languages (Microsoft Word standard)
   const stats = useMemo(() => {
-    if (!note?.content) return { words: 0, chars: 0, readTime: "1 min read" };
-    const text = note.content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    const words = text ? text.split(" ").length : 0;
-    const chars = text.length;
-    const readTimeMinutes = Math.max(1, Math.ceil(words / 200));
+    const rawText = editor
+      ? editor.state.doc.textContent
+      : (note?.content || "");
+
+    const words = countWords(rawText);
+    const chars = countCharacters(rawText);
+    const readTime = calculateReadingTime(words, chars, settings.language === "th" ? "th" : "en");
+
     return {
       words,
       chars,
-      readTime: `${readTimeMinutes} min read`,
+      readTime,
     };
-  }, [note?.content]);
+  }, [editor?.state.doc, note?.content, settings.language]);
 
-  // Format Dates
+  // Format Dates with localization
   const formattedDates = useMemo(() => {
+    const isTh = settings.language === "th";
+    const locale = isTh ? "th-TH" : "en-US";
+
     const formatDate = (val?: string | number) => {
-      if (!val) return "Today 09:41";
+      if (!val) {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+        return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
+      }
       const date = new Date(val);
-      if (isNaN(date.getTime())) return "Today";
-      const today = new Date();
-      const isToday = date.toDateString() === today.toDateString();
-      const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      if (isToday) return `Today ${timeStr}`;
-      return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${timeStr}`;
+      if (isNaN(date.getTime()) || date.getTime() === 0) {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+        return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
+      }
+
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const isYesterday = date.toDateString() === yesterday.toDateString();
+
+      const timeStr = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+      if (isToday) return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
+      if (isYesterday) return `${isTh ? "เมื่อวาน" : "Yesterday"} ${timeStr}`;
+      return `${date.toLocaleDateString(locale, { month: "short", day: "numeric" })} ${timeStr}`;
     };
 
     return {
       created: formatDate(note?.createdAt),
       updated: formatDate(note?.updatedAt),
     };
-  }, [note?.createdAt, note?.updatedAt]);
+  }, [note?.createdAt, note?.updatedAt, settings.language]);
 
   const handleScrollToItem = (item: OutlineItem) => {
     if (editor && item.pos !== undefined) {
@@ -256,9 +317,12 @@ export default function RightPanel({
                     outlineItems.map((item) => {
                       const levelPadding =
                         item.level === "h1" ? "pl-0 font-semibold text-foreground text-xs" :
-                        item.level === "h2" ? "pl-4 font-medium text-foreground/90 text-xs" :
-                        item.level === "h3" ? "pl-8 font-normal text-muted-foreground text-xs" :
-                        "pl-8 font-medium text-foreground/80 text-xs";
+                        item.level === "h2" ? "pl-3 font-medium text-foreground/90 text-xs" :
+                        item.level === "h3" ? "pl-6 font-normal text-muted-foreground text-xs" :
+                        item.level === "h4" ? "pl-8 font-normal text-muted-foreground/90 text-xs" :
+                        item.level === "h5" ? "pl-10 font-normal text-muted-foreground/80 text-xs" :
+                        item.level === "h6" ? "pl-12 font-normal text-muted-foreground/70 text-xs" :
+                        "pl-3 font-medium text-foreground/80 text-xs";
 
                       return (
                         <button
@@ -309,9 +373,8 @@ export default function RightPanel({
                         type="button"
                         onClick={() => {
                           onSelectNote?.(linkNote.id);
-                          onClose();
                         }}
-                        className="flex w-full items-center gap-2 rounded-lg border border-border/60 p-2.5 text-left hover:bg-muted/60 transition-colors"
+                        className="flex w-full items-center gap-2 rounded-lg border border-border/60 p-2.5 text-left hover:bg-muted/60 transition-colors cursor-pointer"
                       >
                         <Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
                         <span className="font-medium text-foreground truncate">{linkNote.fileName || linkNote.title}</span>
@@ -350,7 +413,7 @@ export default function RightPanel({
                         <input
                           type="text"
                           autoFocus
-                          placeholder="Tag..."
+                          placeholder={t("rightPanel.tagPlaceholder")}
                           value={newTagInput}
                           onChange={(e) => setNewTagInput(e.target.value)}
                           onKeyDown={(e) => {
@@ -445,25 +508,41 @@ export default function RightPanel({
                 <button
                   type="button"
                   onClick={() => note && onDuplicate?.(note)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
                 >
                   <Copy className="h-4 w-4 text-muted-foreground shrink-0" />
                   <span>{t("sidebar.duplicateAction")}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={onExport}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors"
-                >
-                  <Download className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span>{t("rightPanel.export")}</span>
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span>{t("rightPanel.export")}</span>
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="top" className="w-52 rounded-xl px-0 py-2 shadow-lg">
+                    <DropdownMenuItem disabled={!note} onClick={onExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                      <FileText className="h-4 w-4" />
+                      <span>{t("editor.exportPdf")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={!note} onClick={onExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                      <FileCode className="h-4 w-4" />
+                      <span>{t("editor.exportWord")}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <button
                   type="button"
                   onClick={() => note && onDelete?.(note)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-500/10 transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 >
                   <Trash2 className="h-4 w-4 shrink-0" />
                   <span>{t("common.delete")}</span>

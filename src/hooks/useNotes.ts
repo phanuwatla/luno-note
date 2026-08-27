@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { docxToHtml } from "@/lib/docxUtils";
 import { markNoteAsDeleted } from "@/lib/fileHandles";
 import {
@@ -9,6 +9,7 @@ import {
   isTiptapJson,
   isMarkdownNote,
 } from "@/lib/frontmatter";
+import { isEncryptedNote } from "@/lib/noteCrypto";
 
 export interface Note {
   id: string;
@@ -20,8 +21,12 @@ export interface Note {
   isLinkedFile?: boolean;
   contentFormat?: "plain" | "markdown" | "html";
   folderPath?: string;
-  fileType?: "image" | "binary" | "settings" | "luno-ai";
+  fileType?: "image" | "binary" | "settings" | "luno-ai" | "web-viewer";
+  url?: string;
+  faviconUrl?: string;
   isFavorite?: boolean;
+  isLocked?: boolean;
+  isDecrypted?: boolean;
   tags?: string[];
   driveFileId?: string;
   driveSyncedAt?: number;
@@ -36,9 +41,11 @@ function loadNotes(): Note[] {
     const loaded: Note[] = JSON.parse(raw);
     return loaded.map((n) => {
       const isMd = isMarkdownNote(n);
-      const extracted = (isMd && n.content && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content).allTags : [];
+      const isLocked = isEncryptedNote(n.content);
+      const extracted = (isMd && n.content && !isLocked && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content).allTags : [];
       return {
         ...n,
+        isLocked: isLocked || n.isLocked || false,
         tags: isMd ? Array.from(new Set([...(n.tags || []), ...extracted])) : [],
       };
     });
@@ -58,24 +65,16 @@ function saveNotes(notes: Note[]) {
 export function extractBaseTitleFromFileName(fileName?: string): string {
   if (!fileName) return "";
   const name = fileName.trim();
-  const lastDot = name.lastIndexOf(".");
-  if (lastDot > 0) {
-    return name.slice(0, lastDot);
-  }
-  return name;
+  const dotIndex = name.lastIndexOf(".");
+  return dotIndex > 0 ? name.slice(0, dotIndex) : name;
 }
 
-export function isSystemGeneratedUntitledName(name?: string): boolean {
-  if (!name) return true;
-  const trimmed = name.trim().toLowerCase();
-  const dotIdx = trimmed.lastIndexOf(".");
-  const baseName = dotIdx > 0 ? trimmed.slice(0, dotIdx) : trimmed;
-  // Match "untitled", "untitled-1", "untitled (1)", "untitled_1"
-  if (/^untitled([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
-  // Match "note_YYYY-MM-DD", "note_YYYY-MM-DD (1)", etc.
-  if (/^note_\d{4}-\d{2}-\d{2}([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
-  // Match "daily-YYYY-MM-DD", "daily-YYYY-MM-DD (1)", etc.
-  if (/^daily-\d{4}-\d{2}-\d{2}([_\-\s]?\d+|\s*\(\d+\))?$/i.test(baseName)) return true;
+export function isSystemGeneratedUntitledName(rawTitle: string): boolean {
+  if (!rawTitle) return true;
+  const trimmed = rawTitle.trim();
+  if (/^untitled(-\d+)?$/i.test(trimmed)) return true;
+  if (/^Note_\d{4}-\d{2}-\d{2}(-\d+)?$/i.test(trimmed)) return true;
+  if (/^Daily-\d{4}-\d{2}-\d{2}(-\d+)?$/i.test(trimmed)) return true;
   return false;
 }
 
@@ -87,9 +86,14 @@ export function getNoteTitleFromFileName(fileName?: string): string {
 
 export function useNotes() {
   const [notes, setNotes] = useState<Note[]>(loadNotes);
+  const notesRef = useRef<Note[]>(notes);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(
     () => loadNotes()[0]?.id ?? null
   );
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
 
   useEffect(() => {
     if (activeNoteId && !notes.some((n) => n.id === activeNoteId)) {
@@ -111,6 +115,7 @@ export function useNotes() {
 
     setNotes((prev) => {
       const updated = [note, ...prev];
+      notesRef.current = updated;
       saveNotes(updated);
       return updated;
     });
@@ -162,57 +167,82 @@ export function useNotes() {
     }
     setNotes((prev) => {
       const updated = [...newNotes, ...prev];
+      notesRef.current = updated;
       saveNotes(updated);
       return updated;
     });
     return newNotes;
   }, []);
 
-  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>) => {
+  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>, isNewWorkspace: boolean = false) => {
     const now = Date.now();
-    let resultNotes: Note[] = [];
 
-    setNotes((prev) => {
-      const prevNotesMap = new Map<string, Note>();
-      prev.forEach((n) => {
+    const prevNotesMap = new Map<string, Note>();
+    if (!isNewWorkspace) {
+      notesRef.current.forEach((n) => {
         if (n.id) prevNotesMap.set(n.id, n);
         const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
         if (relPath) prevNotesMap.set(relPath, n);
       });
+    }
 
-      resultNotes = items.map((item) => {
-        const id = item.id ?? crypto.randomUUID();
-        const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName) : "";
-        const existingNote = prevNotesMap.get(id) || (relPath ? prevNotesMap.get(relPath) : undefined);
+    const resultNotes: Note[] = items.map((item) => {
+      const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName) : "";
+      const existingNote = !isNewWorkspace ? ((item.id ? prevNotesMap.get(item.id) : undefined) || (relPath ? prevNotesMap.get(relPath) : undefined)) : undefined;
+      const id = item.id ?? existingNote?.id ?? crypto.randomUUID();
 
-        const isMd = isMarkdownNote(item);
-        const extractedTags = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
-        const mergedTags = isMd ? (item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]))) : [];
+      const isMd = isMarkdownNote(item);
+      const extractedTags = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
+      const mergedTags = isMd ? (item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]))) : [];
 
-        return {
-          id,
-          title: getNoteTitleFromFileName(item.fileName),
-          content: typeof item.content === "string" ? item.content : "",
-          createdAt: existingNote?.createdAt ?? now,
-          updatedAt: now,
-          fileName: item.fileName,
-          isLinkedFile: item.isLinkedFile,
-          contentFormat: item.contentFormat,
-          folderPath: item.folderPath,
-          fileType: item.fileType,
-          tags: mergedTags,
-        };
-      });
+      const isEncrypted = isEncryptedNote(item.content);
+      const isLocked = isEncrypted || (item as any).isLocked || existingNote?.isLocked || false;
+      const isCurrentlyDecrypted = Boolean(
+        (item as any).isDecrypted ??
+        (existingNote?.isDecrypted && !isEncryptedNote(existingNote?.content))
+      );
+      const isDecrypted = isCurrentlyDecrypted;
+      const content = (isCurrentlyDecrypted && isEncrypted && existingNote?.content)
+        ? existingNote.content
+        : (typeof item.content === "string" ? item.content : "");
 
-      saveNotes(resultNotes);
-      return resultNotes;
+      return {
+        id,
+        title: getNoteTitleFromFileName(item.fileName),
+        content,
+        createdAt: item.createdAt ?? existingNote?.createdAt ?? now,
+        updatedAt: item.updatedAt ?? existingNote?.updatedAt ?? now,
+        fileName: item.fileName,
+        isLinkedFile: item.isLinkedFile,
+        contentFormat: item.contentFormat,
+        folderPath: item.folderPath,
+        fileType: item.fileType,
+        isLocked,
+        isDecrypted,
+        tags: mergedTags,
+        isFavorite: (item as any).isFavorite !== undefined ? (item as any).isFavorite : (existingNote?.isFavorite ?? false),
+        driveFileId: (item as any).driveFileId ?? existingNote?.driveFileId,
+        driveSyncedAt: (item as any).driveSyncedAt ?? existingNote?.driveSyncedAt,
+      };
     });
+
+    // When switching to a new workspace, immediately wipe localStorage AND
+    // the in-memory ref so no stale notes from the previous workspace can
+    // bleed into the new state before React commits the setNotes update.
+    if (isNewWorkspace) {
+      notesRef.current = [];
+      saveNotes([]);
+    }
+
+    notesRef.current = resultNotes;
+    setNotes(resultNotes);
+    saveNotes(resultNotes);
 
     return resultNotes;
   }, []);
 
   const updateNote = useCallback(
-    (id: string, patch: Partial<Pick<Note, "title" | "content" | "fileName" | "isLinkedFile" | "contentFormat" | "folderPath" | "fileType" | "tags" | "driveFileId" | "driveSyncedAt">>) => {
+    (id: string, patch: Partial<Note>) => {
       const normalizedPatch = { ...patch };
       if (patch.fileName && normalizedPatch.title === undefined) {
         normalizedPatch.title = getNoteTitleFromFileName(patch.fileName);
@@ -230,9 +260,8 @@ export function useNotes() {
           };
           const isMd = isMarkdownNote(updatedNoteMeta);
 
-          let finalTags: string[] = [];
+          let finalTags: string[] = n.tags || [];
           if (isMd) {
-            finalTags = n.tags || [];
             if (normalizedPatch.tags !== undefined) {
               finalTags = normalizedPatch.tags;
               if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
@@ -241,8 +270,13 @@ export function useNotes() {
             } else if (normalizedPatch.content !== undefined) {
               const str = mergedContent || "";
               if (typeof str === "string" && !isTiptapJson(str) && !str.trimStart().startsWith("<")) {
-                const extracted = parseFrontmatterAndTags(str).allTags;
-                finalTags = Array.from(new Set([...finalTags, ...extracted]));
+                const parsed = parseFrontmatterAndTags(str);
+                if (parsed.hasFrontmatter) {
+                  finalTags = parsed.allTags;
+                } else {
+                  // Content is body-only (e.g. from Tiptap): preserve existing tags and merge any inline #tags
+                  finalTags = Array.from(new Set([...(n.tags || []), ...parsed.inlineTags]));
+                }
               }
             }
           }
@@ -255,6 +289,7 @@ export function useNotes() {
             updatedAt: Date.now(),
           };
         });
+        notesRef.current = updated;
         saveNotes(updated);
         return updated;
       });
@@ -271,6 +306,7 @@ export function useNotes() {
         const newTags = parseFrontmatterAndTags(newContent).allTags;
         return { ...n, content: newContent, tags: newTags, updatedAt: Date.now() };
       });
+      notesRef.current = updated;
       saveNotes(updated);
       return updated;
     });
@@ -285,6 +321,7 @@ export function useNotes() {
         const newTags = parseFrontmatterAndTags(newContent).allTags;
         return { ...n, content: newContent, tags: newTags, updatedAt: Date.now() };
       });
+      notesRef.current = updated;
       saveNotes(updated);
       return updated;
     });
@@ -295,6 +332,7 @@ export function useNotes() {
       markNoteAsDeleted(id);
       setNotes((prev) => {
         const updated = prev.filter((n) => n.id !== id);
+        notesRef.current = updated;
         saveNotes(updated);
         return updated;
       });

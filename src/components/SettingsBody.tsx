@@ -4,9 +4,10 @@ import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, FONT_OPTIONS, FontFamilyOption, useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Check } from "lucide-react";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -15,7 +16,7 @@ interface SettingsBodyProps {
 }
 
 export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
-  const { settings, updateSetting } = useAppSettings();
+  const { settings, updateSetting, applyAppearanceStyle } = useAppSettings();
   const { t } = useTranslation();
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -48,6 +49,165 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
                 >
                   <Icon className="h-4 w-4" />
                   {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Visual Appearance Themes */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-foreground">
+            {t("settings.visualAppearanceGroup")}
+          </label>
+          <p className="text-xs text-muted-foreground mb-2.5">{t("settings.visualAppearanceDesc")}</p>
+          <div className="grid grid-cols-2 gap-2">
+            {APPEARANCE_STYLE_OPTIONS.map((style) => {
+              const isSelected = (settings.appearanceStyle || "default") === style.id;
+              const isDark = style.recommendedColorScheme === "dark" || (style.id === "default" && settings.colorScheme === "dark");
+              const bgPreview = isDark ? style.darkBg : style.lightBg;
+              const sbPreview = isDark ? style.darkSidebar : style.lightSidebar;
+              const accentColor = APP_THEMES.find((th) => th.id === style.recommendedTheme)?.color || style.accentPreview;
+
+              const getInnerRadiusClass = () => {
+                switch (style.id) {
+                  case "catppuccin":
+                    return "rounded-full";
+                  case "neumorphism":
+                    return "rounded-md";
+                  case "glass":
+                    return "rounded-md";
+                  case "nord":
+                    return "rounded-sm";
+                  case "default":
+                    return "rounded-sm";
+                  case "paper":
+                    return "rounded-xs";
+                  case "midnight":
+                  case "cyberpunk":
+                    return "rounded-none";
+                  default:
+                    return "rounded-sm";
+                }
+              };
+
+              const innerRadiusClass = getInnerRadiusClass();
+
+              return (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => applyAppearanceStyle(style.id)}
+                  className={`flex flex-col rounded-xl border p-2 text-left transition-all cursor-pointer ${
+                    isSelected
+                      ? "border-primary bg-primary/10 shadow-2xs"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                  }`}
+                >
+                  <div
+                    className="w-full h-10 overflow-hidden flex mb-1.5 relative rounded-lg border border-border/40"
+                    style={{ background: bgPreview }}
+                  >
+                    <div
+                      className="w-1/3 h-full border-r border-border/20 p-1 flex flex-col gap-0.5"
+                      style={{
+                        background: sbPreview,
+                        ...(style.id === "glass" ? { backdropFilter: "blur(12px)", backgroundColor: isDark ? "rgba(15,23,42,0.6)" : "rgba(255,255,255,0.6)" } : {}),
+                        ...(style.id === "cyberpunk" ? { borderRight: `1px solid ${accentColor}` } : {}),
+                      }}
+                    >
+                      <div className={`h-1 w-full ${innerRadiusClass} ${isDark ? "bg-white/35" : "bg-black/25"}`} />
+                      <div className={`h-0.5 w-3/4 ${innerRadiusClass} ${isDark ? "bg-white/20" : "bg-black/15"}`} />
+                    </div>
+                    <div className="flex-1 p-1 flex flex-col gap-0.5 justify-center">
+                      {style.id === "glass" ? (
+                        <div
+                          className="p-0.5 rounded-md flex flex-col gap-0.5"
+                          style={{
+                            background: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.7)",
+                            border: "1px solid rgba(255,255,255,0.25)",
+                            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
+                          }}
+                        >
+                          <div className="h-1 w-2/3 rounded-md" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-md ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      ) : style.id === "cyberpunk" ? (
+                        <div
+                          className="p-0.5 rounded-none flex flex-col gap-0.5"
+                          style={{
+                            border: `1px solid ${accentColor}`,
+                            boxShadow: `inset 0 0 3px ${accentColor}`,
+                            background: "rgba(11, 5, 20, 0.8)",
+                          }}
+                        >
+                          <div className="h-1 w-2/3 rounded-none" style={{ backgroundColor: accentColor, boxShadow: `0 0 3px ${accentColor}` }} />
+                          <div className="h-0.5 w-full rounded-none bg-white/30" />
+                        </div>
+                      ) : style.id === "catppuccin" ? (
+                        <div
+                          className="p-0.5 rounded-lg flex flex-col gap-0.5 border border-white/10"
+                          style={{ background: isDark ? "#181825" : "#e6e9ef" }}
+                        >
+                          <div className="h-1 w-2/3 rounded-full" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-full ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      ) : style.id === "neumorphism" ? (
+                        <div
+                          className="p-0.5 rounded-md flex flex-col gap-0.5"
+                          style={{
+                            background: isDark ? "#242831" : "#e5e9ef",
+                            boxShadow: isDark
+                              ? "1px 1px 3px rgba(0,0,0,0.5), -1px -1px 3px rgba(255,255,255,0.05)"
+                              : "1px 1px 3px rgba(163,170,181,0.5), -1px -1px 3px rgba(255,255,255,0.9)",
+                          }}
+                        >
+                          <div className="h-1 w-2/3 rounded-full" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-full ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      ) : style.id === "midnight" ? (
+                        <div
+                          className="p-0.5 rounded-none flex flex-col gap-0.5 border border-zinc-800"
+                          style={{ background: "#050505" }}
+                        >
+                          <div className="h-1 w-2/3 rounded-none" style={{ backgroundColor: accentColor }} />
+                          <div className="h-0.5 w-full rounded-none bg-white/30" />
+                        </div>
+                      ) : style.id === "paper" ? (
+                        <div
+                          className="p-0.5 rounded-xs flex flex-col gap-0.5 border border-amber-900/15"
+                          style={{ background: isDark ? "#161311" : "#f4ede0" }}
+                        >
+                          <div className="h-1 w-2/3 rounded-xs" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-xs ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      ) : style.id === "nord" ? (
+                        <div
+                          className="p-0.5 rounded-sm flex flex-col gap-0.5 border border-slate-700/40"
+                          style={{ background: isDark ? "#1e222a" : "#e5e9f0" }}
+                        >
+                          <div className="h-1 w-2/3 rounded-sm" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-sm ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      ) : (
+                        <div
+                          className="p-0.5 rounded-sm flex flex-col gap-0.5 border border-border/40"
+                          style={{ background: isDark ? "#090d16" : "#f8fafc" }}
+                        >
+                          <div className="h-1 w-2/3 rounded-sm" style={{ backgroundColor: accentColor }} />
+                          <div className={`h-0.5 w-full rounded-sm ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                        </div>
+                      )}
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5 shadow-2xs">
+                        <Check className="h-2 w-2" />
+                      </div>
+                    )}
+                  </div>
+                  <span className={`text-xs font-semibold line-clamp-1 ${isSelected ? "text-primary" : "text-foreground"}`}>
+                    {t(style.nameKey as any) || style.id}
+                  </span>
                 </button>
               );
             })}
@@ -112,18 +272,36 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
 
           <div>
             <label htmlFor={`${idPrefix}-fontFamily`} className="mb-2 block text-sm font-medium text-foreground">
-              {t("settings.fontFamily")}
+              {t("settings.interfaceFontFamily") || "Interface Font"}
             </label>
-            <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as "inter" | "system" | "serif" | "mono" | "prompt")}>
+            <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as FontFamilyOption)}>
               <SelectTrigger id={`${idPrefix}-fontFamily`} className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inter">{t("settings.fontInter")}</SelectItem>
-                <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
-                <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
-                <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
-                <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
+              <SelectContent className="max-h-64">
+                {FONT_OPTIONS.map((font) => (
+                  <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                    <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <label htmlFor={`${idPrefix}-editorFontFamily`} className="mb-2 block text-sm font-medium text-foreground">
+              {t("settings.editorFontFamily") || "Editor Font"}
+            </label>
+            <Select value={settings.editorFontFamily || settings.fontFamily} onValueChange={(v) => updateSetting("editorFontFamily", v as FontFamilyOption)}>
+              <SelectTrigger id={`${idPrefix}-editorFontFamily`} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="max-h-64">
+                {FONT_OPTIONS.map((font) => (
+                  <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                    <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -303,6 +481,24 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             />
           </div>
         </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-accentHeadings`} className="text-sm font-medium text-foreground">
+              {t("settings.accentHeadings")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.accentHeadingsDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.accentHeadings ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-accentHeadings`}
+              checked={settings.accentHeadings}
+              onCheckedChange={(checked) => updateSetting("accentHeadings", checked)}
+            />
+          </div>
+        </div>
       </div>
 
       {/* 4. Editor & Writing */}
@@ -310,6 +506,25 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80 border-b border-border/50 pb-1.5">
           {t("settings.sectionEditor")}
         </h3>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-highlightInlineCode`} className="text-sm font-medium text-foreground">
+              {t("settings.highlightInlineCode")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.highlightInlineCodeDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.highlightInlineCode ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-highlightInlineCode`}
+              checked={settings.highlightInlineCode}
+              onCheckedChange={(checked) => updateSetting("highlightInlineCode", checked)}
+            />
+          </div>
+        </div>
 
         <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
           <div>
@@ -364,6 +579,25 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               id={`${idPrefix}-showCodeLineNumbers`}
               checked={settings.showCodeLineNumbers}
               onCheckedChange={(checked) => updateSetting("showCodeLineNumbers", checked)}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-spellCheck`} className="text-sm font-medium text-foreground">
+              {t("settings.spellCheckSetting") || "Spell Check"}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.spellCheckSettingDesc") || "Check and underline misspelled words in Thai and English"}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.spellCheck !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-spellCheck`}
+              checked={settings.spellCheck !== false}
+              onCheckedChange={(checked) => updateSetting("spellCheck", checked)}
             />
           </div>
         </div>

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Prompt:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Chonburi&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Itim&family=JetBrains+Mono:wght@400;500&family=Kanit:wght@400;500;600;700&family=Mali:wght@400;500;600;700&family=Mitr:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=Noto+Serif+Thai:wght@400;500;600;700&family=Prompt:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&family=Sriracha&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -93,6 +93,30 @@ button[role="combobox"]:focus-visible {
   }
 }
 
+:root[data-app-theme='emerald'] {
+  --primary: 174 62% 39%;
+  --accent: 174 62% 39%;
+  --ring: 174 62% 39%;
+  --sidebar-primary: 174 62% 39%;
+  --sidebar-ring: 174 62% 39%;
+  --hl-tag: #17756b;
+  --hl-attr: #7c3aed;
+  --hl-string: #047857;
+  --hl-keyword: #17756b;
+}
+
+:root[data-app-theme='cyan'] {
+  --primary: 189 94% 43%;
+  --accent: 189 94% 43%;
+  --ring: 189 94% 43%;
+  --sidebar-primary: 189 94% 43%;
+  --sidebar-ring: 189 94% 43%;
+  --hl-tag: #0891b2;
+  --hl-attr: #7c3aed;
+  --hl-string: #059669;
+  --hl-keyword: #0891b2;
+}
+
 :root[data-app-theme='blue'] {
   --primary: 217 91% 53%;
   --accent: 217 91% 53%;
@@ -103,6 +127,18 @@ button[role="combobox"]:focus-visible {
   --hl-attr: #7c3aed;
   --hl-string: #059669;
   --hl-keyword: #2563eb;
+}
+
+:root[data-app-theme='indigo'] {
+  --primary: 239 84% 67%;
+  --accent: 239 84% 67%;
+  --ring: 239 84% 67%;
+  --sidebar-primary: 239 84% 67%;
+  --sidebar-ring: 239 84% 67%;
+  --hl-tag: #4f46e5;
+  --hl-attr: #0891b2;
+  --hl-string: #059669;
+  --hl-keyword: #4f46e5;
 }
 
 :root[data-app-theme='violet'] {
@@ -117,16 +153,16 @@ button[role="combobox"]:focus-visible {
   --hl-keyword: #6d28d9;
 }
 
-:root[data-app-theme='emerald'] {
-  --primary: 174 62% 39%;
-  --accent: 174 62% 39%;
-  --ring: 174 62% 39%;
-  --sidebar-primary: 174 62% 39%;
-  --sidebar-ring: 174 62% 39%;
-  --hl-tag: #17756b;
-  --hl-attr: #7c3aed;
-  --hl-string: #047857;
-  --hl-keyword: #17756b;
+:root[data-app-theme='fuchsia'] {
+  --primary: 292 84% 61%;
+  --accent: 292 84% 61%;
+  --ring: 292 84% 61%;
+  --sidebar-primary: 292 84% 61%;
+  --sidebar-ring: 292 84% 61%;
+  --hl-tag: #c026d3;
+  --hl-attr: #2563eb;
+  --hl-string: #059669;
+  --hl-keyword: #c026d3;
 }
 
 :root[data-app-theme='rose'] {
@@ -141,6 +177,18 @@ button[role="combobox"]:focus-visible {
   --hl-keyword: #be123c;
 }
 
+:root[data-app-theme='ruby'] {
+  --primary: 346 84% 50%;
+  --accent: 346 84% 50%;
+  --ring: 346 84% 50%;
+  --sidebar-primary: 346 84% 50%;
+  --sidebar-ring: 346 84% 50%;
+  --hl-tag: #e11d48;
+  --hl-attr: #4f46e5;
+  --hl-string: #059669;
+  --hl-keyword: #e11d48;
+}
+
 :root[data-app-theme='orange'] {
   --primary: 25 95% 60%;
   --accent: 25 95% 60%;
@@ -151,6 +199,30 @@ button[role="combobox"]:focus-visible {
   --hl-attr: #0f766e;
   --hl-string: #7c3aed;
   --hl-keyword: #c2410c;
+}
+
+:root[data-app-theme='amber'] {
+  --primary: 38 92% 50%;
+  --accent: 38 92% 50%;
+  --ring: 38 92% 50%;
+  --sidebar-primary: 38 92% 50%;
+  --sidebar-ring: 38 92% 50%;
+  --hl-tag: #d97706;
+  --hl-attr: #4f46e5;
+  --hl-string: #059669;
+  --hl-keyword: #d97706;
+}
+
+:root[data-app-theme='lime'] {
+  --primary: 84 81% 44%;
+  --accent: 84 81% 44%;
+  --ring: 84 81% 44%;
+  --sidebar-primary: 84 81% 44%;
+  --sidebar-ring: 84 81% 44%;
+  --hl-tag: #65a30d;
+  --hl-attr: #7c3aed;
+  --hl-string: #0d9488;
+  --hl-keyword: #65a30d;
 }
 
 :root[data-app-theme='slate'] {
@@ -165,6 +237,150 @@ button[role="combobox"]:focus-visible {
   --hl-keyword: #374151;
 }
 
+/* =========================================================================
+   Visual Appearance Themes (Light Mode)
+   ========================================================================= */
+
+:root[data-app-style='paper'] {
+  --background: 44 48% 97%;
+  --foreground: 28 35% 18%;
+  --card: 44 45% 99%;
+  --card-foreground: 28 35% 18%;
+  --popover: 44 45% 99%;
+  --popover-foreground: 28 35% 18%;
+  --secondary: 40 30% 93%;
+  --secondary-foreground: 28 35% 18%;
+  --muted: 40 28% 92%;
+  --muted-foreground: 28 20% 45%;
+  --border: 38 24% 86%;
+  --input: 38 24% 86%;
+  --sidebar-background: 40 35% 94%;
+  --sidebar-foreground: 28 35% 18%;
+  --sidebar-accent: 40 30% 89%;
+  --sidebar-accent-foreground: 28 35% 18%;
+  --sidebar-border: 38 24% 86%;
+}
+
+:root[data-app-style='midnight'] {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 5%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 5%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 5%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 5%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+  --border: 0 0% 88%;
+  --input: 0 0% 88%;
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 0 0% 5%;
+  --sidebar-accent: 0 0% 93%;
+  --sidebar-accent-foreground: 0 0% 5%;
+  --sidebar-border: 0 0% 88%;
+}
+
+:root[data-app-style='nord'] {
+  --background: 220 27% 96%;
+  --foreground: 222 16% 28%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 16% 28%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 16% 28%;
+  --secondary: 218 27% 92%;
+  --secondary-foreground: 222 16% 28%;
+  --muted: 218 27% 92%;
+  --muted-foreground: 220 16% 45%;
+  --border: 216 20% 86%;
+  --input: 216 20% 86%;
+  --sidebar-background: 218 27% 92%;
+  --sidebar-foreground: 222 16% 28%;
+  --sidebar-accent: 216 20% 86%;
+  --sidebar-accent-foreground: 222 16% 28%;
+  --sidebar-border: 216 20% 86%;
+}
+
+:root[data-app-style='glass'] {
+  --background: 204 100% 98%;
+  --foreground: 215 28% 17%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 28% 17%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 215 28% 17%;
+  --secondary: 204 80% 94%;
+  --secondary-foreground: 215 28% 17%;
+  --muted: 204 80% 94%;
+  --muted-foreground: 215 16% 47%;
+  --border: 204 60% 88%;
+  --input: 204 60% 88%;
+  --sidebar-background: 204 80% 96%;
+  --sidebar-foreground: 215 28% 17%;
+  --sidebar-accent: 204 70% 92%;
+  --sidebar-accent-foreground: 215 28% 17%;
+  --sidebar-border: 204 60% 88%;
+}
+
+:root[data-app-style='cyberpunk'] {
+  --background: 290 60% 98%;
+  --foreground: 280 45% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 280 45% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 280 45% 15%;
+  --secondary: 290 40% 93%;
+  --secondary-foreground: 280 45% 15%;
+  --muted: 290 40% 93%;
+  --muted-foreground: 280 20% 45%;
+  --border: 290 30% 85%;
+  --input: 290 30% 85%;
+  --sidebar-background: 290 50% 95%;
+  --sidebar-foreground: 280 45% 15%;
+  --sidebar-accent: 290 40% 90%;
+  --sidebar-accent-foreground: 280 45% 15%;
+  --sidebar-border: 290 30% 85%;
+}
+
+:root[data-app-style='catppuccin'] {
+  --background: 228 33% 97%;
+  --foreground: 234 16% 35%;
+  --card: 0 0% 100%;
+  --card-foreground: 234 16% 35%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 234 16% 35%;
+  --secondary: 225 24% 92%;
+  --secondary-foreground: 234 16% 35%;
+  --muted: 225 24% 92%;
+  --muted-foreground: 232 10% 55%;
+  --border: 223 16% 83%;
+  --input: 223 16% 83%;
+  --sidebar-background: 225 24% 94%;
+  --sidebar-foreground: 234 16% 35%;
+  --sidebar-accent: 223 16% 88%;
+  --sidebar-accent-foreground: 234 16% 35%;
+  --sidebar-border: 223 16% 83%;
+}
+
+:root[data-app-style='neumorphism'] {
+  --background: 216 22% 92%;
+  --foreground: 218 19% 30%;
+  --card: 216 22% 92%;
+  --card-foreground: 218 19% 25%;
+  --popover: 216 22% 92%;
+  --popover-foreground: 218 19% 25%;
+  --secondary: 216 22% 88%;
+  --secondary-foreground: 218 19% 25%;
+  --muted: 216 20% 88%;
+  --muted-foreground: 218 12% 52%;
+  --border: 216 16% 85%;
+  --input: 216 16% 85%;
+  --sidebar-background: 216 22% 90%;
+  --sidebar-foreground: 218 19% 30%;
+  --sidebar-accent: 216 22% 86%;
+  --sidebar-accent-foreground: 218 19% 20%;
+  --sidebar-border: 216 16% 83%;
+}
+
 :root[data-app-font='inter'],
 :root[data-app-font='inter'] ::marker,
 :root[data-app-font='inter'] ol,
@@ -173,20 +389,116 @@ button[role="combobox"]:focus-visible {
   font-family: 'Inter', sans-serif;
 }
 
+:root[data-app-font='sarabun'],
+:root[data-app-font='sarabun'] ::marker,
+:root[data-app-font='sarabun'] ol,
+:root[data-app-font='sarabun'] li {
+  --app-font-family: 'Sarabun', 'Inter', sans-serif;
+  font-family: 'Sarabun', 'Inter', sans-serif;
+}
+
+:root[data-app-font='prompt'],
+:root[data-app-font='prompt'] ::marker,
+:root[data-app-font='prompt'] ol,
+:root[data-app-font='prompt'] li {
+  --app-font-family: 'Prompt', 'Inter', sans-serif;
+  font-family: 'Prompt', 'Inter', sans-serif;
+}
+
+:root[data-app-font='kanit'],
+:root[data-app-font='kanit'] ::marker,
+:root[data-app-font='kanit'] ol,
+:root[data-app-font='kanit'] li {
+  --app-font-family: 'Kanit', 'Inter', sans-serif;
+  font-family: 'Kanit', 'Inter', sans-serif;
+}
+
+:root[data-app-font='mitr'],
+:root[data-app-font='mitr'] ::marker,
+:root[data-app-font='mitr'] ol,
+:root[data-app-font='mitr'] li {
+  --app-font-family: 'Mitr', 'Inter', sans-serif;
+  font-family: 'Mitr', 'Inter', sans-serif;
+}
+
+:root[data-app-font='ibmPlexThai'],
+:root[data-app-font='ibmPlexThai'] ::marker,
+:root[data-app-font='ibmPlexThai'] ol,
+:root[data-app-font='ibmPlexThai'] li {
+  --app-font-family: 'IBM Plex Sans Thai', 'Inter', sans-serif;
+  font-family: 'IBM Plex Sans Thai', 'Inter', sans-serif;
+}
+
+:root[data-app-font='notoSansThai'],
+:root[data-app-font='notoSansThai'] ::marker,
+:root[data-app-font='notoSansThai'] ol,
+:root[data-app-font='notoSansThai'] li {
+  --app-font-family: 'Noto Sans Thai', 'Inter', sans-serif;
+  font-family: 'Noto Sans Thai', 'Inter', sans-serif;
+}
+
+:root[data-app-font='notoSerifThai'],
+:root[data-app-font='notoSerifThai'] ::marker,
+:root[data-app-font='notoSerifThai'] ol,
+:root[data-app-font='notoSerifThai'] li {
+  --app-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
+  font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
+}
+
+:root[data-app-font='chakraPetch'],
+:root[data-app-font='chakraPetch'] ::marker,
+:root[data-app-font='chakraPetch'] ol,
+:root[data-app-font='chakraPetch'] li {
+  --app-font-family: 'Chakra Petch', 'Inter', sans-serif;
+  font-family: 'Chakra Petch', 'Inter', sans-serif;
+}
+
+:root[data-app-font='mali'],
+:root[data-app-font='mali'] ::marker,
+:root[data-app-font='mali'] ol,
+:root[data-app-font='mali'] li {
+  --app-font-family: 'Mali', cursive, sans-serif;
+  font-family: 'Mali', cursive, sans-serif;
+}
+
+:root[data-app-font='itim'],
+:root[data-app-font='itim'] ::marker,
+:root[data-app-font='itim'] ol,
+:root[data-app-font='itim'] li {
+  --app-font-family: 'Itim', cursive, sans-serif;
+  font-family: 'Itim', cursive, sans-serif;
+}
+
+:root[data-app-font='sriracha'],
+:root[data-app-font='sriracha'] ::marker,
+:root[data-app-font='sriracha'] ol,
+:root[data-app-font='sriracha'] li {
+  --app-font-family: 'Sriracha', cursive, sans-serif;
+  font-family: 'Sriracha', cursive, sans-serif;
+}
+
+:root[data-app-font='chonburi'],
+:root[data-app-font='chonburi'] ::marker,
+:root[data-app-font='chonburi'] ol,
+:root[data-app-font='chonburi'] li {
+  --app-font-family: 'Chonburi', cursive, serif;
+  font-family: 'Chonburi', cursive, serif;
+}
+
 :root[data-app-font='system'],
 :root[data-app-font='system'] ::marker,
 :root[data-app-font='system'] ol,
 :root[data-app-font='system'] li {
-  --app-font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --app-font-family: system-ui, -apple-system, 'Segoe UI', 'Leelawadee UI', 'Thonburi', sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Leelawadee UI', 'Thonburi', sans-serif;
 }
 
 :root[data-app-font='serif'],
 :root[data-app-font='serif'] ::marker,
 :root[data-app-font='serif'] ol,
 :root[data-app-font='serif'] li {
-  --app-font-family: Georgia, 'Times New Roman', serif;
-  font-family: Georgia, 'Times New Roman', serif;
+  --app-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
+  font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
 }
 
 :root[data-app-font='mono'],
@@ -197,12 +509,53 @@ button[role="combobox"]:focus-visible {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-:root[data-app-font='prompt'],
-:root[data-app-font='prompt'] ::marker,
-:root[data-app-font='prompt'] ol,
-:root[data-app-font='prompt'] li {
-  --app-font-family: 'Prompt', sans-serif;
-  font-family: 'Prompt', sans-serif;
+:root[data-editor-font='inter'] {
+  --editor-font-family: 'Inter', sans-serif;
+}
+:root[data-editor-font='sarabun'] {
+  --editor-font-family: 'Sarabun', 'Inter', sans-serif;
+}
+:root[data-editor-font='prompt'] {
+  --editor-font-family: 'Prompt', 'Inter', sans-serif;
+}
+:root[data-editor-font='kanit'] {
+  --editor-font-family: 'Kanit', 'Inter', sans-serif;
+}
+:root[data-editor-font='mitr'] {
+  --editor-font-family: 'Mitr', 'Inter', sans-serif;
+}
+:root[data-editor-font='ibmPlexThai'] {
+  --editor-font-family: 'IBM Plex Sans Thai', 'Inter', sans-serif;
+}
+:root[data-editor-font='notoSansThai'] {
+  --editor-font-family: 'Noto Sans Thai', 'Inter', sans-serif;
+}
+:root[data-editor-font='notoSerifThai'] {
+  --editor-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
+}
+:root[data-editor-font='chakraPetch'] {
+  --editor-font-family: 'Chakra Petch', 'Inter', sans-serif;
+}
+:root[data-editor-font='mali'] {
+  --editor-font-family: 'Mali', cursive, sans-serif;
+}
+:root[data-editor-font='itim'] {
+  --editor-font-family: 'Itim', cursive, sans-serif;
+}
+:root[data-editor-font='sriracha'] {
+  --editor-font-family: 'Sriracha', cursive, sans-serif;
+}
+:root[data-editor-font='chonburi'] {
+  --editor-font-family: 'Chonburi', cursive, serif;
+}
+:root[data-editor-font='system'] {
+  --editor-font-family: system-ui, -apple-system, 'Segoe UI', 'Leelawadee UI', 'Thonburi', sans-serif;
+}
+:root[data-editor-font='serif'] {
+  --editor-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
+}
+:root[data-editor-font='mono'] {
+  --editor-font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -219,9 +572,21 @@ button[role="combobox"]:focus-visible {
   li::marker,
   ol,
   ul,
-  li,
-  .ProseMirror {
-    font-family: var(--app-font-family) !important;
+  li {
+    font-family: var(--app-font-family);
+  }
+  .ProseMirror,
+  .ProseMirror *,
+  .editor-content-area,
+  .editor-content-area input,
+  .editor-content-area textarea {
+    font-family: var(--editor-font-family, var(--app-font-family)) !important;
+  }
+  .ProseMirror code,
+  .ProseMirror code *,
+  .ProseMirror pre,
+  .ProseMirror pre * {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
   }
 }
 
@@ -365,6 +730,1026 @@ button[role="combobox"]:focus-visible {
   background: hsl(var(--accent) / 0.20);
 }
 
+/* =========================================================================
+   Visual Appearance Themes (Dark Mode)
+   ========================================================================= */
+
+.dark:root[data-app-style='paper'] {
+  --background: 28 16% 9%;
+  --foreground: 40 30% 90%;
+  --card: 28 15% 12%;
+  --card-foreground: 40 30% 90%;
+  --popover: 28 15% 12%;
+  --popover-foreground: 40 30% 90%;
+  --secondary: 28 14% 16%;
+  --secondary-foreground: 40 30% 90%;
+  --muted: 28 14% 16%;
+  --muted-foreground: 35 15% 60%;
+  --border: 28 12% 19%;
+  --input: 28 12% 19%;
+  --sidebar-background: 28 18% 7%;
+  --sidebar-foreground: 40 30% 90%;
+  --sidebar-accent: 28 14% 14%;
+  --sidebar-accent-foreground: 40 30% 90%;
+  --sidebar-border: 28 12% 16%;
+}
+
+.dark:root[data-app-style='midnight'] {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 4%;
+  --popover-foreground: 0 0% 98%;
+  --secondary: 0 0% 8%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 8%;
+  --muted-foreground: 0 0% 60%;
+  --border: 0 0% 14%;
+  --input: 0 0% 14%;
+  --sidebar-background: 0 0% 0%;
+  --sidebar-foreground: 0 0% 98%;
+  --sidebar-accent: 0 0% 8%;
+  --sidebar-accent-foreground: 0 0% 98%;
+  --sidebar-border: 0 0% 12%;
+}
+
+.dark:root[data-app-style='nord'] {
+  --background: 220 16% 16%;
+  --foreground: 218 27% 92%;
+  --card: 222 16% 22%;
+  --card-foreground: 218 27% 92%;
+  --popover: 222 16% 22%;
+  --popover-foreground: 218 27% 92%;
+  --secondary: 220 16% 26%;
+  --secondary-foreground: 218 27% 92%;
+  --muted: 220 16% 26%;
+  --muted-foreground: 219 14% 65%;
+  --border: 220 16% 30%;
+  --input: 220 16% 30%;
+  --sidebar-background: 222 18% 13%;
+  --sidebar-foreground: 218 27% 92%;
+  --sidebar-accent: 220 16% 20%;
+  --sidebar-accent-foreground: 218 27% 92%;
+  --sidebar-border: 220 16% 24%;
+}
+
+.dark:root[data-app-style='glass'] {
+  --background: 224 45% 6%;
+  --foreground: 210 40% 98%;
+  --card: 224 40% 10%;
+  --card-foreground: 210 40% 98%;
+  --popover: 224 40% 10%;
+  --popover-foreground: 210 40% 98%;
+  --secondary: 224 35% 15%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 224 35% 15%;
+  --muted-foreground: 215 20% 65%;
+  --border: 224 30% 20%;
+  --input: 224 30% 20%;
+  --sidebar-background: 224 50% 5%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-accent: 224 35% 14%;
+  --sidebar-accent-foreground: 210 40% 98%;
+  --sidebar-border: 224 30% 16%;
+}
+
+.dark:root[data-app-style='cyberpunk'] {
+  --background: 270 50% 4%;
+  --foreground: 290 80% 95%;
+  --card: 270 40% 8%;
+  --card-foreground: 290 80% 95%;
+  --popover: 270 40% 8%;
+  --popover-foreground: 290 80% 95%;
+  --secondary: 270 35% 14%;
+  --secondary-foreground: 290 80% 95%;
+  --muted: 270 35% 14%;
+  --muted-foreground: 280 25% 65%;
+  --border: 280 50% 22%;
+  --input: 280 50% 22%;
+  --sidebar-background: 270 60% 3%;
+  --sidebar-foreground: 290 80% 95%;
+  --sidebar-accent: 270 40% 12%;
+  --sidebar-accent-foreground: 290 80% 95%;
+  --sidebar-border: 280 50% 18%;
+}
+
+.dark:root[data-app-style='catppuccin'] {
+  --background: 240 21% 15%;
+  --foreground: 226 64% 88%;
+  --card: 237 16% 23%;
+  --card-foreground: 226 64% 88%;
+  --popover: 237 16% 23%;
+  --popover-foreground: 226 64% 88%;
+  --secondary: 235 18% 30%;
+  --secondary-foreground: 226 64% 88%;
+  --muted: 235 18% 30%;
+  --muted-foreground: 232 14% 65%;
+  --border: 237 16% 32%;
+  --input: 237 16% 32%;
+  --sidebar-background: 240 23% 9%;
+  --sidebar-foreground: 226 64% 88%;
+  --sidebar-accent: 237 16% 20%;
+  --sidebar-accent-foreground: 226 64% 88%;
+  --sidebar-border: 240 21% 17%;
+}
+
+.dark:root[data-app-style='neumorphism'] {
+  --background: 222 16% 17%;
+  --foreground: 216 20% 90%;
+  --card: 222 16% 17%;
+  --card-foreground: 216 20% 90%;
+  --popover: 222 16% 17%;
+  --popover-foreground: 216 20% 90%;
+  --secondary: 222 16% 14%;
+  --secondary-foreground: 216 20% 90%;
+  --muted: 222 16% 22%;
+  --muted-foreground: 216 12% 65%;
+  --border: 222 16% 23%;
+  --input: 222 16% 23%;
+  --sidebar-background: 222 18% 14%;
+  --sidebar-foreground: 216 20% 90%;
+  --sidebar-accent: 222 16% 20%;
+  --sidebar-accent-foreground: 216 20% 95%;
+  --sidebar-border: 222 16% 21%;
+}
+
+/* =========================================================================
+   Visual Appearance Aesthetics & Element Customizations
+   ========================================================================= */
+
+/* Paper / Warm Sepia: Classic bookbinding corners & warm parchment shadows */
+:root[data-app-style='paper'],
+.dark:root[data-app-style='paper'] {
+  --radius: 0.25rem;
+}
+:root[data-app-style='paper'] .rounded-2xl,
+:root[data-app-style='paper'] .rounded-xl {
+  border-radius: 0.5rem;
+}
+:root[data-app-style='paper'] ::selection {
+  background: #fde68a !important;
+  color: #451a03 !important;
+}
+.dark:root[data-app-style='paper'] ::selection {
+  background: #78350f !important;
+  color: #fef3c7 !important;
+}
+
+/* Midnight OLED: Sharp precision rectangular edges, crisp high contrast */
+:root[data-app-style='midnight'],
+.dark:root[data-app-style='midnight'] {
+  --radius: 0.125rem;
+}
+:root[data-app-style='midnight'] .rounded-2xl,
+:root[data-app-style='midnight'] .rounded-xl,
+:root[data-app-style='midnight'] .rounded-lg,
+:root[data-app-style='midnight'] button,
+:root[data-app-style='midnight'] input,
+:root[data-app-style='midnight'] select {
+  border-radius: 0.25rem;
+}
+.dark:root[data-app-style='midnight'] .border-border,
+.dark:root[data-app-style='midnight'] .border-border\/60 {
+  border-color: #1f1f1f !important;
+}
+
+/* Nord / Arctic: Balanced Nordic curves & cool arctic calm */
+:root[data-app-style='nord'],
+.dark:root[data-app-style='nord'] {
+  --radius: 0.5rem;
+}
+:root[data-app-style='nord'] .rounded-2xl {
+  border-radius: 0.875rem;
+}
+
+/* Glassmorphism: Frosted acrylic translucent panels, floating deep curves & specular inner highlight */
+:root[data-app-style='glass'],
+.dark:root[data-app-style='glass'] {
+  --radius: 1.25rem; /* 20px */
+}
+:root[data-app-style='glass'] .rounded-2xl {
+  border-radius: 1.5rem; /* 24px */
+}
+:root[data-app-style='glass'] .rounded-xl {
+  border-radius: 1.25rem; /* 20px */
+}
+:root[data-app-style='glass'] .rounded-lg {
+  border-radius: 1rem; /* 16px */
+}
+:root[data-app-style='glass'] .bg-card,
+:root[data-app-style='glass'] [data-sidebar="sidebar"],
+:root[data-app-style='glass'] [role="dialog"],
+:root[data-app-style='glass'] [role="alertdialog"],
+:root[data-app-style='glass'] [data-floating-window="true"],
+:root[data-app-style='glass'] [data-floating-pill="true"],
+:root[data-app-style='glass'] [role="menu"],
+:root[data-app-style='glass'] [data-radix-portal] [role="dialog"],
+:root[data-app-style='glass'] [data-radix-portal] [role="alertdialog"] {
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+}
+.dark:root[data-app-style='glass'] .bg-card,
+.dark:root[data-app-style='glass'] [role="dialog"],
+.dark:root[data-app-style='glass'] [role="alertdialog"],
+.dark:root[data-app-style='glass'] [data-floating-window="true"],
+.dark:root[data-app-style='glass'] [data-floating-pill="true"],
+.dark:root[data-app-style='glass'] [role="menu"],
+.dark:root[data-app-style='glass'] [data-radix-portal] [role="dialog"],
+.dark:root[data-app-style='glass'] [data-radix-portal] [role="alertdialog"] {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+:root[data-app-style='glass']:not(.dark) .bg-card,
+:root[data-app-style='glass']:not(.dark) [role="dialog"],
+:root[data-app-style='glass']:not(.dark) [role="alertdialog"],
+:root[data-app-style='glass']:not(.dark) [data-floating-window="true"],
+:root[data-app-style='glass']:not(.dark) [data-floating-pill="true"],
+:root[data-app-style='glass']:not(.dark) [role="menu"],
+:root[data-app-style='glass']:not(.dark) [data-radix-portal] [role="dialog"],
+:root[data-app-style='glass']:not(.dark) [data-radix-portal] [role="alertdialog"] {
+  background-color: rgba(255, 255, 255, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+.dark:root[data-app-style='glass'] [data-sidebar="sidebar"] {
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+:root[data-app-style='glass'] [data-radix-portal] > div.fixed.inset-0.bg-black\/80 {
+  background-color: rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+/* Cyberpunk / Terminal: Angular tech corners, Two-Layer Border (Sharp Inner Stroke + Diffuse Neon Glow Halo) */
+:root[data-app-style='cyberpunk'],
+.dark:root[data-app-style='cyberpunk'] {
+  --radius: 0.125rem;
+}
+:root[data-app-style='cyberpunk'] .rounded-2xl,
+:root[data-app-style='cyberpunk'] .rounded-xl,
+:root[data-app-style='cyberpunk'] .rounded-lg,
+:root[data-app-style='cyberpunk'] button,
+:root[data-app-style='cyberpunk'] input,
+:root[data-app-style='cyberpunk'] select {
+  border-radius: 0.1875rem;
+}
+
+/* Two-layer border for Cards, Dialogs & Floating Panels: Sharp 1px solid stroke + Diffused outer neon glow */
+.dark:root[data-app-style='cyberpunk'] .bg-card,
+.dark:root[data-app-style='cyberpunk'] [role="dialog"],
+.dark:root[data-app-style='cyberpunk'] [role="alertdialog"],
+.dark:root[data-app-style='cyberpunk'] [data-floating-window="true"],
+.dark:root[data-app-style='cyberpunk'] [data-floating-pill="true"],
+.dark:root[data-app-style='cyberpunk'] [role="menu"] {
+  border: 1px solid hsl(var(--primary) / 0.6) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.35),
+    0 0 14px 1px hsl(var(--primary) / 0.22),
+    0 0 28px 2px hsl(var(--primary) / 0.10),
+    inset 0 0 12px hsl(var(--primary) / 0.06);
+}
+
+:root[data-app-style='cyberpunk']:not(.dark) .bg-card,
+:root[data-app-style='cyberpunk']:not(.dark) [role="dialog"],
+:root[data-app-style='cyberpunk']:not(.dark) [role="alertdialog"],
+:root[data-app-style='cyberpunk']:not(.dark) [data-floating-window="true"],
+:root[data-app-style='cyberpunk']:not(.dark) [data-floating-pill="true"],
+:root[data-app-style='cyberpunk']:not(.dark) [role="menu"] {
+  border: 1px solid hsl(var(--primary) / 0.5) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    0 0 12px 1px hsl(var(--primary) / 0.18);
+}
+
+/* Buttons, Selected Items & Inputs on Hover/Focus: Electric Two-Layer Laser Glow */
+.dark:root[data-app-style='cyberpunk'] button:hover:not(:disabled),
+.dark:root[data-app-style='cyberpunk'] [aria-selected="true"],
+.dark:root[data-app-style='cyberpunk'] input:focus,
+.dark:root[data-app-style='cyberpunk'] select:focus,
+.dark:root[data-app-style='cyberpunk'] textarea:focus {
+  border-color: hsl(var(--primary)) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.8),
+    0 0 12px 2px hsl(var(--primary) / 0.45),
+    0 0 24px 3px hsl(var(--primary) / 0.2) !important;
+}
+
+:root[data-app-style='cyberpunk']:not(.dark) button:hover:not(:disabled),
+:root[data-app-style='cyberpunk']:not(.dark) [aria-selected="true"],
+:root[data-app-style='cyberpunk']:not(.dark) input:focus,
+:root[data-app-style='cyberpunk']:not(.dark) select:focus,
+:root[data-app-style='cyberpunk']:not(.dark) textarea:focus {
+  border-color: hsl(var(--primary)) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.6),
+    0 0 10px 1px hsl(var(--primary) / 0.3) !important;
+}
+
+/* Cyberpunk Sidebar dividing edge */
+.dark:root[data-app-style='cyberpunk'] [data-sidebar="sidebar"] {
+  border-right: 1px solid hsl(var(--primary) / 0.4) !important;
+  box-shadow: 2px 0 12px -2px hsl(var(--primary) / 0.2);
+}
+
+/* Catppuccin: Soft bubbly pillowy curves, cozy comforting pastel borders */
+:root[data-app-style='catppuccin'],
+.dark:root[data-app-style='catppuccin'] {
+  --radius: 1rem;
+}
+:root[data-app-style='catppuccin'] .rounded-2xl {
+  border-radius: 1.5rem;
+}
+:root[data-app-style='catppuccin'] .rounded-xl {
+  border-radius: 1.125rem;
+}
+:root[data-app-style='catppuccin'] .rounded-lg {
+  border-radius: 0.875rem;
+}
+:root[data-app-style='catppuccin'] button,
+:root[data-app-style='catppuccin'] input,
+:root[data-app-style='catppuccin'] select {
+  border-radius: 0.75rem;
+}
+
+/* Neumorphism: Soft UI with realistic extruded surfaces & dual-directional ambient lighting shadows */
+:root[data-app-style='neumorphism'],
+.dark:root[data-app-style='neumorphism'] {
+  --radius: 0.875rem;
+}
+:root[data-app-style='neumorphism'] .rounded-2xl {
+  border-radius: 1.25rem;
+}
+:root[data-app-style='neumorphism'] .rounded-xl {
+  border-radius: 1rem;
+}
+:root[data-app-style='neumorphism'] .rounded-lg {
+  border-radius: 0.75rem;
+}
+
+/* Standalone Neumorphic Button utility */
+.neumorphic-button {
+  background: #e5e9ef;
+  border-radius: 50%;
+  box-shadow:
+    8px 8px 16px rgba(163, 170, 181, 0.45),
+    -8px -8px 16px rgba(255, 255, 255, 0.8);
+}
+.dark .neumorphic-button {
+  background: #242831;
+  box-shadow:
+    8px 8px 16px rgba(0, 0, 0, 0.55),
+    -8px -8px 16px rgba(255, 255, 255, 0.04);
+}
+
+/* Light Neumorphic Cards, Settings Cards, Dialogs & Popovers */
+:root[data-app-style='neumorphism']:not(.dark) .bg-card,
+:root[data-app-style='neumorphism']:not(.dark) [role="dialog"],
+:root[data-app-style='neumorphism']:not(.dark) [role="menu"],
+:root[data-app-style='neumorphism']:not(.dark) [role="popover"] {
+  background-color: #e5e9ef !important;
+  box-shadow:
+    6px 6px 16px rgba(163, 170, 181, 0.45),
+    -6px -6px 16px rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.65) !important;
+}
+
+/* Light Neumorphic Option Cards (e.g. in Settings) */
+:root[data-app-style='neumorphism']:not(.dark) .grid > button.border,
+:root[data-app-style='neumorphism']:not(.dark) .space-y-2 > button.border,
+:root[data-app-style='neumorphism']:not(.dark) button.rounded-xl.border {
+  background-color: #e5e9ef;
+  box-shadow:
+    4px 4px 10px rgba(163, 170, 181, 0.35),
+    -4px -4px 10px rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+}
+
+/* Light Neumorphic Selected Option Card */
+:root[data-app-style='neumorphism']:not(.dark) button.border-primary,
+:root[data-app-style='neumorphism']:not(.dark) button[aria-selected="true"],
+:root[data-app-style='neumorphism']:not(.dark) button[data-state="checked"],
+:root[data-app-style='neumorphism']:not(.dark) button[data-state="on"] {
+  box-shadow:
+    inset 3px 3px 6px rgba(163, 170, 181, 0.5),
+    inset -3px -3px 6px rgba(255, 255, 255, 0.85) !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
+:root[data-app-style='neumorphism']:not(.dark) button:active:not(:disabled) {
+  box-shadow:
+    inset 2px 2px 5px rgba(163, 170, 181, 0.5),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.85) !important;
+}
+
+:root[data-app-style='neumorphism']:not(.dark) input:focus,
+:root[data-app-style='neumorphism']:not(.dark) textarea:focus,
+:root[data-app-style='neumorphism']:not(.dark) select:focus {
+  box-shadow:
+    inset 2px 2px 5px rgba(163, 170, 181, 0.45),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Dark Neumorphic Cards, Settings Cards, Dialogs & Popovers */
+.dark:root[data-app-style='neumorphism'] .bg-card,
+.dark:root[data-app-style='neumorphism'] [role="dialog"],
+.dark:root[data-app-style='neumorphism'] [role="menu"],
+.dark:root[data-app-style='neumorphism'] [role="popover"] {
+  background-color: #242831 !important;
+  box-shadow:
+    6px 6px 16px rgba(0, 0, 0, 0.55),
+    -6px -6px 16px rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Dark Neumorphic Option Cards (e.g. in Settings) */
+.dark:root[data-app-style='neumorphism'] .grid > button.border,
+.dark:root[data-app-style='neumorphism'] .space-y-2 > button.border,
+.dark:root[data-app-style='neumorphism'] button.rounded-xl.border {
+  background-color: #242831;
+  box-shadow:
+    4px 4px 10px rgba(0, 0, 0, 0.45),
+    -4px -4px 10px rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Dark Neumorphic Selected Option Card */
+.dark:root[data-app-style='neumorphism'] button.border-primary,
+.dark:root[data-app-style='neumorphism'] button[aria-selected="true"],
+.dark:root[data-app-style='neumorphism'] button[data-state="checked"],
+.dark:root[data-app-style='neumorphism'] button[data-state="on"] {
+  box-shadow:
+    inset 3px 3px 6px rgba(0, 0, 0, 0.6),
+    inset -3px -3px 6px rgba(255, 255, 255, 0.04) !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
+.dark:root[data-app-style='neumorphism'] button:active:not(:disabled) {
+  box-shadow:
+    inset 2px 2px 5px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.04) !important;
+}
+
+.dark:root[data-app-style='neumorphism'] input:focus,
+.dark:root[data-app-style='neumorphism'] textarea:focus,
+.dark:root[data-app-style='neumorphism'] select:focus {
+  box-shadow:
+    inset 2px 2px 5px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Modern Clean: Pure default system styling preserved */
+:root[data-app-style='default'] {
+  --radius: 0.375rem;
+}
+
+/* =========================================================================
+   Theme-Specific Toolbar Styling (Main Editor Toolbar & Floating Toolbars)
+   ========================================================================= */
+
+/* Paper / Warm Sepia: Classic stationery wooden desk box */
+:root[data-app-style='paper'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='paper'] [data-editor-toolbar="true"] {
+  border-radius: 0.375rem !important;
+  border-color: rgba(180, 83, 9, 0.25) !important;
+  box-shadow: 0 1px 4px rgba(62, 43, 30, 0.08);
+}
+:root[data-app-style='paper'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='paper'] [data-editor-toolbar="true"] button {
+  border-radius: 0.25rem !important;
+}
+
+/* Midnight OLED: Sharp precision rectangular command bar */
+:root[data-app-style='midnight'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='midnight'] [data-editor-toolbar="true"] {
+  border-radius: 0.125rem !important;
+  border-color: #27272a !important;
+  background-color: #050505 !important;
+  box-shadow: none !important;
+}
+:root[data-app-style='midnight'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='midnight'] [data-editor-toolbar="true"] button {
+  border-radius: 0.125rem !important;
+}
+
+/* Nord / Arctic: Smooth Nordic capsule bar */
+:root[data-app-style='nord'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='nord'] [data-editor-toolbar="true"] {
+  border-radius: 0.75rem !important;
+  border-color: #434c5e !important;
+}
+:root[data-app-style='nord'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='nord'] [data-editor-toolbar="true"] button {
+  border-radius: 0.5rem !important;
+}
+
+/* Glassmorphism: Floating frosted glass capsule with backdrop blur & specular highlight */
+:root[data-app-style='glass'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='glass'] [data-editor-toolbar="true"] {
+  border-radius: 9999px !important;
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+}
+.dark:root[data-app-style='glass'] [data-editor-toolbar="true"] {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+:root[data-app-style='glass']:not(.dark) [data-editor-toolbar="true"] {
+  background-color: rgba(255, 255, 255, 0.70) !important;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+:root[data-app-style='glass'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='glass'] [data-editor-toolbar="true"] button {
+  border-radius: 9999px !important;
+}
+
+/* Cyberpunk / Terminal: Sharp angular high-tech toolbar with two-layer neon border */
+:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] {
+  border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] {
+  background-color: #0b0514 !important;
+  border: 1px solid hsl(var(--primary) / 0.7) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.4),
+    0 0 16px 2px hsl(var(--primary) / 0.3),
+    inset 0 0 8px hsl(var(--primary) / 0.15) !important;
+}
+:root[data-app-style='cyberpunk']:not(.dark) [data-editor-toolbar="true"] {
+  border: 1px solid hsl(var(--primary) / 0.6) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.3),
+    0 0 12px 1px hsl(var(--primary) / 0.2) !important;
+}
+:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] button {
+  border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] button:hover:not(:disabled) {
+  background-color: hsl(var(--primary) / 0.25) !important;
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.5);
+}
+
+/* Catppuccin: Ultra-soft, plush bubbly marshmallow bar */
+:root[data-app-style='catppuccin'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='catppuccin'] [data-editor-toolbar="true"] {
+  border-radius: 1.25rem !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.dark:root[data-app-style='catppuccin'] [data-editor-toolbar="true"] {
+  border-color: #313244 !important;
+  background-color: #181825 !important;
+}
+:root[data-app-style='catppuccin'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='catppuccin'] [data-editor-toolbar="true"] button {
+  border-radius: 0.75rem !important;
+}
+
+/* Neumorphism: Soft UI extruded toolbar with dual-directional lighting shadows */
+:root[data-app-style='neumorphism'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] {
+  border-radius: 9999px !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-editor-toolbar="true"] {
+  background-color: #e5e9ef !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  box-shadow:
+    8px 8px 16px rgba(163, 170, 181, 0.45),
+    -8px -8px 16px rgba(255, 255, 255, 0.8) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] {
+  background-color: #242831 !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  box-shadow:
+    8px 8px 16px rgba(0, 0, 0, 0.55),
+    -8px -8px 16px rgba(255, 255, 255, 0.04) !important;
+}
+:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] button,
+.dark:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] button {
+  border-radius: 9999px !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-editor-toolbar="true"] button:active:not(:disabled),
+:root[data-app-style='neumorphism']:not(.dark) [data-editor-toolbar="true"] button[data-state="on"] {
+  box-shadow:
+    inset 2px 2px 4px rgba(163, 170, 181, 0.55),
+    inset -2px -2px 4px rgba(255, 255, 255, 0.85) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] button:active:not(:disabled),
+.dark:root[data-app-style='neumorphism'] [data-editor-toolbar="true"] button[data-state="on"] {
+  box-shadow:
+    inset 2px 2px 4px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 4px rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Modern Clean: System original default rounded-full preserved */
+:root[data-app-style='default'] [data-editor-toolbar="true"] {
+  border-radius: 9999px !important;
+}
+:root[data-app-style='default'] [data-editor-toolbar="true"] button {
+  border-radius: 9999px !important;
+}
+
+/* =========================================================================
+   Theme-Specific Slash Commands Menu Styling ([data-slash-menu="true"])
+   ========================================================================= */
+
+/* Paper / Warm Sepia: Classic stationery bookbinding box */
+:root[data-app-style='paper'] [data-slash-menu="true"],
+.dark:root[data-app-style='paper'] [data-slash-menu="true"] {
+  border-radius: 0.375rem !important;
+}
+:root[data-app-style='paper']:not(.dark) [data-slash-menu="true"] {
+  background-color: #fbf7ee !important;
+  border: 1px solid rgba(180, 83, 9, 0.25) !important;
+  box-shadow: 0 4px 16px rgba(62, 43, 30, 0.12) !important;
+}
+.dark:root[data-app-style='paper'] [data-slash-menu="true"] {
+  background-color: #161311 !important;
+  border: 1px solid rgba(180, 83, 9, 0.25) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+:root[data-app-style='paper'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='paper'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.25rem !important;
+}
+
+/* Midnight OLED: Sharp rectangular obsidian box */
+:root[data-app-style='midnight'] [data-slash-menu="true"],
+.dark:root[data-app-style='midnight'] [data-slash-menu="true"] {
+  border-radius: 0.125rem !important;
+  background-color: #050505 !important;
+  border: 1px solid #27272a !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
+}
+:root[data-app-style='midnight'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='midnight'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.125rem !important;
+}
+
+/* Nord / Arctic: Calm Nordic arctic card */
+:root[data-app-style='nord'] [data-slash-menu="true"],
+.dark:root[data-app-style='nord'] [data-slash-menu="true"] {
+  border-radius: 0.75rem !important;
+}
+:root[data-app-style='nord']:not(.dark) [data-slash-menu="true"] {
+  background-color: #eceff4 !important;
+  border: 1px solid #d8dee9 !important;
+  box-shadow: 0 8px 24px rgba(46, 52, 64, 0.15) !important;
+}
+.dark:root[data-app-style='nord'] [data-slash-menu="true"] {
+  background-color: #1e222a !important;
+  border: 1px solid #434c5e !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+}
+:root[data-app-style='nord'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='nord'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.5rem !important;
+}
+
+/* Glassmorphism: Translucent frosted glass modal with depth blur */
+:root[data-app-style='glass'] [data-slash-menu="true"],
+.dark:root[data-app-style='glass'] [data-slash-menu="true"] {
+  border-radius: 1.25rem !important;
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+}
+:root[data-app-style='glass']:not(.dark) [data-slash-menu="true"] {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+.dark:root[data-app-style='glass'] [data-slash-menu="true"] {
+  background-color: rgba(15, 23, 42, 0.75) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+:root[data-app-style='glass'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='glass'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.75rem !important;
+}
+
+/* Cyberpunk / Terminal: Futuristic angular neon console */
+:root[data-app-style='cyberpunk'] [data-slash-menu="true"],
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] {
+  border-radius: 0.1875rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] {
+  background-color: #0b0514 !important;
+  border: 1px solid hsl(var(--primary) / 0.7) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.4),
+    0 0 16px 2px hsl(var(--primary) / 0.3),
+    inset 0 0 8px hsl(var(--primary) / 0.15) !important;
+}
+:root[data-app-style='cyberpunk']:not(.dark) [data-slash-menu="true"] {
+  background-color: #fdf4ff !important;
+  border: 1px solid hsl(var(--primary) / 0.6) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.3),
+    0 0 12px 1px hsl(var(--primary) / 0.2) !important;
+}
+:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"][data-selected="true"],
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"]:hover {
+  background-color: hsl(var(--primary) / 0.25) !important;
+  color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.5);
+}
+
+/* Catppuccin: Ultra-soft bubbly pastel marshmallow box */
+:root[data-app-style='catppuccin'] [data-slash-menu="true"],
+.dark:root[data-app-style='catppuccin'] [data-slash-menu="true"] {
+  border-radius: 1.25rem !important;
+}
+:root[data-app-style='catppuccin']:not(.dark) [data-slash-menu="true"] {
+  background-color: #eff1f5 !important;
+  border: 1px solid #ccd0da !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+}
+.dark:root[data-app-style='catppuccin'] [data-slash-menu="true"] {
+  background-color: #181825 !important;
+  border: 1px solid #313244 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+}
+:root[data-app-style='catppuccin'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='catppuccin'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.75rem !important;
+}
+
+/* Neumorphism: Soft extruded surface with dual ambient lighting shadows */
+:root[data-app-style='neumorphism'] [data-slash-menu="true"],
+.dark:root[data-app-style='neumorphism'] [data-slash-menu="true"] {
+  border-radius: 1rem !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-slash-menu="true"] {
+  background-color: #e5e9ef !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  box-shadow:
+    8px 8px 18px rgba(163, 170, 181, 0.45),
+    -8px -8px 18px rgba(255, 255, 255, 0.85) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-slash-menu="true"] {
+  background-color: #242831 !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow:
+    8px 8px 18px rgba(0, 0, 0, 0.6),
+    -8px -8px 18px rgba(255, 255, 255, 0.04) !important;
+}
+:root[data-app-style='neumorphism'] [data-slash-menu="true"] [role="menuitem"],
+.dark:root[data-app-style='neumorphism'] [data-slash-menu="true"] [role="menuitem"] {
+  border-radius: 0.625rem !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-slash-menu="true"] [role="menuitem"][data-selected="true"] {
+  box-shadow:
+    inset 2px 2px 5px rgba(163, 170, 181, 0.5),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.85) !important;
+  background-color: #e5e9ef !important;
+  color: hsl(var(--primary)) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-slash-menu="true"] [role="menuitem"][data-selected="true"] {
+  box-shadow:
+    inset 2px 2px 5px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.04) !important;
+  background-color: #242831 !important;
+  color: hsl(var(--primary)) !important;
+}
+
+/* =========================================================================
+   Theme-Specific Luno AI View & AI Assistant Panel Styling
+   ========================================================================= */
+
+/* Paper / Warm Sepia: Vintage manuscript journal aesthetic */
+:root[data-app-style='paper'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='paper'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='paper'] [data-ai-panel="true"],
+.dark:root[data-app-style='paper'] [data-ai-panel="true"] {
+  border-radius: 0.375rem !important;
+}
+:root[data-app-style='paper']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='paper']:not(.dark) [data-ai-panel="true"] {
+  background-color: #fbf7ee !important;
+  border-color: rgba(180, 83, 9, 0.25) !important;
+}
+.dark:root[data-app-style='paper'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='paper'] [data-ai-panel="true"] {
+  background-color: #161311 !important;
+  border-color: rgba(180, 83, 9, 0.25) !important;
+}
+:root[data-app-style='paper'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='paper'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.375rem !important;
+}
+
+/* Midnight OLED: Pure True Black high-contrast obsidian aesthetic */
+:root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='midnight'] [data-ai-panel="true"],
+.dark:root[data-app-style='midnight'] [data-ai-panel="true"] {
+  border-radius: 0.125rem !important;
+  background-color: #050505 !important;
+  border-color: #27272a !important;
+  box-shadow: none !important;
+}
+:root[data-app-style='midnight'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.125rem !important;
+  background-color: #09090b !important;
+  border-color: #27272a !important;
+}
+
+/* Nord / Arctic: Calm Nordic arctic card aesthetic */
+:root[data-app-style='nord'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='nord'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='nord'] [data-ai-panel="true"],
+.dark:root[data-app-style='nord'] [data-ai-panel="true"] {
+  border-radius: 0.75rem !important;
+}
+:root[data-app-style='nord']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='nord']:not(.dark) [data-ai-panel="true"] {
+  background-color: #eceff4 !important;
+  border-color: #d8dee9 !important;
+}
+.dark:root[data-app-style='nord'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='nord'] [data-ai-panel="true"] {
+  background-color: #1e222a !important;
+  border-color: #434c5e !important;
+}
+:root[data-app-style='nord'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='nord'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.625rem !important;
+}
+
+/* Glassmorphism: Translucent frosted glass depth & blur */
+:root[data-app-style='glass'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='glass'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='glass'] [data-ai-panel="true"],
+.dark:root[data-app-style='glass'] [data-ai-panel="true"] {
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.08) !important;
+  border-radius: 1.25rem !important;
+}
+:root[data-app-style='glass']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='glass']:not(.dark) [data-ai-panel="true"] {
+  background-color: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+.dark:root[data-app-style='glass'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='glass'] [data-ai-panel="true"] {
+  background-color: rgba(15, 23, 42, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+:root[data-app-style='glass'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='glass'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.875rem !important;
+}
+
+/* Cyberpunk / Terminal: Futuristic angular neon console */
+:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='cyberpunk'] [data-ai-panel="true"],
+.dark:root[data-app-style='cyberpunk'] [data-ai-panel="true"] {
+  border-radius: 0.1875rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='cyberpunk'] [data-ai-panel="true"] {
+  background-color: #0b0514 !important;
+  border: 1px solid hsl(var(--primary) / 0.6) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.35),
+    0 0 14px 1px hsl(var(--primary) / 0.22),
+    inset 0 0 10px hsl(var(--primary) / 0.08) !important;
+}
+:root[data-app-style='cyberpunk']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='cyberpunk']:not(.dark) [data-ai-panel="true"] {
+  background-color: #fdf4ff !important;
+  border: 1px solid hsl(var(--primary) / 0.5) !important;
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    0 0 10px 1px hsl(var(--primary) / 0.15) !important;
+}
+:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .grid > button:hover {
+  box-shadow: 0 0 10px hsl(var(--primary) / 0.4) !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
+/* Catppuccin: Ultra-soft bubbly marshmallow curves */
+:root[data-app-style='catppuccin'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='catppuccin'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='catppuccin'] [data-ai-panel="true"],
+.dark:root[data-app-style='catppuccin'] [data-ai-panel="true"] {
+  border-radius: 1.25rem !important;
+}
+:root[data-app-style='catppuccin']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='catppuccin']:not(.dark) [data-ai-panel="true"] {
+  background-color: #eff1f5 !important;
+  border: 1px solid #ccd0da !important;
+}
+.dark:root[data-app-style='catppuccin'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='catppuccin'] [data-ai-panel="true"] {
+  background-color: #181825 !important;
+  border: 1px solid #313244 !important;
+}
+:root[data-app-style='catppuccin'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='catppuccin'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.875rem !important;
+}
+
+/* Neumorphism: Soft extruded surface with dual ambient lighting shadows */
+:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='neumorphism'] [data-ai-panel="true"],
+.dark:root[data-app-style='neumorphism'] [data-ai-panel="true"] {
+  border-radius: 1rem !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-luno-ai-view="true"] .bg-card,
+:root[data-app-style='neumorphism']:not(.dark) [data-ai-panel="true"] {
+  background-color: #e5e9ef !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  box-shadow:
+    6px 6px 14px rgba(163, 170, 181, 0.45),
+    -6px -6px 14px rgba(255, 255, 255, 0.85) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='neumorphism'] [data-ai-panel="true"] {
+  background-color: #242831 !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -6px -6px 14px rgba(255, 255, 255, 0.04) !important;
+}
+:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .grid > button,
+.dark:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .grid > button {
+  border-radius: 0.75rem !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-luno-ai-view="true"] .grid > button {
+  background-color: #e5e9ef !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow:
+    4px 4px 10px rgba(163, 170, 181, 0.35),
+    -4px -4px 10px rgba(255, 255, 255, 0.8) !important;
+}
+:root[data-app-style='neumorphism']:not(.dark) [data-luno-ai-view="true"] .grid > button:active {
+  box-shadow:
+    inset 2px 2px 5px rgba(163, 170, 181, 0.5),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.85) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .grid > button {
+  background-color: #242831 !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  box-shadow:
+    4px 4px 10px rgba(0, 0, 0, 0.45),
+    -4px -4px 10px rgba(255, 255, 255, 0.03) !important;
+}
+.dark:root[data-app-style='neumorphism'] [data-luno-ai-view="true"] .grid > button:active {
+  box-shadow:
+    inset 2px 2px 5px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Seamless Inner Textarea & Inputs in Luno AI Prompt Box (Completely borderless and shadowless) */
+:root [data-luno-ai-view="true"] textarea,
+:root [data-luno-ai-view="true"] textarea:focus,
+:root [data-luno-ai-view="true"] textarea:focus-visible,
+:root [data-luno-ai-view="true"] textarea:hover,
+:root [data-luno-ai-view="true"] input,
+:root [data-luno-ai-view="true"] input:focus,
+:root [data-luno-ai-view="true"] input:focus-visible,
+:root [data-luno-ai-view="true"] input:hover,
+:root[data-app-style] [data-luno-ai-view="true"] textarea,
+:root[data-app-style] [data-luno-ai-view="true"] textarea:focus,
+:root[data-app-style] [data-luno-ai-view="true"] textarea:focus-visible,
+:root[data-app-style] [data-luno-ai-view="true"] input,
+:root[data-app-style] [data-luno-ai-view="true"] input:focus,
+:root[data-app-style] [data-luno-ai-view="true"] input:focus-visible,
+.dark:root[data-app-style] [data-luno-ai-view="true"] textarea,
+.dark:root[data-app-style] [data-luno-ai-view="true"] textarea:focus,
+.dark:root[data-app-style] [data-luno-ai-view="true"] textarea:focus-visible,
+.dark:root[data-app-style] [data-luno-ai-view="true"] input,
+.dark:root[data-app-style] [data-luno-ai-view="true"] input:focus,
+.dark:root[data-app-style] [data-luno-ai-view="true"] input:focus-visible {
+  border: 0 solid transparent !important;
+  border-width: 0 !important;
+  border-color: transparent !important;
+  outline: 0 none transparent !important;
+  outline-width: 0 !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+
 /* Custom System Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -431,6 +1816,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   box-sizing: border-box;
   word-break: break-word;
   overflow-wrap: anywhere;
+  min-height: 120px;
 }
 
 .ProseMirror > * {
@@ -449,7 +1835,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .ProseMirror p {
   margin-top: 0.3em;
   margin-bottom: 0.3em;
-  line-height: 1.6;
+  line-height: inherit;
 }
 
 .ProseMirror li > p,
@@ -468,13 +1854,32 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   margin-top: 0.75em;
   margin-bottom: 0.25em;
   line-height: 1.35;
-  color: hsl(var(--accent));
+  color: hsl(var(--foreground));
 }
 
 .ProseMirror h3 {
   margin-top: 0.65em;
   margin-bottom: 0.2em;
   line-height: 1.4;
+}
+
+.ProseMirror h4 {
+  margin-top: 0.55em;
+  margin-bottom: 0.2em;
+  line-height: 1.4;
+}
+
+.ProseMirror h5 {
+  margin-top: 0.5em;
+  margin-bottom: 0.15em;
+  line-height: 1.4;
+}
+
+.ProseMirror h6 {
+  margin-top: 0.45em;
+  margin-bottom: 0.15em;
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
 }
 
 .ProseMirror ul,
@@ -491,6 +1896,50 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .ProseMirror blockquote {
   margin-top: 0.6em;
   margin-bottom: 0.6em;
+}
+
+/* External Link with trailing arrow icon */
+.ProseMirror a:not([data-wikilink]):not([href^="wikilink:"]):not([href^="#"]):not([href^="mailto:"]):not([href^="tel:"])::after,
+.prose a:not([data-wikilink]):not([href^="wikilink:"]):not([href^="#"]):not([href^="mailto:"]):not([href^="tel:"])::after {
+  content: "";
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.22em;
+  margin-right: 0.05em;
+  vertical-align: -0.05em;
+  background-color: currentColor;
+  opacity: 0.8;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3Cpolyline points='15 3 21 3 21 9'/%3E%3Cline x1='10' y1='14' x2='21' y2='3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3Cpolyline points='15 3 21 3 21 9'/%3E%3Cline x1='10' y1='14' x2='21' y2='3'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  text-decoration: none !important;
+}
+
+/* Inline Code matching CodeBlock background and border */
+.ProseMirror code:not(pre code) {
+  background-color: hsl(var(--muted) / 0.7);
+  border: 1px solid hsl(var(--border) / 0.5);
+  color: hsl(var(--foreground));
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.375rem;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+.ProseMirror pre code,
+.ProseMirror .code-block-wrapper code {
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
 }
 
 .ProseMirror .code-block-wrapper {
@@ -512,8 +1961,18 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 }
 
 .ProseMirror hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
   margin-top: 0.85em;
   margin-bottom: 0.85em;
+}
+
+.ProseMirror-dropcursor,
+.prosemirror-dropcursor {
+  background-color: hsl(var(--border)) !important;
+  height: 1px !important;
+  border: none !important;
+  pointer-events: none !important;
 }
 
 .ProseMirror .tableWrapper {
@@ -581,32 +2040,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   cursor: col-resize;
 }
 
-.show-code-line-numbers .ProseMirror pre,
-.show-code-line-numbers pre {
-  position: relative;
-  padding-left: 2.2rem !important;
-}
 
-.show-code-line-numbers .ProseMirror pre[data-line-numbers]::before,
-.show-code-line-numbers pre[data-line-numbers]::before {
-  content: attr(data-line-numbers);
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 1.6rem;
-  padding-right: 0.4rem;
-  text-align: right;
-  color: hsl(var(--muted-foreground) / 0.4);
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  padding-top: 0 !important;
-  white-space: pre;
-  border-right: 1px solid hsl(var(--border) / 0.3);
-  user-select: none;
-  pointer-events: none;
-}
 
 /* Identical Editor Markdown Typography for Luno AI Output */
 .editor-markdown-content {
@@ -629,7 +2063,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .editor-markdown-content p {
   margin-top: 0.3em;
   margin-bottom: 0.3em;
-  line-height: 1.6;
+  line-height: inherit;
 }
 
 .editor-markdown-content h1 {
@@ -647,11 +2081,11 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   margin-top: 0.75em;
   margin-bottom: 0.25em;
   line-height: 1.35;
-  color: hsl(var(--primary));
+  color: hsl(var(--foreground));
 }
 
 .editor-markdown-content h3 {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 600;
   margin-top: 0.65em;
   margin-bottom: 0.2em;
@@ -659,16 +2093,35 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   color: hsl(var(--foreground));
 }
 
-.editor-markdown-content ul {
-  list-style-type: disc;
-  padding-left: 1.35rem;
-  margin-top: 0.3em;
-  margin-bottom: 0.3em;
+.editor-markdown-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0.55em;
+  margin-bottom: 0.2em;
+  line-height: 1.4;
+  color: hsl(var(--foreground));
 }
 
+.editor-markdown-content h5 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 0.5em;
+  margin-bottom: 0.15em;
+  line-height: 1.4;
+  color: hsl(var(--foreground));
+}
+
+.editor-markdown-content h6 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-top: 0.45em;
+  margin-bottom: 0.15em;
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
+}
+
+.editor-markdown-content ul,
 .editor-markdown-content ol {
-  list-style-type: decimal;
-  padding-left: 1.35rem;
   margin-top: 0.3em;
   margin-bottom: 0.3em;
 }
@@ -676,7 +2129,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .editor-markdown-content li {
   margin-top: 0.12em;
   margin-bottom: 0.12em;
-  line-height: 1.6;
+  line-height: inherit;
 }
 
 .editor-markdown-content li > p,
@@ -694,27 +2147,32 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 }
 
 .editor-markdown-content code {
-  background-color: hsl(var(--muted));
+  background-color: hsl(var(--muted) / 0.7);
+  border: 1px solid hsl(var(--border) / 0.5);
+  color: hsl(var(--foreground));
   padding: 0.15rem 0.35rem;
-  border-radius: 0.25rem;
-  font-family: 'JetBrains Mono', monospace;
+  border-radius: 0.375rem;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.85em;
+  font-weight: 500;
 }
 
 .editor-markdown-content pre {
-  background-color: hsl(var(--muted) / 0.8);
-  border: 1px solid hsl(var(--border) / 0.7);
+  background-color: hsl(var(--muted) / 0.7);
+  border: 1px solid hsl(var(--border) / 0.5);
   padding: 0.85rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   overflow-x: auto;
   margin-top: 0.85em;
   margin-bottom: 0.85em;
 }
 
 .editor-markdown-content pre code {
-  background-color: transparent;
-  padding: 0;
-  border-radius: 0;
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
 }
 
 .editor-markdown-content table {
@@ -754,10 +2212,17 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   content: "" !important;
 }
 
+.code-block-wrapper pre,
 .code-block-wrapper pre code {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 13.5px;
-  line-height: 1.55;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-size: 13.5px !important;
+  line-height: 22px !important;
+  white-space: pre !important;
+  word-break: normal !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  display: block !important;
 }
 
 .hljs-keyword,
@@ -771,6 +2236,21 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .dark .hljs-selector-tag,
 .dark .hljs-subst {
   color: #c084fc;
+}
+
+/* Inline Hashtag Pill Badges in Editor & Content */
+.inline-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.85em;
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 0 0.15rem;
+  vertical-align: baseline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .hljs-string,
@@ -853,3 +2333,96 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .dark .hljs-link {
   color: #fbbf24;
 }
+
+mark,
+.luno-highlight {
+  background-color: rgba(250, 204, 21, 0.45);
+  color: inherit;
+  padding: 0.1em 0.25em;
+  border-radius: 0.25rem;
+}
+
+.dark mark,
+.dark .luno-highlight {
+  background-color: rgba(234, 179, 8, 0.35);
+  color: inherit;
+}
+
+.luno-spell-error {
+  text-decoration: underline wavy #ef4444 !important;
+  text-decoration-thickness: 1.15px !important;
+  text-underline-offset: 2.2px !important;
+  text-decoration-skip-ink: none !important;
+}
+
+/* Reading Mode (โหมดอ่านแบบกระชับพิเศษ Ultra-Compact) */
+.luno-reading-view {
+  user-select: text;
+}
+.luno-reading-view p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: inherit !important;
+}
+.luno-reading-view p:empty,
+.luno-reading-view p.is-empty {
+  height: 0.1rem !important;
+  min-height: 0.1rem !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: 0 !important;
+}
+.luno-reading-view h1 {
+  margin-top: 0.18rem !important;
+  margin-bottom: 0.04rem !important;
+  line-height: 1.2 !important;
+}
+.luno-reading-view h2,
+.luno-reading-view h3,
+.luno-reading-view h4,
+.luno-reading-view h5,
+.luno-reading-view h6 {
+  margin-top: 0.12rem !important;
+  margin-bottom: 0.03rem !important;
+  line-height: 1.2 !important;
+}
+.luno-reading-view blockquote {
+  margin-top: 0.08rem !important;
+  margin-bottom: 0.08rem !important;
+  padding-top: 0.02rem !important;
+  padding-bottom: 0.02rem !important;
+}
+.luno-reading-view hr {
+  margin-top: 0.1rem !important;
+  margin-bottom: 0.1rem !important;
+}
+.luno-reading-view ul,
+.luno-reading-view ol {
+  margin-top: 0.04rem !important;
+  margin-bottom: 0.04rem !important;
+}
+.luno-reading-view li {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  line-height: inherit !important;
+}
+.luno-reading-view .tableWrapper {
+  margin-top: 0.08rem !important;
+  margin-bottom: 0.08rem !important;
+}
+.luno-reading-view .code-block-wrapper {
+  margin-top: 0.08rem !important;
+  margin-bottom: 0.08rem !important;
+}
+.luno-reading-view .selectedCell:after,
+.luno-reading-view td.selectedCell,
+.luno-reading-view th.selectedCell {
+  background: transparent !important;
+  outline: none !important;
+}
+.luno-reading-view table * {
+  cursor: default !important;
+}
+
+
+

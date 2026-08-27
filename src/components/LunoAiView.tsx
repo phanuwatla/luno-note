@@ -121,6 +121,7 @@ interface LunoAiViewProps {
   onInsertToSelectedNote?: (noteId: string, text: string) => void;
   onCreateNewNote?: (fileName: string, content: string, folderPath?: string) => void;
   onOpenSettings?: (category?: string) => void;
+  onOpenWebTab?: (url: string) => void;
 }
 
 const CHAT_SESSIONS_STORAGE_KEY = "luno-ai-chat-sessions-v2";
@@ -480,6 +481,7 @@ export default function LunoAiView({
   onInsertToSelectedNote,
   onCreateNewNote,
   onOpenSettings,
+  onOpenWebTab,
 }: LunoAiViewProps) {
   const { t, language } = useTranslation();
   const lang = (language as "th" | "en") || "th";
@@ -1261,19 +1263,34 @@ export default function LunoAiView({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleProcessFiles = (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
 
     Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setAttachedFiles((prev) => [...prev, { name: file.name, content: text }]);
-      };
-      reader.readAsText(file);
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          setAttachedFiles((prev) => [
+            ...prev,
+            { name: file.name, content: `[Attached Image: ${file.name}]`, dataUrl },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          setAttachedFiles((prev) => [...prev, { name: file.name, content: text }]);
+        };
+        reader.readAsText(file);
+      }
     });
+  };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) handleProcessFiles(files);
     e.target.value = "";
   };
 
@@ -1292,7 +1309,7 @@ export default function LunoAiView({
   });
 
   return (
-    <div className="w-full flex-1 flex h-full overflow-hidden bg-background text-foreground">
+    <div data-luno-ai-view="true" className="w-full flex-1 flex h-full overflow-hidden bg-background text-foreground">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         {/* Top Header Bar */}
@@ -1395,7 +1412,11 @@ export default function LunoAiView({
                       <Tooltip key={idx}>
                         <TooltipTrigger asChild>
                           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                            {file.dataUrl ? (
+                              <img src={file.dataUrl} alt={file.name} className="h-4 w-4 rounded object-cover shrink-0" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                            )}
                             <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                             <button
                               type="button"
@@ -1463,7 +1484,7 @@ export default function LunoAiView({
                         }
                       }}
                       placeholder={dynamicPlaceholder}
-                      className="flex-1 min-w-[200px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground outline-none resize-none min-h-[56px] max-h-[160px] leading-relaxed py-0.5"
+                      className="flex-1 min-w-[200px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none resize-none min-h-[56px] max-h-[160px] leading-relaxed py-0.5"
                     />
                   </div>
 
@@ -1721,6 +1742,17 @@ export default function LunoAiView({
                       <div className="w-full space-y-2 py-1">
                         <div
                           className="editor-markdown-content text-xs sm:text-sm leading-relaxed text-foreground"
+                          onClick={(e) => {
+                            const target = (e.target as HTMLElement).closest("a");
+                            if (target) {
+                              const href = target.getAttribute("href");
+                              if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
+                                e.preventDefault();
+                                if (onOpenWebTab) onOpenWebTab(href);
+                                else window.open(href, "_blank", "noopener,noreferrer");
+                              }
+                            }
+                          }}
                           dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(msg.content) }}
                         />
 
@@ -1785,7 +1817,7 @@ export default function LunoAiView({
                                     const fullDefaultName = extractDefaultFileName(msg.content);
                                     const baseName = fullDefaultName.replace(/\.(md|html|txt)$/i, "");
                                     setCreateNoteContent(msg.content);
-                                    setCreateNoteFileName(baseName || "untitled");
+                                    setCreateNoteFileName(baseName || "Untitled");
                                     setCreateNoteFileExt("md");
                                     setIsCreateNoteModalOpen(true);
                                   }}
@@ -1857,7 +1889,11 @@ export default function LunoAiView({
                     <Tooltip key={idx}>
                       <TooltipTrigger asChild>
                         <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                          <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                          {file.dataUrl ? (
+                            <img src={file.dataUrl} alt={file.name} className="h-4 w-4 rounded object-cover shrink-0" />
+                          ) : (
+                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                          )}
                           <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                           <button
                             type="button"
@@ -1945,6 +1981,8 @@ export default function LunoAiView({
                     type="text"
                     value={prompt}
                     onChange={(e) => handleInputChange(e.target.value)}
+                    placeholder={dynamicPlaceholder}
+                    className="flex-1 bg-transparent border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none text-xs sm:text-sm text-foreground placeholder:text-muted-foreground min-w-0 py-1"
                     onKeyDown={(e) => {
                       if (isSlashMenuOpen && filteredTools.length > 0) {
                         if (e.key === "ArrowDown") {
@@ -2071,7 +2109,7 @@ export default function LunoAiView({
                   if (e.key === "Enter") {
                     e.preventDefault();
                     if (onCreateNewNote) {
-                      const cleanName = createNoteFileName.trim() || "untitled";
+                      const cleanName = createNoteFileName.trim() || "Untitled";
                       const baseName = cleanName.replace(/\.(md|html|txt)$/i, "");
                       const fullFileName = `${baseName}.${createNoteFileExt}`;
                       onCreateNewNote(fullFileName, createNoteContent);
@@ -2079,7 +2117,7 @@ export default function LunoAiView({
                     }
                   }
                 }}
-                placeholder="untitled"
+                placeholder="Untitled"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
               />
             </div>
@@ -2109,7 +2147,7 @@ export default function LunoAiView({
               type="button"
               onClick={() => {
                 if (onCreateNewNote) {
-                  const cleanName = createNoteFileName.trim() || "untitled";
+                  const cleanName = createNoteFileName.trim() || "Untitled";
                   const baseName = cleanName.replace(/\.(md|html|txt)$/i, "");
                   const fullFileName = `${baseName}.${createNoteFileExt}`;
                   onCreateNewNote(fullFileName, createNoteContent);
@@ -2387,15 +2425,17 @@ export default function LunoAiView({
       {/* Floating Slash Commands Menu (100% Identical to Editor UI) */}
       {isSlashMenuOpen && filteredTools.length > 0 && menuCoords && (
         <div
-          className="fixed z-[9999] w-48 sm:w-52 rounded-xl border border-border bg-popover px-0 py-1 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
+          role="menu"
+          data-slash-menu="true"
+          className="fixed z-[9999] w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
           style={{
             ...(menuCoords.bottom !== undefined ? { bottom: `${menuCoords.bottom}px` } : { top: `${menuCoords.top}px` }),
             left: `${menuCoords.left}px`,
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="px-3 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/40 shrink-0">
-            {lang === "th" ? "คำสั่ง" : "Commands"}
+          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+            {t("editor.slashMenuTitle") || (lang === "th" ? "คำสั่ง" : "Commands")}
           </div>
 
           {canScrollUp && (
@@ -2405,9 +2445,9 @@ export default function LunoAiView({
               onMouseEnter={() => startAutoScroll("up")}
               onMouseLeave={stopAutoScroll}
               onClick={() => scrollSlashMenu("up")}
-              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
             >
-              <ChevronUp className="h-3.5 w-3.5" />
+              <ChevronUp className="h-4 w-4" />
             </div>
           )}
 
@@ -2421,19 +2461,20 @@ export default function LunoAiView({
               return (
                 <div
                   key={tool.id}
-                  role="button"
+                  role="menuitem"
                   tabIndex={0}
                   data-slash-item={idx}
+                  data-selected={isSelected ? "true" : undefined}
                   onClick={() => applySlashTool(tool)}
                   onMouseEnter={() => setSelectedSlashIndex(idx)}
-                  className={`mx-1 flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors select-none ${
+                  className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-xs sm:text-sm transition-all select-none gap-2.5 ${
                     isSelected
-                      ? "bg-accent/5 text-primary font-semibold"
-                      : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                      ? "bg-primary/10 text-primary font-semibold shadow-2xs"
+                      : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
                   }`}
                 >
-                  {tool.icon}
-                  <span className="flex-1 truncate text-xs">
+                  <span className="shrink-0">{tool.icon}</span>
+                  <span className="flex-1 truncate">
                     {lang === "th" ? tool.labelTh : tool.labelEn}
                   </span>
                 </div>
@@ -2448,9 +2489,9 @@ export default function LunoAiView({
               onMouseEnter={() => startAutoScroll("down")}
               onMouseLeave={stopAutoScroll}
               onClick={() => scrollSlashMenu("down")}
-              className="flex cursor-default items-center justify-center py-0.5 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
+              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none hover:text-foreground transition-colors"
             >
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDown className="h-4 w-4" />
             </div>
           )}
         </div>

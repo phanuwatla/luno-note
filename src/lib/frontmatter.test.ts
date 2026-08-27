@@ -108,4 +108,38 @@ Some text with #todelete tag.`;
     expect(reParsed.frontmatterTags).toEqual(["project"]);
     expect(removed).not.toContain("#todelete");
   });
+
+  it("ignores hashtags inside code blocks (markdown fenced code and HTML pre/code)", () => {
+    const md = `
+# RealHeading
+This has a #realtag.
+
+\`\`\`plaintext
+#Programming
+#JavaScript
+#University
+#Ideas
+\`\`\`
+
+<pre><code>#NotATag1 #NotATag2</code></pre>
+\`#NotATag3\`
+`;
+
+    const parsed = parseFrontmatterAndTags(md);
+    expect(parsed.allTags).toEqual(["realtag"]);
+  });
+
+  it("prevents extracting incomplete tags while typing until space/punctuation/newline is entered", () => {
+    const typingIncomplete = "Build your own knowledge. #k";
+    expect(parseFrontmatterAndTags(typingIncomplete).allTags).toEqual([]);
+
+    const typedWithSpace = "Build your own knowledge. #kkkk ";
+    expect(parseFrontmatterAndTags(typedWithSpace).allTags).toEqual(["kkkk"]);
+
+    const typedWithPeriod = "Build your own knowledge. #kkkk.";
+    expect(parseFrontmatterAndTags(typedWithPeriod).allTags).toEqual(["kkkk"]);
+
+    const typedWithNewline = "Build your own knowledge. #kkkk\nNext line";
+    expect(parseFrontmatterAndTags(typedWithNewline).allTags).toEqual(["kkkk"]);
+  });
 });

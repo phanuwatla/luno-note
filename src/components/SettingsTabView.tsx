@@ -26,7 +26,40 @@ import {
   Trash2,
   Plug,
   Unplug,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+  Undo2,
+  Redo2,
+  Bold,
+  Italic,
+  Strikethrough,
+  List,
+  ListOrdered,
+  ChevronsDownUp,
+  CodeXml,
+  SquareCode,
+  Quote,
+  Minus,
+  Table as TableIcon,
+  Smile,
+  Calculator,
+  Languages,
+  Clock,
+  Link2,
+  ImagePlus,
+  Mic,
+  Wrench,
+  Underline as UnderlineIcon,
+  Highlighter,
 } from "lucide-react";
+import { Heading1Icon } from "@/components/icons/Heading1Icon";
+import { Heading2Icon } from "@/components/icons/Heading2Icon";
+import { Heading3Icon } from "@/components/icons/Heading3Icon";
+import { Heading4Icon } from "@/components/icons/Heading4Icon";
+import { Heading5Icon } from "@/components/icons/Heading5Icon";
+import { Heading6Icon } from "@/components/icons/Heading6Icon";
+import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId } from "@/lib/googleDriveAuth";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
@@ -34,10 +67,47 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_TOOLBAR_ORDER, FONT_OPTIONS, useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
+
+const TOOLBAR_TOOL_DEFS: Record<
+  string,
+  { labelKey: string; icon: any; categoryKey: string; locked?: boolean }
+> = {
+  undo: { labelKey: "editor.undo", icon: Undo2, categoryKey: "settings.toolCategoryHistory", locked: true },
+  redo: { labelKey: "editor.redo", icon: Redo2, categoryKey: "settings.toolCategoryHistory", locked: true },
+  h1: { labelKey: "editor.heading1", icon: Heading1Icon, categoryKey: "settings.toolCategoryHeading" },
+  h2: { labelKey: "editor.heading2", icon: Heading2Icon, categoryKey: "settings.toolCategoryHeading" },
+  h3: { labelKey: "editor.heading3", icon: Heading3Icon, categoryKey: "settings.toolCategoryHeading" },
+  h4: { labelKey: "editor.heading4", icon: Heading4Icon, categoryKey: "settings.toolCategoryHeading" },
+  h5: { labelKey: "editor.heading5", icon: Heading5Icon, categoryKey: "settings.toolCategoryHeading" },
+  h6: { labelKey: "editor.heading6", icon: Heading6Icon, categoryKey: "settings.toolCategoryHeading" },
+  bold: { labelKey: "editor.bold", icon: Bold, categoryKey: "settings.toolCategoryInline" },
+  italic: { labelKey: "editor.italic", icon: Italic, categoryKey: "settings.toolCategoryInline" },
+  underline: { labelKey: "editor.underline", icon: UnderlineIcon, categoryKey: "settings.toolCategoryInline" },
+  strike: { labelKey: "editor.strikethrough", icon: Strikethrough, categoryKey: "settings.toolCategoryInline" },
+  highlight: { labelKey: "editor.highlight", icon: Highlighter, categoryKey: "settings.toolCategoryInline" },
+  bulletList: { labelKey: "editor.bulletList", icon: List, categoryKey: "settings.toolCategoryList" },
+  orderedList: { labelKey: "editor.orderedList", icon: ListOrdered, categoryKey: "settings.toolCategoryList" },
+  taskList: { labelKey: "editor.checkbox", icon: ListTodoIcon, categoryKey: "settings.toolCategoryList" },
+  toggle: { labelKey: "editor.toggle", icon: ChevronsDownUp, categoryKey: "settings.toolCategoryBlock" },
+  code: { labelKey: "editor.inlineCode", icon: CodeXml, categoryKey: "settings.toolCategoryBlock" },
+  codeBlock: { labelKey: "editor.codeBlock", icon: SquareCode, categoryKey: "settings.toolCategoryBlock" },
+  blockquote: { labelKey: "editor.blockquote", icon: Quote, categoryKey: "settings.toolCategoryBlock" },
+  horizontalRule: { labelKey: "editor.horizontalRule", icon: Minus, categoryKey: "settings.toolCategoryBlock" },
+  table: { labelKey: "editor.insertTable", icon: TableIcon, categoryKey: "settings.toolCategoryBlock" },
+  emoji: { labelKey: "editor.insertEmoji", icon: Smile, categoryKey: "settings.toolCategoryMedia" },
+  calculator: { labelKey: "editor.calculator", icon: Calculator, categoryKey: "settings.toolCategoryMedia" },
+  translator: { labelKey: "editor.translator", icon: Languages, categoryKey: "settings.toolCategoryMedia" },
+  clock: { labelKey: "editor.clock", icon: Clock, categoryKey: "settings.toolCategoryMedia" },
+  link: { labelKey: "editor.link", icon: Link2, categoryKey: "settings.toolCategoryMedia" },
+  image: { labelKey: "editor.image", icon: ImagePlus, categoryKey: "settings.toolCategoryMedia" },
+  audio: { labelKey: "editor.recordAudio", icon: Mic, categoryKey: "settings.toolCategoryMedia" },
+  fixLanguage: { labelKey: "editor.fixLanguage", icon: Wrench, categoryKey: "settings.toolCategoryMedia" },
+  aiAssistant: { labelKey: "settings.aiAssistant", icon: SparklesIcon, categoryKey: "settings.toolCategoryAi" },
+};
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -68,20 +138,51 @@ import type { Note } from "@/hooks/useNotes";
 interface SettingsTabViewProps {
   onClose?: () => void;
   initialCategory?: SettingsCategory;
+  onCategoryChange?: (category: SettingsCategory) => void;
   notes?: Note[];
   onNotesUpdated?: (notes: Note[]) => void;
+  openedFolderName?: string | null;
+  onCloseWorkspace?: () => void;
+  onOpenWebTab?: (url: string) => void;
 }
 
-export default function SettingsTabView({ onClose, initialCategory = "general", notes = [], onNotesUpdated }: SettingsTabViewProps) {
-  const { settings, updateSetting, resetSettings } = useAppSettings();
+export default function SettingsTabView({
+  onClose,
+  initialCategory = "general",
+  onCategoryChange,
+  notes = [],
+  onNotesUpdated,
+  openedFolderName,
+  onCloseWorkspace,
+  onOpenWebTab,
+}: SettingsTabViewProps) {
+  const { settings, updateSetting, applyAppearanceStyle, resetSettings } = useAppSettings();
   const { t } = useTranslation();
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(initialCategory);
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(() => {
+    if (initialCategory && initialCategory !== "general") return initialCategory;
+    try {
+      const saved = localStorage.getItem("luno_last_settings_category") as SettingsCategory;
+      if (saved) return saved;
+    } catch {}
+    return initialCategory || "general";
+  });
 
   useEffect(() => {
     if (initialCategory) {
       setActiveCategory(initialCategory);
+      try {
+        localStorage.setItem("luno_last_settings_category", initialCategory);
+      } catch {}
     }
   }, [initialCategory]);
+
+  const handleSelectCategory = (catId: SettingsCategory) => {
+    setActiveCategory(catId);
+    try {
+      localStorage.setItem("luno_last_settings_category", catId);
+    } catch {}
+    onCategoryChange?.(catId);
+  };
   const [showApiKey, setShowApiKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
@@ -91,7 +192,8 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
 
   // Additional local state for general preferences matching the design
   const [onStartup, setOnStartup] = useState<string>("home");
-  const [reopenTabs, setReopenTabs] = useState<boolean>(true);
+  const [draggedToolbarIndex, setDraggedToolbarIndex] = useState<number | null>(null);
+  const [dragOverToolbarIndex, setDragOverToolbarIndex] = useState<number | null>(null);
   const [checkUpdates, setCheckUpdates] = useState<boolean>(true);
   const [dateFormat, setDateFormat] = useState<string>("YYYY-MM-DD");
   const [timeFormat, setTimeFormat] = useState<string>("24h");
@@ -107,7 +209,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
     { id: "files", label: t("settings.catFilesTitle"), icon: Folder, desc: t("settings.catFilesDesc") },
     { id: "markdown", label: t("settings.catMarkdownTitle"), icon: FileCode, desc: t("settings.catMarkdownDesc") },
     { id: "templates", label: t("settings.catTemplatesTitle"), icon: LayoutTemplate, desc: t("settings.catTemplatesDesc") },
-    { id: "ai", label: t("settings.catAiTitle"), icon: SparklesIcon, isPro: true, desc: t("settings.catAiDesc") },
+    { id: "ai", label: t("settings.catAiTitle"), icon: SparklesIcon, desc: t("settings.catAiDesc") },
     { id: "shortcuts", label: t("settings.catShortcutsTitle"), icon: Keyboard, desc: t("settings.catShortcutsDesc") },
     { id: "storage", label: t("settings.catStorageTitle"), icon: Database, desc: t("settings.catStorageDesc") },
     { id: "backup", label: t("settings.catBackupTitle"), icon: Cloud, desc: t("settings.catBackupDesc") },
@@ -154,7 +256,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                   <button
                     key={cat.id}
                     type="button"
-                    onClick={() => setActiveCategory(cat.id)}
+                    onClick={() => handleSelectCategory(cat.id)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
                       isActive
                         ? "bg-primary/10 text-primary font-semibold shadow-2xs"
@@ -165,12 +267,6 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                       <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/70"}`} />
                       <span className="truncate">{cat.label}</span>
                     </div>
-
-                    {cat.isPro && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
-                        Pro
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -216,7 +312,11 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                         <label className="text-xs font-semibold text-foreground">{t("settings.reopenTabs")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.reopenTabsDesc")}</p>
                       </div>
-                      <Switch checked={reopenTabs} onCheckedChange={setReopenTabs} className="scale-85 origin-right" />
+                      <Switch
+                        checked={settings.reopenTabs}
+                        onCheckedChange={(val) => updateSetting("reopenTabs", val)}
+                        className="scale-85 origin-right"
+                      />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
@@ -331,9 +431,10 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
               {activeCategory === "appearance" && (
                 <div className="space-y-6">
                   {/* Theme & Colors */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.colorSchemeGroup")}</h3>
 
+                    {/* Color Scheme Mode */}
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-2 block">{t("settings.schemeLabel")}</label>
                       <div className="flex gap-2">
@@ -359,6 +460,174 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                       </div>
                     </div>
 
+                    {/* Visual Appearance Themes / Mood & Tone */}
+                    <div className="pt-3 border-t border-border/30">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <div>
+                          <label className="text-xs font-semibold text-foreground block">{t("settings.visualAppearanceGroup")}</label>
+                          <p className="text-xs text-muted-foreground mt-0.5">{t("settings.visualAppearanceDesc")}</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 pt-1">
+                        {APPEARANCE_STYLE_OPTIONS.map((style) => {
+                          const isSelected = (settings.appearanceStyle || "default") === style.id;
+                          const isDark = style.recommendedColorScheme === "dark" || (style.id === "default" && settings.colorScheme === "dark");
+                          const bgPreview = isDark ? style.darkBg : style.lightBg;
+                          const sbPreview = isDark ? style.darkSidebar : style.lightSidebar;
+                          const accentColor = APP_THEMES.find((th) => th.id === style.recommendedTheme)?.color || style.accentPreview;
+
+                          const getInnerRadiusClass = () => {
+                            switch (style.id) {
+                              case "catppuccin":
+                                return "rounded-full"; // 9999px bubbly pill
+                              case "neumorphism":
+                                return "rounded-lg"; // 8px soft curve
+                              case "glass":
+                                return "rounded-md"; // 8px floating glass
+                              case "nord":
+                                return "rounded-sm"; // 4px smooth Nordic
+                              case "default":
+                                return "rounded-sm"; // 3px standard clean
+                              case "paper":
+                                return "rounded-xs"; // 2px crisp notebook
+                              case "midnight":
+                              case "cyberpunk":
+                                return "rounded-none"; // 0px razor-sharp rectangular
+                              default:
+                                return "rounded-sm";
+                            }
+                          };
+
+                          const innerRadiusClass = getInnerRadiusClass();
+
+                          return (
+                            <button
+                              key={style.id}
+                              type="button"
+                              onClick={() => applyAppearanceStyle(style.id)}
+                              className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                                isSelected
+                                  ? "border-primary bg-primary/10 shadow-2xs"
+                                  : "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-foreground/[0.02]"
+                              }`}
+                            >
+                              {/* Mini UI Mockup Preview - Uniform crisp border with signature inner roundness */}
+                              <div
+                                className="w-full h-14 overflow-hidden flex mb-2 relative rounded-lg border border-border/40"
+                                style={{ background: bgPreview }}
+                              >
+                                {/* Mini Sidebar */}
+                                <div
+                                  className="w-1/3 h-full border-r border-border/20 p-1.5 flex flex-col gap-1"
+                                  style={{
+                                    background: sbPreview,
+                                    ...(style.id === "glass" ? { backdropFilter: "blur(12px)", backgroundColor: isDark ? "rgba(15,23,42,0.6)" : "rgba(255,255,255,0.6)" } : {}),
+                                    ...(style.id === "cyberpunk" ? { borderRight: `1px solid ${accentColor}` } : {}),
+                                  }}
+                                >
+                                  <div className={`h-1.5 w-full ${innerRadiusClass} ${isDark ? "bg-white/35" : "bg-black/25"}`} />
+                                  <div className={`h-1 w-3/4 ${innerRadiusClass} ${isDark ? "bg-white/20" : "bg-black/15"}`} />
+                                  <div className={`h-1 w-1/2 ${innerRadiusClass} ${isDark ? "bg-white/15" : "bg-black/10"}`} />
+                                </div>
+                                {/* Mini Content - Prominently displaying unique corner radius & card properties */}
+                                <div className="flex-1 p-1.5 flex flex-col gap-1 justify-center">
+                                  {style.id === "glass" ? (
+                                    <div
+                                      className="p-1 rounded-md flex flex-col gap-1"
+                                      style={{
+                                        background: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.7)",
+                                        border: "1px solid rgba(255,255,255,0.25)",
+                                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
+                                      }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-md" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-md ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  ) : style.id === "cyberpunk" ? (
+                                    <div
+                                      className="p-1 rounded-none flex flex-col gap-1"
+                                      style={{
+                                        border: `1px solid ${accentColor}`,
+                                        boxShadow: `inset 0 0 3px ${accentColor}`,
+                                        background: "rgba(11, 5, 20, 0.8)",
+                                      }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-none" style={{ backgroundColor: accentColor, boxShadow: `0 0 3px ${accentColor}` }} />
+                                      <div className="h-1 w-full rounded-none bg-white/30" />
+                                    </div>
+                                  ) : style.id === "catppuccin" ? (
+                                    <div
+                                      className="p-1 rounded-xl flex flex-col gap-1 border border-white/10"
+                                      style={{ background: isDark ? "#181825" : "#e6e9ef" }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-full" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-full ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  ) : style.id === "neumorphism" ? (
+                                    <div
+                                      className="p-1 rounded-lg flex flex-col gap-1"
+                                      style={{
+                                        background: isDark ? "#242831" : "#e5e9ef",
+                                        boxShadow: isDark
+                                          ? "2px 2px 5px rgba(0,0,0,0.5), -2px -2px 5px rgba(255,255,255,0.05)"
+                                          : "2px 2px 5px rgba(163,170,181,0.5), -2px -2px 5px rgba(255,255,255,0.9)",
+                                      }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-full" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-full ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  ) : style.id === "midnight" ? (
+                                    <div
+                                      className="p-1 rounded-none flex flex-col gap-1 border border-zinc-800"
+                                      style={{ background: "#050505" }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-none" style={{ backgroundColor: accentColor }} />
+                                      <div className="h-1 w-full rounded-none bg-white/30" />
+                                    </div>
+                                  ) : style.id === "paper" ? (
+                                    <div
+                                      className="p-1 rounded-xs flex flex-col gap-1 border border-amber-900/15"
+                                      style={{ background: isDark ? "#161311" : "#f4ede0" }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-xs" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-xs ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  ) : style.id === "nord" ? (
+                                    <div
+                                      className="p-1 rounded-sm flex flex-col gap-1 border border-slate-700/40"
+                                      style={{ background: isDark ? "#1e222a" : "#e5e9f0" }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-sm ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className="p-1 rounded-sm flex flex-col gap-1 border border-border/40"
+                                      style={{ background: isDark ? "#090d16" : "#f8fafc" }}
+                                    >
+                                      <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-sm ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                    </div>
+                                  )}
+                                </div>
+                                {isSelected && (
+                                  <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5 shadow-xs">
+                                    <Check className="h-2.5 w-2.5" />
+                                  </div>
+                                )}
+                              </div>
+                              <span className={`text-xs font-semibold line-clamp-1 ${isSelected ? "text-primary" : "text-foreground"}`}>
+                                {t(style.nameKey as any) || style.id}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">
+                                {t(style.descKey as any)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     <div className="pt-2 border-t border-border/30">
                       <label className="text-xs font-semibold text-foreground mb-2 block">{t("settings.accentTheme")}</label>
                       <div className="flex flex-wrap gap-3">
@@ -376,7 +645,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                                 }`}
                               />
                             </TooltipTrigger>
-                            <TooltipContent>{th.label}</TooltipContent>
+                            <TooltipContent>{t(`settings.theme${th.id.charAt(0).toUpperCase() + th.id.slice(1)}` as any) || th.label}</TooltipContent>
                           </Tooltip>
                         ))}
                       </div>
@@ -397,27 +666,56 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div className="pt-2 border-t border-border/30 flex items-center justify-between">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.accentHeadings")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.accentHeadingsDesc")}</p>
+                      </div>
+                      <Switch checked={settings.accentHeadings} onCheckedChange={(v) => updateSetting("accentHeadings", v)} className="scale-85 origin-right" />
+                    </div>
                   </div>
 
-                  {/* Typography */}
+                    {/* Typography */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.typographyGroup")}</h3>
 
+                    {/* Interface Font */}
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.fontFamily")}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.fontFamilyDesc")}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.interfaceFontFamily") || "Interface Font"}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.interfaceFontFamilyDesc") || "Set typography for sidebar, buttons, and navigation"}</p>
                       </div>
                       <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="inter">Inter</SelectItem>
-                          <SelectItem value="system">{t("settings.fontSystem")}</SelectItem>
-                          <SelectItem value="serif">{t("settings.fontSerif")}</SelectItem>
-                          <SelectItem value="mono">{t("settings.fontMono")}</SelectItem>
-                          <SelectItem value="prompt">{t("settings.fontPrompt")}</SelectItem>
+                        <SelectContent className="max-h-64">
+                          {FONT_OPTIONS.map((font) => (
+                            <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                              <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Editor Font */}
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.editorFontFamily") || "Editor Font"}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.editorFontFamilyDesc") || "Set typography for writing and reading notes"}</p>
+                      </div>
+                      <Select value={settings.editorFontFamily || settings.fontFamily} onValueChange={(v) => updateSetting("editorFontFamily", v as any)}>
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {FONT_OPTIONS.map((font) => (
+                            <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                              <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -443,10 +741,30 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                   </div>
 
                   {/* Layout Density */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.layoutGroup")}</h3>
 
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.interfaceScale")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.interfaceScaleDesc")}</p>
+                      </div>
+                      <Select value={String(settings.interfaceScale || 100)} onValueChange={(v) => updateSetting("interfaceScale", Number(v))}>
+                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="80">80%</SelectItem>
+                          <SelectItem value="90">90%</SelectItem>
+                          <SelectItem value="100">100% (Default)</SelectItem>
+                          <SelectItem value="110">110%</SelectItem>
+                          <SelectItem value="125">125%</SelectItem>
+                          <SelectItem value="150">150%</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
                         <label className="text-xs font-semibold text-foreground">{t("settings.editorWidth")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.editorWidthDesc")}</p>
@@ -528,6 +846,14 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                       </div>
                       <Switch checked={settings.showWordCount} onCheckedChange={(v) => updateSetting("showWordCount", v)} className="scale-85 origin-right" />
                     </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.spellCheckSetting") || "Spell Check"}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.spellCheckSettingDesc") || "Check and underline misspelled words in Thai and English"}</p>
+                      </div>
+                      <Switch checked={settings.spellCheck !== false} onCheckedChange={(v) => updateSetting("spellCheck", v)} className="scale-85 origin-right" />
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
@@ -555,6 +881,183 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showGuideLinesHint")}</p>
                       </div>
                       <Switch checked={settings.showGuideLines} onCheckedChange={(v) => updateSetting("showGuideLines", v)} className="scale-85 origin-right" />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.highlightInlineCode")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.highlightInlineCodeDesc")}</p>
+                      </div>
+                      <Switch checked={settings.highlightInlineCode} onCheckedChange={(v) => updateSetting("highlightInlineCode", v)} className="scale-85 origin-right" />
+                    </div>
+                  </div>
+
+                  {/* Custom Toolbar */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.customToolbar")}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.customToolbarDesc")}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateSetting("toolbarItemsOrder", DEFAULT_TOOLBAR_ORDER);
+                          updateSetting("hiddenToolbarItems", []);
+                          toast({
+                            title: t("settings.resetToolbarDefaults"),
+                            description: "Toolbar layout and order restored to defaults",
+                          });
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-lg transition-colors cursor-pointer border border-border/40"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>{t("settings.resetToolbarDefaults")}</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 max-h-[380px] overflow-y-auto no-scrollbar pr-1 border border-border/30 rounded-xl p-2 bg-muted/20">
+                      {(() => {
+                        const toolbarOrder = settings.toolbarItemsOrder || DEFAULT_TOOLBAR_ORDER;
+                        const hiddenSet = new Set(settings.hiddenToolbarItems || []);
+
+                        const moveItem = (index: number, dir: "up" | "down") => {
+                          const targetIdx = dir === "up" ? index - 1 : index + 1;
+                          if (targetIdx < 0 || targetIdx >= toolbarOrder.length) return;
+                          const newArr = [...toolbarOrder];
+                          const [item] = newArr.splice(index, 1);
+                          newArr.splice(targetIdx, 0, item);
+                          updateSetting("toolbarItemsOrder", newArr);
+                        };
+
+                        const toggleHidden = (id: string) => {
+                          const currHidden = settings.hiddenToolbarItems || [];
+                          const nextHidden = currHidden.includes(id)
+                            ? currHidden.filter((i) => i !== id)
+                            : [...currHidden, id];
+                          updateSetting("hiddenToolbarItems", nextHidden);
+                        };
+
+                        return toolbarOrder.map((id, index) => {
+                          const def = TOOLBAR_TOOL_DEFS[id];
+                          if (!def) return null;
+                          const IconComp = def.icon;
+                          const isHidden = hiddenSet.has(id);
+                          const isDragging = draggedToolbarIndex === index;
+                          const isDragOver = dragOverToolbarIndex === index && draggedToolbarIndex !== index;
+
+                          return (
+                            <div
+                              key={id}
+                              draggable
+                              onDragStart={(e) => {
+                                setDraggedToolbarIndex(index);
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", id);
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                if (draggedToolbarIndex !== null && draggedToolbarIndex !== index) {
+                                  const newArr = [...toolbarOrder];
+                                  const [item] = newArr.splice(draggedToolbarIndex, 1);
+                                  newArr.splice(index, 0, item);
+                                  updateSetting("toolbarItemsOrder", newArr);
+                                  setDraggedToolbarIndex(index);
+                                }
+                                if (dragOverToolbarIndex !== index) {
+                                  setDragOverToolbarIndex(index);
+                                }
+                              }}
+                              onDragLeave={() => {
+                                if (dragOverToolbarIndex === index) {
+                                  setDragOverToolbarIndex(null);
+                                }
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setDraggedToolbarIndex(null);
+                                setDragOverToolbarIndex(null);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedToolbarIndex(null);
+                                setDragOverToolbarIndex(null);
+                              }}
+                              className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg border transition-all cursor-grab active:cursor-grabbing select-none ${
+                                isDragging
+                                  ? "opacity-40 scale-[0.98] border-primary/50 bg-primary/5 shadow-inner"
+                                  : isDragOver
+                                  ? "border-primary bg-primary/10 shadow-sm"
+                                  : isHidden
+                                  ? "bg-muted/30 border-border/20 opacity-60 text-muted-foreground hover:border-border/60"
+                                  : "bg-background border-border/40 text-foreground hover:border-border shadow-2xs"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 pointer-events-none">
+                                <GripVertical className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                                <div className="h-7 w-7 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                                  <IconComp className="h-3.5 w-3.5" />
+                                </div>
+                                <span className="text-xs font-medium truncate">{t(def.labelKey)}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0 hidden sm:inline">
+                                  {t(def.categoryKey)}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={index === 0}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moveItem(index, "up");
+                                  }}
+                                  title={t("settings.moveUp")}
+                                  className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                                >
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={index === toolbarOrder.length - 1}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moveItem(index, "down");
+                                  }}
+                                  title={t("settings.moveDown")}
+                                  className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                                >
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                                {def.locked ? (
+                                  <div
+                                    title={t("settings.toolLocked")}
+                                    className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground/40 cursor-not-allowed"
+                                  >
+                                    <Lock className="h-3.5 w-3.5" />
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleHidden(id);
+                                    }}
+                                    title={isHidden ? t("settings.showTool") : t("settings.hideTool")}
+                                    className={`h-7 w-7 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+                                      isHidden
+                                        ? "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+                                        : "text-primary hover:bg-primary/10"
+                                    }`}
+                                  >
+                                    {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -672,7 +1175,13 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                         href="https://aistudio.google.com/app/apikey"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                        onClick={(e) => {
+                          if (onOpenWebTab) {
+                            e.preventDefault();
+                            onOpenWebTab("https://aistudio.google.com/app/apikey");
+                          }
+                        }}
+                        className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
                       >
                         {t("settings.getKeyFree")} <ExternalLink className="h-3 w-3" />
                       </a>
@@ -723,17 +1232,58 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
               {/* 8. SHORTCUTS */}
               {activeCategory === "shortcuts" && (
                 <div className="space-y-6">
+                  {/* Group 1: General & Navigation */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbShortcutsGroup")}</h3>
-
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupGeneral")}</h3>
                     <div className="divide-y divide-border/30 text-xs">
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbNewNote")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + N</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSearch")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenFolder")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + O</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSave")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + S</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleCalc")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + C</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleClock")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + T</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCloseTab")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + W</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCycleTabs")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Tab / Ctrl + Shift + Tab</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleSidebar")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + \</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenSettings")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + ,</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSearch")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K / Ctrl + F</kbd></div>
+                    </div>
+                  </div>
+
+                  {/* Group 2: Text Formatting */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupFormatting")}</h3>
+                    <div className="divide-y divide-border/30 text-xs">
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBold")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + B</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbItalic")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + I</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbUnderline")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + U</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbStrike")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + X</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbHighlight")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + H</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInlineCode")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + E / Ctrl + `</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInsertLink")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbClearFormatting")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + N</kbd></div>
+                    </div>
+                  </div>
+
+                  {/* Group 3: Lists & Blocks */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupListsAndBlocks")}</h3>
+                    <div className="divide-y divide-border/30 text-xs">
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBulletList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 8</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOrderedList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 7</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbTaskList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 9</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBlockquote")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + Q</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCodeBlock")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Alt + C</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbIndent")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Tab / Shift + Tab</kbd></div>
+                    </div>
+                  </div>
+
+                  {/* Group 4: Tools & Utilities */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupTools")}</h3>
+                    <div className="divide-y divide-border/30 text-xs">
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbFixLang")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + L</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenAi")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + A</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleCalc")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + C</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleClock")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + T</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSlashCommands")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">/</kbd></div>
                     </div>
                   </div>
                 </div>
@@ -841,7 +1391,7 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
-                            <span className="font-semibold text-foreground block mt-0.5">Google Drive / Luno</span>
+                            <span className="font-semibold text-foreground block mt-0.5">Google Drive / Luno / Workspaces</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced") || "Last Synced"}</span>
@@ -889,7 +1439,11 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
 
                         <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border/30">
                           <a
-                            href={folderStructure ? `https://drive.google.com/drive/folders/${folderStructure.rootId}` : "https://drive.google.com"}
+                            href={
+                              folderStructure
+                                ? `https://drive.google.com/drive/folders/${folderStructure.workspacesId || folderStructure.projectId || folderStructure.rootId}`
+                                : "https://drive.google.com"
+                            }
                             target="_blank"
                             rel="noreferrer"
                             className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -948,13 +1502,25 @@ export default function SettingsTabView({ onClose, initialCategory = "general", 
                     <button
                       type="button"
                       onClick={() => {
+                        const isCloudActive = settings.storageMode === "gdrive" || openedFolderName === "Google Drive";
                         disconnectGoogleDrive();
                         updateSetting("storageMode", "local");
                         setDisconnectModalOpen(false);
-                        toast({
-                          title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
-                          description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your files remain safe in Google Drive.",
-                        });
+
+                        if (isCloudActive) {
+                          if (onCloseWorkspace) {
+                            onCloseWorkspace();
+                          }
+                          toast({
+                            title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
+                            description: t("settings.gdriveDisconnectedWorkspaceDesc") || "Cloud workspace closed. Your files remain safe in Google Drive.",
+                          });
+                        } else {
+                          toast({
+                            title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
+                            description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your files remain safe in Google Drive.",
+                          });
+                        }
                       }}
                       className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-xs font-semibold transition-colors cursor-pointer"
                     >

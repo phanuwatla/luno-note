@@ -18,6 +18,14 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
     "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300 border-emerald-600/30",
   ],
+  cyan: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
+    "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
+    "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
+  ],
   blue: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
     "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
@@ -25,6 +33,14 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
     "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
     "bg-blue-600/15 text-blue-700 dark:text-blue-300 border-blue-600/30",
+  ],
+  indigo: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
+    "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
+    "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
+    "bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 border-indigo-600/30",
   ],
   violet: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
@@ -34,6 +50,14 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
     "bg-violet-600/15 text-violet-700 dark:text-violet-300 border-violet-600/30",
   ],
+  fuchsia: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
+    "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
+    "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
+    "bg-fuchsia-600/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-600/30",
+  ],
   rose: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
     "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
@@ -42,6 +66,14 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
     "bg-rose-600/15 text-rose-700 dark:text-rose-300 border-rose-600/30",
   ],
+  ruby: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    "bg-red-600/15 text-red-700 dark:text-red-300 border-red-600/30",
+    "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
+    "bg-red-700/15 text-red-800 dark:text-red-200 border-red-700/30",
+  ],
   orange: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
     "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
@@ -49,6 +81,22 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-amber-600/15 text-amber-700 dark:text-amber-300 border-amber-600/30",
     "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
     "bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30",
+  ],
+  amber: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300 border-yellow-500/30",
+    "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    "bg-amber-600/15 text-amber-700 dark:text-amber-300 border-amber-600/30",
+    "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    "bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30",
+  ],
+  lime: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30",
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300 border-yellow-500/30",
+    "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
+    "bg-lime-600/15 text-lime-700 dark:text-lime-300 border-lime-600/30",
   ],
   slate: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",

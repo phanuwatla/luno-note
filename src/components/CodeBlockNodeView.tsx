@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { NodeViewWrapper, NodeViewContent, NodeViewProps } from "@tiptap/react";
-import { Code2, Copy, Check } from "lucide-react";
+import { Copy, Check } from "lucide-react";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import {
   Select,
   SelectContent,
@@ -41,6 +42,11 @@ export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
   updateAttributes,
 }) => {
   const [copied, setCopied] = useState(false);
+  const { settings } = useAppSettings();
+
+  const showLineNumbers = settings.showCodeLineNumbers;
+  const codeText = node.textContent || "";
+  const linesCount = Math.max(1, codeText.split("\n").length);
 
   const rawLang = node.attrs.language || "";
   const foundLang = LANGUAGES.find(
@@ -70,16 +76,13 @@ export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
   return (
     <NodeViewWrapper className="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-2xs transition-all">
       {/* Seamless Header Bar with System Select & Tooltip UI */}
-      <div className="flex items-center justify-between px-3.5 pt-2 pb-0.5 text-[11px] select-none">
+      <div className="flex items-center justify-between px-3.5 pt-2 pb-1 text-[11px] select-none border-b border-border/30">
         <Select
           value={rawLang ? rawLang.toLowerCase() : "plaintext"}
           onValueChange={(val) => updateAttributes({ language: val })}
         >
-          <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 gap-1.5 font-medium text-muted-foreground/80 hover:text-foreground outline-none shadow-none focus:ring-0 focus:ring-offset-0 text-[11px]">
-            <div className="flex items-center gap-1.5">
-              <Code2 className="h-3.5 w-3.5 opacity-60 shrink-0 text-foreground" />
-              <span className="font-semibold text-muted-foreground/90">{displayLabel}</span>
-            </div>
+          <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 gap-1 font-medium text-muted-foreground/80 hover:text-foreground outline-none shadow-none focus:ring-0 focus:ring-offset-0 text-[11px]">
+            <span className="font-semibold text-muted-foreground/90">{displayLabel}</span>
           </SelectTrigger>
           <SelectContent align="start" className="w-36 max-h-56 p-1 text-xs z-50">
             {LANGUAGES.map((l) => (
@@ -113,9 +116,56 @@ export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
         </TooltipProvider>
       </div>
 
-      {/* Code Content Area with 13.5px font size (larger than header) */}
-      <div className="px-3.5 pt-0.5 pb-2.5 overflow-x-auto font-mono text-[13.5px] leading-relaxed text-foreground">
-        <NodeViewContent as={("pre" as any)} className="outline-none focus:outline-none bg-transparent p-0 m-0 border-0" />
+      {/* Code Content Area with Line Numbers */}
+      <div className="flex px-3.5 py-2.5 overflow-x-auto text-[13.5px] text-foreground items-start">
+        {showLineNumbers && (
+          <div
+            aria-hidden="true"
+            className="flex flex-col select-none pr-3 text-right text-muted-foreground/40 border-r border-border/30 mr-3.5 shrink-0"
+            style={{
+              fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: "13.5px",
+              lineHeight: "22px",
+            }}
+          >
+            {Array.from({ length: linesCount }, (_, i) => (
+              <span
+                key={i + 1}
+                className="block select-none"
+                style={{
+                  height: "22px",
+                  lineHeight: "22px",
+                  margin: 0,
+                  padding: 0,
+                }}
+              >
+                {i + 1}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div
+          className="flex-1 min-w-0"
+          style={{
+            fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            fontSize: "13.5px",
+            lineHeight: "22px",
+          }}
+        >
+          <NodeViewContent
+            as={("pre" as any)}
+            className="outline-none focus:outline-none bg-transparent p-0 m-0 border-0 block"
+            style={{
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              lineHeight: "22px",
+              whiteSpace: "pre",
+              margin: 0,
+              padding: 0,
+            }}
+          />
+        </div>
       </div>
     </NodeViewWrapper>
   );

@@ -25,4 +25,16 @@ describe("First line paragraph indentation preservation", () => {
     const output = preprocessMarkdownForEditor(input);
     expect(output).toBe("\u2003\u2003ต่อเนื่องจากยุคกลางจนถึงยุคเรเนสซองส์...");
   });
+
+  it("should not convert empty lines inside fenced code blocks", () => {
+    const input = "```js\nconst a = 1;\n\n\nconst b = 2;\n```";
+    const output = preprocessMarkdownForEditor(input);
+    expect(output).toBe("```js\nconst a = 1;\n\n\nconst b = 2;\n```");
+  });
+
+  it("should preserve indentation for nested list items and horizontal rules", () => {
+    const input = "  - Nested Item 3.1\n  - Nested Item 3.2\n* * *";
+    const output = preprocessMarkdownForEditor(input);
+    expect(output).toBe("  - Nested Item 3.1\n  - Nested Item 3.2\n* * *");
+  });
 });

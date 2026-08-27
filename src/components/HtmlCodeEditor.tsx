@@ -4,6 +4,9 @@ interface HtmlCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   fontSize?: number;
+  onCursorChange?: (line: number, col: number) => void;
+  spellCheck?: boolean;
+  noteId?: string;
 }
 
 const INDENT = "  "; // 2 spaces
@@ -79,12 +82,13 @@ function highlightHtml(code: string): string {
   return result;
 }
 
-export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlCodeEditorProps) {
+export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId }: HtmlCodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
 
   const lines = value.split("\n");
+  const computedLineHeight = `${Math.round(fontSize * 1.6)}px`;
 
   const syncScroll = () => {
     const ta = textareaRef.current;
@@ -94,7 +98,39 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
       preRef.current.scrollTop = ta.scrollTop;
       preRef.current.scrollLeft = ta.scrollLeft;
     }
+    if (noteId) {
+      try {
+        sessionStorage.setItem(`luno_scroll_${noteId}`, String(ta.scrollTop));
+      } catch {
+        /* ignore */
+      }
+    }
   };
+
+  useEffect(() => {
+    if (!noteId) return;
+    try {
+      const saved = sessionStorage.getItem(`luno_scroll_${noteId}`);
+      if (textareaRef.current) {
+        const top = saved ? parseFloat(saved) : 0;
+        textareaRef.current.scrollTop = !isNaN(top) ? top : 0;
+        syncScroll();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [noteId]);
+
+  const updateCursorPos = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta || !onCursorChange) return;
+    const pos = ta.selectionStart ?? 0;
+    const textBefore = ta.value.slice(0, pos);
+    const splitLines = textBefore.split("\n");
+    const line = splitLines.length;
+    const col = (splitLines[splitLines.length - 1]?.length ?? 0) + 1;
+    onCursorChange(line, col);
+  }, [onCursorChange]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const ta = e.currentTarget;
@@ -127,6 +163,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         requestAnimationFrame(() => {
           ta.selectionStart = start + (e.shiftKey ? 0 : INDENT.length);
           ta.selectionEnd = end + delta;
+          updateCursorPos();
         });
       } else {
         // Single cursor indent
@@ -136,12 +173,18 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
           if (line.startsWith(INDENT)) {
             const next = val.slice(0, lineStart) + val.slice(lineStart + INDENT.length);
             onChange(next);
-            requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start - INDENT.length; });
+            requestAnimationFrame(() => {
+              ta.selectionStart = ta.selectionEnd = start - INDENT.length;
+              updateCursorPos();
+            });
           }
         } else {
           const next = val.slice(0, start) + INDENT + val.slice(end);
           onChange(next);
-          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + INDENT.length; });
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + INDENT.length;
+            updateCursorPos();
+          });
         }
       }
       return;
@@ -169,6 +212,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         requestAnimationFrame(() => {
           const pos = start + 1 + indent.length + extraIndent.length;
           ta.selectionStart = ta.selectionEnd = pos;
+          updateCursorPos();
         });
         return;
       }
@@ -178,7 +222,10 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         const insertText = "\n" + indent;
         const next = val.slice(0, start) + insertText + val.slice(end);
         onChange(next);
-        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + insertText.length; });
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + insertText.length;
+          updateCursorPos();
+        });
       }
       return;
     }
@@ -190,7 +237,10 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         // Quote: skip if next char is same quote
         if (val[start] === close) {
           e.preventDefault();
-          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = start + 1;
+            updateCursorPos();
+          });
           return;
         }
         // Only auto-close quotes if selection or followed by whitespace/end
@@ -208,27 +258,38 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         : e.key + close;
       const next = val.slice(0, start) + insert + val.slice(end);
       onChange(next);
-      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 1;
+        updateCursorPos();
+      });
       return;
     }
 
-    // Skip over closing char
-    if (Object.values(PAIRS).includes(e.key) && val[start] === e.key && start === end) {
-      e.preventDefault();
-      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
-    }
-  }, [onChange]);
+    // Update cursor pos for navigation keys
+    requestAnimationFrame(updateCursorPos);
+  }, [onChange, updateCursorPos]);
 
-  // Keep textarea synced to external value changes
+  const lastInternalValRef = useRef(value);
+
+  const handleTextChange = (newVal: string) => {
+    lastInternalValRef.current = newVal;
+    onChange(newVal);
+    updateCursorPos();
+  };
+
+  // Keep textarea synced to external value changes (e.g. Switching files) without overwriting active user typing
   useEffect(() => {
     const ta = textareaRef.current;
-    if (!ta || ta.value === value) return;
+    if (!ta) return;
+    if (value === lastInternalValRef.current || ta.value === value) return;
+    lastInternalValRef.current = value;
     const ss = ta.selectionStart;
     const se = ta.selectionEnd;
     ta.value = value;
-    ta.selectionStart = ss;
-    ta.selectionEnd = se;
-  }, [value]);
+    ta.selectionStart = Math.min(ss, value.length);
+    ta.selectionEnd = Math.min(se, value.length);
+    updateCursorPos();
+  }, [value, updateCursorPos]);
 
   return (
     <div className="relative flex h-full w-full overflow-hidden font-mono" style={{ fontSize }}>
@@ -237,10 +298,10 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
         ref={lineNumbersRef}
         aria-hidden
         className="no-scrollbar select-none overflow-hidden bg-transparent py-4 text-right text-muted-foreground/30 shrink-0"
-        style={{ fontSize: `${Math.max(10, Math.round(fontSize * 0.72))}px`, lineHeight: "1.625rem", width: `${Math.max(24, String(lines.length).length * Math.round(fontSize * 0.48) + 12)}px`, paddingLeft: "4px", paddingRight: "6px" }}
+        style={{ fontSize: `${Math.max(10, Math.round(fontSize * 0.72))}px`, lineHeight: computedLineHeight, width: `${Math.max(24, String(lines.length).length * Math.round(fontSize * 0.48) + 12)}px`, paddingLeft: "4px", paddingRight: "6px" }}
       >
         {lines.map((_, i) => (
-          <div key={i} style={{ lineHeight: "1.625rem" }}>{i + 1}</div>
+          <div key={i} style={{ lineHeight: computedLineHeight }}>{i + 1}</div>
         ))}
       </div>
 
@@ -250,18 +311,21 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14 }: HtmlC
           ref={preRef}
           aria-hidden
           className="no-scrollbar pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-all px-4 py-4"
-          style={{ fontSize, lineHeight: "1.625rem", tabSize: 2 }}
+          style={{ fontSize, lineHeight: computedLineHeight, tabSize: 2 }}
           dangerouslySetInnerHTML={{ __html: highlightHtml(value) + "\n" }}
         />
         <textarea
           ref={textareaRef}
           className="absolute inset-0 h-full w-full resize-none bg-transparent px-4 py-4 outline-none overflow-auto caret-foreground"
-          style={{ fontSize, lineHeight: "1.625rem", tabSize: 2, color: "transparent", caretColor: "hsl(var(--foreground))" }}
+          style={{ fontSize, lineHeight: computedLineHeight, tabSize: 2, color: "transparent", caretColor: "hsl(var(--foreground))" }}
           defaultValue={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handleTextChange(e.target.value)}
+          onClick={updateCursorPos}
+          onKeyUp={updateCursorPos}
+          onSelect={updateCursorPos}
           onScroll={syncScroll}
           onKeyDown={handleKeyDown}
-          spellCheck={false}
+          spellCheck={spellCheck}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"

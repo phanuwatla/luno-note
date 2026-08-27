@@ -33,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 
 interface FloatingClockProps {
   isOpen: boolean;
@@ -334,6 +335,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
           exit={{ opacity: 0, scale: 0.9 }}
           transition={{ duration: 0.15 }}
           className="fixed rounded-full border border-border/60 bg-card/95 px-3 py-1.5 shadow-md backdrop-blur-md select-none text-foreground flex items-center gap-2"
+          data-floating-pill="true"
           style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
         >
           <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground opacity-60 cursor-grab active:cursor-grabbing shrink-0" />
@@ -421,6 +423,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.18, ease: "easeOut" }}
         className="fixed w-[320px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
+        data-floating-window="true"
         style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
       >
         {/* Window Header */}
@@ -580,38 +583,44 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             </div>
 
             <div className="flex items-center gap-2 my-0.5">
-              <button
+              <Button
                 type="button"
+                variant={swRunning ? "secondary" : "default"}
+                size="sm"
                 onClick={() => setSwRunning(!swRunning)}
-                className={`h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 text-xs font-semibold transition-all cursor-pointer active:scale-95 ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
                   swRunning
-                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
+                    : ""
                 }`}
               >
                 {swRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
                 <span>{swRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={handleSwLap}
                 disabled={!swRunning}
-                className="h-8 px-3 rounded-lg bg-foreground/[0.05] hover:bg-foreground/10 text-foreground disabled:opacity-40 flex items-center gap-1 text-xs font-medium transition-all cursor-pointer active:scale-95"
+                className="h-8 px-3 rounded-xl border-border/70 text-foreground disabled:opacity-40 flex items-center gap-1 text-xs font-medium cursor-pointer active:scale-95"
               >
                 <Flag className="h-3 w-3" />
                 <span>{t("editor.lap") || "Lap"}</span>
-              </button>
+              </Button>
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="icon"
                     onClick={handleSwReset}
-                    className="h-8 w-8 rounded-lg bg-foreground/[0.05] hover:bg-foreground/10 text-foreground flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                    className="h-8 w-8 rounded-xl border-border/70 text-foreground flex items-center justify-center cursor-pointer active:scale-95"
                   >
                     <RotateCcw className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
               </Tooltip>
@@ -639,13 +648,13 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             </div>
 
             {/* Presets */}
-            <div className="grid grid-cols-5 gap-0.5 p-0.5 bg-foreground/[0.04] rounded-lg text-[11px] font-medium w-full my-1">
+            <div className="grid grid-cols-5 gap-0.5 p-0.5 bg-foreground/[0.04] rounded-xl text-[11px] font-medium w-full my-1">
               {[60, 300, 600, 900, 1800].map((secs) => (
                 <button
                   key={secs}
                   type="button"
                   onClick={() => setPresetTimer(secs)}
-                  className={`py-1 px-1 rounded-md text-center flex items-center justify-center transition-all cursor-pointer ${
+                  className={`py-1 px-1 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
                     timerInitial === secs
                       ? "bg-card text-foreground font-semibold shadow-xs"
                       : "text-muted-foreground hover:text-foreground"
@@ -657,31 +666,35 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             </div>
 
             <div className="flex items-center gap-2 my-0.5">
-              <button
+              <Button
                 type="button"
+                variant={timerRunning ? "secondary" : "default"}
+                size="sm"
                 onClick={() => setTimerRunning(!timerRunning)}
-                className={`h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 text-xs font-semibold transition-all cursor-pointer active:scale-95 ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
                   timerRunning
-                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
+                    : ""
                 }`}
               >
                 {timerRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
                 <span>{timerRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
-              </button>
+              </Button>
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="icon"
                     onClick={() => {
                       setTimerRunning(false);
                       setTimerLeft(timerInitial);
                     }}
-                    className="h-8 w-8 rounded-lg bg-foreground/[0.05] hover:bg-foreground/10 text-foreground flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                    className="h-8 w-8 rounded-xl border-border/70 text-foreground flex items-center justify-center cursor-pointer active:scale-95"
                   >
                     <RotateCcw className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
               </Tooltip>
@@ -696,13 +709,15 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
               <span className="text-muted-foreground flex items-center gap-1 font-semibold text-xs">
                 <ClockIcon className="h-3.5 w-3.5" /> {currentTimeStr || "00:00:00"}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={() => setShowAddAlarm(!showAddAlarm)}
-                className="px-2.5 py-1 rounded-lg bg-foreground/[0.05] hover:bg-foreground/10 text-foreground flex items-center gap-1 text-xs font-medium transition-all cursor-pointer"
+                className="h-7 px-2.5 rounded-xl border-border/70 text-foreground flex items-center gap-1 text-xs font-medium cursor-pointer"
               >
                 <Plus className="h-3.5 w-3.5" /> {t("editor.add") || "Add"}
-              </button>
+              </Button>
             </div>
 
             {showAddAlarm && (
@@ -753,20 +768,24 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 />
 
                 <div className="flex gap-2 pt-0.5">
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowAddAlarm(false)}
-                    className="h-9 flex-1 rounded-xl bg-foreground/[0.06] hover:bg-foreground/10 text-foreground font-semibold text-xs transition-all cursor-pointer"
+                    className="h-9 flex-1 rounded-xl text-xs font-semibold cursor-pointer"
                   >
                     {t("editor.cancel") || "Cancel"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="default"
+                    size="sm"
                     onClick={handleAddAlarm}
-                    className="h-9 flex-1 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs hover:bg-primary/90 active:scale-95 transition-all cursor-pointer"
+                    className="h-9 flex-1 rounded-xl text-xs font-semibold cursor-pointer"
                   >
                     {t("editor.saveAlarm") || "Save Alarm"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -820,11 +839,11 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
         {/* 4. POMODORO */}
         {activeTab === "pomodoro" && (
           <div className="flex flex-col items-center gap-3 py-1">
-            <div className="grid grid-cols-3 gap-0.5 p-0.5 bg-foreground/[0.04] rounded-lg text-[11px] font-medium w-full my-1">
+            <div className="grid grid-cols-3 gap-0.5 p-0.5 bg-foreground/[0.04] rounded-xl text-[11px] font-medium w-full my-1">
               <button
                 type="button"
                 onClick={() => switchPomoMode("work")}
-                className={`py-1 px-1.5 rounded-md text-center flex items-center justify-center transition-all cursor-pointer ${
+                className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
                   pomoMode === "work" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -833,7 +852,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
               <button
                 type="button"
                 onClick={() => switchPomoMode("shortBreak")}
-                className={`py-1 px-1.5 rounded-md text-center flex items-center justify-center transition-all cursor-pointer ${
+                className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
                   pomoMode === "shortBreak" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -842,7 +861,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
               <button
                 type="button"
                 onClick={() => switchPomoMode("longBreak")}
-                className={`py-1 px-1.5 rounded-md text-center flex items-center justify-center transition-all cursor-pointer ${
+                className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
                   pomoMode === "longBreak" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -859,31 +878,35 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             </div>
 
             <div className="flex items-center gap-2 my-0.5">
-              <button
+              <Button
                 type="button"
+                variant={pomoRunning ? "secondary" : "default"}
+                size="sm"
                 onClick={() => setPomoRunning(!pomoRunning)}
-                className={`h-8 px-4 rounded-lg flex items-center justify-center gap-1.5 text-xs font-semibold transition-all cursor-pointer active:scale-95 ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
                   pomoRunning
-                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
+                    : ""
                 }`}
               >
                 {pomoRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
                 <span>{pomoRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
-              </button>
+              </Button>
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="icon"
                     onClick={() => {
                       setPomoRunning(false);
                       setPomoTimeLeft(getPomoDuration(pomoMode));
                     }}
-                    className="h-8 w-8 rounded-lg bg-foreground/[0.05] hover:bg-foreground/10 text-foreground flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                    className="h-8 w-8 rounded-xl border-border/70 text-foreground flex items-center justify-center cursor-pointer active:scale-95"
                   >
                     <RotateCcw className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
               </Tooltip>

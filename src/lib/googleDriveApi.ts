@@ -1,3 +1,6 @@
+import { Note } from "@/hooks/useNotes";
+import { getAllKnownLocalManifests } from "./workspaceIdentity";
+
 export interface DriveFileItem {
   id: string;
   name: string;
@@ -10,6 +13,7 @@ export interface DriveFileItem {
 
 export interface LunoFolderStructure {
   rootId: string;
+  workspacesId?: string;
   projectId: string;
   notesId?: string;
   attachmentsId: string;
@@ -18,6 +22,30 @@ export interface LunoFolderStructure {
 
 const BASE_URL = "https://www.googleapis.com/drive/v3";
 const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3";
+
+export async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429 || res.status === 500 || res.status === 502 || res.status === 503) {
+        if (attempt < maxRetries) {
+          attempt++;
+          await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+          continue;
+        }
+      }
+      return res;
+    } catch (err) {
+      if (attempt < maxRetries) {
+        attempt++;
+        await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 const getFolderStructureCacheKey = (projectName?: string) => {
   const clean = (projectName || "Workspace").trim().toLowerCase();
@@ -149,7 +177,7 @@ async function createFolder(token: string, folderName: string, parentId?: string
     metadata.parents = [parentId];
   }
 
-  const res = await fetch(`${BASE_URL}/files?fields=id`, {
+  const res = await fetchWithRetry(`${BASE_URL}/files?fields=id`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -168,7 +196,7 @@ async function createFolder(token: string, folderName: string, parentId?: string
 
 const lunoFolderCreationPromises = new Map<string, Promise<LunoFolderStructure>>();
 
-// Get or create Luno folder hierarchy: Luno/[Workspace]/ (notes directly inside Workspace/, attachments/, .luno/)
+// Get or create Luno folder hierarchy: Luno/Workspaces/[Workspace]/ (notes directly inside Workspace/, attachments/, .luno/)
 export async function ensureLunoFolderStructure(token: string, projectName: string = "Workspace"): Promise<LunoFolderStructure> {
   const cleanProjectName = projectName.trim() || "Workspace";
   const lockKey = `${token.slice(-10)}:${cleanProjectName.toLowerCase()}`;
@@ -201,13 +229,46 @@ export async function ensureLunoFolderStructure(token: string, projectName: stri
       rootId = await createFolder(token, "Luno");
     }
 
-    // 2. Project Workspace folder inside Luno/ (e.g. Luno/Workspace/)
-    let projectId = await findFolder(token, cleanProjectName, rootId);
-    if (!projectId) {
-      projectId = await createFolder(token, cleanProjectName, rootId);
+    // 2. Intermediate Workspaces/ folder inside Luno/ (Luno/Workspaces/)
+    let workspacesId = await findFolder(token, "Workspaces", rootId);
+    if (!workspacesId) {
+      workspacesId = await createFolder(token, "Workspaces", rootId);
     }
 
-    // 3. System Subfolders inside Luno/[Workspace]/
+    // 3. Auto-migrate any legacy workspace folders sitting directly in Luno/ into Luno/Workspaces/
+    try {
+      const qDirectFolders = `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      const resDirect = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qDirectFolders)}&fields=files(id,name)&pageSize=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resDirect.ok) {
+        const dataDirect = await resDirect.json();
+        const directFolders = (dataDirect.files || []) as DriveFileItem[];
+        for (const df of directFolders) {
+          if (df.id !== workspacesId && df.name.toLowerCase() !== "workspaces") {
+            const existingInWorkspaces = await findFolder(token, df.name, workspacesId);
+            if (existingInWorkspaces && existingInWorkspaces !== df.id) {
+              await mergeAndTrashDuplicateFolder(token, existingInWorkspaces, df.id);
+            } else {
+              await fetch(`${BASE_URL}/files/${df.id}?addParents=${workspacesId}&removeParents=${rootId}&fields=id,parents`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${token}` },
+              });
+            }
+          }
+        }
+      }
+    } catch (migErr) {
+      console.warn("Workspace folder migration error:", migErr);
+    }
+
+    // 4. Project Workspace folder inside Luno/Workspaces/ (e.g. Luno/Workspaces/NOTES+/)
+    let projectId = await findFolder(token, cleanProjectName, workspacesId);
+    if (!projectId) {
+      projectId = await createFolder(token, cleanProjectName, workspacesId);
+    }
+
+    // 5. System Subfolders inside Luno/Workspaces/[Workspace]/
     let attachmentsId = await findFolder(token, "attachments", projectId);
     if (!attachmentsId) {
       attachmentsId = await findFolder(token, "Attachments", projectId);
@@ -223,11 +284,31 @@ export async function ensureLunoFolderStructure(token: string, projectName: stri
 
     const structure: LunoFolderStructure = {
       rootId,
+      workspacesId,
       projectId,
       attachmentsId,
       lunoMetaId,
     };
     cacheFolderStructure(structure, cleanProjectName);
+
+    // Automatically trash/clean any legacy "My Luno Project" folder inside Luno/, Workspaces/, or in Drive root
+    try {
+      const legacyId = await findFolder(token, "My Luno Project", workspacesId);
+      if (legacyId && legacyId !== projectId) {
+        void mergeAndTrashDuplicateFolder(token, projectId, legacyId);
+      }
+      const legacyInRootId = await findFolder(token, "My Luno Project", rootId);
+      if (legacyInRootId && legacyInRootId !== projectId) {
+        void mergeAndTrashDuplicateFolder(token, projectId, legacyInRootId);
+      }
+      const rootLegacyId = await findFolder(token, "My Luno Project");
+      if (rootLegacyId && rootLegacyId !== projectId && rootLegacyId !== rootId && rootLegacyId !== workspacesId) {
+        void mergeAndTrashDuplicateFolder(token, projectId, rootLegacyId);
+      }
+    } catch {
+      // ignore legacy cleanup error
+    }
+
     return structure;
   })();
 
@@ -241,11 +322,97 @@ export async function ensureLunoFolderStructure(token: string, projectName: stri
 
 // Cache folder paths to avoid redundant Drive queries
 const folderPathCache = new Map<string, string>();
-const folderCreationPromises = new Map<string, Promise<string>>();
+const singleFolderPromises = new Map<string, Promise<string>>();
 
 export function clearFolderPathCache(): void {
   folderPathCache.clear();
-  folderCreationPromises.clear();
+  singleFolderPromises.clear();
+}
+
+// Atomically ensure a single folder segment exists under parentId without race conditions
+export async function ensureSingleFolder(
+  token: string,
+  parentId: string,
+  folderName: string
+): Promise<string> {
+  const cleanName = folderName.trim();
+  const lockKey = `${parentId}:${cleanName.toLowerCase()}`;
+
+  if (folderPathCache.has(lockKey)) {
+    return folderPathCache.get(lockKey)!;
+  }
+  if (singleFolderPromises.has(lockKey)) {
+    return await singleFolderPromises.get(lockKey)!;
+  }
+
+  const promise = (async () => {
+    // 1. Search if folder already exists on Google Drive
+    const cleanSegment = cleanName.replace(/'/g, "\\'");
+    const q = `'${parentId}' in parents and name = '${cleanSegment}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
+
+    try {
+      const res = await fetch(searchUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const files: DriveFileItem[] = data.files || [];
+        if (files.length > 0) {
+          files.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+          const primaryId = files[0].id;
+          if (files.length > 1) {
+            for (let i = 1; i < files.length; i++) {
+              void mergeAndTrashDuplicateFolder(token, primaryId, files[i].id);
+            }
+          }
+          folderPathCache.set(lockKey, primaryId);
+          return primaryId;
+        }
+      }
+    } catch {
+      // ignore search error
+    }
+
+    // Case-insensitive search fallback
+    try {
+      const qAll = `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      const resAll = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qAll)}&fields=files(id,name,modifiedTime)&pageSize=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resAll.ok) {
+        const dataAll = await resAll.json();
+        const filesAll: DriveFileItem[] = dataAll.files || [];
+        const matches = filesAll.filter((f) => f.name.toLowerCase() === cleanName.toLowerCase());
+        if (matches.length > 0) {
+          matches.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+          const primaryId = matches[0].id;
+          if (matches.length > 1) {
+            for (let i = 1; i < matches.length; i++) {
+              void mergeAndTrashDuplicateFolder(token, primaryId, matches[i].id);
+            }
+          }
+          folderPathCache.set(lockKey, primaryId);
+          return primaryId;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Folder does not exist, create it
+    const createdId = await createFolder(token, cleanName, parentId);
+    folderPathCache.set(lockKey, createdId);
+    return createdId;
+  })();
+
+  singleFolderPromises.set(lockKey, promise);
+  try {
+    return await promise;
+  } finally {
+    singleFolderPromises.delete(lockKey);
+  }
 }
 
 // Ensure nested subfolder path exists on Google Drive (e.g. "Projects/Luno")
@@ -257,82 +424,20 @@ export async function ensureDriveFolderPath(
   const normalized = folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
   if (!normalized) return baseFolderId;
 
-  const cacheKey = `${baseFolderId}:${normalized.toLowerCase()}`;
-  if (folderPathCache.has(cacheKey)) {
-    return folderPathCache.get(cacheKey)!;
-  }
-  if (folderCreationPromises.has(cacheKey)) {
-    return await folderCreationPromises.get(cacheKey)!;
+  const fullCacheKey = `${baseFolderId}:${normalized.toLowerCase()}`;
+  if (folderPathCache.has(fullCacheKey)) {
+    return folderPathCache.get(fullCacheKey)!;
   }
 
-  const promise = (async () => {
-    const segments = normalized.split("/").filter(Boolean);
-    let currentParentId = baseFolderId;
+  const segments = normalized.split("/").filter(Boolean);
+  let currentParentId = baseFolderId;
 
-    for (const segment of segments) {
-      const segCacheKey = `${currentParentId}:${segment.toLowerCase()}`;
-      if (folderPathCache.has(segCacheKey)) {
-        currentParentId = folderPathCache.get(segCacheKey)!;
-        continue;
-      }
-
-      const cleanSegment = segment.replace(/'/g, "\\'");
-      const q = `'${currentParentId}' in parents and name = '${cleanSegment}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-      const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
-
-      const res = await fetch(searchUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const files: DriveFileItem[] = data.files || [];
-        if (files.length > 0) {
-          currentParentId = files[0].id;
-          folderPathCache.set(segCacheKey, currentParentId);
-
-          if (files.length > 1) {
-            for (let i = 1; i < files.length; i++) {
-              void mergeAndTrashDuplicateFolder(token, currentParentId, files[i].id);
-            }
-          }
-          continue;
-        }
-      }
-
-      // Create subfolder on Drive
-      const createRes = await fetch(`${BASE_URL}/files?fields=id,name`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: segment,
-          mimeType: "application/vnd.google-apps.folder",
-          parents: [currentParentId],
-        }),
-      });
-
-      if (!createRes.ok) {
-        throw new Error(`Failed to create subfolder ${segment} on Drive (${createRes.status})`);
-      }
-
-      const created = await createRes.json();
-      currentParentId = created.id;
-      folderPathCache.set(segCacheKey, currentParentId);
-    }
-
-    folderPathCache.set(cacheKey, currentParentId);
-    return currentParentId;
-  })();
-
-  folderCreationPromises.set(cacheKey, promise);
-  try {
-    return await promise;
-  } finally {
-    folderCreationPromises.delete(cacheKey);
+  for (const segment of segments) {
+    currentParentId = await ensureSingleFolder(token, currentParentId, segment);
   }
+
+  folderPathCache.set(fullCacheKey, currentParentId);
+  return currentParentId;
 }
 
 // List all files in Luno/Notes/ folder recursively including subfolders
@@ -387,6 +492,13 @@ export async function fetchDriveFileContent(token: string, driveFileId: string):
   return await res.text();
 }
 
+const BINARY_IMAGE_EXT_SET = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif",
+  ".mp4", ".webm", ".mp3", ".wav", ".pdf", ".zip", ".tar", ".gz", ".docx", ".xlsx", ".pptx",
+]);
+
+const singleNoteUploadPromises = new Map<string, Promise<DriveFileItem>>();
+
 // Create or update a .md note file on Google Drive in appropriate subfolder
 export async function uploadDriveNoteFile(
   token: string,
@@ -396,136 +508,219 @@ export async function uploadDriveNoteFile(
   driveFileId?: string,
   folderPath?: string
 ): Promise<DriveFileItem> {
-  const cleanName = fileName.endsWith(".md") || fileName.endsWith(".txt") || fileName.endsWith(".html") ? fileName : `${fileName}.md`;
-  const mimeType = cleanName.endsWith(".html") ? "text/html" : cleanName.endsWith(".txt") ? "text/plain" : "text/markdown";
+  const dotIndex = fileName.lastIndexOf(".");
+  const ext = dotIndex > 0 ? fileName.slice(dotIndex).toLowerCase() : "";
+
+  if (BINARY_IMAGE_EXT_SET.has(ext)) {
+    throw new Error(`Cannot upload binary/image file ${fileName} via text note uploader`);
+  }
+
+  const cleanName = ext === ".md" || ext === ".txt" || ext === ".html" || ext === ".htm" ? fileName : (ext ? fileName : `${fileName}.md`);
+  const mimeType = cleanName.endsWith(".html") || cleanName.endsWith(".htm") ? "text/html" : cleanName.endsWith(".txt") ? "text/plain" : "text/markdown";
 
   let targetFolderId = notesFolderId;
   if (folderPath && folderPath.trim()) {
     targetFolderId = await ensureDriveFolderPath(token, notesFolderId, folderPath);
   }
 
-  let targetDriveId = driveFileId;
+  const lockKey = `${targetFolderId}:${cleanName.toLowerCase()}`;
+  if (singleNoteUploadPromises.has(lockKey)) {
+    return await singleNoteUploadPromises.get(lockKey)!;
+  }
 
-  // If no driveFileId is provided, check if a file with cleanName already exists on Drive in targetFolderId
-  if (!targetDriveId) {
-    try {
-      const q = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
-      const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
-      const res = await fetch(searchUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const files: DriveFileItem[] = data.files || [];
-        if (files.length > 0) {
-          targetDriveId = files[0].id;
-          if (files.length > 1) {
-            for (let i = 1; i < files.length; i++) {
-              void trashDriveFile(token, files[i].id);
+  const uploadPromise = (async () => {
+    let targetDriveId = driveFileId;
+
+    // If no driveFileId is provided, check if a file with cleanName already exists on Drive in targetFolderId
+    if (!targetDriveId) {
+      try {
+        const q = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
+        const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
+        const res = await fetch(searchUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const files: DriveFileItem[] = data.files || [];
+          if (files.length > 0) {
+            files.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+            targetDriveId = files[0].id;
+            if (files.length > 1) {
+              for (let i = 1; i < files.length; i++) {
+                void trashDriveFile(token, files[i].id);
+              }
             }
           }
         }
-      }
 
-      if (!targetDriveId) {
-        const qAll = `'${targetFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
-        const searchUrlAll = `${BASE_URL}/files?q=${encodeURIComponent(qAll)}&fields=files(id,name,modifiedTime)&pageSize=100`;
-        const resAll = await fetch(searchUrlAll, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (resAll.ok) {
-          const dataAll = await resAll.json();
-          const filesAll: DriveFileItem[] = dataAll.files || [];
-          const matches = filesAll.filter((f) => f.name.toLowerCase() === cleanName.toLowerCase());
-          if (matches.length > 0) {
-            matches.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
-            targetDriveId = matches[0].id;
-            if (matches.length > 1) {
-              for (let i = 1; i < matches.length; i++) {
-                void trashDriveFile(token, matches[i].id);
+        if (!targetDriveId) {
+          const qAll = `'${targetFolderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
+          const searchUrlAll = `${BASE_URL}/files?q=${encodeURIComponent(qAll)}&fields=files(id,name,modifiedTime)&pageSize=100`;
+          const resAll = await fetch(searchUrlAll, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (resAll.ok) {
+            const dataAll = await resAll.json();
+            const filesAll: DriveFileItem[] = dataAll.files || [];
+            const matches = filesAll.filter((f) => f.name.toLowerCase() === cleanName.toLowerCase());
+            if (matches.length > 0) {
+              matches.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+              targetDriveId = matches[0].id;
+              if (matches.length > 1) {
+                for (let i = 1; i < matches.length; i++) {
+                  void trashDriveFile(token, matches[i].id);
+                }
               }
+            }
+          }
+        }
+      } catch {
+        // Ignore search errors, will fallback to creation
+      }
+    }
+
+    const metadata: any = {
+      name: cleanName,
+      mimeType,
+    };
+
+    const boundary = "-------314159265358979323846";
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+
+    let url: string;
+    let method: string;
+
+    if (targetDriveId) {
+      // Update existing file via PATCH (Creates new revision on Google Drive, NO DUPLICATES)
+      url = `${UPLOAD_URL}/files/${targetDriveId}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size`;
+      method = "PATCH";
+    } else {
+      // Create new file via POST
+      metadata.parents = [targetFolderId];
+      url = `${UPLOAD_URL}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size`;
+      method = "POST";
+    }
+
+    const multipartRequestBody =
+      delimiter +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metadata) +
+      delimiter +
+      `Content-Type: ${mimeType}; charset=UTF-8\r\n\r\n` +
+      content +
+      closeDelimiter;
+
+    const res = await fetchWithRetry(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body: multipartRequestBody,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to upload note to Drive (${res.status})`);
+    }
+
+    const uploaded = (await res.json()) as DriveFileItem;
+
+    // Proactively clean any duplicate copies with the same name in targetFolderId
+    try {
+      const qDupes = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
+      const resDupes = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qDupes)}&fields=files(id,name,modifiedTime)&pageSize=10`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resDupes.ok) {
+        const dData = await resDupes.json();
+        const dFiles: DriveFileItem[] = dData.files || [];
+        if (dFiles.length > 1) {
+          for (const df of dFiles) {
+            if (df.id !== uploaded.id) {
+              void trashDriveFile(token, df.id);
             }
           }
         }
       }
     } catch {
-      // Ignore search errors, will fallback to creation
+      // Ignore background cleanup errors
     }
+
+    return uploaded;
+  })();
+
+  singleNoteUploadPromises.set(lockKey, uploadPromise);
+  try {
+    return await uploadPromise;
+  } finally {
+    singleNoteUploadPromises.delete(lockKey);
   }
-
-  const metadata: any = {
-    name: cleanName,
-    mimeType,
-  };
-
-  const boundary = "-------314159265358979323846";
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelimiter = `\r\n--${boundary}--`;
-
-  let url: string;
-  let method: string;
-
-  if (targetDriveId) {
-    // Update existing file via PATCH (Creates new revision on Google Drive, NO DUPLICATES)
-    url = `${UPLOAD_URL}/files/${targetDriveId}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size`;
-    method = "PATCH";
-  } else {
-    // Create new file via POST
-    metadata.parents = [targetFolderId];
-    url = `${UPLOAD_URL}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size`;
-    method = "POST";
-  }
-
-  const multipartRequestBody =
-    delimiter +
-    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-    JSON.stringify(metadata) +
-    delimiter +
-    `Content-Type: ${mimeType}; charset=UTF-8\r\n\r\n` +
-    content +
-    closeDelimiter;
-
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": `multipart/related; boundary=${boundary}`,
-    },
-    body: multipartRequestBody,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to upload note to Drive (${res.status})`);
-  }
-
-  return (await res.json()) as DriveFileItem;
 }
 
-// Upload attachment file (Image, PDF, etc.) to Luno/Attachments/
+function getMimeTypeFromFileName(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".zip")) return "application/zip";
+  if (lower.endsWith(".json")) return "application/json";
+  return "application/octet-stream";
+}
+
+// Upload attachment file (Image, PDF, etc.) to Luno/Attachments/ or target folder
 export async function uploadDriveAttachmentFile(
   token: string,
-  attachmentsFolderId: string,
-  file: File | Blob,
+  targetFolderId: string,
+  file: File | Blob | ArrayBuffer | Uint8Array | string,
   fileName: string
 ): Promise<DriveFileItem> {
   const metadata = {
     name: fileName,
-    parents: [attachmentsFolderId],
+    parents: [targetFolderId],
   };
 
   const boundary = "-------314159265358979323846";
   const delimiter = `\r\n--${boundary}\r\n`;
   const closeDelimiter = `\r\n--${boundary}--`;
 
-  const arrayBuffer = await file.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuffer);
+  let fileBytes: Uint8Array;
+  let detectedType = getMimeTypeFromFileName(fileName);
+
+  if (file instanceof Uint8Array) {
+    fileBytes = file;
+  } else if (file instanceof ArrayBuffer) {
+    fileBytes = new Uint8Array(file);
+  } else if (typeof (file as any)?.arrayBuffer === "function") {
+    const ab = await (file as Blob).arrayBuffer();
+    fileBytes = new Uint8Array(ab);
+    if ((file as Blob).type) detectedType = (file as Blob).type;
+  } else if (typeof file === "string") {
+    // If base64 or data URL
+    if (file.startsWith("data:")) {
+      const commaIdx = file.indexOf(",");
+      const b64 = commaIdx > 0 ? file.slice(commaIdx + 1) : file;
+      const bin = atob(b64);
+      fileBytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) fileBytes[i] = bin.charCodeAt(i);
+    } else {
+      fileBytes = new TextEncoder().encode(file);
+    }
+  } else {
+    fileBytes = new Uint8Array(0);
+  }
 
   const metaPart =
     delimiter +
     "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
     JSON.stringify(metadata) +
     delimiter +
-    `Content-Type: ${file.type || "application/octet-stream"}\r\n\r\n`;
+    `Content-Type: ${detectedType}\r\n\r\n`;
 
   const encoder = new TextEncoder();
   const metaBytes = encoder.encode(metaPart);
@@ -536,7 +731,7 @@ export async function uploadDriveAttachmentFile(
   fullBody.set(fileBytes, metaBytes.length);
   fullBody.set(closeBytes, metaBytes.length + fileBytes.length);
 
-  const res = await fetch(`${UPLOAD_URL}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,webContentLink,webViewLink`, {
+  const res = await fetchWithRetry(`${UPLOAD_URL}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,webContentLink,webViewLink`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -572,13 +767,85 @@ export async function uploadDriveAttachmentFile(
 }
 
 // Upload all local files in attachments/ directory to Google Drive attachments/ folder
+/**
+ * Syncs all files inside local .luno/ folder (workspace.json, settings.json, etc.) to Google Drive's .luno folder.
+ */
+export async function syncLocalLunoMetaToDrive(
+  token: string,
+  lunoMetaFolderId: string,
+  targetElectronPath?: string | null,
+  rootDirHandle?: FileSystemDirectoryHandle | null
+): Promise<void> {
+  try {
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+
+    // 1. Electron Desktop
+    if (electronAPI?.readDirectoryFiles && electronAPI?.readFileContent && targetElectronPath) {
+      const metaDir = `${targetElectronPath}/.luno`;
+      const files: Array<{ name: string; fullPath: string; isDirectory: boolean }> =
+        await electronAPI.readDirectoryFiles(metaDir);
+
+      for (const f of files) {
+        if (!f.isDirectory) {
+          try {
+            const content = await electronAPI.readFileContent(f.fullPath);
+            if (content !== null && content !== undefined) {
+              await uploadDriveNoteFile(token, lunoMetaFolderId, f.name, content);
+            }
+          } catch (err) {
+            console.warn(`Failed syncing .luno/${f.name} to Drive:`, err);
+          }
+        }
+      }
+      return;
+    }
+
+    // 2. Web File System Access API
+    if (rootDirHandle) {
+      try {
+        const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: true });
+        const iterator =
+          typeof (metaDir as any).entries === "function"
+            ? (metaDir as any).entries()
+            : (metaDir as unknown as AsyncIterable<[string, FileSystemHandle]>);
+
+        for await (const [name, handle] of iterator) {
+          if (handle.kind === "file") {
+            try {
+              const fileHandle = handle as FileSystemFileHandle;
+              const file = await fileHandle.getFile();
+              const text = await file.text();
+              await uploadDriveNoteFile(token, lunoMetaFolderId, name, text);
+            } catch (err) {
+              console.warn(`Failed syncing Web FS .luno/${name} to Drive:`, err);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not read Web FS .luno folder:", err);
+      }
+      return;
+    }
+
+    // 3. Fallback: upload workspace.json from local manifest
+    const manifest = await getLocalWorkspaceManifest();
+    if (manifest) {
+      await uploadDriveNoteFile(token, lunoMetaFolderId, "workspace.json", JSON.stringify(manifest, null, 2));
+    }
+  } catch (err) {
+    console.warn("Error in syncLocalLunoMetaToDrive:", err);
+  }
+}
+
 export async function syncLocalAttachmentsToDrive(
   token: string,
   attachmentsFolderId: string,
-  rootDirHandle: FileSystemDirectoryHandle
+  rootDirHandle?: FileSystemDirectoryHandle | null,
+  targetElectronPath?: string | null
 ): Promise<void> {
   try {
-    const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: false });
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+
     const q = `'${attachmentsFolderId}' in parents and trashed = false`;
     const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -587,19 +854,51 @@ export async function syncLocalAttachmentsToDrive(
     const data = await res.json();
     const existingNames = new Set<string>((data.files || []).map((f: any) => (f.name as string).toLowerCase()));
 
-    const iterator =
-      typeof (attachmentsDir as any).entries === "function"
-        ? (attachmentsDir as any).entries()
-        : (attachmentsDir as unknown as AsyncIterable<[string, FileSystemHandle]>);
+    // 1. Electron Desktop
+    if (electronAPI?.readDirectoryFiles && electronAPI?.readFileBase64 && targetElectronPath) {
+      const attachDir = `${targetElectronPath}/attachments`;
+      const files: Array<{ name: string; fullPath: string; isDirectory: boolean }> =
+        await electronAPI.readDirectoryFiles(attachDir);
 
-    for await (const [name, handle] of iterator) {
-      if (handle.kind === "file" && !existingNames.has(name.toLowerCase())) {
-        try {
-          const fileHandle = handle as FileSystemFileHandle;
-          const file = await fileHandle.getFile();
-          await uploadDriveAttachmentFile(token, attachmentsFolderId, file, name);
-        } catch (err) {
-          console.warn(`Failed to sync attachment ${name} to Drive:`, err);
+      for (const f of files) {
+        if (!f.isDirectory && !existingNames.has(f.name.toLowerCase())) {
+          try {
+            const base64 = await electronAPI.readFileBase64(f.fullPath);
+            if (base64) {
+              const byteCharacters = atob(base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray]);
+              await uploadDriveAttachmentFile(token, attachmentsFolderId, blob, f.name);
+            }
+          } catch (err) {
+            console.warn(`Failed to sync Electron attachment ${f.name} to Drive:`, err);
+          }
+        }
+      }
+      return;
+    }
+
+    // 2. Web File System Access API
+    if (rootDirHandle) {
+      const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: false });
+      const iterator =
+        typeof (attachmentsDir as any).entries === "function"
+          ? (attachmentsDir as any).entries()
+          : (attachmentsDir as unknown as AsyncIterable<[string, FileSystemHandle]>);
+
+      for await (const [name, handle] of iterator) {
+        if (handle.kind === "file" && !existingNames.has(name.toLowerCase())) {
+          try {
+            const fileHandle = handle as FileSystemFileHandle;
+            const file = await fileHandle.getFile();
+            await uploadDriveAttachmentFile(token, attachmentsFolderId, file, name);
+          } catch (err) {
+            console.warn(`Failed to sync attachment ${name} to Drive:`, err);
+          }
         }
       }
     }
@@ -685,45 +984,71 @@ export async function trashDriveFile(token: string, driveFileId: string): Promis
   }
 }
 
+// Helper to clean duplicate folders recursively under parentFolderId
+async function cleanDuplicateFoldersRecursively(token: string, parentFolderId: string): Promise<number> {
+  let trashed = 0;
+  try {
+    const q = `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const subfolders = (data.files || []) as DriveFileItem[];
+      const byName = new Map<string, DriveFileItem[]>();
+
+      for (const f of subfolders) {
+        const lower = f.name.toLowerCase();
+        if (lower === "notes") {
+          // Remove obsolete notes subfolder
+          await trashDriveFile(token, f.id);
+          trashed++;
+          continue;
+        }
+        if (!byName.has(lower)) byName.set(lower, []);
+        byName.get(lower)!.push(f);
+      }
+
+      for (const [, group] of byName) {
+        let primary = group[0];
+        if (group.length > 1) {
+          group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+          primary = group[0];
+          for (let i = 1; i < group.length; i++) {
+            await mergeAndTrashDuplicateFolder(token, primary.id, group[i].id);
+            trashed++;
+          }
+        }
+        // Recursively clean children folders
+        trashed += await cleanDuplicateFoldersRecursively(token, primary.id);
+      }
+    }
+  } catch (err) {
+    console.warn("Recursive folder clean error:", err);
+  }
+  return trashed;
+}
+
 // Clean up duplicate files and folders in Luno/Workspace/ (Merge duplicate folders, keep newest files)
 export async function cleanDriveDuplicates(token: string, notesFolderId: string, parentFolderId?: string): Promise<number> {
   try {
     let trashedCount = 0;
 
-    // 1. Clean duplicate subfolders inside notesFolderId (Workspace/)
-    const qSubfolders = `'${notesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-    const resSub = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qSubfolders)}&fields=files(id,name,modifiedTime)&pageSize=1000`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (resSub.ok) {
-      const dataSub = await resSub.json();
-      const subfolders = (dataSub.files || []) as DriveFileItem[];
-      const subfoldersByName = new Map<string, DriveFileItem[]>();
+    // 1. Clean duplicate subfolders recursively inside notesFolderId (Workspace/)
+    trashedCount += await cleanDuplicateFoldersRecursively(token, notesFolderId);
 
-      for (const f of subfolders) {
-        const lowerName = f.name.toLowerCase();
-        if (lowerName === "notes") continue;
-        if (!subfoldersByName.has(lowerName)) subfoldersByName.set(lowerName, []);
-        subfoldersByName.get(lowerName)!.push(f);
-      }
-
-      for (const [, group] of subfoldersByName) {
-        if (group.length > 1) {
-          group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
-          const primaryFolder = group[0];
-          for (let i = 1; i < group.length; i++) {
-            await mergeAndTrashDuplicateFolder(token, primaryFolder.id, group[i].id);
-            trashedCount++;
-          }
-        }
-      }
-    }
-
-    // 2. Clean duplicate files inside notes/ (by relative path and name)
+    // 2. Clean duplicate files inside notes/ (by relative path and name) and trash corrupted binary .md files
     const files = await listDriveNoteFiles(token, notesFolderId);
     const filesByPathAndName = new Map<string, DriveFileItem[]>();
 
     for (const f of files) {
+      // Trash any accidental *.jpg.md, *.png.md files created in the past
+      if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf|mp4|mp3|zip)\.md$/i.test(f.name)) {
+        await trashDriveFile(token, f.id);
+        trashedCount++;
+        continue;
+      }
+
       const pathKey = `${(f.folderPath || "").toLowerCase()}/${f.name.toLowerCase()}`;
       if (!filesByPathAndName.has(pathKey)) {
         filesByPathAndName.set(pathKey, []);
@@ -743,45 +1068,26 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string,
 
     // 3. Clean duplicate folders inside parentFolderId if provided (e.g. Luno/ root)
     if (parentFolderId) {
-      const q = `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-      const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const data = await res.json();
-        const folders = (data.files || []) as DriveFileItem[];
-        const foldersByName = new Map<string, DriveFileItem[]>();
-        for (const f of folders) {
-          const lowerName = f.name.toLowerCase();
-          if (!foldersByName.has(lowerName)) foldersByName.set(lowerName, []);
-          foldersByName.get(lowerName)!.push(f);
-        }
-        for (const [, group] of foldersByName) {
-          if (group.length > 1) {
-            group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
-            const primary = group[0];
-            for (let i = 1; i < group.length; i++) {
-              await mergeAndTrashDuplicateFolder(token, primary.id, group[i].id);
+      trashedCount += await cleanDuplicateFoldersRecursively(token, parentFolderId);
+
+      // If active workspace is different from legacy "My Luno Project", merge & trash legacy folder
+      try {
+        const qLegacy = `'${parentFolderId}' in parents and name = 'My Luno Project' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+        const resLegacy = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qLegacy)}&fields=files(id,name)`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resLegacy.ok) {
+          const dataLegacy = await resLegacy.json();
+          const legacyFolders = (dataLegacy.files || []) as DriveFileItem[];
+          for (const lf of legacyFolders) {
+            if (lf.id !== notesFolderId) {
+              await mergeAndTrashDuplicateFolder(token, notesFolderId, lf.id);
               trashedCount++;
             }
           }
         }
-      }
-    }
-
-    // 4. Remove legacy notes subfolder if created inside Workspace/
-    const qNotes = `'${notesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-    const resNotes = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qNotes)}&fields=files(id,name)`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (resNotes.ok) {
-      const dataNotes = await resNotes.json();
-      const subfolders = (dataNotes.files || []) as DriveFileItem[];
-      for (const sf of subfolders) {
-        const lname = sf.name.toLowerCase();
-        if (lname === "notes") {
-          await trashDriveFile(token, sf.id);
-          trashedCount++;
-        }
+      } catch (err) {
+        console.warn("Legacy folder cleanup error:", err);
       }
     }
 
@@ -790,4 +1096,280 @@ export async function cleanDriveDuplicates(token: string, notesFolderId: string,
     console.warn("Error cleaning Drive duplicates:", err);
     return 0;
   }
+}
+
+/**
+ * Ensure Luno/ and Luno/Workspaces/ exist without creating any workspace folder.
+ * Also cleans any dummy folders named "Default", "Google Drive", or "My Luno Project".
+ */
+export async function ensureWorkspacesRootOnly(token: string): Promise<string> {
+  let rootId = await findFolder(token, "Luno");
+  if (!rootId) {
+    rootId = await createFolder(token, "Luno");
+  }
+
+  let workspacesId = await findFolder(token, "Workspaces", rootId);
+  if (!workspacesId) {
+    workspacesId = await createFolder(token, "Workspaces", rootId);
+  }
+
+  // Clean any erroneous/dummy folders named "Default", "Google Drive", or "My Luno Project" inside Workspaces/
+  try {
+    const qDummy = `'${workspacesId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const resDummy = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qDummy)}&fields=files(id,name)&pageSize=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (resDummy.ok) {
+      const dataDummy = await resDummy.json();
+      const dummyFolders = (dataDummy.files || []) as DriveFileItem[];
+      for (const df of dummyFolders) {
+        const lower = df.name.toLowerCase().trim();
+        if (lower === "default" || lower === "google drive" || lower === "my luno project") {
+          void trashDriveFile(token, df.id);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Dummy folder clean error:", err);
+  }
+
+  return workspacesId;
+}
+
+/**
+ * List all workspaces inside Luno/Workspaces/ on Google Drive.
+ * For each workspace, reads .luno/workspace.json or generates one if not present.
+ */
+export async function listCloudWorkspaces(token: string): Promise<Array<{
+  folderId: string;
+  name: string;
+  workspaceId: string;
+  modifiedTime: string;
+}>> {
+  // 1. Ensure Luno/Workspaces hierarchy exists without creating any dummy workspace folder
+  const workspacesFolderId = await ensureWorkspacesRootOnly(token);
+
+  // 2. Query all folders inside Luno/Workspaces/
+  const q = `'${workspacesFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const url = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=100`;
+
+  const res = await fetchWithRetry(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to list cloud workspaces (${res.status})`);
+  }
+
+  const data = await res.json();
+  const folderList: DriveFileItem[] = data.files || [];
+  const localManifests = await getAllKnownLocalManifests();
+
+  const results: Array<{
+    folderId: string;
+    name: string;
+    workspaceId: string;
+    modifiedTime: string;
+  }> = [];
+
+  for (const folder of folderList) {
+    const lowerName = folder.name.toLowerCase().trim();
+    if (
+      folder.name === ".luno" ||
+      folder.name === "attachments" ||
+      folder.name === "Workspaces" ||
+      lowerName === "default" ||
+      lowerName === "google drive" ||
+      lowerName === "my luno project"
+    ) {
+      continue;
+    }
+
+    let wsId = "";
+    try {
+      // Find .luno inside this workspace folder
+      const lunoMetaId = await findFolder(token, ".luno", folder.id);
+      if (lunoMetaId) {
+        const qManifest = `'${lunoMetaId}' in parents and name = 'workspace.json' and trashed = false`;
+        const resManifest = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qManifest)}&fields=files(id,name)&pageSize=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resManifest.ok) {
+          const dataManifest = await resManifest.json();
+          const manifestFile = dataManifest.files?.[0];
+          if (manifestFile) {
+            const raw = await fetchDriveFileContent(token, manifestFile.id);
+            const parsed = JSON.parse(raw);
+            if (parsed?.id) {
+              wsId = parsed.id;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore read error
+    }
+
+    if (!wsId) {
+      // If workspace.json does not exist yet on Drive, create it
+      try {
+        let metaId = await findFolder(token, ".luno", folder.id);
+        if (!metaId) {
+          metaId = await createFolder(token, ".luno", folder.id);
+        }
+        wsId = `ws_${crypto.randomUUID()}`;
+        const manifest = {
+          id: wsId,
+          name: folder.name,
+          version: 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        await uploadDriveNoteFile(token, metaId, "workspace.json", JSON.stringify(manifest, null, 2));
+      } catch {
+        wsId = `ws_${folder.id.slice(0, 12)}`;
+      }
+    }
+
+    results.push({
+      folderId: folder.id,
+      name: folder.name,
+      workspaceId: wsId,
+      modifiedTime: folder.modifiedTime,
+    });
+  }
+
+  return results.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+}
+
+/**
+ * Create a new workspace inside Luno/Workspaces/[workspaceName]
+ */
+export async function createCloudWorkspace(
+  token: string,
+  workspaceName: string
+): Promise<{ folderId: string; workspaceId: string; name: string }> {
+  const cleanName = workspaceName.trim() || "Workspace";
+  const structure = await ensureLunoFolderStructure(token, cleanName);
+  const projectId = structure.projectId;
+  const lunoMetaId = structure.lunoMetaId;
+
+  // Create .luno/workspace.json
+  const workspaceId = `ws_${crypto.randomUUID()}`;
+  const manifest = {
+    id: workspaceId,
+    name: cleanName,
+    version: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  await uploadDriveNoteFile(token, lunoMetaId, "workspace.json", JSON.stringify(manifest, null, 2));
+
+  // Create welcome.md
+  await uploadDriveNoteFile(
+    token,
+    projectId,
+    "welcome.md",
+    `# Welcome to ${cleanName}\n\nYour cloud workspace is ready.`
+  );
+
+  return {
+    folderId: projectId,
+    workspaceId,
+    name: cleanName,
+  };
+}
+
+/**
+ * Enables public view permission (anyone with link can view) and returns the shareable webViewLink for a Google Drive file.
+ */
+export async function getDriveFileShareLink(token: string, fileId: string): Promise<string> {
+  // 1. Create permission 'anyone with link' has 'reader' role
+  try {
+    const permUrl = `${BASE_URL}/files/${fileId}/permissions`;
+    await fetchWithRetry(permUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        role: "reader",
+        type: "anyone",
+        allowFileDiscovery: false,
+      }),
+    });
+  } catch (err) {
+    console.warn("Could not create public reader permission (might already exist):", err);
+  }
+
+  // 2. Fetch webViewLink
+  try {
+    const getUrl = `${BASE_URL}/files/${fileId}?fields=webViewLink,webContentLink,name`;
+    const res = await fetchWithRetry(getUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.webViewLink) {
+        return data.webViewLink;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch file webViewLink:", err);
+  }
+
+  // Default fallback share link
+  return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+}
+
+/**
+ * Checks if a Google Drive file has public view permissions enabled.
+ */
+export async function checkDriveFileShareStatus(token: string, fileId: string): Promise<{ isShared: boolean; shareLink?: string; permissionId?: string }> {
+  try {
+    const permUrl = `${BASE_URL}/files/${fileId}/permissions?fields=permissions(id,type,role)`;
+    const res = await fetchWithRetry(permUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const anyonePerm = (data.permissions || []).find((p: any) => p.type === "anyone");
+      if (anyonePerm) {
+        const shareLink = `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+        return { isShared: true, shareLink, permissionId: anyonePerm.id };
+      }
+    }
+  } catch (err) {
+    console.warn("Could not check drive file permissions:", err);
+  }
+  return { isShared: false };
+}
+
+/**
+ * Revokes public view permission for a Google Drive file, making it private again.
+ */
+export async function revokeDriveFileShare(token: string, fileId: string): Promise<boolean> {
+  try {
+    const permUrl = `${BASE_URL}/files/${fileId}/permissions?fields=permissions(id,type,role)`;
+    const res = await fetchWithRetry(permUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const anyonePerms = (data.permissions || []).filter((p: any) => p.type === "anyone");
+      for (const perm of anyonePerms) {
+        await fetchWithRetry(`${BASE_URL}/files/${fileId}/permissions/${perm.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+      return true;
+    }
+  } catch (err) {
+    console.warn("Could not revoke drive file permissions:", err);
+  }
+  return false;
 }

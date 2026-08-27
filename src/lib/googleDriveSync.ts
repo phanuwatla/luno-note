@@ -10,6 +10,7 @@ import {
   cleanDriveDuplicates,
   syncLocalAttachmentsToDrive,
   syncDriveAttachmentsToLocal,
+  syncLocalLunoMetaToDrive,
   clearFolderPathCache,
   LunoFolderStructure,
   DriveFileItem,
@@ -60,7 +61,10 @@ class GoogleDriveSyncEngine {
   private pollInterval: NodeJS.Timeout | null = null;
   private isSyncing = false;
   private rootDirHandle: FileSystemDirectoryHandle | null = null;
+  private electronWorkspacePath: string | null = null;
   private rootFolderName: string | null = null;
+  private noteIdToDriveFileId = new Map<string, string>();
+  private inFlightNoteSyncs = new Map<string, Promise<void>>();
 
   public setRootFolderName(name: string | null): void {
     const cleanName = (name || "").trim();
@@ -68,12 +72,30 @@ class GoogleDriveSyncEngine {
     if (cleanName !== prevCleanName) {
       this.rootFolderName = name;
       clearFolderPathCache();
+      this.noteIdToDriveFileId.clear();
+      this.latestPendingNoteMap.clear();
+      for (const timer of this.noteDebounceTimers.values()) clearTimeout(timer);
+      this.noteDebounceTimers.clear();
+      this.inFlightNoteSyncs.clear();
       this.updateState({ folderStructure: null });
     }
   }
 
   public setRootDirHandle(handle: FileSystemDirectoryHandle | null): void {
     this.rootDirHandle = handle;
+  }
+
+  public setElectronWorkspacePath(path: string | null): void {
+    if (this.electronWorkspacePath !== path) {
+      this.electronWorkspacePath = path;
+      clearFolderPathCache();
+      this.noteIdToDriveFileId.clear();
+      this.latestPendingNoteMap.clear();
+      for (const timer of this.noteDebounceTimers.values()) clearTimeout(timer);
+      this.noteDebounceTimers.clear();
+      this.inFlightNoteSyncs.clear();
+      this.updateState({ folderStructure: null });
+    }
   }
 
   constructor() {
@@ -123,7 +145,7 @@ class GoogleDriveSyncEngine {
 
     try {
       this.updateState({ status: "syncing", errorMessage: undefined });
-      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
+      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
       const profile = getStoredUserProfile();
 
       this.updateState({
@@ -180,21 +202,52 @@ class GoogleDriveSyncEngine {
         void syncDriveAttachmentsToLocal(tokenInfo.access_token, structure.attachmentsId, this.rootDirHandle);
       }
 
-      const driveFiles = await listDriveNoteFiles(tokenInfo.access_token, structure.projectId);
+      const rawDriveFiles = await listDriveNoteFiles(tokenInfo.access_token, structure.projectId);
+
+      // Deduplicate drive files by folderPath and fileName (keep newest, trash older duplicates on Drive)
+      const driveFilesByPathName = new Map<string, (DriveFileItem & { folderPath?: string })[]>();
+      for (const file of rawDriveFiles) {
+        const pathKey = `${(file.folderPath || "").toLowerCase()}/${file.name.toLowerCase()}`;
+        if (!driveFilesByPathName.has(pathKey)) {
+          driveFilesByPathName.set(pathKey, []);
+        }
+        driveFilesByPathName.get(pathKey)!.push(file);
+      }
+
+      const driveFiles: (DriveFileItem & { folderPath?: string })[] = [];
+      for (const [, group] of driveFilesByPathName) {
+        if (group.length > 1) {
+          group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+          driveFiles.push(group[0]);
+          for (let i = 1; i < group.length; i++) {
+            void trashDriveFile(tokenInfo.access_token, group[i].id);
+          }
+        } else {
+          driveFiles.push(group[0]);
+        }
+      }
+
       const localByDriveId = new Map<string, Note>();
       const localByFileName = new Map<string, Note>();
 
       existingLocalNotes.forEach((n) => {
-        if (n.driveFileId) localByDriveId.set(n.driveFileId, n);
-        if (n.fileName) localByFileName.set(n.fileName.toLowerCase(), n);
+        if (n.driveFileId) {
+          localByDriveId.set(n.driveFileId, n);
+          this.noteIdToDriveFileId.set(n.id, n.driveFileId);
+        }
+        if (n.fileName) {
+          const key = `${(n.folderPath || "").toLowerCase()}/${n.fileName.toLowerCase()}`;
+          localByFileName.set(key, n);
+        }
       });
 
       const newOrUpdatedNotes: Note[] = [...existingLocalNotes];
       let hasChanges = false;
 
       for (const file of driveFiles) {
+        const fileKey = `${(file.folderPath || "").toLowerCase()}/${file.name.toLowerCase()}`;
         const matchingByDriveId = localByDriveId.get(file.id);
-        const matchingByName = localByFileName.get(file.name.toLowerCase());
+        const matchingByName = localByFileName.get(fileKey);
         const matchingNote = matchingByDriveId || matchingByName;
 
         const remoteTime = new Date(file.modifiedTime).getTime();
@@ -204,9 +257,11 @@ class GoogleDriveSyncEngine {
           const content = await fetchDriveFileContent(tokenInfo.access_token, file.id);
           const baseName = file.name.replace(/\.(md|txt|html)$/i, "");
           const format = file.name.endsWith(".html") ? "html" : file.name.endsWith(".txt") ? "plain" : "markdown";
+          const newId = crypto.randomUUID();
+          this.noteIdToDriveFileId.set(newId, file.id);
 
-          newOrUpdatedNotes.push({
-            id: crypto.randomUUID(),
+          const newNote: Note = {
+            id: newId,
             title: baseName,
             content,
             fileName: file.name,
@@ -216,12 +271,19 @@ class GoogleDriveSyncEngine {
             driveSyncedAt: remoteTime,
             contentFormat: format,
             folderPath: file.folderPath,
-          });
+          };
+
+          newOrUpdatedNotes.push(newNote);
+          localByDriveId.set(file.id, newNote);
+          localByFileName.set(fileKey, newNote);
           hasChanges = true;
-        } else if (!matchingNote.driveFileId) {
+        } else if (!matchingNote.driveFileId || matchingNote.driveFileId !== file.id) {
           // Link local note with Drive file ID
           matchingNote.driveFileId = file.id;
           matchingNote.driveSyncedAt = remoteTime;
+          this.noteIdToDriveFileId.set(matchingNote.id, file.id);
+          localByDriveId.set(file.id, matchingNote);
+          localByFileName.set(fileKey, matchingNote);
           hasChanges = true;
         }
       }
@@ -235,12 +297,18 @@ class GoogleDriveSyncEngine {
     }
   }
 
-  // Sync a note edit to Google Drive (with optimal 800ms debounce)
+  private noteDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private latestPendingNoteMap = new Map<string, { note: Note; onNoteUpdated: (updatedNote: Note) => void }>();
+
+  // Sync a note edit to Google Drive (with optimal 800ms debounce per note)
   public queueNoteSync(
     note: Note,
     onNoteUpdated: (updatedNote: Note) => void,
     delayMs = 800
   ): void {
+    if (note.fileType === "image" || note.fileType === "binary" || note.fileType === "settings" || note.fileType === "luno-ai") {
+      return;
+    }
     if (!isGoogleDriveConnected() || !navigator.onLine) {
       this.updateState({ status: "offline" });
       return;
@@ -248,13 +316,23 @@ class GoogleDriveSyncEngine {
 
     this.updateState({ status: "saving" });
 
-    if (this.saveDebounceTimer) {
-      clearTimeout(this.saveDebounceTimer);
+    // Store latest state of this note
+    this.latestPendingNoteMap.set(note.id, { note, onNoteUpdated });
+
+    const existingTimer = this.noteDebounceTimers.get(note.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
     }
 
-    this.saveDebounceTimer = setTimeout(async () => {
-      await this.executeNoteSync(note, onNoteUpdated);
+    const timer = setTimeout(async () => {
+      this.noteDebounceTimers.delete(note.id);
+      const pending = this.latestPendingNoteMap.get(note.id);
+      if (pending) {
+        await this.executeNoteSync(pending.note, pending.onNoteUpdated);
+      }
     }, delayMs);
+
+    this.noteDebounceTimers.set(note.id, timer);
   }
 
   // Execute sync immediately for a note
@@ -262,56 +340,90 @@ class GoogleDriveSyncEngine {
     note: Note,
     onNoteUpdated: (updatedNote: Note) => void
   ): Promise<void> {
+    if (note.fileType === "image" || note.fileType === "binary" || note.fileType === "settings" || note.fileType === "luno-ai") {
+      return;
+    }
     const tokenInfo = getStoredTokenInfo();
     if (!tokenInfo || !navigator.onLine) {
       this.updateState({ status: "offline" });
       return;
     }
 
-    this.isSyncing = true;
-    this.updateState({ status: "syncing" });
-
-    try {
-      let structure = this.state.folderStructure;
-      if (!structure) {
-        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
-        this.updateState({ folderStructure: structure });
+    if (this.inFlightNoteSyncs.has(note.id)) {
+      try {
+        await this.inFlightNoteSyncs.get(note.id);
+      } catch {
+        // ignore previous in-flight error
       }
+    }
 
-      const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
-      const targetFolderPath = getFullDriveFolderPath(note);
+    // Always pick latest content snapshot for this note if newer exists
+    const currentPending = this.latestPendingNoteMap.get(note.id);
+    const targetNote = currentPending?.note || note;
+    const currentContentToUpload = targetNote.content;
 
-      const uploaded = await uploadDriveNoteFile(
-        tokenInfo.access_token,
-        structure.projectId,
-        fileName,
-        note.content,
-        note.driveFileId,
-        targetFolderPath
-      );
+    const syncPromise = (async () => {
+      this.isSyncing = true;
+      this.updateState({ status: "syncing" });
 
-      const remoteTime = new Date(uploaded.modifiedTime).getTime();
-      const updatedNote: Note = {
-        ...note,
-        fileName: uploaded.name,
-        driveFileId: uploaded.id,
-        driveSyncedAt: remoteTime,
-      };
+      try {
+        let structure = this.state.folderStructure;
+        if (!structure) {
+          structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
+          this.updateState({ folderStructure: structure });
+        }
 
-      onNoteUpdated(updatedNote);
+        const fileName = targetNote.fileName || `${targetNote.title.trim() || "Untitled"}.md`;
+        const targetFolderPath = getFullDriveFolderPath(targetNote);
+        const targetDriveId = targetNote.driveFileId || this.noteIdToDriveFileId.get(targetNote.id);
 
-      this.updateState({
-        status: "synced",
-        lastSyncedAt: Date.now(),
-        conflict: null,
-      });
-    } catch (err: any) {
-      this.updateState({
-        status: "error",
-        errorMessage: err.message || "Failed to sync note to Google Drive",
-      });
+        const uploaded = await uploadDriveNoteFile(
+          tokenInfo.access_token,
+          structure.projectId,
+          fileName,
+          currentContentToUpload,
+          targetDriveId,
+          targetFolderPath
+        );
+
+        this.noteIdToDriveFileId.set(targetNote.id, uploaded.id);
+
+        const remoteTime = new Date(uploaded.modifiedTime).getTime();
+        const updatedNote: Note = {
+          ...targetNote,
+          fileName: uploaded.name,
+          driveFileId: uploaded.id,
+          driveSyncedAt: remoteTime,
+        };
+
+        onNoteUpdated(updatedNote);
+
+        // If user typed newer content while this sync was uploading in background, schedule follow-up sync!
+        const latestAfterUpload = this.latestPendingNoteMap.get(targetNote.id);
+        if (latestAfterUpload && latestAfterUpload.note.content !== currentContentToUpload) {
+          this.queueNoteSync(latestAfterUpload.note, latestAfterUpload.onNoteUpdated, 400);
+        } else {
+          this.updateState({
+            status: "synced",
+            lastSyncedAt: Date.now(),
+            conflict: null,
+          });
+        }
+      } catch (err: any) {
+        this.updateState({
+          status: "error",
+          errorMessage: err.message || "Failed to sync note to Google Drive",
+        });
+      } finally {
+        this.isSyncing = false;
+      }
+    })();
+
+    this.inFlightNoteSyncs.set(note.id, syncPromise);
+    try {
+      await syncPromise;
     } finally {
-      this.isSyncing = false;
+      this.inFlightNoteSyncs.delete(note.id);
     }
   }
 
@@ -387,44 +499,105 @@ class GoogleDriveSyncEngine {
     try {
       let structure = this.state.folderStructure;
       if (!structure) {
-        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "My Luno Project");
+        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
         this.updateState({ folderStructure: structure });
       }
 
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId, structure.rootId);
+      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId, structure.workspacesId || structure.rootId);
 
-      if (this.rootDirHandle) {
-        void syncLocalAttachmentsToDrive(tokenInfo.access_token, structure.attachmentsId, this.rootDirHandle);
+      // 1. Ensure ALL folder paths exist on Google Drive (even empty subfolders)
+      const allFolderPaths = new Set<string>();
+      notes.forEach((n) => {
+        if (n.folderPath && n.folderPath.trim()) {
+          const fp = n.folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+          if (fp && !fp.startsWith(".luno") && !fp.startsWith("attachments")) {
+            const parts = fp.split("/").filter(Boolean);
+            let cur = "";
+            for (const p of parts) {
+              cur = cur ? `${cur}/${p}` : p;
+              allFolderPaths.add(cur);
+            }
+          }
+        }
+      });
+
+      for (const fp of allFolderPaths) {
+        try {
+          await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+        } catch (err) {
+          console.warn(`Failed ensuring Drive folder path ${fp}:`, err);
+        }
+      }
+
+      // 1. Sync all local files in attachments/ to Google Drive
+      if (structure.attachmentsId) {
+        void syncLocalAttachmentsToDrive(
+          tokenInfo.access_token,
+          structure.attachmentsId,
+          this.rootDirHandle,
+          this.electronWorkspacePath
+        );
+      }
+
+      // 2. Sync all local metadata files in .luno/ (workspace.json, settings.json, etc.) to Google Drive
+      if (structure.lunoMetaId) {
+        await syncLocalLunoMetaToDrive(
+          tokenInfo.access_token,
+          structure.lunoMetaId,
+          this.electronWorkspacePath,
+          this.rootDirHandle
+        );
       }
 
       const updatedNotesMap = new Map<string, Note>();
       notes.forEach((n) => updatedNotesMap.set(n.id, { ...n }));
 
-      const validNotes = notes.filter((n) => {
-        if (n.id === "settings" || n.id === "luno-ai" || n.fileType === "settings" || n.fileType === "luno-ai") return false;
+      // 2. Separate text notes vs binary/image files
+      const textNotes = notes.filter((n) => {
+        if (
+          n.id === "settings" ||
+          n.id === "luno-ai" ||
+          n.fileType === "settings" ||
+          n.fileType === "luno-ai" ||
+          n.fileType === "image" ||
+          n.fileType === "binary"
+        )
+          return false;
         const fp = (n.folderPath || "").toLowerCase();
         if (fp === "attachments" || fp.startsWith("attachments/") || fp === ".luno" || fp.startsWith(".luno/")) return false;
         return true;
       });
 
-      // Process parallel chunks of 5 notes for ultra-fast sync speed
+      const binaryNotes = notes.filter((n) => {
+        if (n.fileType === "image" || n.fileType === "binary") return true;
+        const fp = (n.folderPath || "").toLowerCase();
+        if (fp === "attachments" || fp.startsWith("attachments/")) return true;
+        return false;
+      });
+
+      const failedTextNotes: Note[] = [];
+
+      // 3. Process parallel chunks of text notes
       const CHUNK_SIZE = 5;
-      for (let i = 0; i < validNotes.length; i += CHUNK_SIZE) {
-        const chunk = validNotes.slice(i, i + CHUNK_SIZE);
+      for (let i = 0; i < textNotes.length; i += CHUNK_SIZE) {
+        const chunk = textNotes.slice(i, i + CHUNK_SIZE);
         await Promise.all(
           chunk.map(async (note) => {
             try {
               const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
               const targetFolderPath = getFullDriveFolderPath(note);
+              const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
 
               const uploaded = await uploadDriveNoteFile(
                 tokenInfo.access_token,
                 structure.projectId,
                 fileName,
                 note.content,
-                note.driveFileId,
+                targetDriveId,
                 targetFolderPath
               );
+
+              this.noteIdToDriveFileId.set(note.id, uploaded.id);
 
               const remoteTime = new Date(uploaded.modifiedTime).getTime();
               const updated = updatedNotesMap.get(note.id);
@@ -434,7 +607,76 @@ class GoogleDriveSyncEngine {
                 updated.driveSyncedAt = remoteTime;
               }
             } catch (err) {
-              console.warn(`Failed to sync note ${note.id}:`, err);
+              console.warn(`Failed to sync note ${note.id}, will retry:`, err);
+              failedTextNotes.push(note);
+            }
+          })
+        );
+        if (i + CHUNK_SIZE < textNotes.length) {
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      }
+
+      // Retry any failed text notes sequentially
+      for (const note of failedTextNotes) {
+        try {
+          const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
+          const targetFolderPath = getFullDriveFolderPath(note);
+          const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
+
+          const uploaded = await uploadDriveNoteFile(
+            tokenInfo.access_token,
+            structure.projectId,
+            fileName,
+            note.content,
+            targetDriveId,
+            targetFolderPath
+          );
+
+          this.noteIdToDriveFileId.set(note.id, uploaded.id);
+          const remoteTime = new Date(uploaded.modifiedTime).getTime();
+          const updated = updatedNotesMap.get(note.id);
+          if (updated) {
+            updated.fileName = uploaded.name;
+            updated.driveFileId = uploaded.id;
+            updated.driveSyncedAt = remoteTime;
+          }
+        } catch (retryErr) {
+          console.error(`Persistent failure syncing note ${note.id}:`, retryErr);
+        }
+      }
+
+      // 4. Process binary and image notes (including nested assets and attachments)
+      for (let i = 0; i < binaryNotes.length; i += CHUNK_SIZE) {
+        const chunk = binaryNotes.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (note) => {
+            try {
+              if (!note.fileName || !note.content) return;
+              let targetFolderId = structure.projectId;
+              const fp = (note.folderPath || "").trim();
+              if (fp.toLowerCase().startsWith("attachments")) {
+                targetFolderId = structure.attachmentsId;
+              } else if (fp) {
+                targetFolderId = await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+              }
+
+              const uploaded = await uploadDriveAttachmentFile(
+                tokenInfo.access_token,
+                targetFolderId,
+                note.content,
+                note.fileName
+              );
+
+              this.noteIdToDriveFileId.set(note.id, uploaded.id);
+              const remoteTime = new Date(uploaded.modifiedTime).getTime();
+              const updated = updatedNotesMap.get(note.id);
+              if (updated) {
+                updated.driveFileId = uploaded.id;
+                updated.driveSyncedAt = remoteTime;
+              }
+            } catch (err) {
+              console.warn(`Failed to sync binary file ${note.fileName}:`, err);
             }
           })
         );

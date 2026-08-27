@@ -55,6 +55,10 @@ export function useGoogleDriveSync() {
     syncEngine.setRootDirHandle(handle);
   }, []);
 
+  const setElectronWorkspacePath = useCallback((path: string | null) => {
+    syncEngine.setElectronWorkspacePath(path);
+  }, []);
+
   return {
     status: syncState.status,
     lastSyncedAt: syncState.lastSyncedAt,
@@ -71,5 +75,6 @@ export function useGoogleDriveSync() {
     triggerSync,
     setRootFolderName,
     setRootDirHandle,
+    setElectronWorkspacePath,
   };
 }

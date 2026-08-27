@@ -96,6 +96,7 @@ export default function AiAssistantPanel({
 
   return (
     <motion.aside
+      data-ai-panel="true"
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}

@@ -178,6 +178,7 @@ export default function FloatingCalculator({
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.18, ease: "easeOut" }}
         className="fixed w-[240px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
+        data-floating-window="true"
         style={{ top: "15%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
       >
         {/* Window Header */}

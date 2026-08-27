@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
-import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal, MoreVertical } from "lucide-react";
+import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal, MoreVertical, Cloud, Globe } from "lucide-react";
+import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import type { Note } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -16,6 +17,8 @@ interface BreadcrumbProps {
   notes?: Note[];
   onSelectNote?: (id: string) => void;
   onOpenRightPanel?: () => void;
+  paneId?: string;
+  isCloudWorkspace?: boolean;
 }
 
 interface SegmentItem {
@@ -32,6 +35,7 @@ interface TreeNode {
 
 function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = false) {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
+  if (fileType === "web-viewer") return <Globe className={cls} />;
   const name = fileName?.toLowerCase() || "";
   if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
   if (fileType === "image" || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".svg") || name.endsWith(".gif") || name.endsWith(".webp")) {
@@ -222,8 +226,9 @@ function BreadcrumbTreeView({
   );
 }
 
-export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectNote, onOpenRightPanel }: BreadcrumbProps) {
+export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectNote, onOpenRightPanel, paneId = "main", isCloudWorkspace = false }: BreadcrumbProps) {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
   if (!note) return null;
 
   const segmentItems: SegmentItem[] = [];
@@ -237,55 +242,77 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
 
   const fileName = note.fileName || note.title?.trim() || t("editor.untitled");
 
+  const isSplitPane = paneId !== "main";
+
   return (
-    <div className="flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground overflow-x-auto no-scrollbar select-none">
-      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0"
-                >
-                  <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-                  {rootFolderName && <span className="text-muted-foreground/90 font-normal">{rootFolderName}</span>}
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{rootFolderName || "Root Folder"}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
-            <BreadcrumbTreeView notes={notes} baseFolderPath="" activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {segmentItems.map((seg, i) => (
-          <span key={seg.path || i} className="flex items-center gap-1 shrink-0">
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none"
-                >
-                  <span>{seg.label}</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
-                <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
-              </DropdownMenuContent>
-            </DropdownMenu>
+    <div className="flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40">
+      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
+        {isSplitPane ? (
+          <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none">
+            {fileName}
           </span>
-        ))}
+        ) : (
+          <>
+            {/* Mobile / Small Screen: Show only file name */}
+            <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none sm:hidden">
+              {fileName}
+            </span>
 
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-        <span className="font-semibold text-foreground truncate px-0.5 leading-none">{fileName}</span>
+            {/* Desktop / Large Screen: Show full breadcrumb path */}
+            <div className="hidden sm:flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0"
+                      >
+                        {isCloudWorkspace || rootFolderName === "Google Drive" ? (
+                          <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+                        )}
+                        {rootFolderName && <span className="text-muted-foreground/90 font-normal truncate max-w-[100px]">{rootFolderName}</span>}
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>{rootFolderName || "Root Folder"}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                  <BreadcrumbTreeView notes={notes} baseFolderPath="" activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {segmentItems.map((seg, i) => (
+                <span key={seg.path || i} className="flex items-center gap-1 shrink-0">
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none max-w-[120px] truncate"
+                      >
+                        <span className="truncate">{seg.label}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                      <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              ))}
+
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+              <span className="font-semibold text-foreground truncate min-w-[40px] px-0.5 leading-none shrink">{fileName}</span>
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="flex items-center gap-2.5 shrink-0 text-[11.5px] pl-3">
-        <div id="breadcrumb-save-status" className="flex items-center gap-2" />
-        <div id="breadcrumb-editor-actions" className="flex items-center gap-2.5" />
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 text-[11.5px] pl-1">
+        <div id={`breadcrumb-save-status-${paneId}`} className="flex items-center gap-1.5 shrink-0" />
+        <div id={`breadcrumb-editor-actions-${paneId}`} className="flex items-center gap-1.5 shrink-0" />
         {onOpenRightPanel && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -293,12 +320,12 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
                 type="button"
                 onClick={onOpenRightPanel}
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                title={t("editor.rightPanel") || "Toggle Right Panel"}
               >
                 <MoreHorizontal className="h-4 w-4" />
+                <span className="sr-only">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent align="end">{t("editor.rightPanel") || "Toggle Right Panel"}</TooltipContent>
+            <TooltipContent align="end">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</TooltipContent>
           </Tooltip>
         )}
       </div>

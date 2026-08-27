@@ -1,13 +1,56 @@
 import { Note } from "@/hooks/useNotes";
-import { Plus, Search, FileText, FileCode, FileImage, File, Folder, FolderOpen, FolderPlus, Copy, ClipboardList, Files, Pencil, Trash2, FolderArchive, Settings, Home, Compass, Star, Tag, HelpCircle, Sun, Moon, ArrowDown, X } from "lucide-react";
+import { isEncryptedNote } from "@/lib/noteCrypto";
+import {
+  Plus,
+  Search,
+  FileText,
+  FileCode,
+  FileImage,
+  File,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  Copy,
+  ClipboardList,
+  Files,
+  Pencil,
+  Trash2,
+  FolderArchive,
+  Settings,
+  Home,
+  Compass,
+  Star,
+  Tag,
+  HelpCircle,
+  Sun,
+  Moon,
+  ArrowDown,
+  X,
+  LogOut,
+  Cloud,
+  Loader2,
+  ArrowUpDown,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Clock,
+  Calendar,
+  Check,
+  ListFilter,
+  Globe,
+  Lock,
+  Unlock,
+  Key,
+} from "lucide-react";
+import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
+import lunoLogo from "@/assets/luno-logo.png";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -45,6 +88,7 @@ interface SidebarProps {
   onDeleteFiles?: (notes: Note[]) => void;
   onDeleteFolder?: (folderPath: string) => void;
   onOpenFolder?: (pending?: OpenFolderPending) => void | Promise<void>;
+  onCloseWorkspace?: () => void;
   confirmBeforeDelete?: boolean;
   sidebarWidth?: number;
   isMobile?: boolean;
@@ -54,6 +98,11 @@ interface SidebarProps {
   onOpenSettings?: () => void;
   onRenameTagGlobally?: (oldTag: string, newTag: string) => void;
   onDeleteTagGlobally?: (tagToDelete: string) => void;
+  onToggleFavorite?: (noteId: string) => void;
+  onOpenPinModal?: (note: Note, mode: "set" | "remove" | "change") => void;
+  isCloudWorkspace?: boolean;
+  isLoadingWorkspace?: boolean;
+  onOpenWebTab?: (url: string, initialTitle?: string) => void;
 }
 
 interface FolderNode {
@@ -63,7 +112,95 @@ interface FolderNode {
   notes: Note[];
 }
 
-function buildFolderTree(notes: Note[], folderPaths: string[] = [], openedFolderName?: string | null): FolderNode {
+const HIDDEN_FOLDERS = new Set(["attachments", ".attachments", "assets", ".luno", "node_modules", "dist", "dist-desktop"]);
+const OPEN_FOLDERS_STORAGE_PREFIX = "luno_open_folders_";
+const LAST_WORKSPACE_STORAGE_KEY = "luno_last_workspace_name";
+
+function getLocalStorage(): Storage | null {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
+function getInitialOpenFolders(openedFolderName?: string | null): Set<string> {
+  if (!openedFolderName) return new Set(["__opened_root__"]);
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      const lastWorkspace = storage.getItem(LAST_WORKSPACE_STORAGE_KEY);
+      if (lastWorkspace === openedFolderName) {
+        const saved = storage.getItem(OPEN_FOLDERS_STORAGE_PREFIX + openedFolderName);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const set = new Set<string>(parsed);
+            set.add("__opened_root__");
+            return set;
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore storage parse errors
+  }
+  return new Set(["__opened_root__"]);
+}
+
+function isHiddenFolderPath(folderPath?: string): boolean {
+  if (!folderPath) return false;
+  const parts = folderPath.toLowerCase().split("/");
+  return parts.some((p) => HIDDEN_FOLDERS.has(p) || (p.startsWith(".") && p !== "."));
+}
+
+export type WorkspaceSortBy =
+  | "name-asc"
+  | "name-desc"
+  | "modified-desc"
+  | "modified-asc"
+  | "created-desc"
+  | "created-asc";
+
+const WORKSPACE_SORT_STORAGE_KEY = "luno_workspace_sort_by";
+
+function sortNotesList(list: Note[], sortBy: WorkspaceSortBy): Note[] {
+  return [...list].sort((a, b) => {
+    switch (sortBy) {
+      case "name-desc":
+        return (b.fileName || b.title || "").localeCompare(
+          a.fileName || a.title || "",
+          undefined,
+          { numeric: true, sensitivity: "base" }
+        );
+      case "modified-desc":
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      case "modified-asc":
+        return (a.updatedAt || 0) - (b.updatedAt || 0);
+      case "created-desc":
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      case "created-asc":
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      case "name-asc":
+      default:
+        return (a.fileName || a.title || "").localeCompare(
+          b.fileName || b.title || "",
+          undefined,
+          { numeric: true, sensitivity: "base" }
+        );
+    }
+  });
+}
+
+function buildFolderTree(
+  notes: Note[],
+  folderPaths: string[] = [],
+  openedFolderName?: string | null,
+  sortBy: WorkspaceSortBy = "name-asc"
+): FolderNode {
   const rootPath = openedFolderName ? "__opened_root__" : "";
   const rootName = openedFolderName || "";
   const root: FolderNode = { name: rootName, path: rootPath, children: [], notes: [] };
@@ -85,12 +222,26 @@ function buildFolderTree(notes: Note[], folderPaths: string[] = [], openedFolder
 
   for (const note of notes) {
     const path = note.folderPath || "";
+    if (isHiddenFolderPath(path)) continue;
     getOrCreateFolder(path).notes.push(note);
   }
 
   for (const path of folderPaths) {
-    if (path) getOrCreateFolder(path);
+    if (path && !isHiddenFolderPath(path)) getOrCreateFolder(path);
   }
+
+  const sortNode = (node: FolderNode) => {
+    node.children.sort((a, b) => {
+      if (sortBy === "name-desc") {
+        return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" });
+      }
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    });
+    node.notes = sortNotesList(node.notes, sortBy);
+    node.children.forEach(sortNode);
+  };
+
+  sortNode(root);
 
   return root;
 }
@@ -158,6 +309,7 @@ function stripMarkdownAndFrontmatter(content: string): string {
 function getThemeHighlightStyles(theme: string): React.CSSProperties {
   switch (theme) {
     case "rose":
+    case "ruby":
       return {
         backgroundColor: "rgba(34, 211, 238, 0.35)", // Sky Cyan
         color: "inherit",
@@ -166,6 +318,8 @@ function getThemeHighlightStyles(theme: string): React.CSSProperties {
         fontWeight: 500,
       };
     case "violet":
+    case "fuchsia":
+    case "indigo":
       return {
         backgroundColor: "rgba(163, 230, 53, 0.35)", // Lime Green
         color: "inherit",
@@ -174,6 +328,7 @@ function getThemeHighlightStyles(theme: string): React.CSSProperties {
         fontWeight: 500,
       };
     case "orange":
+    case "amber":
       return {
         backgroundColor: "rgba(99, 102, 241, 0.30)", // Electric Indigo Blue
         color: "inherit",
@@ -182,6 +337,7 @@ function getThemeHighlightStyles(theme: string): React.CSSProperties {
         fontWeight: 500,
       };
     case "emerald":
+    case "lime":
       return {
         backgroundColor: "rgba(251, 191, 36, 0.35)", // Warm Golden Amber
         color: "inherit",
@@ -190,6 +346,7 @@ function getThemeHighlightStyles(theme: string): React.CSSProperties {
         fontWeight: 500,
       };
     case "blue":
+    case "cyan":
       return {
         backgroundColor: "rgba(251, 146, 60, 0.35)", // Coral Orange
         color: "inherit",
@@ -253,6 +410,9 @@ function getSearchPreviewSnippet(content: string, title: string, query: string, 
 }
 
 function getPreview(content: string, title: string, noContentLabel: string) {
+  if (isEncryptedNote(content)) {
+    return "••••••";
+  }
   const cleanText = stripMarkdownAndFrontmatter(content);
   if (!cleanText) {
     const fallbackTitle = title.trim();
@@ -274,6 +434,9 @@ function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "
 
 function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
+  if (note.isLocked) {
+    return <Lock className={cls} />;
+  }
   const type = getFileType(note);
   // Force FolderArchive for .zip files regardless of fileType
   const name = note.fileName?.toLowerCase() || "";
@@ -300,7 +463,7 @@ function MarkdownIndicator({ active }: { active: boolean }) {
   );
 }
 
-export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally }: SidebarProps) {
+export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, onCloseWorkspace, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally, onToggleFavorite, onOpenPinModal, isCloudWorkspace = false, isLoadingWorkspace = false, onOpenWebTab }: SidebarProps) {
   const { settings, updateSetting } = useAppSettings();
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
@@ -313,9 +476,44 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
   const [deleteTagTarget, setDeleteTagTarget] = useState("");
 
   const [openFolders, setOpenFolders] = useState<Set<string>>(() =>
-    openedFolderName ? new Set(["__opened_root__"]) : new Set()
+    getInitialOpenFolders(openedFolderName)
   );
+  const prevWorkspaceRef = useRef<string | null | undefined>(openedFolderName);
+
+
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>("");
+  const [sortBy, setSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(WORKSPACE_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (
+        saved &&
+        [
+          "name-asc",
+          "name-desc",
+          "modified-desc",
+          "modified-asc",
+          "created-desc",
+          "created-asc",
+        ].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleSortChange = (newSort: WorkspaceSortBy) => {
+    setSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(WORKSPACE_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
@@ -328,12 +526,22 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     return false;
   };
 
-  const openCreateFileDialog = () => {
+  const openCreateFileDialog = (targetFolder?: string | React.MouseEvent) => {
+    if (typeof targetFolder === "string") {
+      setSelectedFolderPath(targetFolder);
+    } else {
+      setSelectedFolderPath(currentFolderPath);
+    }
     setNewFileExt(settings.defaultExtension);
     setCreateFileDialogOpen(true);
   };
 
-  const openCreateFolderDialog = () => {
+  const openCreateFolderDialog = (targetFolder?: string | React.MouseEvent) => {
+    if (typeof targetFolder === "string") {
+      setSelectedFolderPath(targetFolder);
+    } else {
+      setSelectedFolderPath(currentFolderPath);
+    }
     setCreateFolderDialogOpen(true);
   };
   const [renameFileDialogOpen, setRenameFileDialogOpen] = useState(false);
@@ -391,7 +599,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       const contentFormat = pendingCreate.contentFormat ?? defaultFormat;
       onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     } else if (pendingCreate.kind === "folder") {
-      if (onCreateFolder) onCreateFolder(selectedFolderPath || currentFolderPath, pendingCreate.folderName ?? "untitled-folder");
+      if (onCreateFolder) onCreateFolder(selectedFolderPath || currentFolderPath, pendingCreate.folderName ?? "Untitled");
     }
 
     setPendingCreate(null);
@@ -402,21 +610,24 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     [openedFolderName, notes, folderPaths]
   );
 
+  const effectiveNotes = useMemo(() => (openedFolderName ? notes : []), [openedFolderName, notes]);
+
   const vaultTagCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const n of notes) {
+    for (const n of effectiveNotes) {
       if (isMarkdownNote(n) && n.tags) {
         for (const t of n.tags) {
           const norm = t.trim();
-          if (!norm) continue;
-          const lower = norm.toLowerCase();
-          map.set(lower, (map.get(lower) || 0) + 1);
+          if (norm) {
+            const lower = norm.toLowerCase();
+            map.set(lower, (map.get(lower) || 0) + 1);
+          }
         }
       }
     }
     const result: Array<{ tag: string; lower: string; count: number }> = [];
     const seenLower = new Set<string>();
-    for (const n of notes) {
+    for (const n of effectiveNotes) {
       if (isMarkdownNote(n) && n.tags) {
         for (const t of n.tags) {
           const norm = t.trim();
@@ -429,11 +640,16 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       }
     }
     return result.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  }, [notes]);
+  }, [effectiveNotes]);
+
+  const favoriteNotesCount = useMemo(
+    () => effectiveNotes.filter((n) => n.isFavorite).length,
+    [effectiveNotes]
+  );
 
   const filtered = useMemo(
     () => {
-      let list = notes;
+      let list = effectiveNotes;
 
       if (navFilter === "favorites") {
         list = list.filter((n) => n.isFavorite);
@@ -444,37 +660,86 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         list = list.filter((n) => n.tags?.some((t) => t.toLowerCase() === targetLower));
       }
 
-      if (!query) return list;
-
-      const q = query.trim().toLowerCase();
-      if (q.startsWith("#")) {
-        const tagQ = q.slice(1);
-        return list.filter((n) => n.tags?.some((t) => t.toLowerCase().includes(tagQ)));
+      if (query) {
+        const q = query.trim().toLowerCase();
+        if (q.startsWith("#")) {
+          const tagQ = q.slice(1);
+          list = list.filter((n) => n.tags?.some((t) => t.toLowerCase().includes(tagQ)));
+        } else {
+          list = list.filter((n) => {
+            const titleMatch = n.title?.toLowerCase().includes(q);
+            const fileNameMatch = n.fileName?.toLowerCase().includes(q);
+            const contentMatch = n.content?.toLowerCase().includes(q);
+            const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
+            return titleMatch || fileNameMatch || contentMatch || tagMatch;
+          });
+        }
       }
 
-      return list.filter((n) => {
-        const titleMatch = n.title?.toLowerCase().includes(q);
-        const fileNameMatch = n.fileName?.toLowerCase().includes(q);
-        const contentMatch = n.content?.toLowerCase().includes(q);
-        const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
-        return titleMatch || fileNameMatch || contentMatch || tagMatch;
-      });
+      return sortNotesList(list, sortBy);
     },
-    [notes, query, navFilter, selectedTagFilter],
+    [effectiveNotes, query, navFilter, selectedTagFilter, sortBy],
   );
 
-  const folderTree = useMemo(() => buildFolderTree(notes, folderPaths, openedFolderName), [notes, folderPaths, openedFolderName]);
+  const folderTree = useMemo(
+    () => buildFolderTree(effectiveNotes, folderPaths, openedFolderName, sortBy),
+    [effectiveNotes, folderPaths, openedFolderName, sortBy]
+  );
 
   useEffect(() => {
-    if (openedFolderName) {
-      setOpenFolders((prev) => {
-        const next = new Set(prev);
-        next.add("__opened_root__");
-        return next;
-      });
+    if (!openedFolderName) return;
+
+    if (prevWorkspaceRef.current !== openedFolderName) {
+      const prev = prevWorkspaceRef.current;
+      prevWorkspaceRef.current = openedFolderName;
+      try {
+        const storage = getLocalStorage();
+        if (storage) {
+          const lastWorkspace = storage.getItem(LAST_WORKSPACE_STORAGE_KEY);
+          if (lastWorkspace === openedFolderName && prev === undefined) {
+            // Initial load of the same workspace: restore open folders
+            const saved = storage.getItem(OPEN_FOLDERS_STORAGE_PREFIX + openedFolderName);
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (Array.isArray(parsed)) {
+                const next = new Set<string>(parsed);
+                next.add("__opened_root__");
+                setOpenFolders(next);
+                return;
+              }
+            }
+          }
+          // Switched to a DIFFERENT workspace (or first open): only open root
+          storage.setItem(LAST_WORKSPACE_STORAGE_KEY, openedFolderName);
+          const rootOnly = new Set(["__opened_root__"]);
+          storage.setItem(OPEN_FOLDERS_STORAGE_PREFIX + openedFolderName, JSON.stringify(Array.from(rootOnly)));
+          setOpenFolders(rootOnly);
+        } else {
+          setOpenFolders(new Set(["__opened_root__"]));
+        }
+      } catch {
+        setOpenFolders(new Set(["__opened_root__"]));
+      }
     }
   }, [openedFolderName]);
-  const selectableNotes = useMemo(() => (query ? filtered : notes), [notes, filtered, query]);
+
+  // Persist openFolders whenever they change for the current workspace
+  useEffect(() => {
+    if (!openedFolderName) return;
+    try {
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.setItem(LAST_WORKSPACE_STORAGE_KEY, openedFolderName);
+        storage.setItem(
+          OPEN_FOLDERS_STORAGE_PREFIX + openedFolderName,
+          JSON.stringify(Array.from(openFolders))
+        );
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [openFolders, openedFolderName]);
+  const selectableNotes = useMemo(() => (query ? filtered : effectiveNotes), [effectiveNotes, filtered, query]);
 
   const setSingleSelectedNote = (noteId: string) => {
     setSelectedNoteIds(new Set([noteId]));
@@ -544,8 +809,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     setDeleteConfirmTargets([]);
   };
 
-  const handleDropToFolder = (targetFolderPath: string) => {
+  const handleDropToFolder = (rawTargetFolderPath: string) => {
     if (!draggedItem) return;
+
+    const targetFolderPath = rawTargetFolderPath === "__opened_root__" ? "" : rawTargetFolderPath;
 
     if (draggedItem.kind === "file" && draggedItem.note) {
       onMoveFile?.(draggedItem.note, targetFolderPath);
@@ -589,7 +856,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
     });
   };
 
-  const handleCreateFromDialog = () => {
+  const handleCreateFromDialog = async () => {
     const baseName = newFileName.trim();
     const ext = newFileExt || settings.defaultExtension;
     const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : "plain";
@@ -613,16 +880,34 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       return;
     }
 
-    onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
+    const targetFolder = selectedFolderPath || currentFolderPath;
+    if (targetFolder) {
+      setOpenFolders((prev) => {
+        const next = new Set(prev);
+        next.add("__opened_root__");
+        const parts = targetFolder.split("/");
+        let current = "";
+        for (const p of parts) {
+          current = current ? `${current}/${p}` : p;
+          next.add(current);
+        }
+        return next;
+      });
+    }
+
+    const createdNote = await onCreate(targetFolder, { fileName, contentFormat });
     setCreateFileDialogOpen(false);
     setNewFileName("");
     setNewFileExt(settings.defaultExtension);
+    if (createdNote?.id) {
+      onSelect(createdNote.id);
+    }
   };
 
   const handleCreateFolderFromDialog = () => {
     if (!onCreateFolder) return;
     const safeFolderName = newFolderName.trim().replace(/[\\/:*?"<>|]/g, "_");
-    const folderName = safeFolderName || "untitled-folder";
+    const folderName = safeFolderName || "Untitled";
 
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "folder", folderName });
@@ -632,7 +917,22 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       return;
     }
 
-    onCreateFolder(selectedFolderPath || currentFolderPath, folderName);
+    const targetFolder = selectedFolderPath || currentFolderPath;
+    if (targetFolder) {
+      setOpenFolders((prev) => {
+        const next = new Set(prev);
+        next.add("__opened_root__");
+        const parts = targetFolder.split("/");
+        let current = "";
+        for (const p of parts) {
+          current = current ? `${current}/${p}` : p;
+          next.add(current);
+        }
+        return next;
+      });
+    }
+
+    onCreateFolder(targetFolder, folderName);
     setCreateFolderDialogOpen(false);
     setNewFolderName("");
   };
@@ -671,7 +971,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         <ContextMenu key={note.id}>
           <ContextMenuTrigger asChild>
             <button
-              onClick={() => {
+              onClick={(event) => {
+                if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                  return;
+                }
                 onSelect(note.id);
                 if (isMobile) onClose?.();
               }}
@@ -697,10 +1000,15 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <NoteIcon note={note} active={activeNoteId === note.id} />
               <span className={`truncate ${activeNoteId === note.id ? "font-semibold text-primary" : "font-normal"}`}>{noteLabel}</span>
+              {note.isFavorite && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0 ml-auto" />}
               {isMarkdownNote && <MarkdownIndicator active={activeNoteId === note.id} />}
             </button>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-44 rounded-xl">
+            <ContextMenuItem onClick={() => onToggleFavorite?.(note.id)} className="gap-2">
+              <Star className={`h-4 w-4 ${note.isFavorite ? "text-amber-500 fill-amber-500" : ""}`} />
+              <span>{note.isFavorite ? (t("sidebar.unfavorite") || "Remove from Favorites") : (t("sidebar.favorite") || "Add to Favorites")}</span>
+            </ContextMenuItem>
             <ContextMenuItem onClick={() => handleCopyFromContext(note)} className="gap-2">
               <Copy className="h-4 w-4" />
               <span>{t("sidebar.copyAction")}</span>
@@ -725,6 +1033,24 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               <Trash2 className="h-4 w-4" />
               <span>{t("sidebar.deleteFileAction")}</span>
             </ContextMenuItem>
+            <ContextMenuSeparator />
+            {!note.isLocked ? (
+              <ContextMenuItem onClick={() => onOpenPinModal?.(note, "set")} className="gap-2">
+                <Lock className="h-4 w-4" />
+                <span>{t("sidebar.lockNote") || "Lock with PIN"}</span>
+              </ContextMenuItem>
+            ) : (
+              <>
+                <ContextMenuItem onClick={() => onOpenPinModal?.(note, "remove")} className="gap-2">
+                  <Unlock className="h-4 w-4" />
+                  <span>{t("sidebar.unlockNote") || "Remove PIN"}</span>
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => onOpenPinModal?.(note, "change")} className="gap-2">
+                  <Key className="h-4 w-4" />
+                  <span>{t("sidebar.changePin") || "Change PIN"}</span>
+                </ContextMenuItem>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       );
@@ -738,7 +1064,10 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
-            onClick={() => {
+            onClick={(event) => {
+              if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                return;
+              }
               onSelect(note.id);
               if (isMobile) onClose?.();
             }}
@@ -772,6 +1101,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 >
                   {query ? highlightMatchText(noteLabel, query, settings.theme) : noteLabel}
                 </span>
+                {note.isFavorite && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
                 {isMarkdownNote && <MarkdownIndicator active={activeNoteId === note.id} />}
               </div>
               <span className="shrink-0 text-[10px] text-muted-foreground">{formatDate(note.updatedAt)}</span>
@@ -784,9 +1114,17 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           </motion.button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-44 rounded-xl">
+          <ContextMenuItem onClick={() => onToggleFavorite?.(note.id)} className="gap-2">
+            <Star className={`h-4 w-4 ${note.isFavorite ? "text-amber-500 fill-amber-500" : ""}`} />
+            <span>{note.isFavorite ? (t("sidebar.unfavorite") || "Remove from Favorites") : (t("sidebar.favorite") || "Add to Favorites")}</span>
+          </ContextMenuItem>
           <ContextMenuItem onClick={() => handleCopyFromContext(note)} className="gap-2">
             <Copy className="h-4 w-4" />
             <span>{t("sidebar.copyAction")}</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onPasteToFolder?.(note.folderPath || "")} className="gap-2" disabled={!canPaste}>
+            <ClipboardList className="h-4 w-4" />
+            <span>{t("sidebar.pasteAction")}</span>
           </ContextMenuItem>
           <ContextMenuItem onClick={() => handleDuplicateFromContext(note)} className="gap-2">
             <Files className="h-4 w-4" />
@@ -808,6 +1146,24 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <Trash2 className="h-4 w-4" />
             <span>{t("sidebar.deleteFileAction")}</span>
           </ContextMenuItem>
+          <ContextMenuSeparator />
+          {!note.isLocked ? (
+            <ContextMenuItem onClick={() => onOpenPinModal?.(note, "set")} className="gap-2">
+              <Lock className="h-4 w-4" />
+              <span>{t("sidebar.lockNote") || "Lock with PIN"}</span>
+            </ContextMenuItem>
+          ) : (
+            <>
+              <ContextMenuItem onClick={() => onOpenPinModal?.(note, "remove")} className="gap-2">
+                <Unlock className="h-4 w-4" />
+                <span>{t("sidebar.unlockNote") || "Remove PIN"}</span>
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onOpenPinModal?.(note, "change")} className="gap-2">
+                <Key className="h-4 w-4" />
+                <span>{t("sidebar.changePin") || "Change PIN"}</span>
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );
@@ -860,27 +1216,35 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 handleDropToFolder(node.path);
               }}
               onContextMenu={() => setSelectedFolderPath(node.path)}
-              className={`flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"} font-medium transition-colors rounded-lg ${
+              className={`sticky flex w-full items-center gap-1.5 px-3 bg-sidebar/95 backdrop-blur-[2px] ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"} font-medium transition-colors rounded-lg ${
                 dropTargetFolderPath === node.path
                   ? "bg-sidebar-accent/50 text-foreground"
                   : "text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40"
               }`}
-              style={{ paddingLeft: `${12 + depth * 14}px` }}
+              style={{
+                top: `${depth * (settings.sidebarDensity === "compact" ? 26 : 30)}px`,
+                zIndex: 35 - Math.min(depth, 25),
+                paddingLeft: `${12 + depth * 14}px`,
+              }}
             >
               {isOpen ? (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
-              {isOpen ? (
+              {node.path === "__opened_root__" && isCloudWorkspace ? (
+                <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
+              ) : isOpen ? (
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
               ) : (
                 <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
               )}
               <span className="truncate">{node.name}</span>
-              {hasContent && (
+              {node.path === "__opened_root__" && isLoadingWorkspace ? (
+                <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+              ) : hasContent ? (
                 <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">{node.notes.length + node.children.length}</span>
-              )}
+              ) : null}
             </button>
             {isOpen && (
               <div className="relative w-full">
@@ -914,10 +1278,12 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48 rounded-xl">
-          <ContextMenuItem onClick={() => onCopyFolder?.(node.path)} className="gap-2">
-            <Copy className="h-4 w-4" />
-            <span>{t("sidebar.copyAction")}</span>
-          </ContextMenuItem>
+          {node.path !== "__opened_root__" && (
+            <ContextMenuItem onClick={() => onCopyFolder?.(node.path)} className="gap-2">
+              <Copy className="h-4 w-4" />
+              <span>{t("sidebar.copyAction")}</span>
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={() => onPasteToFolder?.(node.path)} className="gap-2" disabled={!canPaste}>
             <ClipboardList className="h-4 w-4" />
             <span>{t("sidebar.pasteAction")}</span>
@@ -942,27 +1308,42 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             <FolderPlus className="h-4 w-4" />
             <span>{t("sidebar.createFolderAction")}</span>
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDuplicateFolder?.(node.path)} className="gap-2">
-            <Files className="h-4 w-4" />
-            <span>{t("sidebar.duplicateAction")}</span>
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              const segments = node.path.split("/").filter(Boolean);
-              const currentName = segments[segments.length - 1] || "folder";
-              setRenameTargetFolderPath(node.path);
-              setRenameFolderName(currentName);
-              setRenameFolderDialogOpen(true);
-            }}
-            className="gap-2"
-          >
-            <Pencil className="h-4 w-4" />
-            <span>{t("sidebar.renameAction")}</span>
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => handleDeleteFolderFromContext(node.path)} className="gap-2">
-            <Trash2 className="h-4 w-4" />
-            <span>{t("sidebar.deleteFolderAction")}</span>
-          </ContextMenuItem>
+          {node.path !== "__opened_root__" && (
+            <ContextMenuItem onClick={() => onDuplicateFolder?.(node.path)} className="gap-2">
+              <Files className="h-4 w-4" />
+              <span>{t("sidebar.duplicateAction")}</span>
+            </ContextMenuItem>
+          )}
+          {node.path !== "__opened_root__" && (
+            <ContextMenuItem
+              onClick={() => {
+                const segments = node.path.split("/").filter(Boolean);
+                const currentName = segments[segments.length - 1] || "folder";
+                setRenameTargetFolderPath(node.path);
+                setRenameFolderName(currentName);
+                setRenameFolderDialogOpen(true);
+              }}
+              className="gap-2"
+            >
+              <Pencil className="h-4 w-4" />
+              <span>{t("sidebar.renameAction")}</span>
+            </ContextMenuItem>
+          )}
+          {node.path !== "__opened_root__" && (
+            <ContextMenuItem onClick={() => handleDeleteFolderFromContext(node.path)} className="gap-2">
+              <Trash2 className="h-4 w-4" />
+              <span>{t("sidebar.deleteFolderAction")}</span>
+            </ContextMenuItem>
+          )}
+          {node.path === "__opened_root__" && onCloseWorkspace && (
+            <>
+              <div className="h-[1px] bg-sidebar-border/60 my-1 -mx-1" />
+              <ContextMenuItem onClick={onCloseWorkspace} className="gap-2">
+                <LogOut className="h-4 w-4" />
+                <span>{t("sidebar.closeWorkspace") || "Close Workspace"}</span>
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );
@@ -983,7 +1364,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 >
                   {/* Normal state: Logo */}
                   <span className="transition-all duration-200 group-hover:scale-0 group-hover:opacity-0 flex items-center justify-center">
-                    <img src="/luno-logo.png" alt="Luno Logo" className="h-5 w-5 object-contain shrink-0" />
+                    <img src={lunoLogo} alt="Luno Logo" className="h-5 w-5 object-contain shrink-0" />
                   </span>
 
                   {/* Hover state: Open Sidebar Button */}
@@ -1000,13 +1381,13 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
             {/* Top Divider */}
             <div className="w-5 h-[1px] bg-sidebar-border/60 my-0.5" />
 
-            {/* Nav Item 1: Files / Notes (Active Highlight) */}
+            {/* Nav Item 1: Files / Notes */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={onOpenSidebar}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                 >
                   <Files className="h-4 w-4" />
                 </button>
@@ -1016,13 +1397,13 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               </TooltipContent>
             </Tooltip>
 
-            {/* Nav Item 2: Explore / Sparkles */}
+            {/* Nav Item 2: Explore */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={onOpenSidebar}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                 >
                   <Compass className="h-4 w-4" />
                 </button>
@@ -1032,13 +1413,36 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               </TooltipContent>
             </Tooltip>
 
-            {/* Nav Item 3: Plus (New Note) */}
+            {/* Nav Item 3: Luno AI (under Explorer) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelect("luno-ai");
+                    if (isMobile) onClose?.();
+                  }}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
+                    activeNoteId === "luno-ai"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                {t("sidebar.lunoAi") || "Luno AI"}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Nav Item 4: Plus (New Note) */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={() => void onCreate()}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
@@ -1048,13 +1452,13 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               </TooltipContent>
             </Tooltip>
 
-            {/* Nav Item 4: Open Workspace / Folder */}
+            {/* Nav Item 5: Open Workspace / Folder */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={() => void onOpenFolder?.()}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
                 >
                   <Folder className="h-4 w-4" />
                 </button>
@@ -1102,7 +1506,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2">
         <div className="flex items-center gap-2.5">
           <div className="relative flex h-[22px] w-[22px] items-center justify-center shrink-0">
-            <img src="/luno-logo.png" alt="Luno Logo" className="h-[22px] w-auto object-contain shrink-0" />
+            <img src={lunoLogo} alt="Luno Logo" className="h-[22px] w-auto object-contain shrink-0" />
           </div>
           <span className="font-krona text-[16px] font-normal tracking-tight text-foreground">Luno</span>
         </div>
@@ -1167,12 +1571,19 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
         <button
           type="button"
           onClick={() => setNavFilter("favorites")}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+          className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
             navFilter === "favorites" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
           }`}
         >
-          <Star className="h-4 w-4 shrink-0 text-foreground" />
-          <span>{t("sidebar.favorites")}</span>
+          <div className="flex items-center gap-2.5">
+            <Star className={`h-4 w-4 shrink-0 ${favoriteNotesCount > 0 ? "text-amber-500 fill-amber-500/30" : "text-foreground"}`} />
+            <span>{t("sidebar.favorites")}</span>
+          </div>
+          {favoriteNotesCount > 0 && (
+            <span className="text-[11px] font-mono px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
+              {favoriteNotesCount}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -1197,9 +1608,124 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
       </div>
 
       {/* WORKSPACE Header */}
-      <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5">
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDropTargetFolderPath("__opened_root__");
+        }}
+        onDragLeave={() => {
+          if (dropTargetFolderPath === "__opened_root__") {
+            setDropTargetFolderPath(null);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          handleDropToFolder("__opened_root__");
+        }}
+        className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
+          dropTargetFolderPath === "__opened_root__" ? "bg-sidebar-accent/50 text-foreground" : ""
+        }`}
+      >
         <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">{t("sidebar.workspace")}</span>
         <div className="flex items-center gap-1">
+          {/* Sort Dropdown */}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                  >
+                    <ArrowUpDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-56 rounded-xl px-1 py-1.5 shadow-md">
+              <DropdownMenuItem
+                onClick={() => handleSortChange("name-asc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "name-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <ArrowDownAZ className="h-3.5 w-3.5" />
+                  <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+                </div>
+                {sortBy === "name-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleSortChange("name-desc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "name-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <ArrowUpAZ className="h-3.5 w-3.5" />
+                  <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+                </div>
+                {sortBy === "name-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleSortChange("modified-desc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "modified-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+                </div>
+                {sortBy === "modified-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleSortChange("modified-asc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "modified-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5 opacity-60" />
+                  <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+                </div>
+                {sortBy === "modified-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleSortChange("created-desc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "created-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+                </div>
+                {sortBy === "created-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleSortChange("created-asc")}
+                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
+                  sortBy === "created-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-3.5 w-3.5 opacity-60" />
+                  <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+                </div>
+                {sortBy === "created-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {onOpenFolder && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1232,7 +1758,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
               </TooltipTrigger>
               <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="w-44 rounded-xl px-0 py-2">
+            <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
               <DropdownMenuItem onClick={openCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
                 <FileText className="h-4 w-4" />
                 <span>{t("sidebar.createFileAction")}</span>
@@ -1241,47 +1767,46 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                 <FolderPlus className="h-4 w-4" />
                 <span>{t("sidebar.createFolderAction")}</span>
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  if (onOpenWebTab) {
+                    onOpenWebTab("https://www.google.com", "Google");
+                  }
+                  if (isMobile) onClose?.();
+                }}
+                className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg"
+              >
+                <Globe className="h-4 w-4" />
+                <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      {pendingReconnectFolder && (
-        <div className="mx-3 mb-2.5 p-2.5 rounded-xl border border-primary/30 bg-primary/10 flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-primary">
-            <FolderOpen className="h-4 w-4 shrink-0" />
-            <span className="truncate">{openedFolderName || "Workspace"}</span>
-          </div>
-          <p className="text-[11px] text-muted-foreground leading-tight">
-            {t("sidebar.reconnectPrompt")}
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            className="w-full h-7 text-xs font-medium rounded-lg gap-1.5 cursor-pointer"
-            onClick={onReconnectFolder}
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            {t("sidebar.reconnectAction")}
-          </Button>
-        </div>
-      )}
-
-      {/* Active Tag Filter Pill */}
-      {selectedTagFilter && (
-        <div className={`mx-2 mb-2 flex items-center justify-between rounded-xl px-3 py-1.5 text-xs border ${getTagColorClass(selectedTagFilter, settings.theme, undefined, settings.tagColorStyle)}`}>
-          <span className="font-semibold truncate flex items-center gap-1">
-            <Tag className="h-3 w-3" /> #{selectedTagFilter}
-          </span>
-          <button type="button" onClick={() => setSelectedTagFilter(null)} className="ml-1 opacity-70 hover:opacity-100 p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10">
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      )}
 
       {/* Tree Content */}
       <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
-        {navFilter === "tags" ? (
+        {navFilter === "favorites" ? (
+          <div className="space-y-1 p-1">
+            <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1 pb-1">
+              <span>{t("sidebar.favorites") || "Favorites"} ({filtered.length})</span>
+            </div>
+            {filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center px-4 py-16 text-center text-muted-foreground">
+                <Star className="h-8 w-8 text-amber-500/40 mb-3" />
+                <p className="text-xs font-semibold text-foreground">{t("sidebar.noFavorites") || "No Favorite Notes"}</p>
+                <p className="text-[11px] text-muted-foreground/70 mt-1 max-w-[200px] leading-relaxed">
+                  {t("sidebar.noFavoritesDesc") || "Star notes or right-click to add them to your favorites for quick access."}
+                </p>
+              </div>
+            ) : (
+              <AnimatePresence initial={false}>
+                {filtered.map((note) => renderNote(note))}
+              </AnimatePresence>
+            )}
+          </div>
+        ) : navFilter === "tags" ? (
           <div className="space-y-3 p-1">
             <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1">
               <span>{t("sidebar.tags") || "Tags"} ({vaultTagCounts.length})</span>
@@ -1429,7 +1954,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                     ? `Note_${new Date().toISOString().slice(0, 10)}`
                     : settings.newFilePattern === "daily"
                     ? `Daily-${new Date().toISOString().slice(0, 10)}`
-                    : "untitled"
+                    : "Untitled"
                 }
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
               />
@@ -1485,7 +2010,7 @@ export default function Sidebar({ notes, folderPaths = [], activeNoteId, openedF
                   handleCreateFolderFromDialog();
                 }
               }}
-              placeholder="untitled-folder"
+              placeholder="Untitled"
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
