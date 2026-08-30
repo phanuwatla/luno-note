@@ -100,6 +100,22 @@ function getSavedWorkspaceData() {
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, "utf8");
       const data = JSON.parse(raw);
+      const currentVersion = app.getVersion();
+
+      // If version changed (e.g. fresh install or update over old version), do not auto-open previous workspace
+      if (data?.lastAppVersion && data.lastAppVersion !== currentVersion) {
+        data.folderPath = null;
+        data.folderName = null;
+        data.lastAppVersion = currentVersion;
+        fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf8");
+        return null;
+      }
+
+      if (!data?.lastAppVersion) {
+        data.lastAppVersion = currentVersion;
+        fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf8");
+      }
+
       if (data?.folderPath) {
         ensureDefaultWorkspaceFolders(data.folderPath);
       }
@@ -138,6 +154,7 @@ function saveWorkspaceData(data) {
     }
     const toSave = {
       ...(data || {}),
+      lastAppVersion: app.getVersion(),
       recentWorkspaces: recent.slice(0, 50),
     };
     fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), "utf8");
