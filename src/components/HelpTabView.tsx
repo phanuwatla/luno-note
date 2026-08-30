@@ -33,6 +33,7 @@ import { useAppSettings } from "@/hooks/useAppSettings";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
+import { getToolbarIcon } from "@/lib/iconPacks";
 
 export type HelpCategory =
   | "shortcuts"
@@ -44,7 +45,7 @@ export type HelpCategory =
 interface HelpCategoryMeta {
   id: HelpCategory;
   label: string;
-  icon: any;
+  iconKey: string;
   desc: string;
 }
 
@@ -60,6 +61,8 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
+  const pack = settings?.iconPack || "lucide";
+
   const isMac = useMemo(() => {
     return typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
   }, []);
@@ -71,31 +74,31 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
       {
         id: "shortcuts",
         label: t("helpModal.tabShortcuts") || "Shortcuts",
-        icon: Keyboard,
+        iconKey: "keyboard",
         desc: t("helpModal.sectionGeneral") || "Keyboard shortcuts for quick navigation and editing.",
       },
       {
         id: "markdown",
         label: t("helpModal.tabMarkdown") || "Markdown Guide",
-        icon: BookOpen,
+        iconKey: "bookOpen",
         desc: t("helpModal.markdownDescription") || "Comprehensive syntax reference for markdown documents.",
       },
       {
         id: "features",
         label: t("helpModal.tabFeatures") || "Features & Tools",
-        icon: Sparkles,
+        iconKey: "sparkles",
         desc: t("helpModal.description") || "Core features, slash commands, and editing workflow.",
       },
       {
         id: "faq",
-        label: (t as any)("helpModal.tabFaq") || "FAQ & Tips",
-        icon: HelpCircle,
-        desc: "Frequently asked questions, troubleshooting, and power user tips.",
+        label: t("helpModal.tabFaq") || "FAQ & Tips",
+        iconKey: "helpCircle",
+        desc: t("helpModal.faqGeneralDesc") || "Frequently asked questions, troubleshooting, and power user tips.",
       },
       {
         id: "about",
         label: t("helpModal.tabAbout") || "About",
-        icon: Info,
+        iconKey: "about",
         desc: t("helpModal.aboutDesc") || "Version info, community, and app overview.",
       },
     ],
@@ -119,22 +122,22 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
       {
         title: t("helpModal.sectionGeneral") || "General & Navigation",
         items: [
-          { label: t("editor.newNote") || "New Note", keys: [modKey, "N"], desc: "Create a new note in active workspace folder" },
-          { label: t("editor.saveFile") || "Save Note", keys: [modKey, "S"], desc: "Manually persist current note to disk" },
-          { label: t("sidebar.openFolderAction") || "Open Workspace Folder", keys: [modKey, "O"], desc: "Open a folder as your workspace" },
-          { label: t("editor.searchNotes") || "Quick Note Search", keys: [modKey, "P"], desc: "Search and jump across all workspace notes" },
-          { label: t("common.settings") || "Open Settings", keys: [modKey, ","], desc: "Open application preferences tab" },
-          { label: t("sidebar.help") || "Help & Documentation", keys: ["F1"], desc: "Open this help center" },
-          { label: "Close Active Tab", keys: [modKey, "W"], desc: "Close currently active editor tab" },
+          { label: t("editor.newNote") || "New Note", keys: [modKey, "N"], desc: t("helpModal.newNoteDesc") || "Create a new note in active workspace folder" },
+          { label: t("editor.saveFile") || "Save Note", keys: [modKey, "S"], desc: t("helpModal.saveNoteDesc") || "Manually persist current note to disk" },
+          { label: t("sidebar.openFolderAction") || "Open Workspace Folder", keys: [modKey, "O"], desc: t("helpModal.openFolderDesc") || "Open a folder as your workspace" },
+          { label: t("editor.searchNotes") || "Quick Note Search", keys: [modKey, "P"], desc: t("helpModal.searchNotesDesc") || "Search and jump across all workspace notes" },
+          { label: t("common.settings") || "Open Settings", keys: [modKey, ","], desc: t("helpModal.openSettingsDesc") || "Open application preferences tab" },
+          { label: t("sidebar.help") || "Help & Documentation", keys: ["F1"], desc: t("helpModal.helpDesc") || "Open this help center" },
+          { label: t("helpModal.closeActiveTab") || "Close Active Tab", keys: [modKey, "W"], desc: t("helpModal.closeActiveTabDesc") || "Close currently active editor tab" },
         ],
       },
       {
         title: t("helpModal.sectionFormatting") || "Text Formatting",
         items: [
-          { label: t("editor.bold") || "Bold", keys: [modKey, "B"], desc: "Make selected text bold" },
-          { label: t("editor.italic") || "Italic", keys: [modKey, "I"], desc: "Italicize selected text" },
+          { label: t("editor.bold") || "Bold", keys: [modKey, "B"], desc: t("editor.shortcutBoldDesc") || "Make selected text bold" },
+          { label: t("editor.italic") || "Italic", keys: [modKey, "I"], desc: t("editor.shortcutItalicDesc") || "Italicize selected text" },
           { label: t("editor.underline") || "Underline", keys: [modKey, "U"], desc: "Underline selected text" },
-          { label: t("editor.strikethrough") || "Strikethrough", keys: [modKey, "Shift", "X"], desc: "Cross out text" },
+          { label: t("editor.strikethrough") || "Strikethrough", keys: [modKey, "Shift", "X"], desc: t("editor.shortcutStrikeDesc") || "Cross out text" },
           { label: t("editor.inlineCode") || "Inline Code", keys: [modKey, "E"], desc: "Convert text to inline code block" },
           { label: t("editor.highlight") || "Highlight", keys: [modKey, "Shift", "H"], desc: "Apply background color highlight" },
           { label: t("editor.link") || "Insert Link", keys: [modKey, "K"], desc: "Insert or edit hyperlink" },
@@ -158,7 +161,7 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
         items: [
           { label: t("helpModal.featureSlashTitle") || "Slash Commands Menu", keys: ["/"], desc: "Trigger quick insert block popup" },
           { label: t("editor.shortcutTabDesc") || "Indent / Tab", keys: ["Tab"], desc: "Indent line or list item" },
-          { label: t("editor.shortcutShiftTabDesc") || "Outdent", keys: ["Shift", "Tab"], desc: "Outdent line or list item" },
+          { label: t("editor.shortcutShiftTabDesc") || "Outdent", keys: ["Shift", "Tab"], desc: t("editor.shortcutShiftTabDesc") || "Outdent line or list item" },
           { label: t("editor.undo") || "Undo", keys: [modKey, "Z"], desc: "Revert last change" },
           { label: t("editor.redo") || "Redo", keys: [modKey, "Y"], desc: "Reapply previously undone change" },
         ],
@@ -183,51 +186,54 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
       .filter((group) => group.items.length > 0);
   }, [shortcutGroups, searchQuery]);
 
+  const isTh = language === "th";
+
   const markdownCheatSheet = useMemo(
     () => [
       {
-        category: "Headings (หัวข้อ)",
+        category: isTh ? "หัวข้อ (Headings)" : "Headings",
         items: [
-          { syntax: "# Heading 1", preview: "Large primary heading (H1)" },
-          { syntax: "## Heading 2", preview: "Medium section heading (H2)" },
-          { syntax: "### Heading 3", preview: "Sub-section heading (H3)" },
+          { syntax: "# Heading 1", preview: isTh ? "หัวข้อหลักขนาดใหญ่ (H1)" : "Large primary heading (H1)" },
+          { syntax: "## Heading 2", preview: isTh ? "หัวข้อส่วนขนาดกลาง (H2)" : "Medium section heading (H2)" },
+          { syntax: "### Heading 3", preview: isTh ? "หัวข้อย่อย (H3)" : "Sub-section heading (H3)" },
         ],
       },
       {
-        category: "Styling (การเน้นข้อความ)",
+        category: isTh ? "การเน้นข้อความ (Styling)" : "Styling",
         items: [
-          { syntax: "**bold text**", preview: "Bold emphasis" },
-          { syntax: "*italic text*", preview: "Italicized text" },
-          { syntax: "~~strikethrough~~", preview: "Strikethrough line" },
-          { syntax: "==highlighted text==", preview: "Colored marker background" },
-          { syntax: "`inline code`", preview: "Inline monospace block" },
+          { syntax: "**bold text**", preview: isTh ? "ตัวหนาเน้นข้อความ" : "Bold emphasis" },
+          { syntax: "*italic text*", preview: isTh ? "ตัวเอียง" : "Italicized text" },
+          { syntax: "~~strikethrough~~", preview: isTh ? "ขีดฆ่าข้อความ" : "Strikethrough line" },
+          { syntax: "==highlighted text==", preview: isTh ? "ไฮไลต์พื้นหลังข้อความ" : "Colored marker background" },
+          { syntax: "`inline code`", preview: isTh ? "โค้ดแทรกในบรรทัด" : "Inline monospace block" },
         ],
       },
       {
-        category: "Lists & Tasks (รายการและงาน)",
+        category: isTh ? "รายการและงาน (Lists & Tasks)" : "Lists & Tasks",
         items: [
-          { syntax: "- [ ] Task to do\n- [x] Completed task", preview: "Interactive task checkboxes" },
-          { syntax: "- Bullet item\n  - Indented bullet", preview: "Unordered bullet lists" },
-          { syntax: "1. First step\n2. Second step", preview: "Numbered ordered lists" },
+          { syntax: "- [ ] Task to do\n- [x] Completed task", preview: isTh ? "กล่องเครื่องหมายสำหรับรายการงาน" : "Interactive task checkboxes" },
+          { syntax: "- Bullet item\n  - Indented bullet", preview: isTh ? "รายการหัวข้อย่อยแบบจุด" : "Unordered bullet lists" },
+          { syntax: "1. First step\n2. Second step", preview: isTh ? "รายการแบบใส่หมายเลขลำดับ" : "Numbered ordered lists" },
         ],
       },
       {
-        category: "Advanced Blocks (บล็อกขั้นสูง)",
+        category: isTh ? "บล็อกขั้นสูง (Advanced Blocks)" : "Advanced Blocks",
         items: [
-          { syntax: "```javascript\nfunction greet() {\n  console.log('Hello');\n}\n```", preview: "Syntax highlighted code block with copy" },
-          { syntax: "> This is a blockquote quote.", preview: "Indented blockquote callout" },
-          { syntax: "| Header 1 | Header 2 |\n| :--- | :--- |\n| Cell A | Cell B |", preview: "Clean markdown table" },
-          { syntax: "$E = mc^2$", preview: "Inline KaTeX Math equation" },
-          { syntax: "---\n***", preview: "Horizontal dividing rule" },
-          { syntax: "[Link Title](https://example.com)", preview: "Clickable external hyperlink" },
+          { syntax: "```javascript\nfunction greet() {\n  console.log('Hello');\n}\n```", preview: isTh ? "บล็อกโค้ดพร้อมไฮไลต์สีไวยากรณ์" : "Syntax highlighted code block with copy" },
+          { syntax: "> This is a blockquote quote.", preview: isTh ? "กล่องข้อความอ้างอิง" : "Indented blockquote callout" },
+          { syntax: "| Header 1 | Header 2 |\n| :--- | :--- |\n| Cell A | Cell B |", preview: isTh ? "ตารางจัดระเบียบข้อมูล" : "Clean markdown table" },
+          { syntax: "$E = mc^2$", preview: isTh ? "สูตรคณิตศาสตร์ KaTeX" : "Inline KaTeX Math equation" },
+          { syntax: "---\n***", preview: isTh ? "เส้นคั่นแบ่งแนวนอน" : "Horizontal dividing rule" },
+          { syntax: "[Link Title](https://example.com)", preview: isTh ? "ลิงก์เว็บไซต์ภายนอก" : "Clickable external hyperlink" },
+          { syntax: "Here is text[^1].\n\n[^1]: Footnote description.", preview: isTh ? "เชิงอรรถอ้างอิงท้ายหน้า" : "Footnote reference and definition" },
         ],
       },
     ],
-    []
+    [isTh]
   );
 
   const faqItems = useMemo(
-    () => [
+    () => isTh ? [
       {
         q: "โน้ตและไฟล์ของฉันถูกเก็บไว้ที่ไหน?",
         a: "Luno Notes ทำงานแบบ Local-first ข้อมูลทั้งหมดจะถูกเก็บเป็นไฟล์ .md และไฟล์รูปภาพจริงในโฟลเดอร์เครื่องคอมพิวเตอร์ของคุณ 100% ทำให้คุณสามารถเปิดแก้ไขด้วยโปรแกรมอื่นหรือย้ายโฟลเดอร์ได้อย่างอิสระ",
@@ -248,8 +254,29 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
         q: "สามารถปรับแต่งแถบเครื่องมือและไอคอนได้ไหม?",
         a: "สามารถทำได้ในเมนูตั้งค่า > แถบเครื่องมือ (Toolbar) คุณสามารถเปิด/ปิดปุ่มเครื่องมือ หรือลากสลับลำดับตำแหน่งปุ่มบน Toolbar ได้อย่างอิสระตามความถนัด",
       },
+    ] : [
+      {
+        q: "Where are my notes and files stored?",
+        a: "Luno Notes operates with a local-first architecture. All your notes and images are saved directly as real Markdown (.md) and media files on your local computer, allowing you to open or edit them with any external editor freely.",
+      },
+      {
+        q: "How does Google Drive synchronization work?",
+        a: "When enabled in Settings > Cloud Sync, Luno automatically backs up and syncs your workspace files with your personal Google Drive, giving you seamless access across all your devices.",
+      },
+      {
+        q: "How do I use Slash (/) commands?",
+        a: "Simply press '/' at the start of any empty line in the editor to bring up a quick popup menu for tables, code blocks, task lists, math formulas, and formatting tools without using the toolbar.",
+      },
+      {
+        q: "Can I view and edit two notes side-by-side?",
+        a: "Yes! Use the Split Screen button on the toolbar or right-click a note tab to open two documents side-by-side with an adjustable resizable divider.",
+      },
+      {
+        q: "Can I customize the toolbar and button order?",
+        a: "Yes, head over to Settings > Toolbar Preferences where you can toggle tool visibility and drag buttons to reorder them according to your workflow.",
+      },
     ],
-    []
+    [isTh]
   );
 
   return (
@@ -260,7 +287,10 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
         <div className="p-4 border-b border-border/40 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <HelpCircle className="h-4 w-4" />
+              {(() => {
+                const HelpIcon = getToolbarIcon("helpCircle", pack);
+                return <HelpIcon className="h-4 w-4" />;
+              })()}
             </div>
             <div>
               <h2 className="text-sm font-bold text-foreground leading-tight">
@@ -274,7 +304,7 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
         {/* Categories List */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {categories.map((cat) => {
-            const Icon = cat.icon;
+            const Icon = getToolbarIcon(cat.iconKey, pack);
             const isActive = activeCategory === cat.id;
             return (
               <button
@@ -301,10 +331,13 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
               type="button"
               variant="outline"
               size="sm"
-              className="w-full justify-start gap-2 text-xs rounded-xl h-8 border-border/60"
+              className="w-full justify-start gap-2 text-xs rounded-xl h-8 border-border/60 cursor-pointer"
               onClick={onOpenSettings}
             >
-              <SettingsIcon className="h-3.5 w-3.5" />
+              {(() => {
+                const SettingsIconComp = getToolbarIcon("settings", pack);
+                return <SettingsIconComp className="h-3.5 w-3.5" />;
+              })()}
               <span>{t("common.settings") || "Settings"}</span>
             </Button>
           )}
@@ -319,7 +352,10 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                  <currentCategory.icon className="h-4 w-4" />
+                  {(() => {
+                    const CurrentHeaderIcon = getToolbarIcon(currentCategory.iconKey, pack);
+                    return <CurrentHeaderIcon className="h-4 w-4" />;
+                  })()}
                 </div>
                 <h1 className="text-lg md:text-xl font-bold text-foreground">
                   {currentCategory.label}
@@ -341,14 +377,14 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search keyboard shortcuts (e.g. Save, Bold, New Note, Ctrl+N)..."
+                  placeholder={t("helpModal.searchShortcutsPlaceholder") || "Search keyboard shortcuts (e.g. Save, Bold, New Note, Ctrl+N)..."}
                   className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/70 bg-card text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary transition-colors"
                 />
               </div>
 
               {filteredShortcutGroups.length === 0 ? (
                 <div className="py-12 text-center text-xs text-muted-foreground rounded-2xl border border-border/40 bg-card/40">
-                  No matching shortcuts found.
+                  {t("helpModal.noShortcutsFound") || "No matching shortcuts found."}
                 </div>
               ) : (
                 filteredShortcutGroups.map((group) => (
@@ -393,9 +429,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
               <div className="p-4 rounded-2xl border border-primary/20 bg-primary/5 flex items-start gap-3">
                 <Lightbulb className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                 <div className="space-y-1 text-xs">
-                  <p className="font-semibold text-foreground">Markdown Live Formatting</p>
+                  <p className="font-semibold text-foreground">{t("helpModal.markdownTipTitle") || "Markdown Live Formatting"}</p>
                   <p className="text-muted-foreground leading-relaxed">
-                    Luno Notes รองรับไวยากรณ์ CommonMark และ GFM พร้อมตัวแสดงผลสด คุณสามารถพิมพ์สัญลักษณ์เหล่านี้เพื่อจัดรูปแบบเอกสารได้ทันที
+                    {t("helpModal.markdownTipDesc") || "Luno Notes supports CommonMark and GFM syntax with instant live rendering. Type these symbols to format your documents on the fly."}
                   </p>
                 </div>
               </div>
@@ -421,18 +457,25 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                             <pre className="text-xs font-mono bg-muted/70 p-2.5 pr-8 rounded-xl border border-border/50 text-foreground overflow-x-auto whitespace-pre-wrap">
                               {item.syntax}
                             </pre>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(item.syntax, codeId)}
-                              className="absolute top-2 right-2 p-1 rounded-md bg-card/80 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="Copy markdown snippet"
-                            >
-                              {copiedCode === codeId ? (
-                                <Check className="h-3.5 w-3.5 text-emerald-500" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(item.syntax, codeId)}
+                                  className="absolute top-2 right-2 p-1 rounded-md bg-card/80 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                                  aria-label="Copy markdown snippet"
+                                >
+                                  {copiedCode === codeId ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" sideOffset={4}>
+                                {copiedCode === codeId ? "Copied!" : "Copy markdown snippet"}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           <span className="text-xs text-muted-foreground pl-1">{item.preview}</span>
                         </div>
@@ -451,9 +494,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <Command className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">คำสั่ง Slash (/) ด่วน</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("helpModal.featureSlashTitle")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  พิมพ์เครื่องหมาย <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-foreground">/</kbd> ในบรรทัดว่างเพื่อเปิดเมนูสำหรับแทรกหัวข้อ ตาราง บล็อกโค้ด รายการงาน และเครื่องมือช่วยจัดรูปแบบได้ทันที
+                  {t("helpModal.featureSlashDesc")}
                 </p>
               </div>
 
@@ -461,9 +504,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <Columns className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">การแบ่งหน้าจอคู่ (Split View)</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("helpModal.featureSplitTitle")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  เปิดอ่านและแก้ไข 2 โน้ตพร้อมกันแบบเคียงข้างกัน โดยคลิกขวาที่แท็บหรือเลือก Split Screen สามารถปรับขนาดความกว้างได้อิสระ
+                  {t("helpModal.featureSplitDesc")}
                 </p>
               </div>
 
@@ -471,9 +514,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <Sparkles className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">ผู้ช่วยอัจฉริยะ Luno AI</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("helpModal.featureAiTitle")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  เชื่อมต่อ Gemini API เพื่อช่วยสรุปเนื้อหา, ตรวจไวยากรณ์, แปลภาษา, ช่วยเขียนบทความ และสร้างโค้ดโปรแกรมได้ในพริบตา
+                  {t("helpModal.featureAiDesc")}
                 </p>
               </div>
 
@@ -481,9 +524,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <Cloud className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">ซิงก์ข้อมูลกับ Google Drive</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("helpModal.featureSyncTitle")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  สำรองและซิงก์โน้ตทั้งหมดไปยัง Google Drive ของคุณโดยอัตโนมัติ ปลอดภัย และเปิดใช้งานต่อเนื่องได้ในทุกอุปกรณ์
+                  {t("helpModal.featureSyncDesc")}
                 </p>
               </div>
 
@@ -491,9 +534,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <Tag className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">แท็ก (#Tags) และตัวกรอง</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("helpModal.featureTagsTitle")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  ใส่ <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-foreground">#แท็ก</kbd> ได้ทุกที่ในเนื้อหาโน้ตเพื่อจัดกลุ่ม และคลิกเลือกแท็กจากแถบด้านข้างเพื่อกรองโน้ตที่เกี่ยวข้องได้ทันที
+                  {t("helpModal.featureTagsDesc")}
                 </p>
               </div>
 
@@ -501,9 +544,9 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                   <SlidersHorizontal className="h-5 w-5" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground">ปรับแต่งแถบเครื่องมือและธีม</h3>
+                <h3 className="text-sm font-bold text-foreground">{t("settings.title")}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  ปรับธีม Dark/Light, ชุดสี Accent, ขนาดตัวอักษร, และปรับแต่งปุ่มบน Toolbar ตามลำดับที่คุณใช้งานบ่อยที่สุด
+                  {t("settings.appThemeDesc")}
                 </p>
               </div>
             </div>
@@ -542,7 +585,7 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                   <span>Production Ready</span>
                 </div>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed pt-1">
-                  แอปพลิเคชันจดบันทึก Markdown แบบ Local-First ความเร็วสูง ทำงานบนเครื่องของคุณอย่างเป็นส่วนตัว พร้อมการเชื่อมต่อคลาวด์และผู้ช่วย AI
+                  {t("helpModal.aboutDesc")}
                 </p>
               </div>
 

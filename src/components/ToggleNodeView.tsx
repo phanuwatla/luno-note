@@ -1,13 +1,14 @@
 import { NodeViewContent, NodeViewWrapper } from "@tiptap/react";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface ToggleNodeViewProps {
   node: { attrs: { open?: boolean; title?: string } };
   updateAttributes: (attrs: Record<string, unknown>) => void;
+  selected?: boolean;
 }
 
-export default function ToggleNodeView({ node, updateAttributes }: ToggleNodeViewProps) {
+function ToggleNodeViewComponent({ node, updateAttributes }: ToggleNodeViewProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState<boolean>(node.attrs.open ?? false);
   const [title, setTitle] = useState<string>(node.attrs.title ?? "");
@@ -111,4 +112,14 @@ export default function ToggleNodeView({ node, updateAttributes }: ToggleNodeVie
       </div>
     </NodeViewWrapper>
   );
-}
+};
+
+export const ToggleNodeView = React.memo(ToggleNodeViewComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.node.attrs.open === nextProps.node.attrs.open &&
+    prevProps.node.attrs.title === nextProps.node.attrs.title &&
+    prevProps.selected === nextProps.selected
+  );
+});
+
+export default ToggleNodeView;

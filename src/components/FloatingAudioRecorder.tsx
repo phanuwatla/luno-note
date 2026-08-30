@@ -4,6 +4,8 @@ import { Mic, Square, Play, Pause, RotateCcw, Check, X, GripHorizontal, AlertCir
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import { formatDateTime } from "@/lib/dateTimeFormatter";
 
 interface FloatingAudioRecorderProps {
   isOpen: boolean;
@@ -69,6 +71,7 @@ export default function FloatingAudioRecorder({
   rootDirHandle,
 }: FloatingAudioRecorderProps) {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
 
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "paused" | "preview">("idle");
   const [recordDuration, setRecordDuration] = useState(0);
@@ -205,9 +208,8 @@ export default function FloatingAudioRecorder({
   useEffect(() => {
     if (isOpen) {
       const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const dateStr = now.toLocaleDateString([], { month: "short", day: "numeric" });
-      setAudioTitle(`Voice Note - ${dateStr}, ${timeStr}`);
+      const formattedNow = formatDateTime(now, settings.dateFormat, settings.timeFormat, settings.language);
+      setAudioTitle(`Voice Note - ${formattedNow}`);
       setRecordingState("idle");
       setRecordDuration(0);
       setAudioBlob(null);
@@ -827,10 +829,10 @@ export default function FloatingAudioRecorder({
         dragMomentum={false}
         dragElastic={0}
         onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={{ opacity: 0, scale: 0.92, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15, ease: "easeOut" }}
+        exit={{ opacity: 0, scale: 0.92, y: 16 }}
+        transition={{ type: "spring", damping: 25, stiffness: 350 }}
         className="fixed w-[320px] rounded-2xl border border-border/80 bg-card/95 p-3.5 shadow-2xl backdrop-blur-md select-none text-foreground z-50"
         data-floating-window="true"
         style={{ top: "18%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}

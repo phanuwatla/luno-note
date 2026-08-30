@@ -37,7 +37,7 @@ const LANGUAGES = [
   { value: "markdown", label: "Markdown" },
 ];
 
-export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
+const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
   node,
   updateAttributes,
 }) => {
@@ -170,5 +170,13 @@ export const CodeBlockNodeView: React.FC<NodeViewProps> = ({
     </NodeViewWrapper>
   );
 };
+
+export const CodeBlockNodeView = React.memo(CodeBlockNodeViewComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.node.attrs.language === nextProps.node.attrs.language &&
+    prevProps.node.textContent === nextProps.node.textContent &&
+    prevProps.selected === nextProps.selected
+  );
+});
 
 export default CodeBlockNodeView;

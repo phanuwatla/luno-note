@@ -1,8 +1,11 @@
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import RightPanel from "@/components/RightPanel";
+import VersionHistoryPanel from "@/components/VersionHistoryPanel";
+import VersionHistorySplitDiffView from "@/components/VersionHistorySplitDiffView";
+import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHistoryStorage";
 import { AnimatePresence } from "framer-motion";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, THAI_SPELL_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
   Check,
@@ -32,6 +35,8 @@ import {
   ChevronDown,
   Keyboard,
   Monitor,
+  Tablet,
+  Smartphone,
   Moon,
   MoreHorizontal,
   ClipboardList,
@@ -90,6 +95,7 @@ import {
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
+import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon } from "@/components/icons/WandSparklesIcon";
 import { SpellCheckIcon } from "@/components/icons/SpellCheckIcon";
@@ -129,9 +135,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
-import { parseFrontmatterAndTags, updateFrontmatterTags, isMarkdownNote } from "@/lib/frontmatter";
+import { parseFrontmatterAndTags, updateFrontmatterTags, updateFrontmatterIcon, updateFrontmatterFavorite, isMarkdownNote } from "@/lib/frontmatter";
 import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare } from "@/lib/googleDriveApi";
 import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
@@ -161,7 +168,8 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import { countWords, countCharacters } from "@/lib/wordCount";
-import { Underline, Highlight } from "@/lib/tiptapCustomMarks";
+import { formatDateForFileName } from "@/lib/dateTimeFormatter";
+import { Underline, Highlight, Superscript, Subscript } from "@/lib/tiptapCustomMarks";
 
 /** Preserves full ProseMirror undo/redo history and document state per note across tab switching */
 export const noteEditorStateMap = new Map<string, EditorState>();
@@ -206,13 +214,15 @@ export function clearNoteEditorHistory(noteId: string) {
 export const clearNoteEditorState = clearNoteEditorHistory;
 
 /** Preprocess Markdown to preserve paragraph first-line indentation and empty paragraphs while preserving code blocks and syntax */
-export function preprocessMarkdownForEditor(markdown: string): string {
+export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boolean = false): string {
   if (!markdown) return "";
   const lines = markdown.split("\n");
   let inFencedCode = false;
   let fenceChar = "";
   let fenceLength = 0;
   const resultLines: string[] = [];
+  const footnoteDefs = new Map<string, string>();
+  let justStrippedFootnote = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -248,11 +258,47 @@ export function preprocessMarkdownForEditor(markdown: string): string {
       continue;
     }
 
+    let processedLine = line;
+
+    // Handle footnote definitions outside code blocks: e.g. [^1]: This is a footnote.
+    const footnoteDefMatch = line.match(/^\[\^([^\]\r\n\s]+)\]:\s*(.*)$/);
+    if (footnoteDefMatch) {
+      const fnId = footnoteDefMatch[1].trim();
+      const fnContent = footnoteDefMatch[2].trim();
+      if (isReadingMode) {
+        // In Reading Mode: collected to render at the bottom of the document
+        footnoteDefs.set(fnId, fnContent);
+        // Ensure there is exactly 1 normal empty paragraph spacing after the text reference
+        while (
+          resultLines.length > 0 &&
+          (resultLines[resultLines.length - 1] === "" || resultLines[resultLines.length - 1] === "<p></p>")
+        ) {
+          resultLines.pop();
+        }
+        resultLines.push("");
+        resultLines.push("<p></p>");
+        resultLines.push("");
+        justStrippedFootnote = true;
+        continue;
+      } else {
+        // In Edit Mode: rendered in-place without separate arrow icon, with clickable prefix
+        processedLine = `<p id="fn-${fnId}" data-footnote-def="${fnId}" class="footnote-def text-sm text-muted-foreground my-1.5"><a href="#fnref-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer">[^${fnId}]:</a> ${fnContent}</p>`;
+        resultLines.push(processedLine);
+        continue;
+      }
+    }
+
     // Handle empty or blank lines (Obsidian compatibility: every blank line becomes an editable empty paragraph)
-    if (!line.trim()) {
+    if (!line.trim() || /^\s*\|[\s|]*$/.test(line)) {
+      if (isReadingMode && justStrippedFootnote) {
+        // Skip blank lines immediately following a stripped footnote definition in reading mode
+        continue;
+      }
+      justStrippedFootnote = false;
+
       // Find the next non-empty line to check if it's an indented list / continuation block
       let nextNonEmptyIdx = i + 1;
-      while (nextNonEmptyIdx < lines.length && !lines[nextNonEmptyIdx].trim()) {
+      while (nextNonEmptyIdx < lines.length && (!lines[nextNonEmptyIdx].trim() || /^\s*\|[\s|]*$/.test(lines[nextNonEmptyIdx]))) {
         nextNonEmptyIdx++;
       }
       const nextNonEmptyLine = nextNonEmptyIdx < lines.length ? lines[nextNonEmptyIdx] : "";
@@ -266,7 +312,7 @@ export function preprocessMarkdownForEditor(markdown: string): string {
 
       // Count consecutive blank lines (cap at 50 to prevent freezing on massive corrupted whitespace files)
       let blankCount = 1;
-      while (i + 1 < lines.length && !lines[i + 1].trim()) {
+      while (i + 1 < lines.length && (!lines[i + 1].trim() || /^\s*\|[\s|]*$/.test(lines[i + 1]))) {
         const nextCandidate = lines[i + 1];
         if (nextCandidate.length > 0 && /^[ \t]{2,}/.test(nextCandidate)) {
           break;
@@ -274,16 +320,20 @@ export function preprocessMarkdownForEditor(markdown: string): string {
         blankCount++;
         i++;
       }
+
       blankCount = Math.min(blankCount, 50);
       if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
         resultLines.push("");
       }
+      // In Markdown, 1 blank line separates blocks. Extra blank lines (blankCount > 1) represent intentional empty paragraphs.
       for (let b = 0; b < blankCount; b++) {
         resultLines.push("<p></p>");
       }
       resultLines.push("");
       continue;
     }
+
+    justStrippedFootnote = false;
 
     // Do NOT alter indentation for Markdown structural syntax:
     // lists (- *, 1.), blockquotes (>), headings (#), horizontal rules (--- *** ___ * * *), tables (|)
@@ -292,7 +342,6 @@ export function preprocessMarkdownForEditor(markdown: string): string {
     // Only convert leading spaces/tabs for prose text lines (e.g. Thai text) outside code blocks
     const hasProseText = /[\u0E00-\u0E7F]/.test(line);
 
-    let processedLine = line;
     if (!isMarkdownSyntax && hasProseText) {
       const match = line.match(/^([ \t\u00A0\u2003]{2,4}|\t+)(.*)/);
       if (match) {
@@ -318,13 +367,69 @@ export function preprocessMarkdownForEditor(markdown: string): string {
     processedLine = processedLine.replace(
       /!\[([^\]|\r\n]*)\|(\d+)(?:x\d+)?\]\(([^)\r\n]+)\)/g,
       (_m, alt, width, src) => {
-        const cleanSrc = (src || "").trim();
+        let cleanSrc = (src || "").trim();
         const cleanAlt = (alt || "").trim();
+        if (cleanSrc && !/^(https?:\/\/|data:|blob:)/i.test(cleanSrc)) {
+          try {
+            cleanSrc = encodeURI(decodeURI(cleanSrc));
+          } catch {
+            cleanSrc = cleanSrc.replace(/ /g, "%20");
+          }
+        }
         return `<img src="${cleanSrc}" alt="${cleanAlt}" width="${width}" data-relative-src="${cleanSrc}" style="width: ${width}px; max-width: 100%;" />`;
       }
     );
 
+    // Ensure spaces in standard Markdown images ![alt](url) are encoded as %20 so marked parses them properly
+    processedLine = processedLine.replace(
+      /!\[([^\]|\r\n]*)\]\(([^)\r\n]+)\)/g,
+      (match, alt, src) => {
+        const trimmed = (src || "").trim();
+        const titleMatch = trimmed.match(/^(\S+.*?)(?:\s+(["'][^"']*["']))?$/);
+        if (titleMatch) {
+          let urlPart = titleMatch[1];
+          const titlePart = titleMatch[2] ? ` ${titleMatch[2]}` : "";
+          if (urlPart && !/^(https?:\/\/|data:|blob:)/i.test(urlPart)) {
+            try {
+              urlPart = encodeURI(decodeURI(urlPart));
+            } catch {
+              urlPart = urlPart.replace(/ /g, "%20");
+            }
+            return `![${alt}](${urlPart}${titlePart})`;
+          }
+        }
+        return match;
+      }
+    );
+
+    // Convert footnote references outside inline code blocks: e.g. text[^1] or text[^note]
+    const parts = processedLine.split(/(`+[^`\r\n]*`+)/g);
+    processedLine = parts
+      .map((part) => {
+        if (part.startsWith("`") && part.endsWith("`")) return part;
+        return part.replace(/(?<!\\)\[\^([^\]\r\n\s]+)\]/g, (_m, refId) => {
+          const cleanId = refId.trim();
+          return `<sup><a href="#fn-${cleanId}" id="fnref-${cleanId}" data-footnote-ref="${cleanId}" class="footnote-ref text-primary hover:underline cursor-pointer select-none font-medium px-0.5">[${cleanId}]</a></sup>`;
+        });
+      })
+      .join("");
+
     resultLines.push(processedLine);
+  }
+
+  // In Reading Mode: render collected footnotes at the bottom below divider with return arrow
+  if (isReadingMode && footnoteDefs.size > 0) {
+    const footnoteItems: string[] = [];
+    footnoteDefs.forEach((fnContent, fnId) => {
+      footnoteItems.push(
+        `<li id="fn-${fnId}" class="footnote-item" data-footnote-id="${fnId}"><p><a id="fn-${fnId}" data-footnote-target="${fnId}" class="footnote-anchor select-none"></a>${fnContent} <a href="#fnref-${fnId}" id="fnback-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary hover:underline cursor-pointer select-none ml-1">↩</a></p></li>`
+      );
+    });
+    resultLines.push("");
+    resultLines.push("<p></p>");
+    resultLines.push('<hr class="footnotes-sep my-6 border-t border-border/60" />');
+    resultLines.push("<p></p>");
+    resultLines.push(`<section class="footnotes my-4" data-footnotes="true"><ol class="footnotes-list list-decimal pl-6 space-y-1 text-sm text-muted-foreground">${footnoteItems.join("")}</ol></section>`);
   }
 
   return resultLines.join("\n");
@@ -391,7 +496,56 @@ export const HashtagDecoration = Extension.create({
             return createHashtagDecorations(doc, options.theme, options.tagColorStyle);
           },
           apply(tr, oldState) {
-            return tr.docChanged ? createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle) : oldState;
+            if (!tr.docChanged) return oldState;
+            if (!oldState || tr.steps.length === 0) {
+              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
+            }
+            try {
+              let set = oldState.map(tr.mapping, tr.doc);
+              for (const step of tr.steps) {
+                step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
+                  const safeStart = Math.min(newStart, tr.doc.content.size);
+                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const $from = tr.doc.resolve(safeStart);
+                  const $to = tr.doc.resolve(safeEnd);
+                  const start = $from.start();
+                  const end = $to.end();
+                  set = set.remove(set.find(start, end));
+                  const newDecos: Decoration[] = [];
+                  const parentNode = $from.parent;
+                  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+                  parentNode.descendants((child: any, childPos: number, parent: any) => {
+                    if (child.isText) {
+                      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
+                      if (child.marks && child.marks.some((m: any) => m.type.name === "code")) return;
+                      const text = child.text || "";
+                      let match: RegExpExecArray | null;
+                      tagRegex.lastIndex = 0;
+                      const absPos = start + childPos;
+                      while ((match = tagRegex.exec(text)) !== null) {
+                        const rawTag = match[1];
+                        if (/^\d+$/.test(rawTag)) continue;
+                        const hashIndex = match[0].indexOf("#");
+                        const startPos = absPos + match.index + hashIndex;
+                        const endPos = startPos + 1 + rawTag.length;
+                        const colorClass = getTagColorClass(rawTag, options.theme, undefined, options.tagColorStyle);
+                        newDecos.push(
+                          Decoration.inline(startPos, endPos, {
+                            class: `inline-tag-badge border ${colorClass}`,
+                          })
+                        );
+                      }
+                    }
+                  });
+                  if (newDecos.length > 0) {
+                    set = set.add(tr.doc, newDecos);
+                  }
+                });
+              }
+              return set;
+            } catch {
+              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
+            }
           },
         },
         props: {
@@ -405,6 +559,8 @@ export const HashtagDecoration = Extension.create({
 });
 
 const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
+const LATIN_SPELL_REGEX = /[A-Za-z']+/g;
+const THAI_CHAR_TEST = /[\u0E00-\u0E7F]/;
 
 function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet {
   if (!enabled) return DecorationSet.empty;
@@ -423,11 +579,13 @@ function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet 
     if (node.isText && node.text) {
       const text = node.text;
 
-      // 1. Thai Misspellings check
-      for (const misspelled of Object.keys(THAI_SPELL_CORRECTIONS)) {
-        let sIdx = text.indexOf(misspelled);
-        while (sIdx !== -1) {
-          const from = pos + sIdx;
+      // 1. Thai Misspellings check via single precompiled regex
+      if (THAI_CHAR_TEST.test(text)) {
+        THAI_SPELL_REGEX.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = THAI_SPELL_REGEX.exec(text)) !== null) {
+          const misspelled = match[0];
+          const from = pos + match.index;
           const to = from + misspelled.length;
           decorations.push(
             Decoration.inline(from, to, {
@@ -435,14 +593,13 @@ function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet 
               "data-spell-word": misspelled,
             })
           );
-          sIdx = text.indexOf(misspelled, sIdx + 1);
         }
       }
 
       // 2. English words check
-      const latinRegex = /[A-Za-z']+/g;
+      LATIN_SPELL_REGEX.lastIndex = 0;
       let match: RegExpExecArray | null;
-      while ((match = latinRegex.exec(text)) !== null) {
+      while ((match = LATIN_SPELL_REGEX.exec(text)) !== null) {
         const word = match[0];
         if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
           if (isWordMisspelled(word)) {
@@ -482,7 +639,79 @@ export const SpellCheckDecoration = Extension.create({
             return createSpellCheckDecorations(doc, options.enabled);
           },
           apply(tr, oldState) {
-            return tr.docChanged ? createSpellCheckDecorations(tr.doc, options.enabled) : oldState;
+            if (!options.enabled) return DecorationSet.empty;
+            if (!tr.docChanged) return oldState;
+            if (!oldState || tr.steps.length === 0) {
+              return createSpellCheckDecorations(tr.doc, options.enabled);
+            }
+            try {
+              let set = oldState.map(tr.mapping, tr.doc);
+              for (const step of tr.steps) {
+                step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
+                  const safeStart = Math.min(newStart, tr.doc.content.size);
+                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const $from = tr.doc.resolve(safeStart);
+                  const $to = tr.doc.resolve(safeEnd);
+                  const start = $from.start();
+                  const end = $to.end();
+                  set = set.remove(set.find(start, end));
+                  const newDecos: Decoration[] = [];
+                  const parentNode = $from.parent;
+                  parentNode.descendants((child: any, childPos: number) => {
+                    if (
+                      child.type.name === "codeBlock" ||
+                      child.type.name === "codeBlockLowlight" ||
+                      child.type.name === "mathBlock" ||
+                      child.type.name === "image"
+                    ) {
+                      return false;
+                    }
+                    if (child.isText && child.text) {
+                      const text = child.text;
+                      const absPos = start + childPos;
+                      if (THAI_CHAR_TEST.test(text)) {
+                        THAI_SPELL_REGEX.lastIndex = 0;
+                        let match: RegExpExecArray | null;
+                        while ((match = THAI_SPELL_REGEX.exec(text)) !== null) {
+                          const misspelled = match[0];
+                          const from = absPos + match.index;
+                          const to = from + misspelled.length;
+                          newDecos.push(
+                            Decoration.inline(from, to, {
+                              class: "luno-spell-error",
+                              "data-spell-word": misspelled,
+                            })
+                          );
+                        }
+                      }
+                      LATIN_SPELL_REGEX.lastIndex = 0;
+                      let match: RegExpExecArray | null;
+                      while ((match = LATIN_SPELL_REGEX.exec(text)) !== null) {
+                        const word = match[0];
+                        if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
+                          if (isWordMisspelled(word)) {
+                            const from = absPos + match.index;
+                            const to = from + word.length;
+                            newDecos.push(
+                              Decoration.inline(from, to, {
+                                class: "luno-spell-error",
+                                "data-spell-word": word,
+                              })
+                            );
+                          }
+                        }
+                      }
+                    }
+                  });
+                  if (newDecos.length > 0) {
+                    set = set.add(tr.doc, newDecos);
+                  }
+                });
+              }
+              return set;
+            } catch {
+              return createSpellCheckDecorations(tr.doc, options.enabled);
+            }
           },
         },
         props: {
@@ -842,6 +1071,7 @@ export const Toggle = TiptapNode.create({
 export type SlashMenuItem = {
   id: string;
   titleKey: string;
+  categoryKey?: string;
   icon: React.ReactNode;
   keywords: string[];
   action: (
@@ -854,6 +1084,9 @@ export type SlashMenuItem = {
       openAudioRecorder: () => void;
       handleFixLanguage: () => void;
       openTranslator?: () => void;
+      openCalculator?: () => void;
+      openClock?: () => void;
+      triggerAi?: (actionType?: AiActionType) => void;
     }
   ) => void;
 };
@@ -875,31 +1108,243 @@ export const slashMenuScrollRef = {
   current: null as HTMLDivElement | null,
 };
 
+const escHtml = (str: string): string =>
+  str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+export const insertFootnoteAtSelection = (editor: any) => {
+  if (!editor || editor.isDestroyed) return;
+
+  const doc = editor.state.doc;
+  const existingDefs: { id: string; content: string }[] = [];
+  const existingNums: number[] = [];
+  const rangesToDelete: { from: number; to: number }[] = [];
+
+  try {
+    // Collect all existing citation numbers across the whole document
+    doc.descendants((node: any) => {
+      if (node.isText && node.text) {
+        const matches = Array.from(node.text.matchAll(/\[\^?(\d+)\]/g));
+        for (const m of matches as RegExpMatchArray[]) {
+          const n = parseInt(m[1], 10);
+          if (!isNaN(n)) existingNums.push(n);
+        }
+      }
+      if (node.marks) {
+        node.marks.forEach((mark: any) => {
+          if (mark.attrs?.["data-footnote-ref"]) {
+            const n = parseInt(mark.attrs["data-footnote-ref"], 10);
+            if (!isNaN(n)) existingNums.push(n);
+          }
+          if (mark.attrs?.["data-footnote-backref"]) {
+            const n = parseInt(mark.attrs["data-footnote-backref"], 10);
+            if (!isNaN(n)) existingNums.push(n);
+          }
+        });
+      }
+    });
+
+    // Scan top-level children to find definition paragraphs and their preceding blank line
+    let prevChildBlankRange: { from: number; to: number } | null = null;
+    let inDefGroup = false;
+
+    doc.forEach((childNode: any, offset: number) => {
+      const isDef =
+        childNode.type?.name === "paragraph" &&
+        (childNode.attrs?.["data-footnote-def"] ||
+          (childNode.attrs?.["id"]?.startsWith("fn-") ? childNode.attrs["id"].replace(/^fn-/, "") : null) ||
+          /^\s*\[\^[^\]]+\]:/.test(childNode.textContent || ""));
+
+      const isEmpty =
+        childNode.type?.name === "paragraph" &&
+        !childNode.textContent?.trim() &&
+        !isDef;
+
+      if (isDef) {
+        if (!inDefGroup && prevChildBlankRange) {
+          rangesToDelete.push(prevChildBlankRange);
+        }
+        inDefGroup = true;
+
+        let fnId = childNode.attrs?.["data-footnote-def"] || (childNode.attrs?.["id"]?.startsWith("fn-") ? childNode.attrs["id"].replace(/^fn-/, "") : null);
+        let content = childNode.textContent || "";
+        const match = content.match(/^\s*\[\^([^\]]+)\]:\s*(.*)$/);
+        if (match) {
+          fnId = fnId || match[1];
+          content = match[2].trim();
+        } else {
+          content = content.replace(/^\s*\[\^[^\]]+\]:\s*/, "").trim();
+        }
+
+        if (fnId) {
+          existingDefs.push({
+            id: String(fnId),
+            content,
+          });
+        }
+        rangesToDelete.push({
+          from: offset,
+          to: offset + childNode.nodeSize,
+        });
+      } else {
+        inDefGroup = false;
+      }
+
+      if (isEmpty) {
+        prevChildBlankRange = {
+          from: offset,
+          to: offset + childNode.nodeSize,
+        };
+      } else {
+        prevChildBlankRange = null;
+      }
+    });
+  } catch {
+    const docText = editor.getText();
+    const matches = Array.from(docText.matchAll(/\[\^(\d+)\]/g));
+    for (const m of matches as RegExpMatchArray[]) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n)) existingNums.push(n);
+    }
+  }
+
+  let nextNum = 1;
+  if (existingNums.length > 0) {
+    nextNum = Math.max(...existingNums) + 1;
+  }
+
+  const tr = editor.state.tr;
+
+  // 1. Delete all old definitions and their preceding blank line in reverse order
+  rangesToDelete.sort((a, b) => b.from - a.from);
+  for (const r of rangesToDelete) {
+    if (r.from < tr.doc.content.size && r.to <= tr.doc.content.size) {
+      tr.delete(r.from, r.to);
+    }
+  }
+
+  // 2. Map current cursor position through deletions
+  const mappedCursorPos = tr.mapping.map(editor.state.selection.from);
+
+  // 3. Insert citation [nextNum] at mapped cursor position
+  const citationSchema = editor.schema;
+  const supMark = citationSchema.marks.superscript ? citationSchema.marks.superscript.create() : null;
+  const linkMark = citationSchema.marks.link.create({
+    href: `#fn-${nextNum}`,
+    id: `fnref-${nextNum}`,
+    "data-footnote-ref": String(nextNum),
+    class: "footnote-ref text-primary hover:underline cursor-pointer select-none font-medium px-0.5",
+  });
+  const marks = supMark ? [linkMark, supMark] : [linkMark];
+  const citationText = citationSchema.text(`[${nextNum}]`, marks);
+  tr.insert(mappedCursorPos, citationText);
+
+  // 4. Resolve the end of the top-level block containing the new citation
+  const resolved = tr.doc.resolve(mappedCursorPos + citationText.nodeSize);
+  const afterBlockPos = resolved.after(1);
+
+  // 5. Construct the new definitions block
+  const allDefs = [...existingDefs, { id: String(nextNum), content: "" }];
+  const defNodes: any[] = [];
+  defNodes.push(citationSchema.nodes.paragraph.create());
+
+  for (const def of allDefs) {
+    const backlink = citationSchema.marks.link.create({
+      href: `#fnref-${def.id}`,
+      "data-footnote-backref": def.id,
+      class: "footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer",
+    });
+    const prefix = citationSchema.text(`[^${def.id}]:`, [backlink]);
+    const children = [prefix];
+    if (def.content) {
+      children.push(citationSchema.text(" " + def.content));
+    } else {
+      children.push(citationSchema.text(" "));
+    }
+    const para = citationSchema.nodes.paragraph.create(
+      {
+        id: `fn-${def.id}`,
+        "data-footnote-def": def.id,
+        class: "footnote-def text-sm text-muted-foreground my-1.5",
+      },
+      children
+    );
+    defNodes.push(para);
+  }
+
+  // 6. Insert new definitions block right after current block (or at document end)
+  const insertPos = Math.min(afterBlockPos, tr.doc.content.size);
+  tr.insert(insertPos, defNodes);
+
+  // 7. Move selection inside the new definition line
+  let targetPos = -1;
+  tr.doc.descendants((node: any, pos: number) => {
+    if (node.type?.name === "paragraph" && node.attrs?.["data-footnote-def"] === String(nextNum)) {
+      targetPos = pos + node.nodeSize - 1;
+      return false;
+    }
+  });
+
+  if (targetPos >= 0) {
+    tr.setSelection(editor.state.selection.constructor.near(tr.doc.resolve(targetPos)));
+  }
+
+  editor.view.dispatch(tr);
+  editor.view.focus();
+};
+
 export const SLASH_ITEMS: SlashMenuItem[] = [
+  // 1. History
+  {
+    id: "undo",
+    titleKey: "editor.undo",
+    categoryKey: "settings.toolCategoryHistory",
+    icon: <Undo2 className="mr-2 h-4 w-4" />,
+    keywords: ["undo", "history", "ย้อนกลับ", "เลิกทำ", "ยกเลิก"],
+    action: (editor) => editor.chain().focus().undo().run(),
+  },
+  {
+    id: "redo",
+    titleKey: "editor.redo",
+    categoryKey: "settings.toolCategoryHistory",
+    icon: <Redo2 className="mr-2 h-4 w-4" />,
+    keywords: ["redo", "history", "ทำซ้ำ", "ทำอีกครั้ง"],
+    action: (editor) => editor.chain().focus().redo().run(),
+  },
+
+  // 2. Headings
   {
     id: "h1",
     titleKey: "editor.heading1",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading1Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h1", "heading1", "header1", "หัวข้อ1", "หัวข้อ 1"],
+    keywords: ["h1", "heading1", "header1", "หัวข้อ1", "หัวข้อ 1", "หัวเรื่องใหญ่"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run(),
   },
   {
     id: "h2",
     titleKey: "editor.heading2",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading2Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h2", "heading2", "header2", "หัวข้อ2", "หัวข้อ 2"],
+    keywords: ["h2", "heading2", "header2", "หัวข้อ2", "หัวข้อ 2", "หัวเรื่องกลาง"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run(),
   },
   {
     id: "h3",
     titleKey: "editor.heading3",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading3Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h3", "heading3", "header3", "หัวข้อ3", "หัวข้อ 3"],
+    keywords: ["h3", "heading3", "header3", "หัวข้อ3", "หัวข้อ 3", "หัวเรื่องเล็ก"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run(),
   },
   {
     id: "h4",
     titleKey: "editor.heading4",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading4Icon className="mr-2 h-4 w-4" />,
     keywords: ["h4", "heading4", "header4", "หัวข้อ4", "หัวข้อ 4"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 4 }).run(),
@@ -907,6 +1352,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "h5",
     titleKey: "editor.heading5",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading5Icon className="mr-2 h-4 w-4" />,
     keywords: ["h5", "heading5", "header5", "หัวข้อ5", "หัวข้อ 5"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 5 }).run(),
@@ -914,27 +1360,33 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "h6",
     titleKey: "editor.heading6",
+    categoryKey: "settings.toolCategoryHeading",
     icon: <Heading6Icon className="mr-2 h-4 w-4" />,
     keywords: ["h6", "heading6", "header6", "หัวข้อ6", "หัวข้อ 6"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 6 }).run(),
   },
+
+  // 3. Inline Formatting
   {
     id: "bold",
     titleKey: "editor.bold",
+    categoryKey: "settings.toolCategoryInline",
     icon: <Bold className="mr-2 h-4 w-4" />,
-    keywords: ["bold", "b", "ตัวหนา"],
+    keywords: ["bold", "b", "ตัวหนา", "หนา"],
     action: (editor) => editor.chain().focus().toggleBold().run(),
   },
   {
     id: "italic",
     titleKey: "editor.italic",
+    categoryKey: "settings.toolCategoryInline",
     icon: <Italic className="mr-2 h-4 w-4" />,
-    keywords: ["italic", "i", "ตัวเอียง"],
+    keywords: ["italic", "i", "ตัวเอียง", "เอียง"],
     action: (editor) => editor.chain().focus().toggleItalic().run(),
   },
   {
     id: "underline",
     titleKey: "editor.underline",
+    categoryKey: "settings.toolCategoryInline",
     icon: <UnderlineIcon className="mr-2 h-4 w-4" />,
     keywords: ["underline", "u", "ขีดเส้นใต้", "เส้นใต้"],
     action: (editor) => editor.chain().focus().toggleUnderline().run(),
@@ -942,6 +1394,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "strike",
     titleKey: "editor.strikethrough",
+    categoryKey: "settings.toolCategoryInline",
     icon: <Strikethrough className="mr-2 h-4 w-4" />,
     keywords: ["strike", "strikethrough", "s", "ขีดฆ่า"],
     action: (editor) => editor.chain().focus().toggleStrike().run(),
@@ -949,13 +1402,17 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "highlight",
     titleKey: "editor.highlight",
+    categoryKey: "settings.toolCategoryInline",
     icon: <Highlighter className="mr-2 h-4 w-4" />,
     keywords: ["highlight", "mark", "hl", "ไฮไลต์", "ไฮไลท์", "เน้นข้อความ", "ป้าย"],
     action: (editor) => editor.chain().focus().toggleHighlight().run(),
   },
+
+  // 4. Lists
   {
     id: "bulletList",
     titleKey: "editor.bulletList",
+    categoryKey: "settings.toolCategoryList",
     icon: <List className="mr-2 h-4 w-4" />,
     keywords: ["bullet", "list", "ul", "รายการ", "จุด"],
     action: (editor) => editor.chain().focus().toggleBulletList().run(),
@@ -963,6 +1420,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "orderedList",
     titleKey: "editor.numberedList",
+    categoryKey: "settings.toolCategoryList",
     icon: <ListOrdered className="mr-2 h-4 w-4" />,
     keywords: ["number", "ordered", "ol", "เลข", "ลำดับ"],
     action: (editor) => editor.chain().focus().toggleOrderedList().run(),
@@ -970,13 +1428,17 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "taskList",
     titleKey: "editor.checkbox",
+    categoryKey: "settings.toolCategoryList",
     icon: <ListTodoIcon className="mr-2 h-4 w-4" />,
-    keywords: ["todo", "task", "check", "checkbox", "กล่อง", "เช็ค"],
+    keywords: ["todo", "task", "check", "checkbox", "กล่อง", "เช็ค", "ทาสก์"],
     action: (editor) => editor.chain().focus().toggleTaskList().run(),
   },
+
+  // 5. Blocks & Structure
   {
     id: "toggle",
     titleKey: "editor.toggle",
+    categoryKey: "settings.toolCategoryBlock",
     icon: <ChevronsDownUp className="mr-2 h-4 w-4" />,
     keywords: ["toggle", "collapse", "details", "พับ", "ย่อย"],
     action: (editor) => handleToggleClick(editor),
@@ -984,13 +1446,15 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "code",
     titleKey: "editor.inlineCode",
+    categoryKey: "settings.toolCategoryBlock",
     icon: <CodeXml className="mr-2 h-4 w-4" />,
-    keywords: ["code", "inline", "โค้ด"],
+    keywords: ["code", "inline", "โค้ด", "โค้ดในบรรทัด"],
     action: (editor) => editor.chain().focus().toggleCode().run(),
   },
   {
     id: "codeBlock",
     titleKey: "editor.codeBlock",
+    categoryKey: "settings.toolCategoryBlock",
     icon: <SquareCode className="mr-2 h-4 w-4" />,
     keywords: ["codeblock", "code", "block", "โค้ด", "บล็อกโค้ด"],
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
@@ -998,27 +1462,41 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "blockquote",
     titleKey: "editor.blockquote",
+    categoryKey: "settings.toolCategoryBlock",
     icon: <Quote className="mr-2 h-4 w-4" />,
     keywords: ["quote", "blockquote", "คำพูด", "อ้างอิง"],
     action: (editor) => editor.chain().focus().toggleBlockquote().run(),
   },
   {
+    id: "footnote",
+    titleKey: "editor.footnote",
+    categoryKey: "settings.toolCategoryBlock",
+    icon: <FootnoteIcon className="mr-2 h-4 w-4" />,
+    keywords: ["footnote", "note", "fn", "เชิงอรรถ", "อ้างอิงท้ายหน้า", "อ้างอิง", "reference"],
+    action: (editor) => insertFootnoteAtSelection(editor),
+  },
+  {
     id: "horizontalRule",
     titleKey: "editor.horizontalRule",
+    categoryKey: "settings.toolCategoryBlock",
     icon: <Minus className="mr-2 h-4 w-4" />,
-    keywords: ["hr", "horizontal", "rule", "line", "divider", "เส้นแบ่ง", "เส้น"],
+    keywords: ["hr", "horizontal", "rule", "line", "divider", "เส้นแบ่ง", "เส้น", "คั่น"],
     action: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   {
-    id: "emoji",
-    titleKey: "editor.insertEmoji",
-    icon: <Smile className="mr-2 h-4 w-4" />,
-    keywords: ["emoji", "smile", "อิโมจิ"],
-    action: (editor) => editor.chain().focus().insertContent("😊").run(),
+    id: "table",
+    titleKey: "editor.insertTable",
+    categoryKey: "settings.toolCategoryBlock",
+    icon: <TableIcon className="mr-2 h-4 w-4" />,
+    keywords: ["table", "grid", "ตาราง", "แถว", "คอลัมน์"],
+    action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
+
+  // 6. Media & Tools
   {
     id: "link",
     titleKey: "editor.link",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <Link2 className="mr-2 h-4 w-4" />,
     keywords: ["link", "url", "ลิงก์"],
     action: (_editor, helpers) => helpers.openLinkDialog(),
@@ -1026,6 +1504,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "imageUrl",
     titleKey: "editor.insertImageByUrl",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <ImagePlus className="mr-2 h-4 w-4" />,
     keywords: ["image", "img", "photo", "pic", "รูป", "ภาพ", "url"],
     action: (_editor, helpers) => helpers.openImageDialog(),
@@ -1033,6 +1512,7 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "imageWorkspace",
     titleKey: "editor.insertImageFromWorkspace",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <Images className="mr-2 h-4 w-4" />,
     keywords: ["image", "workspace", "attachment", "attachments", "รูป", "ไฟล์แนบ", "คลังภาพ"],
     action: (_editor, helpers) => helpers.openWorkspaceImageDialog?.(),
@@ -1040,37 +1520,140 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
   {
     id: "imageUpload",
     titleKey: "editor.uploadImage",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <Upload className="mr-2 h-4 w-4" />,
     keywords: ["upload", "file", "image", "img", "อัปโหลด", "อัพโหลด", "รูป", "ไฟล์"],
     action: (_editor, helpers) => helpers.triggerImageUpload(),
   },
   {
+    id: "emoji",
+    titleKey: "editor.insertEmoji",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Smile className="mr-2 h-4 w-4" />,
+    keywords: ["emoji", "smile", "อิโมจิ", "ยิ้ม"],
+    action: (editor) => editor.chain().focus().insertContent("😊").run(),
+  },
+  {
     id: "audio",
     titleKey: "editor.recordAudio",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <Mic className="mr-2 h-4 w-4" />,
     keywords: ["audio", "record", "voice", "sound", "mic", "อัดเสียง", "เสียง", "บันทึกเสียง", "ไมค์"],
     action: (_editor, helpers) => helpers.openAudioRecorder(),
   },
   {
-    id: "table",
-    titleKey: "editor.insertTable",
-    icon: <TableIcon className="mr-2 h-4 w-4" />,
-    keywords: ["table", "grid", "ตาราง", "แถว", "คอลัมน์"],
-    action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
-  },
-  {
-    id: "fixLanguage",
-    titleKey: "editor.fixLanguage",
-    icon: <Wrench className="mr-2 h-4 w-4" />,
-    keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา"],
-    action: (_editor, helpers) => helpers.handleFixLanguage(),
+    id: "calculator",
+    titleKey: "editor.calculator",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Calculator className="mr-2 h-4 w-4" />,
+    keywords: ["calculator", "calc", "math", "เครื่องคิดเลข", "คำนวณ", "เลข"],
+    action: (_editor, helpers) => helpers.openCalculator?.(),
   },
   {
     id: "translator",
     titleKey: "editor.translator",
+    categoryKey: "settings.toolCategoryMedia",
     icon: <Languages className="mr-2 h-4 w-4" />,
     keywords: ["translate", "translator", "language", "แปล", "แปลภาษา", "ดิกชันนารี", "ภาษา"],
     action: (_editor, helpers) => helpers.openTranslator?.(),
+  },
+  {
+    id: "clock",
+    titleKey: "editor.clock",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Clock className="mr-2 h-4 w-4" />,
+    keywords: ["clock", "timer", "stopwatch", "time", "นาฬิกา", "จับเวลา", "เวลา"],
+    action: (_editor, helpers) => helpers.openClock?.(),
+  },
+  {
+    id: "fixLanguage",
+    titleKey: "editor.fixLanguage",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Wrench className="mr-2 h-4 w-4" />,
+    keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา", "แก้แป้นพิมพ์"],
+    action: (_editor, helpers) => helpers.handleFixLanguage(),
+  },
+
+  // 7. AI Assistant
+  {
+    id: "aiImprove",
+    titleKey: "settings.aiImprove",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <WandSparklesIcon className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "improve", "เขียนดีขึ้น", "ปรับปรุง", "เกลา", "เอไอ"],
+    action: (_editor, helpers) => helpers.triggerAi?.("improve"),
+  },
+  {
+    id: "aiFixGrammar",
+    titleKey: "settings.aiFixGrammar",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <SpellCheckIcon className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "grammar", "spell", "ไวยากรณ์", "สะกด", "ตรวจคำผิด"],
+    action: (_editor, helpers) => helpers.triggerAi?.("fix_grammar"),
+  },
+  {
+    id: "aiMakeShorter",
+    titleKey: "settings.aiMakeShorter",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <Minimize2 className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "short", "shorter", "summarize", "ย่อ", "สั้นลง", "สรุป"],
+    action: (_editor, helpers) => helpers.triggerAi?.("make_shorter"),
+  },
+  {
+    id: "aiMakeLonger",
+    titleKey: "settings.aiMakeLonger",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <Maximize2 className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "long", "longer", "expand", "ขยาย", "ยาวขึ้น", "เพิ่มรายละเอียด"],
+    action: (_editor, helpers) => helpers.triggerAi?.("make_longer"),
+  },
+  {
+    id: "aiSimplify",
+    titleKey: "settings.aiSimplify",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <BookOpen className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "simplify", "เข้าใจง่าย", "ภาษาเรียบง่าย"],
+    action: (_editor, helpers) => helpers.triggerAi?.("simplify"),
+  },
+  {
+    id: "aiFormalize",
+    titleKey: "settings.aiFormalize",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <BriefcaseBusinessIcon className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "formal", "formalize", "ทางการ", "ภาษาทางการ"],
+    action: (_editor, helpers) => helpers.triggerAi?.("formalize"),
+  },
+  {
+    id: "aiMakeCasual",
+    titleKey: "settings.aiMakeCasual",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <MessageCircle className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "casual", "เป็นกันเอง", "ภาษาสนทนา"],
+    action: (_editor, helpers) => helpers.triggerAi?.("make_casual"),
+  },
+  {
+    id: "aiTranslate",
+    titleKey: "settings.aiTranslate",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <Languages className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "translate", "แปล", "แปลภาษา", "อังกฤษ", "ไทย"],
+    action: (_editor, helpers) => helpers.triggerAi?.("translate"),
+  },
+  {
+    id: "aiContinueWriting",
+    titleKey: "settings.aiContinueWriting",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <ArrowRight className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "continue", "write", "เขียนต่อ", "ต่อข้อความ"],
+    action: (_editor, helpers) => helpers.triggerAi?.("continue_writing"),
+  },
+  {
+    id: "aiRewrite",
+    titleKey: "settings.aiRewrite",
+    categoryKey: "settings.toolCategoryAi",
+    icon: <PenLineIcon className="mr-2 h-4 w-4" />,
+    keywords: ["ai", "rewrite", "เขียนใหม่", "เรียบเรียงใหม่", "สำนวนใหม่"],
+    action: (_editor, helpers) => helpers.triggerAi?.("rewrite"),
   },
 ];
 
@@ -1883,7 +2466,14 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
 
   // Serialize lists matching CommonMark block boundaries
   td.addRule("list", {
-    filter: ["ul", "ol"],
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        (el.nodeName === "UL" || el.nodeName === "OL") &&
+        !el.classList?.contains("footnotes-list") &&
+        !el.closest("section.footnotes, [data-footnotes]")
+      );
+    },
     replacement: (content, node) => {
       const parent = node.parentNode;
       if (parent && parent.nodeName === "LI") {
@@ -1970,6 +2560,96 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     replacement: (content) => `==${content}==`,
   });
 
+  // Convert footnote reference HTML <sup><a href="#fn-1" data-footnote-ref="1">[1]</a></sup> back into [^1]
+  td.addRule("footnoteRef", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.getAttribute("data-footnote-ref") !== null ||
+        (el.nodeName === "SUP" && Boolean(el.querySelector("[data-footnote-ref]") || /\[\^?[^\]]+\]/.test(el.textContent || ""))) ||
+        (el.nodeName === "A" && (el.getAttribute("href") || "").startsWith("#fn-"))
+      );
+    },
+    replacement: (_content, node) => {
+      const el = node as HTMLElement;
+      const ref =
+        el.getAttribute("data-footnote-ref") ||
+        el.querySelector("[data-footnote-ref]")?.getAttribute("data-footnote-ref") ||
+        (el.getAttribute("href") || "").replace(/^#fn-/, "") ||
+        el.textContent ||
+        "";
+      const cleanRef = ref.replace(/[\[\]\^]/g, "").trim();
+      return cleanRef ? `[^${cleanRef}]` : "";
+    },
+  });
+
+  // Convert in-place footnote definition HTML <p id="fn-1" data-footnote-def="1">... back into [^1]: ...
+  td.addRule("footnoteDef", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.nodeName === "P" &&
+        (el.getAttribute("data-footnote-def") !== null || el.classList?.contains("footnote-def") || /^\s*\[\^[^\]]+\]:/.test(el.textContent || ""))
+      );
+    },
+    replacement: (_content, node) => {
+      const el = node as HTMLElement;
+      const fnId =
+        el.getAttribute("data-footnote-def") ||
+        (el.getAttribute("id") || "").replace(/^fn-/, "") ||
+        "1";
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll(".footnote-backref, [data-footnote-backref]").forEach((a) => a.remove());
+      const rawContent = td.turndown(clone.innerHTML).trim();
+      const cleanContent = rawContent.replace(/^\[\^[^\]]+\]:\s*/, "").trim();
+      return `\n[^${fnId}]: ${cleanContent}\n`;
+    },
+  });
+
+  // Ignore reading mode bottom footnotes list items and section so they never write to disk
+  td.addRule("readingModeFootnoteItem", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return el.nodeName === "LI" && (el.classList?.contains("footnote-item") || el.getAttribute("data-footnote-id") !== null);
+    },
+    replacement: () => "",
+  });
+
+  td.addRule("footnotesSection", {
+    filter: (node) => (node as HTMLElement).nodeName === "SECTION" && (node as HTMLElement).classList?.contains("footnotes"),
+    replacement: () => "",
+  });
+
+  td.addRule("footnotesSep", {
+    filter: (node) => (node as HTMLElement).nodeName === "HR" && (node as HTMLElement).classList?.contains("footnotes-sep"),
+    replacement: () => "",
+  });
+
+  // Suppress duplicate standalone footnote backrefs
+  td.addRule("footnoteBackref", {
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.getAttribute("data-footnote-backref") !== null ||
+        el.classList?.contains("footnote-backref") ||
+        (el.nodeName === "A" && (el.getAttribute("href") || "").startsWith("#fnref-"))
+      );
+    },
+    replacement: () => "",
+  });
+
+  // Convert <sup> to <sup>text</sup> in markdown (if not a footnote ref)
+  td.addRule("superscript", {
+    filter: (node) => node.nodeName === "SUP" && !node.querySelector("[data-footnote-ref]"),
+    replacement: (content) => `<sup>${content}</sup>`,
+  });
+
+  // Convert <sub> to <sub>text</sub> in markdown
+  td.addRule("subscript", {
+    filter: "sub",
+    replacement: (content) => `<sub>${content}</sub>`,
+  });
+
   // Convert HTML images back to Markdown, preserving relative asset paths and width
   td.addRule("relativeImage", {
     filter: "img",
@@ -1980,7 +2660,14 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const rawWidth = img.getAttribute("width") || img.style.width || "";
       const widthMatch = rawWidth ? String(rawWidth).match(/\d+/) : null;
       const width = widthMatch ? widthMatch[0] : "";
-      const relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap?.get(img.src) || img.getAttribute("src") || "";
+      let relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap?.get(img.src) || img.getAttribute("src") || "";
+      if (relSrc && !/^(https?:\/\/|data:|blob:)/i.test(relSrc)) {
+        try {
+          relSrc = encodeURI(decodeURI(relSrc));
+        } catch {
+          relSrc = relSrc.replace(/ /g, "%20");
+        }
+      }
       const titleAttr = title ? ` "${title}"` : "";
       if (width) {
         return `![${alt}|${width}](${relSrc}${titleAttr})`;
@@ -2026,7 +2713,15 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
 
   // Clean list item formatting to prevent loose lists with blank lines and broken indentation
   td.addRule("cleanListItem", {
-    filter: (node) => node.nodeName === "LI" && node.getAttribute("data-type") !== "taskItem",
+    filter: (node) => {
+      const el = node as HTMLElement;
+      return (
+        el.nodeName === "LI" &&
+        el.getAttribute("data-type") !== "taskItem" &&
+        !el.classList?.contains("footnote-item") &&
+        el.getAttribute("data-footnote-id") === null
+      );
+    },
     replacement: (content, node, options) => {
       const cleanContent = content
         .replace(/^\n+/, "")
@@ -2111,13 +2806,19 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
 
       rows.forEach((row) => {
         const cells = Array.from(row.querySelectorAll("th, td"));
+        if (cells.length === 0) return;
         const rowData = cells.map((cell) => {
-          const text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
+          let text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
+          text = text.replace(/\\\|/g, "___PIPE_TEMP___").replace(/\|/g, "\\|").replace(/___PIPE_TEMP___/g, "\\|");
           return text;
         });
         if (rowData.length > maxCols) maxCols = rowData.length;
         matrix.push(rowData);
       });
+
+      while (matrix.length > 1 && matrix[matrix.length - 1].every((cell) => !cell.trim())) {
+        matrix.pop();
+      }
 
       if (matrix.length === 0 || maxCols === 0) return "";
 
@@ -2199,6 +2900,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [htmlCursor, setHtmlCursor] = useState({ line: 1, col: 1 });
+
+  // Version History State
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [comparingVersion, setComparingVersion] = useState<NoteVersionSnapshot | null>(null);
 
   // Share via Google Drive State
   const [shareSyncDialogOpen, setShareSyncDialogOpen] = useState(false);
@@ -2402,7 +3107,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleCreateFileFromDialog = () => {
     const baseName = (newFileName || "").trim();
     const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
     let defaultBaseName = "Untitled";
     if (settings.newFilePattern === "date") {
       defaultBaseName = `Note_${dateStr}`;
@@ -2557,6 +3262,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [isImageZoomed, setIsImageZoomed] = useState(false);
   const [canZoomImage, setCanZoomImage] = useState(false);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
+  const [htmlDeviceMode, setHtmlDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [clockOpen, setClockOpen] = useState(false);
@@ -2704,7 +3410,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isTiptapJson = (text: string) => typeof text === "string" && (text.trimStart().startsWith('{"type":"doc"') || text.includes('{"type":"doc"'));
 
   /** Return content in the format that editor.setContent() / useEditor({ content }) accepts */
-  const parseEditorContent = (text: unknown, baseTitle: string = "", isTxt: boolean = false, isHtml: boolean = false): string | Record<string, unknown> => {
+  const parseEditorContent = (
+    text: unknown,
+    baseTitle: string = "",
+    isTxt: boolean = false,
+    isHtml: boolean = false,
+    readingMode: boolean = isReadingMode
+  ): string | Record<string, unknown> => {
     if (isHtml) {
       return typeof text === "string" ? text : "";
     }
@@ -2761,17 +3473,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (parsedFm.hasFrontmatter) {
       cleanText = parsedFm.bodyContent;
     }
+    cleanText = cleanText.replace(/^\r?\n/, "");
 
     if (isTxt) {
       if (!cleanText.trim()) return "<p></p>";
-      return toEditorHtml(cleanText, true);
+      return toEditorHtml(cleanText, true, readingMode);
     }
 
     const titleH1Html = baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
-    let editorHtml = toEditorHtml(cleanText, false);
+    let editorHtml = toEditorHtml(cleanText, false, readingMode);
 
-    if (baseTitle && /^\s*<h1[^>]*>[\s\S]*?<\/h1>/i.test(editorHtml)) {
-      editorHtml = editorHtml.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>/i, titleH1Html);
+    const firstH1Match = /^\s*(?:<p>(?:<br\s*\/?>|\s*)*<\/p>\s*)*<h1[^>]*>[\s\S]*?<\/h1>/i.exec(editorHtml);
+    if (firstH1Match) {
+      editorHtml = titleH1Html + editorHtml.slice(firstH1Match[0].length);
     } else if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
       editorHtml = titleH1Html + editorHtml;
     }
@@ -2836,6 +3550,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     // Unwrap paragraphs containing audio elements or image elements to ensure they are parsed as top-level block nodes
     root.querySelectorAll("p").forEach((p) => {
+      if (p.closest("table, td, th")) return;
       const audio = p.querySelector("audio");
       if (audio) {
         if (p.children.length === 1 && !p.textContent?.trim()) {
@@ -2846,8 +3561,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             p.remove();
           }
         }
-      } else if (p.children.length === 1 && p.firstElementChild?.tagName === "IMG" && !p.textContent?.trim()) {
-        p.replaceWith(p.firstElementChild);
+      }
+      const img = p.querySelector("img");
+      if (img) {
+        if (p.children.length === 1 && !p.textContent?.trim()) {
+          p.replaceWith(img);
+        } else {
+          p.querySelectorAll("br").forEach((br) => {
+            if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
+              br.remove();
+            }
+          });
+          if (p.contains(img)) {
+            p.after(img);
+          }
+          if (!p.textContent?.trim() && !p.children.length) {
+            p.remove();
+          }
+        }
       }
     });
 
@@ -2855,8 +3586,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     root.querySelectorAll("img").forEach((img) => {
       const src = img.getAttribute("src") || "";
       if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
-        img.setAttribute("data-relative-src", src);
-        const cachedBlobUrl = assetBlobUrlMap.current.get(src);
+        let encodedRel = src;
+        try {
+          encodedRel = encodeURI(decodeURI(src));
+        } catch {
+          encodedRel = src.replace(/ /g, "%20");
+        }
+        let decodedRel = src;
+        try {
+          decodedRel = decodeURIComponent(src);
+        } catch {}
+        img.setAttribute("data-relative-src", encodedRel);
+        const cachedBlobUrl =
+          assetBlobUrlMap.current.get(encodedRel) ||
+          assetBlobUrlMap.current.get(decodedRel) ||
+          assetBlobUrlMap.current.get(src);
         if (cachedBlobUrl) {
           img.setAttribute("src", cachedBlobUrl);
         }
@@ -2865,6 +3609,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     // Clean up empty paragraph before an image or audio if it was created by Markdown block splitting
     root.querySelectorAll("p").forEach((p) => {
+      if (p.closest("table, td, th")) return;
       if (!p.textContent?.trim() && !p.querySelector("img, audio, input, label")) {
         const next = p.nextElementSibling;
         if (next && (next.tagName === "IMG" || next.tagName === "AUDIO")) {
@@ -3012,8 +3757,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
-  const toEditorHtml = (text: string, isTxt: boolean = false): string => {
-    if (!text.trim()) return isTxt ? "<p></p>" : "<h1></h1><p></p>";
+  const toEditorHtml = (text: string, isTxt: boolean = false, readingMode: boolean = isReadingMode): string => {
+    if (!text) return isTxt ? "<p></p>" : "<p></p>";
 
     const temp = document.createElement("div");
     const format = isTxt ? "plain" : (note?.contentFormat ?? "markdown");
@@ -3026,7 +3771,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else {
       try {
         const textWithTableAttr = text.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
-        const preprocessed = preprocessMarkdownForEditor(textWithTableAttr);
+        const preprocessed = preprocessMarkdownForEditor(textWithTableAttr, readingMode);
         const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true });
         temp.innerHTML = typeof parsed === "string" ? parsed : text;
       } catch {
@@ -3044,7 +3789,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const EDITOR_CLASSES =
     "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
     " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
-    " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal";
+    " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
+    " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
 
   const scheduleAutoSaveDiskRef = useRef<(() => void) | null>(null);
 
@@ -3120,6 +3866,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const openAudioRecorderRef = useRef<(() => void) | null>(null);
   const handleFixLanguageRef = useRef<(() => void) | null>(null);
   const openTranslatorRef = useRef<(() => void) | null>(null);
+  const openCalculatorRef = useRef<(() => void) | null>(null);
+  const openClockRef = useRef<(() => void) | null>(null);
+  const handleAiActionRef = useRef<((action?: AiActionType) => void) | null>(null);
   const tRef = useRef(t);
   const isMobileRef = useRef(isMobile);
   const noteRef = useRef(note);
@@ -3146,6 +3895,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         openAudioRecorder: () => openAudioRecorderRef.current?.(),
         handleFixLanguage: () => handleFixLanguageRef.current?.(),
         openTranslator: () => openTranslatorRef.current?.(),
+        openCalculator: () => openCalculatorRef.current?.(),
+        openClock: () => openClockRef.current?.(),
+        triggerAi: (action) => handleAiActionRef.current?.(action),
       });
     },
     [],
@@ -3199,8 +3951,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const filtered = SLASH_ITEMS.filter((item) => {
         if (!query) return true;
         const titleStr = t(item.titleKey).toLowerCase();
+        const catStr = item.categoryKey ? t(item.categoryKey).toLowerCase() : "";
         return (
           titleStr.includes(query) ||
+          catStr.includes(query) ||
           item.keywords.some((kw) => kw.toLowerCase().includes(query))
         );
       });
@@ -3232,11 +3986,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   );
 
   const [editorTick, setEditorTick] = useState(0);
+  const tickRafRef = useRef<number | null>(null);
+  const lastTickTimeRef = useRef<number>(0);
+  const scheduleEditorTick = useCallback(() => {
+    if (tickRafRef.current !== null) return;
+    const now = Date.now();
+    const elapsed = now - lastTickTimeRef.current;
+    if (elapsed >= 350) {
+      lastTickTimeRef.current = now;
+      tickRafRef.current = window.setTimeout(() => {
+        tickRafRef.current = null;
+        setEditorTick((v) => (v + 1) % 1000000);
+      }, 0);
+    } else {
+      tickRafRef.current = window.setTimeout(() => {
+        tickRafRef.current = null;
+        lastTickTimeRef.current = Date.now();
+        setEditorTick((v) => (v + 1) % 1000000);
+      }, 350 - elapsed);
+    }
+  }, []);
 
   const processAndInsertImageFileRef = useRef<((file: File) => Promise<void>) | null>(null);
   const debouncedContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedVersionSnapshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveContentRef = useRef<{ id: string; content: string } | null>(null);
   const userEditedRef = useRef(false);
+  const editorInstanceRef = useRef<TiptapEditor | null>(null);
 
   const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -3263,29 +4039,143 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setNoteScrollPosition(note.id, top);
   }, [note?.id]);
 
+  const serializeEditorContent = useCallback((targetNote: Note, instance: TiptapEditor): string => {
+    if (isTxtFile(targetNote)) {
+      return getPlainTextFromHtml(instance.getHTML());
+    }
+    const html = instance.getHTML();
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    // Strip reading-mode footnote section and separator if any are present in the DOM
+    temp.querySelectorAll("section.footnotes, [data-footnotes], hr.footnotes-sep").forEach((el) => el.remove());
+    const firstChild = temp.firstElementChild;
+    if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
+      firstChild.remove();
+    }
+    return normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
+  }, [isTxtFile, turndown]);
+
   const flushDebouncedContentSave = useCallback(() => {
     if (debouncedContentSaveTimeoutRef.current) {
       clearTimeout(debouncedContentSaveTimeoutRef.current);
       debouncedContentSaveTimeoutRef.current = null;
     }
-    if (userEditedRef.current && pendingSaveContentRef.current && noteRef.current) {
-      const { id, content } = pendingSaveContentRef.current;
+    if (userEditedRef.current && noteRef.current) {
+      const currentNote = noteRef.current;
+      let contentToSave = pendingSaveContentRef.current?.content;
+      if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current) {
+        try {
+          contentToSave = serializeEditorContent(currentNote, editorInstanceRef.current);
+        } catch {
+          // fallback
+        }
+      }
       pendingSaveContentRef.current = null;
-      onUpdate(id, { content });
+      if (contentToSave !== undefined && contentToSave !== null) {
+        onUpdate(currentNote.id, { content: contentToSave });
+      }
       userEditedRef.current = false;
     } else if (!userEditedRef.current) {
       pendingSaveContentRef.current = null;
     }
-  }, [onUpdate]);
+  }, [onUpdate, serializeEditorContent]);
+
+  const navigateFootnoteOrAnchor = useCallback((clickedEl: HTMLElement, container: HTMLElement | null): boolean => {
+    const linkEl = clickedEl.closest("a, [data-footnote-ref], [data-footnote-backref], [data-footnote-target], sup, .footnote-ref, .footnote-backref") as HTMLElement | null;
+    if (!linkEl) return false;
+
+    const fnRef =
+      linkEl.getAttribute("data-footnote-ref") ||
+      linkEl.querySelector("[data-footnote-ref]")?.getAttribute("data-footnote-ref") ||
+      linkEl.closest("[data-footnote-ref]")?.getAttribute("data-footnote-ref");
+
+    const fnBackref =
+      linkEl.getAttribute("data-footnote-backref") ||
+      linkEl.querySelector("[data-footnote-backref]")?.getAttribute("data-footnote-backref") ||
+      linkEl.closest("[data-footnote-backref]")?.getAttribute("data-footnote-backref");
+
+    const href = linkEl.getAttribute("href") || (linkEl.querySelector("a")?.getAttribute("href") || "");
+
+    const isBackref = Boolean(fnBackref || href.includes("#fnref-") || linkEl.classList?.contains("footnote-backref"));
+    const isCitation = Boolean(!isBackref && (fnRef || href.includes("#fn-") || linkEl.classList?.contains("footnote-ref") || linkEl.closest("sup")));
+
+    if (!isCitation && !isBackref && !href.startsWith("#")) return false;
+
+    const cleanId = (
+      fnRef ||
+      fnBackref ||
+      (href.includes("#") ? href.split("#")[1].replace(/^(fn|fnref)-/, "") : "") ||
+      (linkEl.textContent || "").replace(/[\[\]\^:\s]/g, "")
+    ).trim();
+
+    if (!cleanId) return false;
+
+    const rootEl = container || editorScrollContainerRef.current || document;
+    let targetEl: HTMLElement | null = null;
+
+    if (isCitation) {
+      // User clicked citation [1] in text -> jump down to definition at bottom (or in-place)
+      targetEl =
+        (rootEl.querySelector(`[data-footnote-def="${cleanId}"]`) as HTMLElement) ||
+        (rootEl.querySelector(`[data-footnote-backref="${cleanId}"]`) as HTMLElement) ||
+        (rootEl.querySelector(`[data-footnote-target="${cleanId}"]`) as HTMLElement) ||
+        (rootEl.querySelector(`[id="fn-${cleanId}"]`) as HTMLElement) ||
+        (rootEl.querySelector(`[data-footnote-id="${cleanId}"]`) as HTMLElement) ||
+        (document.getElementById(`fn-${cleanId}`));
+    } else {
+      // User clicked return arrow ↩ (or [^1]:) -> jump back up to citation [1] in text
+      targetEl =
+        (rootEl.querySelector(`[data-footnote-ref="${cleanId}"]`) as HTMLElement) ||
+        (rootEl.querySelector(`[id="fnref-${cleanId}"]`) as HTMLElement) ||
+        (document.getElementById(`fnref-${cleanId}`));
+    }
+
+    if (targetEl) {
+      const scrollBlock = targetEl.closest("li, p, h1, h2, h3, h4, h5, h6, sup") || targetEl;
+      scrollBlock.scrollIntoView({ behavior: "smooth", block: "center" });
+      const highlightTarget = targetEl.closest("li, p, sup") || targetEl;
+      highlightTarget.classList.add("bg-primary/20", "transition-colors", "duration-500", "rounded");
+      setTimeout(() => {
+        highlightTarget.classList.remove("bg-primary/20");
+      }, 1200);
+      return true;
+    }
+
+    return false;
+  }, []);
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         codeBlock: false,
+        paragraph: false,
         dropcursor: {
           color: "hsl(var(--border))",
           width: 1,
           class: "prosemirror-dropcursor",
+        },
+      }),
+      Paragraph.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            id: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("id"),
+              renderHTML: (attributes) => {
+                if (!attributes.id) return {};
+                return { id: attributes.id };
+              },
+            },
+            "data-footnote-def": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-footnote-def"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-footnote-def"]) return {};
+                return { "data-footnote-def": attributes["data-footnote-def"] };
+              },
+            },
+          };
         },
       }),
       CodeBlockLowlight.extend({
@@ -3308,6 +4198,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
       Underline,
       Highlight,
+      Superscript,
+      Subscript,
       Toggle,
       TaskList,
       TaskItem,
@@ -3333,13 +4225,41 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 };
               },
             },
+            "data-footnote-ref": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-footnote-ref"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-footnote-ref"]) return {};
+                return {
+                  "data-footnote-ref": attributes["data-footnote-ref"],
+                };
+              },
+            },
+            "data-footnote-backref": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-footnote-backref"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-footnote-backref"]) return {};
+                return {
+                  "data-footnote-backref": attributes["data-footnote-backref"],
+                };
+              },
+            },
+            id: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("id"),
+              renderHTML: (attributes) => {
+                if (!attributes.id) return {};
+                return {
+                  id: attributes.id,
+                };
+              },
+            },
           };
         },
       }).configure({
         openOnClick: false,
-        autolink: true,
-        defaultProtocol: "https",
-        protocols: ["http", "https", "ftp", "mailto", "tel", "wikilink"],
+        autolink: false,
         validate: () => true,
         HTMLAttributes: {
           class: "text-primary underline underline-offset-4",
@@ -3397,7 +4317,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               if (baseTitle) return baseTitle;
             }
             const pattern = settingsRef.current?.newFilePattern;
-            const dateStr = new Date().toISOString().slice(0, 10);
+            const dateStr = formatDateForFileName(new Date(), settingsRef.current?.dateFormat);
             if (pattern === "date") return `Note_${dateStr}`;
             if (pattern === "daily") return `Daily-${dateStr}`;
             return tRef.current("editor.untitled");
@@ -3459,11 +4379,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }`,
       },
       handleClick: (view, pos, event) => {
-        const target = (event.target as HTMLElement).closest("a");
+        const target = (event.target as HTMLElement).closest("a, [data-footnote-ref], [data-footnote-backref], [data-footnote-target], sup, .footnote-ref, .footnote-backref");
         if (!target) return false;
 
-        const href = target.getAttribute("href") || "";
-        const dataWiki = target.getAttribute("data-wikilink");
+        const href = target.getAttribute("href") || (target.querySelector("a")?.getAttribute("href") || "");
+        const dataWiki = target.getAttribute("data-wikilink") || target.querySelector("[data-wikilink]")?.getAttribute("data-wikilink");
         const wikilinkTarget = dataWiki || (href.startsWith("wikilink:") ? decodeURIComponent(href.replace(/^wikilink:/, "")) : null);
 
         if (wikilinkTarget) {
@@ -3495,7 +4415,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             });
             return true;
           }
-        } else if (href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:") || href.startsWith("tel:"))) {
+        }
+
+        if (navigateFootnoteOrAnchor(target, (view.dom.closest(".luno-editor-container") || view.dom.parentElement || document) as HTMLElement)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return true;
+        }
+
+        if (href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:") || href.startsWith("tel:"))) {
           event.preventDefault();
           event.stopPropagation();
           if (href.startsWith("http://") || href.startsWith("https://")) {
@@ -3509,6 +4437,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
           return true;
         }
+
         return false;
       },
       handleDrop: (_view, event) => {
@@ -3637,7 +4566,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
-      setEditorTick((v) => v + 1);
+      scheduleEditorTick();
       if (note?.id) {
         noteEditorStateMap.set(note.id, instance.state);
       }
@@ -3648,93 +4577,88 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
-      setEditorTick((v) => v + 1);
+      scheduleEditorTick();
       if (note?.id) {
         noteEditorStateMap.set(note.id, instance.state);
       }
-      if (!note || syncingFromNote.current || isNoteDeleted(note.id)) return;
+      if (isReadingMode || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (loadingNoteIdRef.current === note.id) return;
       userEditedRef.current = true;
-      setLastEditedTime(Date.now());
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
-      if (note.fileType === "image" || note.fileType === "binary") return;
+      if (note.fileType === "image" || note.fileType === "binary" || isHtmlFile(note) || isTxtFile(note)) return;
 
-      if (!isTxtFile(note)) {
-        const doc = instance.state.doc;
-        const firstChild = doc.firstChild;
-        let firstH1Text = "";
-        if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-          firstH1Text = (firstChild.textContent || "").trim();
-        }
+      const doc = instance.state.doc;
+      const firstChild = doc.firstChild;
+      let firstH1Text = "";
+      if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
+        firstH1Text = (firstChild.textContent || "").trim();
+      }
 
-        const currentBaseTitle = getBaseTitle(note);
-        if (firstH1Text !== currentBaseTitle) {
-          if (firstH1Text === "") {
-            pendingRenameRef.current = { note, firstH1Text: "", newFileName: "" };
-          } else if (note.fileName) {
-            const lastDot = note.fileName.lastIndexOf(".");
-            const ext = lastDot > 0 ? note.fileName.slice(lastDot) : ".md";
-            const safeName = firstH1Text.replace(/[\\/:*?"<>|]/g, "_").trim();
-            if (safeName && !isSystemGeneratedUntitledName(safeName)) {
-              const newFileName = `${safeName}${ext}`;
-              if (newFileName !== note.fileName) {
-                pendingRenameRef.current = { note, firstH1Text, newFileName };
-                if (debounceRenameTimeoutRef.current) {
-                  clearTimeout(debounceRenameTimeoutRef.current);
-                }
-                debounceRenameTimeoutRef.current = setTimeout(() => {
-                  debounceRenameTimeoutRef.current = null;
-                  flushPendingRename();
-                }, 800);
+      const currentBaseTitle = getBaseTitle(note);
+      if (firstH1Text !== currentBaseTitle) {
+        if (firstH1Text === "") {
+          pendingRenameRef.current = { note, firstH1Text: "", newFileName: "" };
+        } else if (note.fileName) {
+          const lastDot = note.fileName.lastIndexOf(".");
+          const ext = lastDot > 0 ? note.fileName.slice(lastDot) : ".md";
+          const safeName = firstH1Text.replace(/[\\/:*?"<>|]/g, "_").trim();
+          if (safeName && !isSystemGeneratedUntitledName(safeName)) {
+            const newFileName = `${safeName}${ext}`;
+            if (newFileName !== note.fileName) {
+              pendingRenameRef.current = { note, firstH1Text, newFileName };
+              if (debounceRenameTimeoutRef.current) {
+                clearTimeout(debounceRenameTimeoutRef.current);
               }
-            } else {
-              pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
+              debounceRenameTimeoutRef.current = setTimeout(() => {
+                debounceRenameTimeoutRef.current = null;
+                flushPendingRename();
+              }, 800);
             }
           } else {
             pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
           }
+        } else {
+          pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
         }
       }
 
-      if (isHtmlFile(note)) {
-        // Raw HTML / Code notes are edited in HtmlCodeEditor — Tiptap MUST NOT overwrite note.content!
-        return;
-      }
-
-      let savedContent = "";
-      if (isTxtFile(note)) {
-        savedContent = getPlainTextFromHtml(instance.getHTML());
-      } else {
-        const html = instance.getHTML();
-        const temp = document.createElement("div");
-        temp.innerHTML = html;
-        const firstChild = temp.firstElementChild;
-        if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
-          firstChild.remove();
-        }
-        savedContent = normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
-      }
-
-      pendingSaveContentRef.current = { id: note.id, content: savedContent };
-      try {
-        if (savedContent) {
-          localStorage.setItem(`luno_backup_${note.id}`, savedContent);
-          if (note.fileName) {
-            localStorage.setItem(`luno_backup_fn_${note.fileName}`, savedContent);
-          }
-        }
-      } catch {
-        /* ignore localStorage quota */
-      }
       if (debouncedContentSaveTimeoutRef.current) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
       }
       debouncedContentSaveTimeoutRef.current = setTimeout(() => {
-        if (userEditedRef.current && pendingSaveContentRef.current) {
-          const { id, content } = pendingSaveContentRef.current;
+        if (userEditedRef.current && noteRef.current) {
+          const currentNote = noteRef.current;
+          const savedContent = serializeEditorContent(currentNote, instance);
+          pendingSaveContentRef.current = { id: currentNote.id, content: savedContent };
+          try {
+            if (savedContent) {
+              localStorage.setItem(`luno_backup_${currentNote.id}`, savedContent);
+              if (currentNote.fileName) {
+                localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, savedContent);
+              }
+            }
+          } catch {
+            /* ignore localStorage quota */
+          }
           pendingSaveContentRef.current = null;
-          onUpdate(id, { content });
+          setLastEditedTime(Date.now());
+          onUpdate(currentNote.id, { content: savedContent });
           userEditedRef.current = false;
+
+          // Throttled and debounced automatic version snapshot on typing idle (10s)
+          if (debouncedVersionSnapshotTimeoutRef.current) {
+            clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
+          }
+          debouncedVersionSnapshotTimeoutRef.current = setTimeout(() => {
+            saveVersionSnapshot(
+              { ...currentNote, content: savedContent },
+              "auto",
+              undefined,
+              false,
+              editorStats.wordCount,
+              editorStats.charCount
+            );
+          }, 10000);
         } else if (!userEditedRef.current) {
           pendingSaveContentRef.current = null;
         }
@@ -3744,9 +4668,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
         setSaveStatus("auto_saving");
         scheduleAutoSaveDiskRef.current?.();
-      }, 300);
+      }, 1000);
     },
   });
+
+  editorInstanceRef.current = editor;
 
   const toggleTranslator = useCallback(() => {
     setTranslatorOpen((prev) => {
@@ -4162,6 +5088,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const actionId = `breadcrumb-editor-actions-${paneId}`;
     const statusId = `breadcrumb-save-status-${paneId}`;
 
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     const findTargets = () => {
       const target = document.getElementById(actionId);
       if (target) {
@@ -4171,16 +5099,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (statusTarget) {
         setStatusPortalTarget((prev) => (prev !== statusTarget ? statusTarget : prev));
       }
+      if (target && statusTarget && interval) {
+        clearInterval(interval);
+        interval = null;
+      }
     };
 
     findTargets();
-    const interval = setInterval(findTargets, 100);
+    interval = setInterval(findTargets, 300);
 
     const observer = new MutationObserver(findTargets);
     observer.observe(document.body, { childList: true, subtree: true });
 
     return () => {
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       observer.disconnect();
     };
   }, [paneId]);
@@ -4207,15 +5139,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   useEffect(() => {
     if (!note) return;
-    const savedSnapshot = savedSnapshotByNoteId[note.id];
-    const currentContent = getContentToSave(savedSnapshot?.ext ?? "md");
-    const currentlySaved = Boolean(savedSnapshot && currentContent === savedSnapshot.content);
-
-    setSaveStatus((prev) => {
-      if (prev === "saving" || prev === "auto_saving" || prev === "auto_saved") return prev;
-      return currentlySaved ? "saved" : "unsaved";
-    });
-  }, [note?.id, editorTick, note?.content]);
+    if (saveStatus === "saving" || saveStatus === "auto_saving" || saveStatus === "auto_saved") return;
+    if (userEditedRef.current) {
+      setSaveStatus("unsaved");
+    }
+  }, [note?.id, note?.content]);
 
   useEffect(() => {
     if (saveStatus === "auto_saved") {
@@ -4257,7 +5185,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
+    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) {
+      if (debounceRenameTimeoutRef.current) {
+        clearTimeout(debounceRenameTimeoutRef.current);
+        debounceRenameTimeoutRef.current = null;
+      }
+      pendingRenameRef.current = null;
+    }
+
     if (isHtmlFile(note)) {
+      if (debounceRenameTimeoutRef.current) {
+        clearTimeout(debounceRenameTimeoutRef.current);
+        debounceRenameTimeoutRef.current = null;
+      }
+      pendingRenameRef.current = null;
       editorActiveNoteIdRef.current = note.id;
       return;
     }
@@ -4345,6 +5286,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
         debouncedContentSaveTimeoutRef.current = null;
       }
+      if (debouncedVersionSnapshotTimeoutRef.current) {
+        clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
+        debouncedVersionSnapshotTimeoutRef.current = null;
+      }
       if (autoSaveDiskTimeoutRef.current) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
         autoSaveDiskTimeoutRef.current = null;
@@ -4374,6 +5319,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (debouncedContentSaveTimeoutRef.current) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
         debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (debouncedVersionSnapshotTimeoutRef.current) {
+        clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
+        debouncedVersionSnapshotTimeoutRef.current = null;
       }
       if (autoSaveDiskTimeoutRef.current) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
@@ -4412,10 +5361,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode]);
 
+  const isFirstReadingModeEffectRef = useRef(true);
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.setEditable(!isReadingMode);
-  }, [editor, isReadingMode]);
+    if (isFirstReadingModeEffectRef.current) {
+      isFirstReadingModeEffectRef.current = false;
+      return;
+    }
+    if (!note) return;
+    const rawContent = noteRef.current?.content ?? note.content ?? "";
+    const isTxt = isTxtFile(note);
+    const isHtml = isHtmlFile(note);
+    const baseTitle = getBaseTitle(note);
+    const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, isReadingMode);
+    const prevScroll = editorScrollContainerRef.current?.scrollTop;
+    (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+    if (typeof prevScroll === "number" && editorScrollContainerRef.current) {
+      editorScrollContainerRef.current.scrollTop = prevScroll;
+    }
+  }, [editor, isReadingMode, note?.id, getBaseTitle]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -4992,14 +5957,32 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleInsertWorkspaceImage = useCallback(
     (targetNote: Note, relativePath: string, blobUrl?: string) => {
       const fileName = targetNote.fileName || targetNote.title || "image.png";
-      const finalBlobUrl = blobUrl || assetBlobUrlMap.current.get(relativePath) || relativePath;
+      let encodedRelPath = relativePath;
+      try {
+        encodedRelPath = encodeURI(decodeURI(relativePath));
+      } catch {
+        encodedRelPath = relativePath.replace(/ /g, "%20");
+      }
+      let decodedRelPath = relativePath;
+      try {
+        decodedRelPath = decodeURIComponent(relativePath);
+      } catch {}
+
+      const finalBlobUrl =
+        blobUrl ||
+        assetBlobUrlMap.current.get(encodedRelPath) ||
+        assetBlobUrlMap.current.get(decodedRelPath) ||
+        assetBlobUrlMap.current.get(relativePath) ||
+        encodedRelPath;
+
       if (blobUrl) {
-        assetBlobUrlMap.current.set(relativePath, blobUrl);
-        assetBlobUrlMap.current.set(blobUrl, relativePath);
+        assetBlobUrlMap.current.set(encodedRelPath, blobUrl);
+        assetBlobUrlMap.current.set(decodedRelPath, blobUrl);
+        assetBlobUrlMap.current.set(blobUrl, encodedRelPath);
       }
       const chain = getFocusedChain();
       if (chain) {
-        chain.setImage({ src: finalBlobUrl, alt: fileName, "data-relative-src": relativePath } as any).run();
+        chain.setImage({ src: finalBlobUrl, alt: fileName, "data-relative-src": encodedRelPath } as any).run();
       }
     },
     [getFocusedChain]
@@ -5027,6 +6010,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     openAudioRecorderRef.current = openAudioRecorder;
     handleFixLanguageRef.current = handleFixLanguage;
     openTranslatorRef.current = toggleTranslator;
+    openCalculatorRef.current = toggleCalculator;
+    openClockRef.current = toggleClock;
+    handleAiActionRef.current = (action) => handleAiAction(action || "improve");
     processAndInsertImageFileRef.current = processAndInsertImageFile;
   });
 
@@ -5078,7 +6064,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const getRelativeAttachmentPath = (attachmentFileName: string) => {
     const depth = (note?.folderPath ?? "").split("/").filter(Boolean).length;
     const prefix = depth > 0 ? "../".repeat(depth) : "";
-    return `${prefix}attachments/${attachmentFileName}`;
+    const rawPath = `${prefix}attachments/${attachmentFileName}`;
+    try {
+      return encodeURI(decodeURI(rawPath));
+    } catch {
+      return rawPath.replace(/ /g, "%20");
+    }
   };
 
   const processAndInsertImageFile = async (file: File) => {
@@ -5146,7 +6137,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
             const relPath = getRelativeAttachmentPath(uniqueName);
             const blobUrl = URL.createObjectURL(finalBlob);
+            const decodedRel = decodeURIComponent(relPath);
             assetBlobUrlMap.current.set(relPath, blobUrl);
+            assetBlobUrlMap.current.set(decodedRel, blobUrl);
             assetBlobUrlMap.current.set(blobUrl, relPath);
 
             const chain = getFocusedChain();
@@ -5173,7 +6166,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         const relPath = getRelativeAttachmentPath(attachmentFileName);
         const blobUrl = URL.createObjectURL(finalBlob);
+        const decodedRel = decodeURIComponent(relPath);
         assetBlobUrlMap.current.set(relPath, blobUrl);
+        assetBlobUrlMap.current.set(decodedRel, blobUrl);
         assetBlobUrlMap.current.set(blobUrl, relPath);
 
         const chain = getFocusedChain();
@@ -5242,9 +6237,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const normalizeSerializedMarkdown = (markdown: string): string => {
     let clean = markdown.replace(/\r\n?/g, "\n");
-    clean = clean.replace(/\n*<!--luno:blank-->/g, "\n");
+    let leadingBlankCount = 0;
+    while (clean.startsWith("<!--luno:blank-->") || clean.startsWith("\n<!--luno:blank-->")) {
+      leadingBlankCount++;
+      clean = clean.replace(/^\n*<!--luno:blank-->\n*/, "");
+    }
+    clean = clean.replace(/^\n+/, "");
+    clean = clean.replace(/\n*<!--luno:blank-->\n*/g, "\n\n");
     clean = clean.replace(/<!--luno:blank-->/g, "");
-    return clean.replace(/^[\r\n]+|[\r\n]+$/g, "");
+    clean = clean.replace(/\n[ \t]*\|[ \t|]*\n/g, "\n\n");
+    clean = clean.replace(/[ \t]+(?=\n)/g, "");
+    clean = clean.replace(/\n+$/, "");
+    if (leadingBlankCount > 0) {
+      clean = "\n".repeat(leadingBlankCount) + clean;
+    }
+    return clean;
   };
 
   const getMarkdownFromHtml = (html: string): string => {
@@ -5274,7 +6281,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const resolveAssetPath = (baseFolderPath: string, assetPath: string) => {
-    const trimmed = assetPath.trim();
+    let trimmed = assetPath.trim();
+    try {
+      trimmed = decodeURIComponent(trimmed);
+    } catch {}
     if (!trimmed) return "";
     if (trimmed.startsWith("/")) return trimmed.replace(/^\/+/, "");
 
@@ -5378,14 +6388,30 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let modified = false;
 
     for (const { pos, relPath } of tasks) {
-      let blobUrl = assetBlobUrlMap.current.get(relPath);
+      let encodedRel = relPath;
+      try {
+        encodedRel = encodeURI(decodeURI(relPath));
+      } catch {
+        encodedRel = relPath.replace(/ /g, "%20");
+      }
+      let decodedRel = relPath;
+      try {
+        decodedRel = decodeURIComponent(relPath);
+      } catch {}
+
+      let blobUrl =
+        assetBlobUrlMap.current.get(encodedRel) ||
+        assetBlobUrlMap.current.get(decodedRel) ||
+        assetBlobUrlMap.current.get(relPath);
+
       if (!blobUrl) {
         try {
           const resolvedUrl = await resolveAssetDataUrl(relPath);
           if (resolvedUrl) {
             blobUrl = resolvedUrl;
-            assetBlobUrlMap.current.set(relPath, blobUrl);
-            assetBlobUrlMap.current.set(blobUrl, relPath);
+            assetBlobUrlMap.current.set(encodedRel, blobUrl);
+            assetBlobUrlMap.current.set(decodedRel, blobUrl);
+            assetBlobUrlMap.current.set(blobUrl, encodedRel);
           }
         } catch (err) {
           console.warn("Failed to resolve relative image in ProseMirror doc:", relPath, err);
@@ -5395,11 +6421,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (blobUrl) {
         const currentNode = instance.state.doc.nodeAt(pos);
         if (currentNode && currentNode.type.name === "image") {
-          if (currentNode.attrs.src !== blobUrl || currentNode.attrs["data-relative-src"] !== relPath) {
+          if (currentNode.attrs.src !== blobUrl || currentNode.attrs["data-relative-src"] !== encodedRel) {
             tr.setNodeMarkup(pos, undefined, {
               ...currentNode.attrs,
               src: blobUrl,
-              "data-relative-src": relPath,
+              "data-relative-src": encodedRel,
             });
             modified = true;
           }
@@ -5418,6 +6444,57 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       void resolveRelativeImagesInEditor(editor);
     }
   }, [editor, note?.id, rootDirHandle, resolveRelativeImagesInEditor]);
+
+  const handleRestoreVersionContent = useCallback((ver: NoteVersionSnapshot) => {
+    if (!note) return;
+    saveVersionSnapshot(note, "pre-restore");
+
+    // 1. Update localStorage crash-recovery backups
+    try {
+      if (ver.content) {
+        localStorage.setItem(`luno_backup_${note.id}`, ver.content);
+        if (note.fileName) {
+          localStorage.setItem(`luno_backup_fn_${note.fileName}`, ver.content);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 2. Update React Note state
+    onUpdate(note.id, { content: ver.content });
+
+    // 3. Update TipTap Editor DOM
+    if (editor && !editor.isDestroyed) {
+      const baseTitle = getBaseTitle(note);
+      const parsed = parseEditorContent(ver.content, baseTitle, isTxtFile(note), isHtmlFile(note));
+      syncingFromNote.current = true;
+      (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+      void resolveRelativeImagesInEditor(editor);
+    }
+
+    // 4. Trigger Auto-Save to Disk / Workspace Files
+    setSaveStatus("auto_saving");
+    scheduleAutoSaveDiskRef.current?.();
+
+    toast({
+      title: t("versionHistoryPanel.restoreSuccess"),
+    });
+  }, [note, onUpdate, editor, getBaseTitle, parseEditorContent, isTxtFile, isHtmlFile, resolveRelativeImagesInEditor, t, toast]);
+
+  const handleManualVersionSnapshot = useCallback((): NoteVersionSnapshot | null => {
+    if (!note) return null;
+    const currentContent = editor ? serializeEditorContent(note, editor) : (note.content || "");
+    const snap = saveVersionSnapshot(
+      { ...note, content: currentContent },
+      "manual",
+      undefined,
+      true,
+      editorStats.wordCount,
+      editorStats.charCount
+    );
+    return snap;
+  }, [note, editor, serializeEditorContent, editorStats]);
 
   const fileToDataUrl = async (file: File) => {
     return await new Promise<string>((resolve, reject) => {
@@ -5531,6 +6608,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let mdText = isLikelyHtml(htmlContent) ? getMarkdownFromHtml(htmlContent) : htmlContent;
       if (isMarkdownNote(note)) {
         mdText = updateFrontmatterTags(mdText, note.tags || []);
+        if (note.icon !== undefined || note.iconColor !== undefined) {
+          mdText = updateFrontmatterIcon(mdText, note.icon, note.iconColor);
+        }
+        if (note.isFavorite !== undefined) {
+          mdText = updateFrontmatterFavorite(mdText, note.isFavorite);
+        }
       }
       return mdText;
     }
@@ -5842,17 +6925,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let cancelled = false;
     let objectUrl: string | null = null;
 
+    if (note.content?.startsWith("data:image/") || note.content?.startsWith("data:application/")) {
+      setImageBlobUrl(note.content);
+    }
+
     const hydrateHandle = async () => {
       // 1. Electron Desktop Native Support
       const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-      if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+      if (electronAPI?.getSavedWorkspace && (electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
         try {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath && note?.fileName) {
             const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
             const fullPath = `${saved.folderPath}/${relPath}`;
-            if (note.fileType === "image") {
-              const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+            const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(note.fileName);
+            if (isImg) {
+              let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
+              if (!dataUrl && electronAPI.readFileBase64) {
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                if (b64) {
+                  const ext = (note.fileName || "").toLowerCase();
+                  const mime = ext.endsWith(".png")
+                    ? "image/png"
+                    : ext.endsWith(".gif")
+                    ? "image/gif"
+                    : ext.endsWith(".webp")
+                    ? "image/webp"
+                    : ext.endsWith(".svg")
+                    ? "image/svg+xml"
+                    : "image/jpeg";
+                  dataUrl = `data:${mime};base64,${b64}`;
+                }
+              }
               if (dataUrl && !cancelled) {
                 setImageBlobUrl(dataUrl);
                 return;
@@ -6145,31 +7249,98 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return (
       <Fragment>
         {note?.contentFormat === "html" && (
-          <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none mr-1.5">
-            <button
-              type="button"
-              onClick={() => setHtmlPreviewOpen(false)}
-              className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
-                !htmlPreviewOpen
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Code className="h-3 w-3" />
-              <span className="hidden sm:inline">{t("editor.modeEditor")}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setHtmlPreviewOpen(true)}
-              className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
-                htmlPreviewOpen
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Eye className="h-3 w-3" />
-              <span className="hidden sm:inline">{t("editor.modePreview")}</span>
-            </button>
+          <div className="flex items-center gap-1 mr-1.5">
+            <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
+              <button
+                type="button"
+                onClick={() => setHtmlPreviewOpen(false)}
+                className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                  !htmlPreviewOpen
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Code className="h-3 w-3" />
+                <span className="hidden sm:inline">{t("editor.modeEditor")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setHtmlPreviewOpen(true)}
+                className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                  htmlPreviewOpen
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Eye className="h-3 w-3" />
+                <span className="hidden sm:inline">{t("editor.modePreview")}</span>
+              </button>
+            </div>
+
+            {/* Responsive Device Switcher (Desktop, Tablet, Mobile) */}
+            {htmlPreviewOpen && (
+              <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setHtmlDeviceMode("desktop")}
+                      className={`p-1 rounded-md transition-all cursor-pointer ${
+                        htmlDeviceMode === "desktop"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      aria-label="Desktop (100%)"
+                    >
+                      <Monitor className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    Desktop (100%)
+                  </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setHtmlDeviceMode("tablet")}
+                      className={`p-1 rounded-md transition-all cursor-pointer ${
+                        htmlDeviceMode === "tablet"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      aria-label="Tablet (768px)"
+                    >
+                      <Tablet className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    Tablet (768px)
+                  </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setHtmlDeviceMode("mobile")}
+                      className={`p-1 rounded-md transition-all cursor-pointer ${
+                        htmlDeviceMode === "mobile"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      aria-label="Mobile (375px)"
+                    >
+                      <Smartphone className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    Mobile (375px)
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            )}
           </div>
         )}
         {note?.contentFormat !== "html" && (
@@ -6202,11 +7373,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   });
                 }}
               >
-                {isReadingMode ? (
-                  <PenLine className="h-3.5 w-3.5" />
-                ) : (
-                  <BookOpen className="h-3.5 w-3.5" />
-                )}
+                {(() => {
+                  const IconComp = getToolbarIcon(isReadingMode ? "edit" : "bookOpen", settings.iconPack);
+                  return <IconComp className="h-3.5 w-3.5" />;
+                })()}
                 <span className="sr-only">
                   {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
                 </span>
@@ -6227,7 +7397,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 onClick={() => onRelockNote?.(note.id)}
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
               >
-                <Lock className="h-3.5 w-3.5" />
+                {(() => {
+                  const LockIconComp = getToolbarIcon("lock", settings.iconPack);
+                  return <LockIconComp className="h-3.5 w-3.5" />;
+                })()}
                 <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
               </Button>
             </TooltipTrigger>
@@ -6239,7 +7412,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
-              <Save className="h-3.5 w-3.5" />
+              {(() => {
+                const SaveIconComp = getToolbarIcon("save", settings.iconPack);
+                return <SaveIconComp className="h-3.5 w-3.5" />;
+              })()}
               <span className="sr-only">{t("editor.saveFile")}</span>
             </Button>
           </DropdownMenuTrigger>
@@ -6248,11 +7424,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </Tooltip>
           <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
             <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-              <Save className="h-4 w-4" />
+              {(() => {
+                const SaveIconComp = getToolbarIcon("save", settings.iconPack);
+                return <SaveIconComp className="h-4 w-4" />;
+              })()}
               <span>{t("editor.save")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem disabled={!note} onClick={() => void performSaveAs()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-              <File className="h-4 w-4" />
+              {(() => {
+                const FileIconComp = getToolbarIcon("file", settings.iconPack);
+                return <FileIconComp className="h-4 w-4" />;
+              })()}
               <span>{t("editor.saveAs")}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -6270,7 +7452,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               {isSharingLoading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Share2 className="h-3.5 w-3.5" />
+                (() => {
+                  const ShareIconComp = getToolbarIcon("share", settings.iconPack);
+                  return <ShareIconComp className="h-3.5 w-3.5" />;
+                })()
               )}
               <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
             </Button>
@@ -6287,14 +7472,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               className="hidden md:inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
               onClick={() => {
                 if (note) {
-                  toast({
-                    title: t("breadcrumb.versionHistory") || "Version History",
-                    description: t("saveStatus.saved") || "All changes saved.",
-                  });
+                  setVersionHistoryOpen((prev) => !prev);
                 }
               }}
             >
-              <History className="h-3.5 w-3.5" />
+              {(() => {
+                const HistoryIconComp = getToolbarIcon("history", settings.iconPack);
+                return <HistoryIconComp className="h-3.5 w-3.5" />;
+              })()}
               <span className="sr-only">{t("breadcrumb.versionHistory") || "Version History"}</span>
             </Button>
           </TooltipTrigger>
@@ -6356,9 +7541,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   }}
                   placeholder={
                     settings.newFilePattern === "date"
-                      ? `Note_${new Date().toISOString().slice(0, 10)}`
+                      ? `Note_${formatDateForFileName(new Date(), settings.dateFormat)}`
                       : settings.newFilePattern === "daily"
-                      ? `Daily-${new Date().toISOString().slice(0, 10)}`
+                      ? `Daily-${formatDateForFileName(new Date(), settings.dateFormat)}`
                       : "Untitled"
                   }
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
@@ -6499,10 +7684,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const displayFileName = note.fileName || `${note.title?.trim() || t("editor.untitled")}`;
   // const [fileInfoOpen, setFileInfoOpen] = useState(false);
-  const savedSnapshot = savedSnapshotByNoteId[note.id];
-  const isSaved = Boolean(
-    savedSnapshot && getContentToSave(savedSnapshot.ext) === savedSnapshot.content,
-  );
+  const isSaved = saveStatus === "saved" || saveStatus === "auto_saved" || saveStatus === "manually_saved";
   const saveStatusLabel = isSaved ? t("editor.saveStatusSaved") : t("editor.saveStatusUnsaved");
 
 
@@ -6544,6 +7726,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "codeBlock", group: "block", labelKey: "editor.codeBlock" },
               { id: "blockquote", group: "block", labelKey: "editor.blockquote" },
               { id: "horizontalRule", group: "block", labelKey: "editor.horizontalRule" },
+              { id: "footnote", group: "block", labelKey: "editor.footnote" },
               { id: "table", group: "block", labelKey: "editor.insertTable" },
               { id: "emoji", group: "media", labelKey: "editor.insertEmoji" },
               { id: "calculator", group: "media", labelKey: "editor.calculator" },
@@ -6624,6 +7807,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             const overflowItems = TOOLBAR_ITEMS.slice(visibleCount);
 
             const renderToolbarButton = (id: string) => {
+              const renderToolIcon = (toolId: string) => {
+                const IconComp = getToolbarIcon(toolId, settings.iconPack);
+                return <IconComp className="h-4 w-4" />;
+              };
+
               switch (id) {
                 case "undo":
                   return (
@@ -6638,7 +7826,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().undo().run()}
                         >
-                          <Undo2 className="h-4 w-4" />
+                          {renderToolIcon("undo")}
                           <span className="sr-only">{t("editor.undo")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6658,7 +7846,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().redo().run()}
                         >
-                          <Redo2 className="h-4 w-4" />
+                          {renderToolIcon("redo")}
                           <span className="sr-only">{t("editor.redo")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6679,7 +7867,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               disabled={!editor || aiGenerating}
                               onMouseDown={(e) => e.preventDefault()}
                             >
-                              {aiGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+                              {aiGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : renderToolIcon("aiAssistant")}
                               <span className="sr-only">{t("settings.aiAssistant")}</span>
                             </Button>
                           </DropdownMenuTrigger>
@@ -6743,7 +7931,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
                         >
-                          <Heading1Icon className="h-4 w-4" />
+                          {renderToolIcon("h1")}
                           <span className="sr-only">{t("editor.heading1")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6763,7 +7951,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                         >
-                          <Heading2Icon className="h-4 w-4" />
+                          {renderToolIcon("h2")}
                           <span className="sr-only">{t("editor.heading2")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6783,7 +7971,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
                         >
-                          <Heading3Icon className="h-4 w-4" />
+                          {renderToolIcon("h3")}
                           <span className="sr-only">{t("editor.heading3")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6803,7 +7991,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
                         >
-                          <Heading4Icon className="h-4 w-4" />
+                          {renderToolIcon("h4")}
                           <span className="sr-only">{t("editor.heading4")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6823,7 +8011,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
                         >
-                          <Heading5Icon className="h-4 w-4" />
+                          {renderToolIcon("h5")}
                           <span className="sr-only">{t("editor.heading5")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6843,7 +8031,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
                         >
-                          <Heading6Icon className="h-4 w-4" />
+                          {renderToolIcon("h6")}
                           <span className="sr-only">{t("editor.heading6")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6863,7 +8051,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleBold().run()}
                         >
-                          <Bold className="h-4 w-4" />
+                          {renderToolIcon("bold")}
                           <span className="sr-only">{t("editor.bold")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6883,7 +8071,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleItalic().run()}
                         >
-                          <Italic className="h-4 w-4" />
+                          {renderToolIcon("italic")}
                           <span className="sr-only">{t("editor.italic")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6903,7 +8091,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleUnderline().run()}
                         >
-                          <UnderlineIcon className="h-4 w-4" />
+                          {renderToolIcon("underline")}
                           <span className="sr-only">{t("editor.underline")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6923,7 +8111,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleStrike().run()}
                         >
-                          <Strikethrough className="h-4 w-4" />
+                          {renderToolIcon("strike")}
                           <span className="sr-only">{t("editor.strikethrough")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6943,7 +8131,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHighlight().run()}
                         >
-                          <Highlighter className="h-4 w-4" />
+                          {renderToolIcon("highlight")}
                           <span className="sr-only">{t("editor.highlight")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6963,7 +8151,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleBulletList().run()}
                         >
-                          <List className="h-4 w-4" />
+                          {renderToolIcon("bulletList")}
                           <span className="sr-only">{t("editor.bulletList")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -6983,7 +8171,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
                         >
-                          <ListOrdered className="h-4 w-4" />
+                          {renderToolIcon("orderedList")}
                           <span className="sr-only">{t("editor.orderedList")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7003,7 +8191,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleTaskList().run()}
                         >
-                          <ListTodoIcon className="h-4 w-4" />
+                          {renderToolIcon("taskList")}
                           <span className="sr-only">{t("editor.checkbox")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7023,7 +8211,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => handleToggleClick(editor)}
                         >
-                          <ChevronsDownUp className="h-4 w-4" />
+                          {renderToolIcon("toggle")}
                           <span className="sr-only">{t("editor.toggle")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7043,7 +8231,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleCode().run()}
                         >
-                          <CodeXml className="h-4 w-4" />
+                          {renderToolIcon("code")}
                           <span className="sr-only">{t("editor.code")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7063,7 +8251,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                         >
-                          <SquareCode className="h-4 w-4" />
+                          {renderToolIcon("codeBlock")}
                           <span className="sr-only">{t("editor.codeBlock")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7083,7 +8271,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleBlockquote().run()}
                         >
-                          <Quote className="h-4 w-4" />
+                          {renderToolIcon("blockquote")}
                           <span className="sr-only">{t("editor.blockquote")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7103,11 +8291,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().setHorizontalRule().run()}
                         >
-                          <Minus className="h-4 w-4" />
+                          {renderToolIcon("horizontalRule")}
                           <span className="sr-only">{t("editor.horizontalRule")}</span>
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t("editor.horizontalRule")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "footnote":
+                  return (
+                    <Tooltip key="footnote">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (!editor) return;
+                            insertFootnoteAtSelection(editor);
+                          }}
+                        >
+                          {renderToolIcon("footnote")}
+                          <span className="sr-only">{t("editor.footnote")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.footnote")}</TooltipContent>
                     </Tooltip>
                   );
                 case "table":
@@ -7124,7 +8335,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
                           >
-                            <TableIcon className="h-4 w-4" />
+                            {renderToolIcon("table")}
                             <span className="sr-only">{t("editor.insertTable")}</span>
                           </Button>
                         </TooltipTrigger>
@@ -7144,7 +8355,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full bg-primary/15 text-primary"
                               onMouseDown={(e) => e.preventDefault()}
                             >
-                              <TableIcon className="h-4 w-4" />
+                              {renderToolIcon("table")}
                               <span className="sr-only">{t("editor.tableOptions")}</span>
                             </Button>
                           </DropdownMenuTrigger>
@@ -7183,7 +8394,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           disabled={!editor.can().mergeCells()}
                           className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                         >
-                          <TableIcon className="mr-2 h-4 w-4" />
+                          {renderToolIcon("table", "mr-2")}
                           <span>{t("editor.mergeCells")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -7191,11 +8402,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           disabled={!editor.can().splitCell()}
                           className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                         >
-                          <TableIcon className="mr-2 h-4 w-4" />
+                          {renderToolIcon("table", "mr-2")}
                           <span>{t("editor.splitCell")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeaderRow().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <TableIcon className="mr-2 h-4 w-4" />
+                          {renderToolIcon("table", "mr-2")}
                           <span>{t("editor.toggleHeaderRow")}</span>
                         </DropdownMenuItem>
                         <div className="my-1 border-t border-border/40" />
@@ -7220,7 +8431,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               disabled={!editor}
                               onMouseDown={(e) => e.preventDefault()}
                             >
-                              <Smile className="h-4 w-4" />
+                              {renderToolIcon("emoji")}
                               <span className="sr-only">{t("editor.emoji")}</span>
                             </Button>
                           </PopoverTrigger>
@@ -7263,7 +8474,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleCalculator}
                         >
-                          <Calculator className="h-4 w-4" />
+                          {renderToolIcon("calculator")}
                           <span className="sr-only">{t("editor.calculator")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7282,7 +8493,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleTranslator}
                         >
-                          <Languages className="h-4 w-4" />
+                          {renderToolIcon("translator")}
                           <span className="sr-only">{t("editor.translator")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7301,7 +8512,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleClock}
                         >
-                          <Clock className="h-4 w-4" />
+                          {renderToolIcon("clock")}
                           <span className="sr-only">{t("editor.clock")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7321,7 +8532,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={openLinkDialog}
                         >
-                          <Link2 className="h-4 w-4" />
+                          {renderToolIcon("link")}
                           <span className="sr-only">{t("editor.link")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7342,7 +8553,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               disabled={!editor}
                               onMouseDown={(e) => e.preventDefault()}
                             >
-                              <ImagePlus className="h-4 w-4" />
+                              {renderToolIcon("image")}
                               <span className="sr-only">{t("editor.image")}</span>
                             </Button>
                           </DropdownMenuTrigger>
@@ -7384,7 +8595,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={openAudioRecorder}
                         >
-                          <Mic className="h-4 w-4" />
+                          {renderToolIcon("audio")}
                           <span className="sr-only">{t("editor.recordAudio")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7404,7 +8615,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={handleFixLanguage}
                         >
-                          <Wrench className="h-4 w-4" />
+                          {renderToolIcon("fixLanguage")}
                           <span className="sr-only">{t("editor.fixLanguage")}</span>
                         </Button>
                       </TooltipTrigger>
@@ -7417,137 +8628,142 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             };
 
             const renderDropdownItem = (id: string) => {
+              const renderDropdownIcon = (toolId: string) => {
+                const IconComp = getToolbarIcon(toolId, settings.iconPack);
+                return <IconComp className="mr-2 h-4 w-4" />;
+              };
+
               switch (id) {
                 case "undo":
                   return (
                     <DropdownMenuItem key="undo" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor || !editor.can().undo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Undo2 className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("undo")}
                       <span>{t("editor.undo")}</span>
                     </DropdownMenuItem>
                   );
                 case "redo":
                   return (
                     <DropdownMenuItem key="redo" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor || !editor.can().redo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Redo2 className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("redo")}
                       <span>{t("editor.redo")}</span>
                     </DropdownMenuItem>
                   );
                 case "h1":
                   return (
                     <DropdownMenuItem key="h1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading1Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h1")}
                       <span>{t("editor.heading1")}</span>
                     </DropdownMenuItem>
                   );
                 case "h2":
                   return (
                     <DropdownMenuItem key="h2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading2Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h2")}
                       <span>{t("editor.heading2")}</span>
                     </DropdownMenuItem>
                   );
                 case "h3":
                   return (
                     <DropdownMenuItem key="h3" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading3Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h3")}
                       <span>{t("editor.heading3")}</span>
                     </DropdownMenuItem>
                   );
                 case "h4":
                   return (
                     <DropdownMenuItem key="h4" onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading4Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h4")}
                       <span>{t("editor.heading4")}</span>
                     </DropdownMenuItem>
                   );
                 case "h5":
                   return (
                     <DropdownMenuItem key="h5" onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading5Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h5")}
                       <span>{t("editor.heading5")}</span>
                     </DropdownMenuItem>
                   );
                 case "h6":
                   return (
                     <DropdownMenuItem key="h6" onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Heading6Icon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("h6")}
                       <span>{t("editor.heading6")}</span>
                     </DropdownMenuItem>
                   );
                 case "bold":
                   return (
                     <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Bold className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("bold")}
                       <span>{t("editor.bold")}</span>
                     </DropdownMenuItem>
                   );
                 case "italic":
                   return (
                     <DropdownMenuItem key="italic" onClick={() => editor?.chain().focus().toggleItalic().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Italic className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("italic")}
                       <span>{t("editor.italic")}</span>
                     </DropdownMenuItem>
                   );
                 case "underline":
                   return (
                     <DropdownMenuItem key="underline" onClick={() => editor?.chain().focus().toggleUnderline().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <UnderlineIcon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("underline")}
                       <span>{t("editor.underline")}</span>
                     </DropdownMenuItem>
                   );
                 case "strike":
                   return (
                     <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Strikethrough className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("strike")}
                       <span>{t("editor.strikethrough")}</span>
                     </DropdownMenuItem>
                   );
                 case "highlight":
                   return (
                     <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Highlighter className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("highlight")}
                       <span>{t("editor.highlight")}</span>
                     </DropdownMenuItem>
                   );
                 case "bulletList":
                   return (
                     <DropdownMenuItem key="bulletList" onClick={() => editor?.chain().focus().toggleBulletList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <List className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("bulletList")}
                       <span>{t("editor.bulletList")}</span>
                     </DropdownMenuItem>
                   );
                 case "orderedList":
                   return (
                     <DropdownMenuItem key="orderedList" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <ListOrdered className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("orderedList")}
                       <span>{t("editor.numberedList")}</span>
                     </DropdownMenuItem>
                   );
                 case "taskList":
                   return (
                     <DropdownMenuItem key="taskList" onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <ListTodoIcon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("taskList")}
                       <span>{t("editor.checkbox")}</span>
                     </DropdownMenuItem>
                   );
                 case "toggle":
                   return (
                     <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <ChevronsDownUp className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("toggle")}
                       <span>{t("editor.toggle")}</span>
                     </DropdownMenuItem>
                   );
                 case "code":
                   return (
                     <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <CodeXml className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("code")}
                       <span>{t("editor.inlineCode")}</span>
                     </DropdownMenuItem>
                   );
                 case "blockquote":
                   return (
                     <DropdownMenuItem key="blockquote" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Quote className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("blockquote")}
                       <span>{t("editor.blockquote")}</span>
                     </DropdownMenuItem>
                   );
@@ -7566,42 +8782,42 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }}
                       className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                     >
-                      <TableIcon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("table")}
                       <span>{t("editor.insertTable")}</span>
                     </DropdownMenuItem>
                   );
                 case "emoji":
                   return (
                     <DropdownMenuItem key="emoji" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Smile className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("emoji")}
                       <span>{t("editor.insertEmoji")}</span>
                     </DropdownMenuItem>
                   );
                 case "calculator":
                   return (
                     <DropdownMenuItem key="calculator" onClick={toggleCalculator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Calculator className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("calculator")}
                       <span>{t("editor.calculator")}</span>
                     </DropdownMenuItem>
                   );
                 case "translator":
                   return (
                     <DropdownMenuItem key="translator" onClick={toggleTranslator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Languages className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("translator")}
                       <span>{t("editor.translator")}</span>
                     </DropdownMenuItem>
                   );
                 case "clock":
                   return (
                     <DropdownMenuItem key="clock" onClick={toggleClock} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Clock className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("clock")}
                       <span>{t("editor.clock")}</span>
                     </DropdownMenuItem>
                   );
                 case "link":
                   return (
                     <DropdownMenuItem key="link" onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Link2 className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("link")}
                       <span>{t("editor.link")}</span>
                     </DropdownMenuItem>
                   );
@@ -7609,7 +8825,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   return (
                     <Fragment key="image">
                       <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {renderDropdownIcon("image")}
                         <span>{t("editor.insertImageByUrl")}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={openWorkspaceImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
@@ -7635,21 +8851,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       onClick={openAudioRecorder}
                       className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                     >
-                      <Mic className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("audio")}
                       <span>{t("editor.recordAudio")}</span>
                     </DropdownMenuItem>
                   );
                 case "fixLanguage":
                   return (
                     <DropdownMenuItem key="fixLanguage" onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <Wrench className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("fixLanguage")}
                       <span>{t("editor.fixLanguage")}</span>
                     </DropdownMenuItem>
                   );
                 case "aiAssistant":
                   return (
                     <DropdownMenuItem key="aiAssistant" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                      <SparklesIcon className="mr-2 h-4 w-4" />
+                      {renderDropdownIcon("aiAssistant")}
                       <span>{t("settings.aiAssistant")}</span>
                     </DropdownMenuItem>
                   );
@@ -7801,6 +9017,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           onScroll={handleEditorScroll}
           onClick={(e) => {
             const target = e.target as HTMLElement;
+            if (navigateFootnoteOrAnchor(target, e.currentTarget)) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+
             if (
               editor &&
               !target.closest("button, a, input, textarea, select, [role='button'], [role='menuitem'], summary, .code-block-wrapper, table")
@@ -7814,7 +9036,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto overflow-x-hidden"
           } w-full`}
         >
-          {(note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content) ? (
+          {comparingVersion ? (
+            <VersionHistorySplitDiffView
+              note={note}
+              version={comparingVersion}
+              editorFontSize={editorFontSize}
+              assetBlobUrlMap={assetBlobUrlMap}
+              resolveAssetDataUrl={resolveAssetDataUrl}
+              onRestore={(ver) => {
+                handleRestoreVersionContent(ver);
+                setComparingVersion(null);
+              }}
+              onClose={() => setComparingVersion(null)}
+            />
+          ) : (note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content) ? (
             <LockedNoteViewer
               note={note}
               onUnlock={async (pin) => {
@@ -7824,11 +9059,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 return false;
               }}
             />
-          ) : note.fileType === "image" ? (
+          ) : note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(note.fileName || "") ? (
             <div className={`flex min-h-full w-full ${isImageZoomed && canZoomImage ? "items-start justify-center p-4 overflow-auto" : "items-center justify-center p-4 overflow-hidden"}`}>
-              {imageBlobUrl ? (
+              {imageBlobUrl || (note.content?.startsWith("data:") ? note.content : null) ? (
                 <img
-                  src={imageBlobUrl}
+                  src={imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined)}
                   alt={note.fileName}
                   onLoad={(e) => {
                     const img = e.currentTarget;
@@ -7869,32 +9104,47 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </div>
           ) : note.contentFormat === "html" ? (
             htmlPreviewOpen ? (
-              <div className="flex-1 w-full h-full overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between border-b border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/30 shrink-0">
+              <div className="flex-1 w-full h-full overflow-hidden flex flex-col bg-muted/20">
+                <div className="flex items-center justify-between border-b border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/40 shrink-0 select-none">
                   <div className="flex items-center gap-2">
                     <Play className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                    <span className="font-semibold text-foreground/80">HTML Preview</span>
+                    <span className="font-semibold text-foreground/80">{t("editor.htmlPreview")}</span>
                   </div>
+
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         onClick={openHtmlPreviewInNewTab}
-                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground flex items-center gap-1 text-xs"
-                        aria-label="Open HTML in browser"
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground flex items-center gap-1 text-xs cursor-pointer"
+                        aria-label={t("editor.openHtmlInBrowser")}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>Open HTML in browser</TooltipContent>
+                    <TooltipContent>{t("editor.openHtmlInBrowser")}</TooltipContent>
                   </Tooltip>
                 </div>
-                <iframe
-                  className="flex-1 w-full bg-white border-0"
-                  srcDoc={previewHtml || note.content}
-                  sandbox="allow-scripts allow-same-origin"
-                  title="HTML Preview"
-                />
+
+                {/* Responsive Viewport Container */}
+                <div className="flex-1 min-h-0 w-full flex items-center justify-center p-2 sm:p-4 overflow-auto bg-muted/10">
+                  <div
+                    className={`h-full transition-all duration-300 shadow-md rounded-lg overflow-hidden border border-border/50 bg-white ${
+                      htmlDeviceMode === "mobile"
+                        ? "w-[375px]"
+                        : htmlDeviceMode === "tablet"
+                        ? "w-[768px]"
+                        : "w-full"
+                    }`}
+                  >
+                    <iframe
+                      className="w-full h-full bg-white border-0"
+                      srcDoc={previewHtml || note.content}
+                      sandbox="allow-scripts allow-same-origin"
+                      title="HTML Preview"
+                    />
+                  </div>
+                </div>
               </div>
             ) : (
               <HtmlCodeEditor
@@ -7961,6 +9211,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             title: t("editor.noteNotFound") || "Note not found",
                             description: `[[${wikilinkTarget}]]`,
                           });
+                        }
+                      } else if (href && href.startsWith("#")) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const targetId = href.slice(1);
+                        const rootEl = (e.currentTarget as HTMLElement).closest(".luno-editor-container") || document;
+                        const targetEl = rootEl.querySelector(`[id="${targetId}"]`) || document.getElementById(targetId);
+                        if (targetEl) {
+                          targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                          targetEl.classList.add("bg-primary/20", "transition-colors", "duration-500", "rounded");
+                          setTimeout(() => {
+                            targetEl.classList.remove("bg-primary/20");
+                          }, 1200);
                         }
                       }
                     }}
@@ -8354,6 +9617,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onAccept={handleAcceptDiff}
               onReject={handleRejectDiff}
               onInsertBelow={handleInsertBelowDiff}
+            />
+          )}
+
+          {/* Version History Right Panel */}
+          {versionHistoryOpen && note && (
+            <VersionHistoryPanel
+              isOpen={versionHistoryOpen}
+              onClose={() => setVersionHistoryOpen(false)}
+              note={note}
+              currentWordCount={editorStats.wordCount}
+              currentCharCount={editorStats.charCount}
+              onManualSnapshot={handleManualVersionSnapshot}
+              onRestoreVersion={(ver) => {
+                handleRestoreVersionContent(ver);
+              }}
+              onCompareVersion={(ver) => {
+                setComparingVersion(ver);
+              }}
             />
           )}
         </AnimatePresence>
@@ -8767,31 +10048,40 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             ) : (
               slashMenuState.filteredItems.map((item, idx) => {
                 const isSelected = idx === slashMenuState.selectedIndex;
+                const prevItem = slashMenuState.filteredItems[idx - 1];
+                const showCategoryHeader = !slashMenuState.query && (idx === 0 || item.categoryKey !== prevItem?.categoryKey);
+
                 return (
-                  <div
-                    key={item.id}
-                    role="menuitem"
-                    tabIndex={0}
-                    data-slash-item={idx}
-                    data-selected={isSelected ? "true" : undefined}
-                    onMouseEnter={() => {
-                      setSlashMenuState((prev) => ({ ...prev, selectedIndex: idx }));
-                      slashMenuStateRef.current.selectedIndex = idx;
-                    }}
-                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-sm transition-all select-none gap-2.5 ${
-                      isSelected
-                        ? "bg-primary/10 text-primary font-semibold shadow-2xs"
-                        : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
-                    }`}
-                    onClick={() => {
-                      if (editor) {
-                        executeSlashCommand(editor, item);
-                      }
-                    }}
-                  >
-                    <span className="shrink-0">{item.icon}</span>
-                    <span className="truncate flex-1">{t(item.titleKey)}</span>
-                  </div>
+                  <Fragment key={item.id}>
+                    {showCategoryHeader && item.categoryKey && (
+                      <div className={`px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/80 select-none ${idx > 0 ? "mt-1 border-t border-border/25" : ""}`}>
+                        {t(item.categoryKey)}
+                      </div>
+                    )}
+                    <div
+                      role="menuitem"
+                      tabIndex={0}
+                      data-slash-item={idx}
+                      data-selected={isSelected ? "true" : undefined}
+                      onMouseEnter={() => {
+                        setSlashMenuState((prev) => ({ ...prev, selectedIndex: idx }));
+                        slashMenuStateRef.current.selectedIndex = idx;
+                      }}
+                      className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-sm transition-all select-none gap-2.5 ${
+                        isSelected
+                          ? "bg-primary/10 text-primary font-semibold shadow-2xs"
+                          : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      onClick={() => {
+                        if (editor) {
+                          executeSlashCommand(editor, item);
+                        }
+                      }}
+                    >
+                      <span className="shrink-0">{item.icon}</span>
+                      <span className="truncate flex-1">{t(item.titleKey)}</span>
+                    </div>
+                  </Fragment>
                 );
               })
             )}

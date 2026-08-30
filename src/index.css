@@ -31,6 +31,16 @@ button[role="combobox"]:focus-visible {
   border-color: hsl(var(--primary)) !important;
 }
 
+/* Remove default focus outline on sidebar items and buttons */
+aside button,
+aside button:focus,
+aside button:focus-visible,
+aside [role="button"]:focus,
+aside [role="button"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 .show-code-line-numbers pre code {
   counter-reset: line;
 }
@@ -2424,5 +2434,49 @@ mark,
   cursor: default !important;
 }
 
+/* ==========================================================================
+   Animation & Reduced Motion Settings Control
+   ========================================================================== */
+html[data-animations="false"],
+html[data-animations="false"] *,
+html[data-animations="false"] *::before,
+html[data-animations="false"] *::after,
+html.reduce-motion,
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* Hardware-accelerated distinct smooth animations when enabled */
+html:not([data-animations="false"]) {
+  /* Smooth scrolling for main scroll areas */
+  scroll-behavior: smooth;
+}
+
+html:not([data-animations="false"]) [data-state="open"].animate-in,
+html:not([data-animations="false"]) [data-state="closed"].animate-out,
+html:not([data-animations="false"]) .animate-in {
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  backface-visibility: hidden;
+}
+
+.transition-smooth {
+  transition-property: transform, opacity, background-color, border-color, color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Floating tools and dialogs GPU acceleration */
+[data-floating-window="true"],
+[role="dialog"],
+[role="menu"],
+[role="tooltip"] {
+  will-change: transform, opacity;
+}
 
 

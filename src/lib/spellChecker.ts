@@ -433,6 +433,21 @@ export function getSpellingSuggestions(word: string, maxSuggestions = 5): string
   return [];
 }
 
+export const THAI_SPELL_SET = new Set(Object.keys(THAI_SPELL_CORRECTIONS));
+export const ENGLISH_SPELL_SET = new Set(Object.keys(ENGLISH_SPELL_CORRECTIONS));
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export const THAI_SPELL_REGEX = new RegExp(
+  Object.keys(THAI_SPELL_CORRECTIONS)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegex)
+    .join("|"),
+  "g"
+);
+
 export function isWordMisspelled(word: string): boolean {
   if (!word) return false;
   const clean = word.trim();
@@ -443,16 +458,12 @@ export function isWordMisspelled(word: string): boolean {
 
   // Thai check: only known misspelled Thai words
   if (/[\u0E00-\u0E7F]/.test(clean)) {
-    if (THAI_SPELL_CORRECTIONS[clean]) return true;
-    for (const misspelled of Object.keys(THAI_SPELL_CORRECTIONS)) {
-      if (clean === misspelled) return true;
-    }
-    return false;
+    return THAI_SPELL_SET.has(clean);
   }
 
   // English check: only known English misspelled words or 3+ repeated letter typos (e.g. "soooo", "heeeey")
   if (/^[A-Za-z]+$/.test(clean)) {
-    if (ENGLISH_SPELL_CORRECTIONS[lower]) return true;
+    if (ENGLISH_SPELL_SET.has(lower)) return true;
     if (/([a-z])\1{2,}/.test(lower)) return true;
     return false;
   }

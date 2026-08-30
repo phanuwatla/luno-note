@@ -52,6 +52,11 @@ import {
   Wrench,
   Underline as UnderlineIcon,
   Highlighter,
+  Sparkles,
+  Layers,
+  Feather,
+  BookOpen,
+  LayoutGrid,
 } from "lucide-react";
 import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
@@ -60,6 +65,7 @@ import { Heading4Icon } from "@/components/icons/Heading4Icon";
 import { Heading5Icon } from "@/components/icons/Heading5Icon";
 import { Heading6Icon } from "@/components/icons/Heading6Icon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
+import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId } from "@/lib/googleDriveAuth";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
@@ -67,10 +73,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_TOOLBAR_ORDER, FONT_OPTIONS, useAppSettings } from "@/hooks/useAppSettings";
+import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_HIDDEN_TOOLBAR_ITEMS, DEFAULT_TOOLBAR_ORDER, TOOLBAR_PRESETS, FONT_OPTIONS, useAppSettings } from "@/hooks/useAppSettings";
+import { ICON_PACK_OPTIONS, IconPackId, TOOLBAR_ICON_MAP, getToolbarIcon } from "@/lib/iconPacks";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
+import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -97,6 +105,7 @@ const TOOLBAR_TOOL_DEFS: Record<
   codeBlock: { labelKey: "editor.codeBlock", icon: SquareCode, categoryKey: "settings.toolCategoryBlock" },
   blockquote: { labelKey: "editor.blockquote", icon: Quote, categoryKey: "settings.toolCategoryBlock" },
   horizontalRule: { labelKey: "editor.horizontalRule", icon: Minus, categoryKey: "settings.toolCategoryBlock" },
+  footnote: { labelKey: "editor.footnote", icon: FootnoteIcon, categoryKey: "settings.toolCategoryBlock" },
   table: { labelKey: "editor.insertTable", icon: TableIcon, categoryKey: "settings.toolCategoryBlock" },
   emoji: { labelKey: "editor.insertEmoji", icon: Smile, categoryKey: "settings.toolCategoryMedia" },
   calculator: { labelKey: "editor.calculator", icon: Calculator, categoryKey: "settings.toolCategoryMedia" },
@@ -190,31 +199,26 @@ export default function SettingsTabView({
 
   const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
 
-  // Additional local state for general preferences matching the design
-  const [onStartup, setOnStartup] = useState<string>("home");
+  // Additional local state matching the design
   const [draggedToolbarIndex, setDraggedToolbarIndex] = useState<number | null>(null);
   const [dragOverToolbarIndex, setDragOverToolbarIndex] = useState<number | null>(null);
-  const [checkUpdates, setCheckUpdates] = useState<boolean>(true);
-  const [dateFormat, setDateFormat] = useState<string>("YYYY-MM-DD");
-  const [timeFormat, setTimeFormat] = useState<string>("24h");
-  const [startWeekOn, setStartWeekOn] = useState<string>("monday");
-  const [enableAnimations, setEnableAnimations] = useState<boolean>(true);
-  const [sendUsageData, setSendUsageData] = useState<boolean>(false);
   const [aiModel, setAiModel] = useState<string>("gemini-2.5-flash");
 
-  const categories: CategoryMeta[] = [
-    { id: "general", label: t("settings.catGeneralTitle"), icon: SlidersHorizontal, desc: t("settings.catGeneralDesc") },
-    { id: "appearance", label: t("settings.catAppearanceTitle"), icon: Palette, desc: t("settings.catAppearanceDesc") },
-    { id: "editor", label: t("settings.catEditorTitle"), icon: Pencil, desc: t("settings.catEditorDesc") },
-    { id: "files", label: t("settings.catFilesTitle"), icon: Folder, desc: t("settings.catFilesDesc") },
-    { id: "markdown", label: t("settings.catMarkdownTitle"), icon: FileCode, desc: t("settings.catMarkdownDesc") },
-    { id: "templates", label: t("settings.catTemplatesTitle"), icon: LayoutTemplate, desc: t("settings.catTemplatesDesc") },
-    { id: "ai", label: t("settings.catAiTitle"), icon: SparklesIcon, desc: t("settings.catAiDesc") },
-    { id: "shortcuts", label: t("settings.catShortcutsTitle"), icon: Keyboard, desc: t("settings.catShortcutsDesc") },
-    { id: "storage", label: t("settings.catStorageTitle"), icon: Database, desc: t("settings.catStorageDesc") },
-    { id: "backup", label: t("settings.catBackupTitle"), icon: Cloud, desc: t("settings.catBackupDesc") },
-    { id: "privacy", label: t("settings.catPrivacyTitle"), icon: Lock, desc: t("settings.catPrivacyDesc") },
-    { id: "about", label: t("settings.catAboutTitle"), icon: Info, desc: t("settings.catAboutDesc") },
+  const pack = settings?.iconPack || "lucide";
+
+  const categories = [
+    { id: "general" as SettingsCategory, iconKey: "general", label: t("settings.catGeneralTitle"), desc: t("settings.catGeneralDesc") },
+    { id: "appearance" as SettingsCategory, iconKey: "appearance", label: t("settings.catAppearanceTitle"), desc: t("settings.catAppearanceDesc") },
+    { id: "editor" as SettingsCategory, iconKey: "editorCat", label: t("settings.catEditorTitle"), desc: t("settings.catEditorDesc") },
+    { id: "files" as SettingsCategory, iconKey: "folder", label: t("settings.catFilesTitle"), desc: t("settings.catFilesDesc") },
+    { id: "markdown" as SettingsCategory, iconKey: "fileCode", label: t("settings.catMarkdownTitle"), desc: t("settings.catMarkdownDesc") },
+    { id: "templates" as SettingsCategory, iconKey: "templates", label: t("settings.catTemplatesTitle"), desc: t("settings.catTemplatesDesc") },
+    { id: "ai" as SettingsCategory, iconKey: "ai", label: t("settings.catAiTitle"), desc: t("settings.catAiDesc") },
+    { id: "shortcuts" as SettingsCategory, iconKey: "shortcuts", label: t("settings.catShortcutsTitle"), desc: t("settings.catShortcutsDesc") },
+    { id: "storage" as SettingsCategory, iconKey: "storage", label: t("settings.catStorageTitle"), desc: t("settings.catStorageDesc") },
+    { id: "backup" as SettingsCategory, iconKey: "backup", label: t("settings.catBackupTitle"), desc: t("settings.catBackupDesc") },
+    { id: "privacy" as SettingsCategory, iconKey: "privacy", label: t("settings.catPrivacyTitle"), desc: t("settings.catPrivacyDesc") },
+    { id: "about" as SettingsCategory, iconKey: "about", label: t("settings.catAboutTitle"), desc: t("settings.catAboutDesc") },
   ];
 
   const currentCategory = categories.find((c) => c.id === activeCategory) || categories[0];
@@ -249,7 +253,7 @@ export default function SettingsTabView({
 
             <div className="flex-1 overflow-y-auto p-2.5 space-y-1 no-scrollbar">
               {categories.map((cat) => {
-                const Icon = cat.icon;
+                const Icon = getToolbarIcon(cat.iconKey, pack);
                 const isActive = activeCategory === cat.id;
 
                 return (
@@ -277,8 +281,10 @@ export default function SettingsTabView({
           <div className="flex-1 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
             <div className="px-8 py-5 border-b border-border/40 bg-card/20 shrink-0">
-              <h2 className="text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{currentCategory.desc}</p>
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{currentCategory.desc}</p>
+              </div>
             </div>
 
             {/* Scrollable Category Options Body */}
@@ -295,7 +301,7 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.onStartup")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.onStartupDesc")}</p>
                       </div>
-                      <Select value={onStartup} onValueChange={setOnStartup}>
+                      <Select value={settings.onStartup || "home"} onValueChange={(v) => updateSetting("onStartup", v)}>
                         <SelectTrigger className="w-48 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
@@ -324,7 +330,7 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.checkUpdates")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.checkUpdatesDesc")}</p>
                       </div>
-                      <Switch checked={checkUpdates} onCheckedChange={setCheckUpdates} className="scale-85 origin-right" />
+                      <Switch checked={settings.checkUpdates !== false} onCheckedChange={(val) => updateSetting("checkUpdates", val)} className="scale-85 origin-right" />
                     </div>
                   </div>
 
@@ -337,13 +343,13 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.appLanguage")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.appLanguageDesc")}</p>
                       </div>
-                      <Select value={settings.language} onValueChange={(v) => updateSetting("language", v === "th" ? "th" : "en")}>
+                      <Select value={settings.language || "en"} onValueChange={(v) => updateSetting("language", v)}>
                         <SelectTrigger className="w-48 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="en">{t("settings.english")}</SelectItem>
-                          <SelectItem value="th">{t("settings.thai")}</SelectItem>
+                          <SelectItem value="en">English</SelectItem>
+                          <SelectItem value="th">ภาษาไทย</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -358,14 +364,14 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.dateFormat")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.dateFormatDesc")}</p>
                       </div>
-                      <Select value={dateFormat} onValueChange={setDateFormat}>
-                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                      <Select value={settings.dateFormat || "YYYY-MM-DD"} onValueChange={(v) => updateSetting("dateFormat", v)}>
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="YYYY-MM-DD">2026-08-01 (YYYY-MM-DD)</SelectItem>
-                          <SelectItem value="DD/MM/YYYY">01/08/2026 (DD/MM/YYYY)</SelectItem>
-                          <SelectItem value="MM/DD/YYYY">08/01/2026 (MM/DD/YYYY)</SelectItem>
+                          <SelectItem value="YYYY-MM-DD">{formatDate(new Date(), "YYYY-MM-DD")} (YYYY-MM-DD)</SelectItem>
+                          <SelectItem value="DD/MM/YYYY">{formatDate(new Date(), "DD/MM/YYYY")} (DD/MM/YYYY)</SelectItem>
+                          <SelectItem value="MM/DD/YYYY">{formatDate(new Date(), "MM/DD/YYYY")} (MM/DD/YYYY)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -375,13 +381,17 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.timeFormat")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.timeFormatDesc")}</p>
                       </div>
-                      <Select value={timeFormat} onValueChange={setTimeFormat}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                      <Select value={settings.timeFormat || "24h"} onValueChange={(v) => updateSetting("timeFormat", v)}>
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="24h">{t("settings.opt24h")}</SelectItem>
-                          <SelectItem value="12h">{t("settings.opt12h")}</SelectItem>
+                          <SelectItem value="24h">
+                            {settings.language === "th" ? "24 ชั่วโมง" : "24-hour"} ({formatTime(new Date(), "24h", settings.language)})
+                          </SelectItem>
+                          <SelectItem value="12h">
+                            {settings.language === "th" ? "12 ชั่วโมง" : "12-hour"} ({formatTime(new Date(), "12h", settings.language)})
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -391,7 +401,7 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.startWeekOn")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.startWeekOnDesc")}</p>
                       </div>
-                      <Select value={startWeekOn} onValueChange={setStartWeekOn}>
+                      <Select value={settings.startWeekOn || "monday"} onValueChange={(v) => updateSetting("startWeekOn", v)}>
                         <SelectTrigger className="w-48 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
@@ -412,7 +422,7 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.enableAnimations")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.enableAnimationsDesc")}</p>
                       </div>
-                      <Switch checked={enableAnimations} onCheckedChange={setEnableAnimations} className="scale-85 origin-right" />
+                      <Switch checked={settings.enableAnimations !== false} onCheckedChange={(val) => updateSetting("enableAnimations", val)} className="scale-85 origin-right" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
@@ -420,13 +430,12 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.sendUsageData")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.sendUsageDataDesc")}</p>
                       </div>
-                      <Switch checked={sendUsageData} onCheckedChange={setSendUsageData} className="scale-85 origin-right" />
+                      <Switch checked={settings.sendUsageData === true} onCheckedChange={(val) => updateSetting("sendUsageData", val)} className="scale-85 origin-right" />
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* 2. APPEARANCE */}
               {/* 2. APPEARANCE */}
               {activeCategory === "appearance" && (
                 <div className="space-y-6">
@@ -439,7 +448,7 @@ export default function SettingsTabView({
                       <label className="text-xs font-semibold text-foreground mb-2 block">{t("settings.schemeLabel")}</label>
                       <div className="flex gap-2">
                         {(["light", "dark", "system"] as const).map((scheme) => {
-                          const Icon = scheme === "light" ? Sun : scheme === "dark" ? Moon : Monitor;
+                          const Icon = getToolbarIcon(scheme === "light" ? "sun" : scheme === "dark" ? "moon" : "monitor", pack);
                           const label = scheme === "light" ? t("settings.colorSchemeLight") : scheme === "dark" ? t("settings.colorSchemeDark") : t("settings.colorSchemeSystem");
                           return (
                             <button
@@ -610,11 +619,6 @@ export default function SettingsTabView({
                                     </div>
                                   )}
                                 </div>
-                                {isSelected && (
-                                  <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5 shadow-xs">
-                                    <Check className="h-2.5 w-2.5" />
-                                  </div>
-                                )}
                               </div>
                               <span className={`text-xs font-semibold line-clamp-1 ${isSelected ? "text-primary" : "text-foreground"}`}>
                                 {t(style.nameKey as any) || style.id}
@@ -673,6 +677,61 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.accentHeadingsDesc")}</p>
                       </div>
                       <Switch checked={settings.accentHeadings} onCheckedChange={(v) => updateSetting("accentHeadings", v)} className="scale-85 origin-right" />
+                    </div>
+                  </div>
+
+                  {/* Icon Pack Selection Card */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.iconPackGroup") || "Icon Pack"}</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t("settings.iconPackDesc") || "Choose icon theme and styling for app controls, sidebar, and toolbar"}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      {ICON_PACK_OPTIONS.map((pack) => {
+                        const isSelected = (settings.iconPack || "lucide") === pack.id;
+                        const FolderIcon = getToolbarIcon("folder", pack.id);
+                        const FileIcon = getToolbarIcon("fileText", pack.id);
+                        const BoldIcon = getToolbarIcon("bold", pack.id);
+                        const SparkleIcon = getToolbarIcon("aiAssistant", pack.id);
+                        const SettingsIcon = getToolbarIcon("settings", pack.id);
+
+                        return (
+                          <button
+                            key={pack.id}
+                            type="button"
+                            onClick={() => updateSetting("iconPack", pack.id)}
+                            className={`flex flex-col p-3.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                              isSelected
+                                ? "border-primary bg-primary/10 shadow-2xs"
+                                : "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-foreground/[0.02]"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className={`text-xs font-semibold ${isSelected ? "text-primary font-bold" : "text-foreground"}`}>
+                                {t(pack.nameKey as any) || pack.id}
+                              </span>
+                            </div>
+
+                            {/* Mini Icons Strip Preview */}
+                            <div className="flex items-center gap-2 p-2 rounded-lg bg-background/60 border border-border/40 mb-2">
+                              <FolderIcon className="w-4 h-4 text-amber-500" />
+                              <FileIcon className="w-4 h-4 text-primary" />
+                              <BoldIcon className="w-4 h-4 text-foreground/80" />
+                              <SparkleIcon className="w-4 h-4 text-purple-400" />
+                              <SettingsIcon className="w-4 h-4 text-muted-foreground" />
+                            </div>
+
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 mt-auto">
+                              {t(pack.descKey as any)}
+                            </p>
+                            <div className="flex items-center justify-between text-[10px] text-muted-foreground/70 mt-2 pt-1.5 border-t border-border/20">
+                              <span>{pack.author}</span>
+                              <span className="font-mono">{pack.count}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -903,7 +962,8 @@ export default function SettingsTabView({
                         type="button"
                         onClick={() => {
                           updateSetting("toolbarItemsOrder", DEFAULT_TOOLBAR_ORDER);
-                          updateSetting("hiddenToolbarItems", []);
+                          updateSetting("hiddenToolbarItems", DEFAULT_HIDDEN_TOOLBAR_ITEMS);
+                          updateSetting("toolbarConfiguredV3" as any, true);
                           toast({
                             title: t("settings.resetToolbarDefaults"),
                             description: "Toolbar layout and order restored to defaults",
@@ -916,37 +976,89 @@ export default function SettingsTabView({
                       </button>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 max-h-[380px] overflow-y-auto no-scrollbar pr-1 border border-border/30 rounded-xl p-2 bg-muted/20">
-                      {(() => {
-                        const toolbarOrder = settings.toolbarItemsOrder || DEFAULT_TOOLBAR_ORDER;
-                        const hiddenSet = new Set(settings.hiddenToolbarItems || []);
+                    {/* Presets Grid */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between px-0.5 text-xs text-muted-foreground">
+                        <span className="font-medium">{t("settings.toolbarPresets")}</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {TOOLBAR_PRESETS.map((preset) => {
+                        const currHidden = settings.hiddenToolbarItems || DEFAULT_HIDDEN_TOOLBAR_ITEMS;
+                        const isMatch =
+                          preset.hidden.length === currHidden.length &&
+                          preset.hidden.every((id) => currHidden.includes(id));
 
-                        const moveItem = (index: number, dir: "up" | "down") => {
-                          const targetIdx = dir === "up" ? index - 1 : index + 1;
-                          if (targetIdx < 0 || targetIdx >= toolbarOrder.length) return;
-                          const newArr = [...toolbarOrder];
-                          const [item] = newArr.splice(index, 1);
-                          newArr.splice(targetIdx, 0, item);
-                          updateSetting("toolbarItemsOrder", newArr);
+                        const PRESET_ICONS: Record<string, any> = {
+                          standard: Layers,
+                          minimal: Feather,
+                          tasks: ListTodoIcon,
+                          academic: BookOpen,
+                          technical: SquareCode,
+                          all: LayoutGrid,
                         };
+                        const PresetIcon = PRESET_ICONS[preset.id] || Layers;
 
-                        const toggleHidden = (id: string) => {
-                          const currHidden = settings.hiddenToolbarItems || [];
-                          const nextHidden = currHidden.includes(id)
-                            ? currHidden.filter((i) => i !== id)
-                            : [...currHidden, id];
-                          updateSetting("hiddenToolbarItems", nextHidden);
-                        };
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => {
+                              updateSetting("toolbarItemsOrder", preset.order);
+                              updateSetting("hiddenToolbarItems", preset.hidden);
+                              updateSetting("toolbarConfiguredV3" as any, true);
+                              toast({
+                                title: t("settings.presetApplied"),
+                                description: t(preset.nameKey),
+                              });
+                            }}
+                            className={`flex items-center justify-start gap-2.5 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer select-none border ${
+                              isMatch
+                                ? "bg-primary/10 border-primary/70 text-primary shadow-xs ring-1 ring-primary/20 font-semibold"
+                                : "bg-muted/30 border-border/40 text-foreground/85 hover:text-foreground hover:bg-muted/60 hover:border-border hover:shadow-2xs"
+                            }`}
+                          >
+                            <PresetIcon className="h-4 w-4 shrink-0" />
+                            <span className="truncate flex-1 text-left">{t(preset.nameKey)}</span>
+                          </button>
+                        );
+                      })}
+                      </div>
+                    </div>
 
-                        return toolbarOrder.map((id, index) => {
-                          const def = TOOLBAR_TOOL_DEFS[id];
-                          if (!def) return null;
-                          const IconComp = def.icon;
-                          const isHidden = hiddenSet.has(id);
-                          const isDragging = draggedToolbarIndex === index;
-                          const isDragOver = dragOverToolbarIndex === index && draggedToolbarIndex !== index;
+                    {/* Toolbar Reorder List */}
+                    {(() => {
+                      const toolbarOrder = settings.toolbarItemsOrder || DEFAULT_TOOLBAR_ORDER;
+                      const hiddenSet = new Set(settings.hiddenToolbarItems || []);
+                      const activeCount = toolbarOrder.length - hiddenSet.size;
 
-                          return (
+                      const moveItem = (index: number, dir: "up" | "down") => {
+                        const targetIdx = dir === "up" ? index - 1 : index + 1;
+                        if (targetIdx < 0 || targetIdx >= toolbarOrder.length) return;
+                        const newArr = [...toolbarOrder];
+                        const [item] = newArr.splice(index, 1);
+                        newArr.splice(targetIdx, 0, item);
+                        updateSetting("toolbarItemsOrder", newArr);
+                        updateSetting("toolbarConfiguredV3" as any, true);
+                      };
+
+                      const toggleHidden = (id: string) => {
+                        const currHidden = settings.hiddenToolbarItems || [];
+                        const nextHidden = currHidden.includes(id)
+                          ? currHidden.filter((i) => i !== id)
+                          : [...currHidden, id];
+                        updateSetting("hiddenToolbarItems", nextHidden);
+                        updateSetting("toolbarConfiguredV3" as any, true);
+                      };
+
+                      const renderedItems = toolbarOrder.map((id, index) => {
+                        const def = TOOLBAR_TOOL_DEFS[id];
+                        if (!def) return null;
+                        const IconComp = getToolbarIcon(id, pack);
+                        const isHidden = hiddenSet.has(id);
+                        const isDragging = draggedToolbarIndex === index;
+                        const isDragOver = dragOverToolbarIndex === index && draggedToolbarIndex !== index;
+
+                        return (
                             <div
                               key={id}
                               draggable
@@ -1005,60 +1117,104 @@ export default function SettingsTabView({
                               </div>
 
                               <div className="flex items-center gap-1 shrink-0">
-                                <button
-                                  type="button"
-                                  disabled={index === 0}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    moveItem(index, "up");
-                                  }}
-                                  title={t("settings.moveUp")}
-                                  className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-                                >
-                                  <ChevronUp className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={index === toolbarOrder.length - 1}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    moveItem(index, "down");
-                                  }}
-                                  title={t("settings.moveDown")}
-                                  className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-                                >
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                </button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      disabled={index === 0}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveItem(index, "up");
+                                      }}
+                                      aria-label={t("settings.moveUp")}
+                                      className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                                    >
+                                      <ChevronUp className="h-3.5 w-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" sideOffset={4}>
+                                    {t("settings.moveUp")}
+                                  </TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      disabled={index === toolbarOrder.length - 1}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveItem(index, "down");
+                                      }}
+                                      aria-label={t("settings.moveDown")}
+                                      className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" sideOffset={4}>
+                                    {t("settings.moveDown")}
+                                  </TooltipContent>
+                                </Tooltip>
+
                                 {def.locked ? (
-                                  <div
-                                    title={t("settings.toolLocked")}
-                                    className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground/40 cursor-not-allowed"
-                                  >
-                                    <Lock className="h-3.5 w-3.5" />
-                                  </div>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div
+                                        aria-label={t("settings.toolLocked")}
+                                        className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground/40 cursor-not-allowed"
+                                      >
+                                        <Lock className="h-3.5 w-3.5" />
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" sideOffset={4}>
+                                      {t("settings.toolLocked")}
+                                    </TooltipContent>
+                                  </Tooltip>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleHidden(id);
-                                    }}
-                                    title={isHidden ? t("settings.showTool") : t("settings.hideTool")}
-                                    className={`h-7 w-7 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
-                                      isHidden
-                                        ? "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-                                        : "text-primary hover:bg-primary/10"
-                                    }`}
-                                  >
-                                    {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                  </button>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleHidden(id);
+                                        }}
+                                        aria-label={isHidden ? t("settings.showTool") : t("settings.hideTool")}
+                                        className={`h-7 w-7 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+                                          isHidden
+                                            ? "text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+                                            : "text-primary hover:bg-primary/10"
+                                        }`}
+                                      >
+                                        {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" sideOffset={4}>
+                                      {isHidden ? t("settings.showTool") : t("settings.hideTool")}
+                                    </TooltipContent>
+                                  </Tooltip>
                                 )}
                               </div>
                             </div>
                           );
                         });
+
+                        return (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between px-0.5 text-xs text-muted-foreground">
+                              <span className="font-medium">{t("settings.dragToReorder")}</span>
+                              <span className="text-[11px] px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground font-medium">
+                                {activeCount} / {toolbarOrder.length}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5 max-h-[380px] overflow-y-auto no-scrollbar pr-1 border border-border/30 rounded-xl p-2 bg-muted/20">
+                              {renderedItems}
+                            </div>
+                          </div>
+                        );
                       })()}
-                    </div>
                   </div>
                 </div>
               )}
@@ -1095,10 +1251,70 @@ export default function SettingsTabView({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="untitled">{t("settings.optUntitledPattern")}</SelectItem>
-                          <SelectItem value="date">{t("settings.optDatePattern")}</SelectItem>
-                          <SelectItem value="daily">{t("settings.optDailyPattern")}</SelectItem>
+                          <SelectItem value="date">
+                            {settings.language === "th"
+                              ? `ตามวันที่ (Note_${getDatePatternLabel(settings.dateFormat)})`
+                              : `Date (Note_${getDatePatternLabel(settings.dateFormat)})`}
+                          </SelectItem>
+                          <SelectItem value="daily">
+                            {settings.language === "th"
+                              ? `บันทึกประจำวัน (Daily-${getDatePatternLabel(settings.dateFormat)})`
+                              : `Daily (Daily-${getDatePatternLabel(settings.dateFormat)})`}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.autoFolderIcons")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.autoFolderIconsDesc")}</p>
+                      </div>
+                      <Switch
+                        checked={settings.autoFolderIcons !== false}
+                        onCheckedChange={(checked) => updateSetting("autoFolderIcons", checked)}
+                        className="scale-85 origin-right"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Trash & Deletion Settings */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("trash.title")}</h3>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("trash.trashRetention")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("trash.trashRetentionDesc")}</p>
+                      </div>
+                      <Select
+                        value={String(settings.trashRetentionDays ?? 30)}
+                        onValueChange={(v) => updateSetting("trashRetentionDays", Number(v))}
+                      >
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="7">{t("trash.retention7Days")}</SelectItem>
+                          <SelectItem value="14">{t("trash.retention14Days")}</SelectItem>
+                          <SelectItem value="30">{t("trash.retention30Days")}</SelectItem>
+                          <SelectItem value="60">{t("trash.retention60Days")}</SelectItem>
+                          <SelectItem value="90">{t("trash.retention90Days")}</SelectItem>
+                          <SelectItem value="0">{t("trash.retentionNever")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.confirmBeforeDelete")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.confirmBeforeDeleteDesc")}</p>
+                      </div>
+                      <Switch
+                        checked={settings.confirmBeforeDelete}
+                        onCheckedChange={(v) => updateSetting("confirmBeforeDelete", v)}
+                        className="scale-85 origin-right"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1135,26 +1351,77 @@ export default function SettingsTabView({
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.templatesGroup")}</h3>
 
-                    <div className="flex items-center justify-between gap-4">
+                    {/* Markdown (.md) */}
+                    <div className="flex items-center justify-between gap-4 py-2 border-b border-border/40">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.defaultTemplate")}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.defaultTemplateDesc")}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.templateMdTitle")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.templateMdDesc")}</p>
                       </div>
                       <Select
-                        value={settings.defaultNoteTemplate}
-                        onValueChange={(val) => updateSetting("defaultNoteTemplate", val as any)}
+                        value={settings.defaultTemplateMd || settings.defaultNoteTemplate || "blank"}
+                        onValueChange={(val) => {
+                          updateSetting("defaultTemplateMd", val as any);
+                          updateSetting("defaultNoteTemplate", val as any);
+                        }}
                       >
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="blank">{t("settings.optBlankDocument")}</SelectItem>
-                          <SelectItem value="meeting">{t("settings.optMeetingNotes")}</SelectItem>
-                          <SelectItem value="daily">{t("settings.optDailyJournal")}</SelectItem>
-                          <SelectItem value="project">{t("settings.optProjectPlanning")}</SelectItem>
+                          <SelectItem value="daily">{t("settings.optDailyNote")}</SelectItem>
                           <SelectItem value="todo">{t("settings.optTodoList")}</SelectItem>
-                          <SelectItem value="study">{t("settings.optStudyNotes")}</SelectItem>
-                          <SelectItem value="bug">{t("settings.optBugReport")}</SelectItem>
+                          <SelectItem value="meeting">{t("settings.optMeetingNotes")}</SelectItem>
+                          <SelectItem value="project">{t("settings.optProjectPlan")}</SelectItem>
+                          <SelectItem value="study">{t("settings.optIdeaBrainstorm")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Plain Text (.txt) */}
+                    <div className="flex items-center justify-between gap-4 py-2 border-b border-border/40">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.templateTxtTitle")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.templateTxtDesc")}</p>
+                      </div>
+                      <Select
+                        value={settings.defaultTemplateTxt || "blank"}
+                        onValueChange={(val) => updateSetting("defaultTemplateTxt", val as any)}
+                      >
+                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="blank">{t("settings.optTxtBlank") || "Blank Text"}</SelectItem>
+                          <SelectItem value="notes">{t("settings.optTxtNotes") || "Notes"}</SelectItem>
+                          <SelectItem value="todo">{t("settings.optTxtTodoList") || "To-Do List"}</SelectItem>
+                          <SelectItem value="meeting">{t("settings.optTxtMeetingNotes") || "Meeting Notes"}</SelectItem>
+                          <SelectItem value="journal">{t("settings.optTxtJournal") || "Journal"}</SelectItem>
+                          <SelectItem value="readme">{t("settings.optTxtReadme") || "README"}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* HTML (.html) */}
+                    <div className="flex items-center justify-between gap-4 py-2">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.templateHtmlTitle")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.templateHtmlDesc")}</p>
+                      </div>
+                      <Select
+                        value={settings.defaultTemplateHtml || "blank"}
+                        onValueChange={(val) => updateSetting("defaultTemplateHtml", val as any)}
+                      >
+                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="blank">{t("settings.optHtmlBlank") || "Blank HTML"}</SelectItem>
+                          <SelectItem value="basic-website">{t("settings.optHtmlBasic") || "Basic Website"}</SelectItem>
+                          <SelectItem value="landing-page">{t("settings.optHtmlLanding") || "Landing Page"}</SelectItem>
+                          <SelectItem value="portfolio">{t("settings.optHtmlPortfolio") || "Portfolio"}</SelectItem>
+                          <SelectItem value="blog">{t("settings.optHtmlBlog") || "Blog"}</SelectItem>
+                          <SelectItem value="dashboard">{t("settings.optHtmlDashboard") || "Dashboard"}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1590,7 +1857,10 @@ export default function SettingsTabView({
                 onClick={handleReset}
                 className="h-10 px-5 rounded-xl border border-border/60 hover:bg-foreground/5 text-xs font-semibold transition-all cursor-pointer flex items-center gap-2 text-muted-foreground hover:text-foreground active:scale-95"
               >
-                <RotateCcw className="h-4 w-4" />
+                {(() => {
+                  const ResetIcon = getToolbarIcon("rotateCcw", pack);
+                  return <ResetIcon className="h-4 w-4" />;
+                })()}
                 <span>{t("settings.resetDefaults")}</span>
               </button>
 
@@ -1599,7 +1869,12 @@ export default function SettingsTabView({
                 onClick={handleSave}
                 className="h-10 px-6 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs hover:bg-primary/90 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
               >
-                {savedSuccess ? <Check className="h-4 w-4" /> : null}
+                {savedSuccess ? (
+                  (() => {
+                    const CheckIcon = getToolbarIcon("check", pack);
+                    return <CheckIcon className="h-4 w-4" />;
+                  })()
+                ) : null}
                 <span>{savedSuccess ? t("settings.savedSuccess") : t("settings.saveChanges")}</span>
               </button>
             </div>

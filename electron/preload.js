@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectDirectoryDialog: (title) => ipcRenderer.invoke("select-directory-dialog", title),
   showSaveDialog: (options) => ipcRenderer.invoke("show-save-dialog", options),
   createNewWorkspace: (data) => ipcRenderer.invoke("create-new-workspace", data),
+  openWorkspaceInNewWindow: (folderPath) => ipcRenderer.invoke("open-workspace-in-new-window", folderPath),
   readWorkspaceTree: (folderPath) => ipcRenderer.invoke("read-workspace-tree", folderPath),
   readDirectoryFiles: (folderPath) => ipcRenderer.invoke("read-directory-files", folderPath),
   readFileContent: (fullPath) => ipcRenderer.invoke("read-file-content", fullPath),
@@ -50,6 +51,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   copyFileOrFolder: (data) => ipcRenderer.invoke("copy-file-or-folder", data),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   fetchTtsAudio: (data) => ipcRenderer.invoke("fetch-tts-audio", data),
+  getOsUserInfo: () => ipcRenderer.invoke("get-os-user-info"),
   onWorkspaceChanged: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on("workspace-changed", subscription);

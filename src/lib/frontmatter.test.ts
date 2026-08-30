@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseFrontmatterAndTags,
   updateFrontmatterTags,
+  updateFrontmatterFavorite,
   renameTagInMarkdown,
   removeTagFromMarkdown,
   normalizeTag,
@@ -141,5 +142,83 @@ This has a #realtag.
 
     const typedWithNewline = "Build your own knowledge. #kkkk\nNext line";
     expect(parseFrontmatterAndTags(typedWithNewline).allTags).toEqual(["kkkk"]);
+  });
+
+  it("preserves intentional blank lines in note body and does not accumulate empty lines", () => {
+    const rawNote = `---
+tags:
+  - welcome
+---
+
+> A quiet space for your thoughts, ideas, and everything worth remembering.
+
+Welcome to **Luno**.
+
+Luno is a simple and flexible workspace.`;
+
+    const parsed = parseFrontmatterAndTags(rawNote);
+    expect(parsed.hasFrontmatter).toBe(true);
+    expect(parsed.frontmatterTags).toEqual(["welcome"]);
+    // Body should preserve the exact empty line under --- followed by the blockquote and all paragraphs
+    expect(parsed.bodyContent).toBe(`
+> A quiet space for your thoughts, ideas, and everything worth remembering.
+
+Welcome to **Luno**.
+
+Luno is a simple and flexible workspace.`);
+
+    // Updating tags should produce the exact same text format without adding extra blank lines
+    const updated = updateFrontmatterTags(rawNote, ["welcome"]);
+    expect(updated).toBe(rawNote);
+
+    // Repeated saves must be 100% idempotent
+    const savedTwice = updateFrontmatterTags(updated, ["welcome"]);
+    expect(savedTwice).toBe(rawNote);
+  });
+
+  it("parses favorite boolean and string in Frontmatter", () => {
+    const md1 = `---\nfavorite: true\n---\n# My Fav Note`;
+    const parsed1 = parseFrontmatterAndTags(md1);
+    expect(parsed1.frontmatterData.favorite).toBe(true);
+
+    const md2 = `---\nisFavorite: true\n---\n# My Fav Note`;
+    const parsed2 = parseFrontmatterAndTags(md2);
+    expect(parsed2.frontmatterData.isFavorite).toBe(true);
+
+    const md3 = `---\nfavorite: false\n---\n# Note`;
+    const parsed3 = parseFrontmatterAndTags(md3);
+    expect(parsed3.frontmatterData.favorite).toBe(false);
+  });
+
+  it("updates and removes favorite in Frontmatter without corrupting existing fields", () => {
+    const mdWithoutFm = "# Plain Note\n\nSome content";
+    const withFav = updateFrontmatterFavorite(mdWithoutFm, true);
+    expect(withFav).toContain("---\nfavorite: true\n---");
+    expect(withFav).toContain("# Plain Note");
+
+    const parsedWithFav = parseFrontmatterAndTags(withFav);
+    expect(parsedWithFav.frontmatterData.favorite).toBe(true);
+
+    // Remove favorite
+    const unFav = updateFrontmatterFavorite(withFav, false);
+    const parsedUnFav = parseFrontmatterAndTags(unFav);
+    expect(parsedUnFav.frontmatterData.favorite).toBeUndefined();
+
+    // Preserve other frontmatter fields
+    const mdWithExisting = `---\ntitle: Document\ntags:\n  - idea\n---\n\nBody`;
+    const addedFav = updateFrontmatterFavorite(mdWithExisting, true);
+    const parsedAdded = parseFrontmatterAndTags(addedFav);
+    expect(parsedAdded.frontmatterData.title).toBe("Document");
+    expect(parsedAdded.frontmatterTags).toEqual(["idea"]);
+    expect(parsedAdded.frontmatterData.favorite).toBe(true);
+
+    // Exact user scenario with tags, icon, and iconColor
+    const userScenario = `---\ntags:\n  - feedback\nicon: "lucide:MessageSquare"\niconColor: "#64748b"\n---\n# Content`;
+    const updated = updateFrontmatterFavorite(userScenario, true);
+    const parsedUser = parseFrontmatterAndTags(updated);
+    expect(parsedUser.frontmatterTags).toEqual(["feedback"]);
+    expect(parsedUser.frontmatterData.icon).toBe("lucide:MessageSquare");
+    expect(parsedUser.frontmatterData.iconColor).toBe("#64748b");
+    expect(parsedUser.frontmatterData.favorite).toBe(true);
   });
 });

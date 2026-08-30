@@ -4,12 +4,14 @@ import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import type { Note } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getToolbarIcon, IconPack } from "@/lib/iconPacks";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 
 interface BreadcrumbProps {
   note: Note | null;
@@ -33,19 +35,28 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = false) {
+function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = false, pack: IconPack = "lucide") {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   if (fileType === "web-viewer") return <Globe className={cls} />;
   const name = fileName?.toLowerCase() || "";
-  if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
+  if (name.endsWith(".zip")) {
+    const ZipIcon = getToolbarIcon("fileZip", pack);
+    return <ZipIcon className={cls} />;
+  }
   if (fileType === "image" || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".svg") || name.endsWith(".gif") || name.endsWith(".webp")) {
-    return <FileImage className={cls} />;
+    const ImgIcon = getToolbarIcon("fileImage", pack);
+    return <ImgIcon className={cls} />;
   }
   if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx")) {
-    return <FileCode className={cls} />;
+    const CodeIcon = getToolbarIcon("fileCode", pack);
+    return <CodeIcon className={cls} />;
   }
-  if (fileType === "binary") return <File className={cls} />;
-  return <FileText className={cls} />;
+  if (fileType === "binary") {
+    const FileIcon = getToolbarIcon("file", pack);
+    return <FileIcon className={cls} />;
+  }
+  const TextIcon = getToolbarIcon("fileText", pack);
+  return <TextIcon className={cls} />;
 }
 
 function buildTreeFromNotes(notes: Note[], baseFolderPath: string): TreeNode {
@@ -153,7 +164,7 @@ function BreadcrumbTreeView({
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
         <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {getFileIcon(note.fileName, note.fileType, isActive)}
+        {getFileIcon(note.fileName, note.fileType, isActive, settings.iconPack)}
         <span className="truncate flex-1">{fileName}</span>
       </button>
     );
@@ -163,6 +174,11 @@ function BreadcrumbTreeView({
     const isOpen = openFolders.has(node.path);
     const hasContent = node.notes.length > 0 || node.children.length > 0;
     const totalCount = node.notes.length + node.children.length;
+    const pack = settings.iconPack;
+    const ChevDown = getToolbarIcon("chevronDown", pack);
+    const ChevRight = getToolbarIcon("chevronRight", pack);
+    const FolderOpenIcon = getToolbarIcon("folderOpen", pack);
+    const FolderIcon = getToolbarIcon("folder", pack);
 
     return (
       <div key={node.path} className="group/tree-item relative w-full">
@@ -176,14 +192,14 @@ function BreadcrumbTreeView({
           style={{ paddingLeft: `${12 + depth * 14}px` }}
         >
           {isOpen ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <ChevDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <ChevRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
           {isOpen ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+            <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
           ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <FolderIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
           <span className="truncate flex-1 font-semibold text-foreground/90">{node.name}</span>
           {hasContent && (
@@ -226,7 +242,7 @@ function BreadcrumbTreeView({
   );
 }
 
-export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectNote, onOpenRightPanel, paneId = "main", isCloudWorkspace = false }: BreadcrumbProps) {
+function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, onOpenRightPanel, paneId = "main", isCloudWorkspace = false }: BreadcrumbProps) {
   const { t } = useTranslation();
   const { settings } = useAppSettings();
   if (!note) return null;
@@ -271,7 +287,10 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
                         {isCloudWorkspace || rootFolderName === "Google Drive" ? (
                           <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
                         ) : (
-                          <Home className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+                          (() => {
+                            const HomeIcon = getToolbarIcon("home", settings.iconPack);
+                            return <HomeIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
+                          })()
                         )}
                         {rootFolderName && <span className="text-muted-foreground/90 font-normal truncate max-w-[100px]">{rootFolderName}</span>}
                       </button>
@@ -284,26 +303,32 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {segmentItems.map((seg, i) => (
-                <span key={seg.path || i} className="flex items-center gap-1 shrink-0">
-                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none max-w-[120px] truncate"
-                      >
-                        <span className="truncate">{seg.label}</span>
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
-                      <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </span>
-              ))}
+              {segmentItems.map((seg, i) => {
+                const ChevRight = getToolbarIcon("chevronRight", settings.iconPack);
+                return (
+                  <span key={seg.path || i} className="flex items-center gap-1 shrink-0">
+                    <ChevRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none max-w-[120px] truncate"
+                        >
+                          <span className="truncate">{seg.label}</span>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                        <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </span>
+                );
+              })}
 
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+              {(() => {
+                const ChevRight = getToolbarIcon("chevronRight", settings.iconPack);
+                return <ChevRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;
+              })()}
               <span className="font-semibold text-foreground truncate min-w-[40px] px-0.5 leading-none shrink">{fileName}</span>
             </div>
           </>
@@ -316,14 +341,19 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
         {onOpenRightPanel && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={onOpenRightPanel}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus-visible:ring-0 focus-visible:outline-none focus:outline-none"
               >
-                <MoreHorizontal className="h-4 w-4" />
+                {(() => {
+                  const MoreIcon = getToolbarIcon("moreHorizontal", settings.iconPack);
+                  return <MoreIcon className="h-3.5 w-3.5" />;
+                })()}
                 <span className="sr-only">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</span>
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent align="end">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</TooltipContent>
           </Tooltip>
@@ -332,3 +362,5 @@ export default function Breadcrumb({ note, rootFolderName, notes = [], onSelectN
     </div>
   );
 }
+
+export default React.memo(BreadcrumbComponent);

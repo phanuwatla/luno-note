@@ -73,10 +73,12 @@ export function getRelativePathBetween(
   const upPrefix = upCount > 0 ? "../".repeat(upCount) : "";
   const remainingTo = toParts.slice(common).join("/");
 
-  if (remainingTo) {
-    return `${upPrefix}${remainingTo}/${fileName}`;
+  const rawPath = remainingTo ? `${upPrefix}${remainingTo}/${fileName}` : `${upPrefix}${fileName}`;
+  try {
+    return encodeURI(decodeURI(rawPath));
+  } catch {
+    return rawPath.replace(/ /g, "%20");
   }
-  return `${upPrefix}${fileName}`;
 }
 
 export function isImageNote(note: Note): boolean {
@@ -85,14 +87,34 @@ export function isImageNote(note: Note): boolean {
   return /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i.test(name);
 }
 
-export function isAttachmentNote(note: Note): boolean {
-  const folder = (note.folderPath || "").toLowerCase();
-  const name = (note.fileName || note.title || "").toLowerCase();
+export function isAttachmentPath(folderPath: string, fileName?: string): boolean {
+  const folder = (folderPath || "").replace(/\\/g, "/").toLowerCase();
+  const name = (fileName || "").replace(/\\/g, "/").toLowerCase();
   return (
     folder === "attachments" ||
     folder.startsWith("attachments/") ||
     name.startsWith("attachments/")
   );
+}
+
+export function isAttachmentNote(note: Note): boolean {
+  return isAttachmentPath(note.folderPath || "", note.fileName || note.title || "");
+}
+
+export function cacheBlobUrlInMap(
+  map: Map<string, string> | undefined,
+  path: string,
+  url: string
+): void {
+  if (!map || !path || !url) return;
+  map.set(path, url);
+  map.set(url, path);
+  try {
+    const encoded = encodeURI(decodeURI(path));
+    const decoded = decodeURIComponent(path);
+    map.set(encoded, url);
+    map.set(decoded, url);
+  } catch {}
 }
 
 interface WorkspaceImagePickerDialogProps {
@@ -192,10 +214,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                   const blobUrl = URL.createObjectURL(file);
                   previewsMap[key] = blobUrl;
 
-                  if (assetBlobUrlMap?.current) {
-                    assetBlobUrlMap.current.set(relPath, blobUrl);
-                    assetBlobUrlMap.current.set(blobUrl, relPath);
-                  }
+                  cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, blobUrl);
 
                   itemsMap.set(key, {
                     id: key,
@@ -204,7 +223,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                     relativePath: relPath,
                     src: blobUrl,
                     fileHandle,
-                    isAttachment: folder === "attachments" || folder.startsWith("attachments/"),
+                    isAttachment: isAttachmentPath(folder, name),
                   });
                 } catch (err) {
                   console.warn("Failed reading image file handle:", name, err);
@@ -253,10 +272,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                             const dataUrl = `data:${mime};base64,${base64}`;
                             previewsMap[key] = dataUrl;
 
-                            if (assetBlobUrlMap?.current) {
-                              assetBlobUrlMap.current.set(relPath, dataUrl);
-                              assetBlobUrlMap.current.set(dataUrl, relPath);
-                            }
+                            cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, dataUrl);
 
                             itemsMap.set(key, {
                               id: key,
@@ -264,8 +280,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                               folderPath: folder,
                               relativePath: relPath,
                               src: dataUrl,
-                              isAttachment:
-                                folder === "attachments" || folder.startsWith("attachments/"),
+                              isAttachment: isAttachmentPath(folder, f.name),
                             });
                           }
                         } catch (err) {
@@ -306,8 +321,9 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
             ? n.content
             : undefined;
 
-        if (!preview && assetBlobUrlMap?.current && assetBlobUrlMap.current.has(relPath)) {
-          preview = assetBlobUrlMap.current.get(relPath);
+        if (!preview && assetBlobUrlMap?.current) {
+          const encodedRel = encodeURI(relPath);
+          preview = assetBlobUrlMap.current.get(relPath) || assetBlobUrlMap.current.get(encodedRel);
         }
 
         // Try resolving handle from rootDirHandle directly by path traversal
@@ -323,10 +339,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
             const fileHandle = await targetDir.getFileHandle(fileName, { create: false });
             const file = await fileHandle.getFile();
             preview = URL.createObjectURL(file);
-            if (assetBlobUrlMap?.current) {
-              assetBlobUrlMap.current.set(relPath, preview);
-              assetBlobUrlMap.current.set(preview, relPath);
-            }
+            cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, preview);
           } catch {
             /* ignore traversal failure */
           }
@@ -341,10 +354,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
               if (perm === "granted") {
                 const file = await handle.getFile();
                 preview = URL.createObjectURL(file);
-                if (assetBlobUrlMap?.current) {
-                  assetBlobUrlMap.current.set(relPath, preview);
-                  assetBlobUrlMap.current.set(preview, relPath);
-                }
+                cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, preview);
               }
             }
           } catch {
@@ -368,10 +378,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                 const ext = fileName.split(".").pop()?.toLowerCase() || "png";
                 const mime = ext === "svg" ? "image/svg+xml" : `image/${ext}`;
                 preview = `data:${mime};base64,${base64}`;
-                if (assetBlobUrlMap?.current) {
-                  assetBlobUrlMap.current.set(relPath, preview);
-                  assetBlobUrlMap.current.set(preview, relPath);
-                }
+                cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, preview);
               }
             }
           } catch {
@@ -411,8 +418,12 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
     return scannedItems.filter((i) => i.isAttachment);
   }, [scannedItems]);
 
+  const workspaceOnlyItems = useMemo(() => {
+    return scannedItems.filter((i) => !i.isAttachment);
+  }, [scannedItems]);
+
   const displayedItems = useMemo(() => {
-    const list = activeTab === "attachments" ? attachmentItems : scannedItems;
+    const list = activeTab === "attachments" ? attachmentItems : workspaceOnlyItems;
     const query = searchQuery.trim().toLowerCase();
     if (!query) return list;
 
@@ -421,7 +432,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
       const folder = i.folderPath.toLowerCase();
       return name.includes(query) || folder.includes(query);
     });
-  }, [activeTab, attachmentItems, scannedItems, searchQuery]);
+  }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery]);
 
   const handleSelectAndInsert = useCallback(
     (item: ScannedImageItem) => {
@@ -530,7 +541,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
             >
               <Images className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">
-                {t("editor.tabAllWorkspace")} ({scannedItems.length})
+                {t("editor.tabAllWorkspace")} ({workspaceOnlyItems.length})
               </span>
             </button>
           </div>
@@ -579,12 +590,6 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                           />
                         ) : (
                           <FileImage className="h-6 w-6 text-muted-foreground/40" />
-                        )}
-
-                        {isSelected && (
-                          <div className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
-                            <Check className="h-2.5 w-2.5 stroke-[3]" />
-                          </div>
                         )}
                       </div>
 
@@ -648,12 +653,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                         </div>
                       </div>
 
-                      {/* Selection indicator */}
-                      {isSelected ? (
-                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow shrink-0">
-                          <Check className="h-3 w-3 stroke-[3]" />
-                        </div>
-                      ) : (
+                      {!isSelected && (
                         <span className="text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                           {t("editor.insertImage") || "Select"}
                         </span>

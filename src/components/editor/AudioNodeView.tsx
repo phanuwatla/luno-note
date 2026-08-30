@@ -21,7 +21,7 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 
-export const AudioNodeView: React.FC<NodeViewProps> = ({
+const AudioNodeViewComponent: React.FC<NodeViewProps> = ({
   editor,
   node,
   getPos,
@@ -284,5 +284,13 @@ export const AudioNodeView: React.FC<NodeViewProps> = ({
     </NodeViewWrapper>
   );
 };
+
+export const AudioNodeView = React.memo(AudioNodeViewComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.node.attrs.src === nextProps.node.attrs.src &&
+    prevProps.node.attrs.title === nextProps.node.attrs.title &&
+    prevProps.selected === nextProps.selected
+  );
+});
 
 export default AudioNodeView;

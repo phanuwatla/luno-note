@@ -23,6 +23,8 @@ import type { Note } from "@/hooks/useNotes";
 import type { Editor } from "@tiptap/react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
+import IconPickerDialog from "@/components/IconPickerDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -33,6 +35,7 @@ import {
 import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson, isMarkdownNote } from "@/lib/frontmatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { countWords, countCharacters, calculateReadingTime } from "@/lib/wordCount";
+import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 
 interface RightPanelProps {
   isOpen: boolean;
@@ -57,7 +60,7 @@ interface OutlineItem {
   pos?: number;
 }
 
-export default function RightPanel({
+function RightPanelComponent({
   isOpen,
   onClose,
   note,
@@ -73,8 +76,9 @@ export default function RightPanel({
   onSelectNote,
 }: RightPanelProps) {
   const { t } = useTranslation();
-  const { settings } = useAppSettings();
+  const { settings, setFileIcon, removeFileIcon } = useAppSettings();
   const [activeTab, setActiveTab] = useState<"outline" | "properties" | "backlinks">("outline");
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
 
@@ -180,41 +184,18 @@ export default function RightPanel({
     };
   }, [editor?.state.doc, note?.content, settings.language]);
 
-  // Format Dates with localization
+  // Format Dates with localization & user settings
   const formattedDates = useMemo(() => {
-    const isTh = settings.language === "th";
-    const locale = isTh ? "th-TH" : "en-US";
-
     const formatDate = (val?: string | number) => {
-      if (!val) {
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-        return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
-      }
-      const date = new Date(val);
-      if (isNaN(date.getTime()) || date.getTime() === 0) {
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-        return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
-      }
-
-      const now = new Date();
-      const isToday = date.toDateString() === now.toDateString();
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      const isYesterday = date.toDateString() === yesterday.toDateString();
-
-      const timeStr = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-      if (isToday) return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
-      if (isYesterday) return `${isTh ? "เมื่อวาน" : "Yesterday"} ${timeStr}`;
-      return `${date.toLocaleDateString(locale, { month: "short", day: "numeric" })} ${timeStr}`;
+      if (!val) return "";
+      return formatRelativeDateTime(val, settings.dateFormat, settings.timeFormat, settings.language);
     };
 
     return {
       created: formatDate(note?.createdAt),
       updated: formatDate(note?.updatedAt),
     };
-  }, [note?.createdAt, note?.updatedAt, settings.language]);
+  }, [note?.createdAt, note?.updatedAt, settings.dateFormat, settings.timeFormat, settings.language]);
 
   const handleScrollToItem = (item: OutlineItem) => {
     if (editor && item.pos !== undefined) {
@@ -224,9 +205,10 @@ export default function RightPanel({
   };
 
   const handleAddTag = (overrideTag?: string) => {
+    if (!note || !isMarkdownNote(note) || !onUpdateNote) return;
     const rawVal = overrideTag !== undefined ? overrideTag : newTagInput;
     const tagToAdd = rawVal.trim().replace(/^#/, "");
-    if (!tagToAdd || !note || !onUpdateNote) return;
+    if (!tagToAdd) return;
 
     const currentTags = note.tags || [];
     const updatedTags = Array.from(new Set([...currentTags, tagToAdd]));
@@ -237,7 +219,7 @@ export default function RightPanel({
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
-    if (!note || !onUpdateNote) return;
+    if (!note || !isMarkdownNote(note) || !onUpdateNote) return;
     const currentTags = note.tags || [];
     const updatedTags = currentTags.filter((t) => t.toLowerCase() !== tagToRemove.toLowerCase());
     onUpdateNote(note.id, { tags: updatedTags });
@@ -245,12 +227,22 @@ export default function RightPanel({
 
   if (!note || !isOpen) return null;
 
+  const currentRelPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+  const currentIcon = note.icon || (currentRelPath && settings?.fileIcons?.[currentRelPath]?.icon);
+  const currentColor = note.iconColor || (currentRelPath && settings?.fileIcons?.[currentRelPath]?.color);
+
+  const pack = settings?.iconPack || "lucide";
+  const renderIcon = (key: string, cls = "h-4 w-4") => {
+    const IconComp = getToolbarIcon(key, pack);
+    return <IconComp className={cls} />;
+  };
+
   return (
     <motion.aside
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
-      transition={{ duration: 0.2, ease: "easeInOut" }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="h-full w-[280px] shrink-0 border-l border-border bg-background flex flex-col select-none overflow-hidden"
     >
       {/* Header Tabs (Outline / Properties / Backlinks) */}
@@ -299,9 +291,9 @@ export default function RightPanel({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
             >
-              <X className="h-3.5 w-3.5" />
+              {renderIcon("x", "h-3.5 w-3.5")}
             </button>
           </TooltipTrigger>
           <TooltipContent>{t("rightPanel.closePanel")}</TooltipContent>
@@ -334,7 +326,7 @@ export default function RightPanel({
                           <span className="text-[10px] uppercase font-bold text-muted-foreground/60 shrink-0 w-4">
                             {item.level === "table" ? "" : item.level.toUpperCase()}
                           </span>
-                          {item.level === "table" && <TableIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                          {item.level === "table" && renderIcon("table", "h-3.5 w-3.5 text-muted-foreground shrink-0")}
                           <span className="truncate">{item.text}</span>
                         </button>
                       );
@@ -360,6 +352,20 @@ export default function RightPanel({
                     <span className="text-muted-foreground">{t("rightPanel.folder")}</span>
                     <span className="font-medium text-foreground">{note.folderPath || t("rightPanel.root")}</span>
                   </div>
+                  <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+                    <span className="text-muted-foreground">{t("sidebar.changeNoteIcon") || "Icon"}</span>
+                    <button
+                      type="button"
+                      onClick={() => setIconPickerOpen(true)}
+                      className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-muted/70 text-foreground transition-colors cursor-pointer border border-border/40 text-xs"
+                    >
+                      {currentIcon ? (
+                        renderCustomIcon(currentIcon, "h-3.5 w-3.5", { color: currentColor })
+                      ) : (
+                        <span className="text-muted-foreground text-[11px]">{t("iconPicker.title") || "Change..."}</span>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -376,7 +382,7 @@ export default function RightPanel({
                         }}
                         className="flex w-full items-center gap-2 rounded-lg border border-border/60 p-2.5 text-left hover:bg-muted/60 transition-colors cursor-pointer"
                       >
-                        <Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+                        {renderIcon("link", "h-3.5 w-3.5 text-primary shrink-0")}
                         <span className="font-medium text-foreground truncate">{linkNote.fileName || linkNote.title}</span>
                       </button>
                     ))
@@ -402,9 +408,9 @@ export default function RightPanel({
                           <button
                             type="button"
                             onClick={() => handleRemoveTag(tag)}
-                            className="opacity-60 hover:opacity-100 transition-opacity"
+                            className="opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
                           >
-                            <X className="h-3 w-3" />
+                            {renderIcon("x", "h-3 w-3")}
                           </button>
                         </span>
                       ))}
@@ -429,9 +435,9 @@ export default function RightPanel({
                             <button
                               type="button"
                               onClick={() => setIsAddingTag(true)}
-                              className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                              className="flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
                             >
-                              <Plus className="h-3.5 w-3.5" />
+                              {renderIcon("plus", "h-3.5 w-3.5")}
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>{t("rightPanel.addTag")}</TooltipContent>
@@ -450,7 +456,7 @@ export default function RightPanel({
                 <div className="space-y-2 text-xs">
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
-                      <Clock className="h-3.5 w-3.5 shrink-0" />
+                      {renderIcon("clock", "h-3.5 w-3.5 shrink-0")}
                       <span>{t("rightPanel.created")}</span>
                     </span>
                     <span className="font-medium text-foreground/80">{formattedDates.created}</span>
@@ -458,7 +464,7 @@ export default function RightPanel({
 
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
-                      <FileEdit className="h-3.5 w-3.5 shrink-0" />
+                      {renderIcon("pencil", "h-3.5 w-3.5 shrink-0")}
                       <span>{t("rightPanel.updated")}</span>
                     </span>
                     <span className="font-medium text-foreground/80">{formattedDates.updated}</span>
@@ -466,7 +472,7 @@ export default function RightPanel({
 
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
-                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      {renderIcon("fileText", "h-3.5 w-3.5 shrink-0")}
                       <span>{t("rightPanel.wordCount")}</span>
                     </span>
                     <span className="font-medium text-foreground/80">{stats.words.toLocaleString()}</span>
@@ -474,7 +480,7 @@ export default function RightPanel({
 
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
-                      <AlignLeft className="h-3.5 w-3.5 shrink-0" />
+                      {renderIcon("fileText", "h-3.5 w-3.5 shrink-0")}
                       <span>{t("rightPanel.characterCount")}</span>
                     </span>
                     <span className="font-medium text-foreground/80">{stats.chars.toLocaleString()}</span>
@@ -482,7 +488,7 @@ export default function RightPanel({
 
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
-                      <Clock className="h-3.5 w-3.5 shrink-0" />
+                      {renderIcon("clock", "h-3.5 w-3.5 shrink-0")}
                       <span>{t("rightPanel.readingTime")}</span>
                     </span>
                     <span className="font-medium text-foreground/80">{stats.readTime}</span>
@@ -499,9 +505,9 @@ export default function RightPanel({
                 <button
                   type="button"
                   onClick={() => note && onFavorite?.(note.id)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
                 >
-                  <Star className={`h-4 w-4 shrink-0 ${note.isFavorite ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`} />
+                  {renderIcon("star", `h-4 w-4 shrink-0 ${note.isFavorite ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`)}
                   <span>{note.isFavorite ? t("rightPanel.removeFromFavorites") : t("rightPanel.addToFavorites")}</span>
                 </button>
 
@@ -510,7 +516,7 @@ export default function RightPanel({
                   onClick={() => note && onDuplicate?.(note)}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
                 >
-                  <Copy className="h-4 w-4 text-muted-foreground shrink-0" />
+                  {renderIcon("copy", "h-4 w-4 text-muted-foreground shrink-0")}
                   <span>{t("sidebar.duplicateAction")}</span>
                 </button>
 
@@ -521,19 +527,19 @@ export default function RightPanel({
                       className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
                     >
                       <div className="flex items-center gap-2.5">
-                        <Download className="h-4 w-4 text-muted-foreground shrink-0" />
+                        {renderIcon("download", "h-4 w-4 text-muted-foreground shrink-0")}
                         <span>{t("rightPanel.export")}</span>
                       </div>
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      {renderIcon("chevronRight", "h-3.5 w-3.5 text-muted-foreground/60")}
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" side="top" className="w-52 rounded-xl px-0 py-2 shadow-lg">
                     <DropdownMenuItem disabled={!note} onClick={onExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                      <FileText className="h-4 w-4" />
+                      {renderIcon("fileText", "h-4 w-4")}
                       <span>{t("editor.exportPdf")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem disabled={!note} onClick={onExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                      <FileCode className="h-4 w-4" />
+                      {renderIcon("fileCode", "h-4 w-4")}
                       <span>{t("editor.exportWord")}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -544,11 +550,35 @@ export default function RightPanel({
                   onClick={() => note && onDelete?.(note)}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 >
-                  <Trash2 className="h-4 w-4 shrink-0" />
+                  {renderIcon("trash", "h-4 w-4 shrink-0")}
                   <span>{t("common.delete")}</span>
                 </button>
               </div>
             </div>
+
+      <IconPickerDialog
+        open={iconPickerOpen}
+        onOpenChange={setIconPickerOpen}
+        title={t("sidebar.changeNoteIcon") || "Change Icon"}
+        initialIcon={currentIcon}
+        initialColor={currentColor}
+        onSelectIcon={(icon, color) => {
+          if (currentRelPath) {
+            setFileIcon(currentRelPath, icon, color);
+          }
+          onUpdateNote?.(note.id, { icon, iconColor: color });
+          setIconPickerOpen(false);
+        }}
+        onRemoveIcon={() => {
+          if (currentRelPath) {
+            removeFileIcon(currentRelPath);
+          }
+          onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined });
+          setIconPickerOpen(false);
+        }}
+      />
     </motion.aside>
   );
 }
+
+export default React.memo(RightPanelComponent);

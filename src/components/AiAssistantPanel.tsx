@@ -100,7 +100,7 @@ export default function AiAssistantPanel({
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
-      transition={{ duration: 0.2, ease: "easeInOut" }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="h-full w-[280px] shrink-0 border-l border-border bg-background flex flex-col select-none overflow-hidden"
     >
       {/* Header Bar */}
@@ -132,12 +132,19 @@ export default function AiAssistantPanel({
             <ActionIcon className="h-3.5 w-3.5 text-primary shrink-0" />
             <span className="font-semibold text-xs text-foreground whitespace-nowrap">{actionLabel}</span>
           </div>
-          <span
-            className="text-[10px] font-mono text-muted-foreground/80 bg-muted/60 px-1.5 py-0.5 rounded border border-border/50 select-none truncate max-w-[125px] whitespace-nowrap shrink"
-            title={formatModelName(diffState.modelUsed)}
-          >
-            {formatModelName(diffState.modelUsed)}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="text-[10px] font-mono text-muted-foreground/80 bg-muted/60 px-1.5 py-0.5 rounded border border-border/50 select-none truncate max-w-[125px] whitespace-nowrap shrink cursor-default"
+                aria-label={formatModelName(diffState.modelUsed)}
+              >
+                {formatModelName(diffState.modelUsed)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}>
+              {formatModelName(diffState.modelUsed)}
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Original Text Section */}

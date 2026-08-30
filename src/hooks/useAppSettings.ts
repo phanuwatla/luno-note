@@ -1,4 +1,6 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { MotionConfig } from "framer-motion";
+import type { IconPackId } from "@/lib/iconPacks";
 
 export type AppTheme =
   | "emerald"
@@ -53,24 +55,287 @@ export const DEFAULT_TOOLBAR_ORDER: string[] = [
   "bulletList",
   "orderedList",
   "taskList",
-  "link",
-  "image",
-  "table",
+  "toggle",
   "code",
   "codeBlock",
   "blockquote",
   "horizontalRule",
-  "toggle",
+  "footnote",
+  "table",
+  "link",
+  "image",
   "emoji",
+  "audio",
   "calculator",
   "translator",
   "clock",
-  "audio",
   "fixLanguage",
   "aiAssistant",
 ];
 
-export const DEFAULT_HIDDEN_TOOLBAR_ITEMS: string[] = ["h3", "h4", "h5", "h6"];
+export const DEFAULT_HIDDEN_TOOLBAR_ITEMS: string[] = [
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "footnote",
+  "calculator",
+  "translator",
+  "clock",
+  "fixLanguage",
+];
+
+export type ToolbarPresetId = "standard" | "minimal" | "tasks" | "academic" | "technical" | "all";
+
+export interface ToolbarPreset {
+  id: ToolbarPresetId;
+  nameKey: string;
+  order: string[];
+  hidden: string[];
+}
+
+export const TOOLBAR_PRESETS: ToolbarPreset[] = [
+  {
+    id: "standard",
+    nameKey: "settings.presetStandard",
+    order: DEFAULT_TOOLBAR_ORDER,
+    hidden: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
+  },
+  {
+    id: "minimal",
+    nameKey: "settings.presetMinimal",
+    order: [
+      "undo",
+      "redo",
+      "h1",
+      "h2",
+      "bold",
+      "italic",
+      "highlight",
+      "bulletList",
+      "taskList",
+      "aiAssistant",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "underline",
+      "strike",
+      "orderedList",
+      "toggle",
+      "code",
+      "codeBlock",
+      "blockquote",
+      "horizontalRule",
+      "footnote",
+      "table",
+      "link",
+      "image",
+      "emoji",
+      "audio",
+      "calculator",
+      "translator",
+      "clock",
+      "fixLanguage",
+    ],
+    hidden: [
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "underline",
+      "strike",
+      "orderedList",
+      "toggle",
+      "code",
+      "codeBlock",
+      "blockquote",
+      "horizontalRule",
+      "footnote",
+      "table",
+      "link",
+      "image",
+      "emoji",
+      "audio",
+      "calculator",
+      "translator",
+      "clock",
+      "fixLanguage",
+    ],
+  },
+  {
+    id: "tasks",
+    nameKey: "settings.presetTasks",
+    order: [
+      "undo",
+      "redo",
+      "h1",
+      "h2",
+      "bold",
+      "highlight",
+      "taskList",
+      "bulletList",
+      "orderedList",
+      "toggle",
+      "table",
+      "horizontalRule",
+      "clock",
+      "calculator",
+      "audio",
+      "aiAssistant",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "italic",
+      "underline",
+      "strike",
+      "code",
+      "codeBlock",
+      "blockquote",
+      "footnote",
+      "link",
+      "image",
+      "emoji",
+      "translator",
+      "fixLanguage",
+    ],
+    hidden: [
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "italic",
+      "underline",
+      "strike",
+      "code",
+      "codeBlock",
+      "blockquote",
+      "footnote",
+      "link",
+      "image",
+      "emoji",
+      "translator",
+      "fixLanguage",
+    ],
+  },
+  {
+    id: "academic",
+    nameKey: "settings.presetAcademic",
+    order: [
+      "undo",
+      "redo",
+      "h1",
+      "h2",
+      "h3",
+      "bold",
+      "italic",
+      "underline",
+      "highlight",
+      "orderedList",
+      "bulletList",
+      "blockquote",
+      "footnote",
+      "table",
+      "toggle",
+      "link",
+      "image",
+      "translator",
+      "aiAssistant",
+      "h4",
+      "h5",
+      "h6",
+      "strike",
+      "taskList",
+      "code",
+      "codeBlock",
+      "horizontalRule",
+      "emoji",
+      "audio",
+      "calculator",
+      "clock",
+      "fixLanguage",
+    ],
+    hidden: [
+      "h4",
+      "h5",
+      "h6",
+      "strike",
+      "taskList",
+      "code",
+      "codeBlock",
+      "horizontalRule",
+      "emoji",
+      "audio",
+      "calculator",
+      "clock",
+      "fixLanguage",
+    ],
+  },
+  {
+    id: "technical",
+    nameKey: "settings.presetTechnical",
+    order: [
+      "undo",
+      "redo",
+      "h1",
+      "h2",
+      "code",
+      "codeBlock",
+      "taskList",
+      "bulletList",
+      "toggle",
+      "table",
+      "horizontalRule",
+      "link",
+      "image",
+      "fixLanguage",
+      "aiAssistant",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "bold",
+      "italic",
+      "underline",
+      "strike",
+      "highlight",
+      "orderedList",
+      "blockquote",
+      "footnote",
+      "emoji",
+      "audio",
+      "calculator",
+      "translator",
+      "clock",
+    ],
+    hidden: [
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "bold",
+      "italic",
+      "underline",
+      "strike",
+      "highlight",
+      "orderedList",
+      "blockquote",
+      "footnote",
+      "emoji",
+      "audio",
+      "calculator",
+      "translator",
+      "clock",
+    ],
+  },
+  {
+    id: "all",
+    nameKey: "settings.presetAll",
+    order: DEFAULT_TOOLBAR_ORDER,
+    hidden: [],
+  },
+];
 
 export type FontFamilyOption =
   | "inter"
@@ -246,13 +511,32 @@ export interface AppSettings {
   autoSave: boolean;
   reopenTabs: boolean;
 
-  // File Settings
+  // General Settings
+  onStartup: string;
+  checkUpdates: boolean;
+  dateFormat: string;
+  timeFormat: string;
+  startWeekOn: string;
+  enableAnimations: boolean;
+  sendUsageData: boolean;
+
+  // Trash & Deletion Settings
+  trashRetentionDays: number;
+  autoEmptyTrash: boolean;
+
   defaultExtension: "md" | "txt" | "html";
   newFilePattern: "untitled" | "date" | "daily";
   defaultNoteTemplate: "blank" | "meeting" | "daily" | "project" | "todo" | "study" | "bug";
+  defaultTemplateMd: "blank" | "meeting" | "daily" | "project" | "todo" | "study" | "bug";
+  defaultTemplateTxt: "blank" | "notes" | "todo" | "meeting" | "journal" | "readme" | "daily" | "project" | "study" | "bug";
+  defaultTemplateHtml: "blank" | "basic-website" | "landing-page" | "portfolio" | "blog" | "dashboard" | "meeting" | "daily" | "project" | "todo" | "study" | "bug";
+  autoFolderIcons: boolean;
 
   // Appearance Settings
   interfaceScale: number;
+  iconPack: IconPackId;
+  folderIcons?: Record<string, { icon: string; color?: string }>;
+  fileIcons?: Record<string, { icon: string; color?: string }>;
   editorWidth: "compact" | "standard" | "full";
   lineHeight: "1.4" | "1.6" | "1.8";
   sidebarDensity: "compact" | "comfortable";
@@ -352,11 +636,29 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoSave: true,
   reopenTabs: true,
 
+  onStartup: "home",
+  checkUpdates: true,
+  dateFormat: "YYYY-MM-DD",
+  timeFormat: "24h",
+  startWeekOn: "monday",
+  enableAnimations: true,
+  sendUsageData: false,
+
+  trashRetentionDays: 30,
+  autoEmptyTrash: true,
+
   defaultExtension: "md",
   newFilePattern: "untitled",
   defaultNoteTemplate: "blank",
+  defaultTemplateMd: "blank",
+  defaultTemplateTxt: "blank",
+  defaultTemplateHtml: "blank",
+  autoFolderIcons: true,
 
   interfaceScale: 100,
+  iconPack: "lucide",
+  folderIcons: {},
+  fileIcons: {},
   editorWidth: "standard",
   lineHeight: "1.6",
   sidebarDensity: "comfortable",
@@ -404,9 +706,18 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
 
   const defaultExtension = raw?.defaultExtension === "txt" || raw?.defaultExtension === "html" ? raw.defaultExtension : "md";
   const newFilePattern = raw?.newFilePattern === "date" || raw?.newFilePattern === "daily" ? raw.newFilePattern : "untitled";
-  const defaultNoteTemplate = ["blank", "meeting", "daily", "project", "todo", "study", "bug"].includes(raw?.defaultNoteTemplate as any)
-    ? (raw.defaultNoteTemplate as any)
+  const defaultTemplateMd = ["blank", "meeting", "daily", "project", "todo", "study", "bug"].includes(raw?.defaultTemplateMd as any)
+    ? (raw.defaultTemplateMd as any)
+    : (["blank", "meeting", "daily", "project", "todo", "study", "bug"].includes(raw?.defaultNoteTemplate as any)
+      ? (raw.defaultNoteTemplate as any)
+      : "blank");
+  const defaultTemplateTxt = ["blank", "notes", "todo", "meeting", "journal", "readme", "daily", "project", "study", "bug"].includes(raw?.defaultTemplateTxt as any)
+    ? (raw.defaultTemplateTxt as any)
     : "blank";
+  const defaultTemplateHtml = ["blank", "basic-website", "landing-page", "portfolio", "blog", "dashboard", "meeting", "daily", "project", "todo", "study", "bug"].includes(raw?.defaultTemplateHtml as any)
+    ? (raw.defaultTemplateHtml as any)
+    : "blank";
+  const defaultNoteTemplate = defaultTemplateMd;
 
   const interfaceScale = [80, 90, 100, 110, 125, 150].includes(Number(raw?.interfaceScale)) ? Number(raw?.interfaceScale) : 100;
   const editorWidth = raw?.editorWidth === "compact" || raw?.editorWidth === "full" ? raw.editorWidth : "standard";
@@ -452,22 +763,17 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     ? raw.hiddenToolbarItems.filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id) && id !== "undo" && id !== "redo")
     : null;
 
-  let hiddenToolbarItems: string[];
-  if (rawHidden === null) {
-    hiddenToolbarItems = DEFAULT_HIDDEN_TOOLBAR_ITEMS;
-  } else {
-    // If user's stored settings are from an older version without h3-h6 in hidden items, ensure h3-h6 are hidden by default
-    const hasAnyH3toH6 = rawHidden.some((id) => ["h3", "h4", "h5", "h6"].includes(id));
-    if (!hasAnyH3toH6 && !(raw as any)?.toolbarConfiguredV2) {
-      hiddenToolbarItems = Array.from(new Set([...rawHidden, "h3", "h4", "h5", "h6"]));
-    } else {
-      hiddenToolbarItems = rawHidden;
-    }
-  }
+  const hiddenToolbarItems: string[] = rawHidden ?? DEFAULT_HIDDEN_TOOLBAR_ITEMS;
 
   const geminiApiKey = typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey.trim() : "";
   const storageMode = raw?.storageMode === "gdrive" ? "gdrive" : "local";
   const googleDriveClientId = typeof raw?.googleDriveClientId === "string" ? raw.googleDriveClientId.trim() : "";
+
+  const iconPack: IconPackId = ["lucide", "tabler", "phosphor"].includes(raw?.iconPack as any)
+    ? (raw?.iconPack as IconPackId)
+    : "lucide";
+  const folderIcons = typeof raw?.folderIcons === "object" && raw?.folderIcons !== null ? raw.folderIcons : {};
+  const fileIcons = typeof raw?.fileIcons === "object" && raw?.fileIcons !== null ? raw.fileIcons : {};
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
@@ -482,11 +788,29 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     autoSave: typeof raw?.autoSave === "boolean" ? raw.autoSave : DEFAULT_SETTINGS.autoSave,
     reopenTabs: typeof raw?.reopenTabs === "boolean" ? raw.reopenTabs : DEFAULT_SETTINGS.reopenTabs,
 
+    onStartup: raw?.onStartup === "lastNote" || raw?.onStartup === "blank" ? raw.onStartup : "home",
+    checkUpdates: raw?.checkUpdates !== false,
+    dateFormat: raw?.dateFormat === "DD/MM/YYYY" || raw?.dateFormat === "MM/DD/YYYY" ? raw.dateFormat : "YYYY-MM-DD",
+    timeFormat: raw?.timeFormat === "12h" ? "12h" : "24h",
+    startWeekOn: raw?.startWeekOn === "sunday" ? "sunday" : "monday",
+    enableAnimations: raw?.enableAnimations !== false,
+    sendUsageData: raw?.sendUsageData === true,
+
+    trashRetentionDays: typeof raw?.trashRetentionDays === "number" ? raw.trashRetentionDays : DEFAULT_SETTINGS.trashRetentionDays,
+    autoEmptyTrash: raw?.autoEmptyTrash !== false,
+
     defaultExtension,
     newFilePattern,
     defaultNoteTemplate,
+    defaultTemplateMd,
+    defaultTemplateTxt,
+    defaultTemplateHtml,
+    autoFolderIcons: raw?.autoFolderIcons !== false,
 
     interfaceScale,
+    iconPack,
+    folderIcons,
+    fileIcons,
     editorWidth,
     lineHeight,
     sidebarDensity,
@@ -583,6 +907,8 @@ interface AppSettingsContextValue {
   settings: AppSettings;
   updateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   updateSettings: (partial: Partial<AppSettings>) => void;
+  setFolderIcon: (folderPath: string, icon: string, color?: string) => void;
+  removeFolderIcon: (folderPath: string) => void;
   applyAppearanceStyle: (styleId: AppearanceStyle) => void;
   resetSettings: () => void;
 }
@@ -603,6 +929,46 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
     setSettings((prev) => {
       const next = normalizeSettings({ ...prev, ...partial });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const setFolderIcon = useCallback((folderPath: string, icon: string, color?: string) => {
+    setSettings((prev) => {
+      const current = prev.folderIcons || {};
+      const nextIcons = { ...current, [folderPath]: { icon, color } };
+      const next = normalizeSettings({ ...prev, folderIcons: nextIcons });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const removeFolderIcon = useCallback((folderPath: string) => {
+    setSettings((prev) => {
+      const current = { ...(prev.folderIcons || {}) };
+      delete current[folderPath];
+      const next = normalizeSettings({ ...prev, folderIcons: current });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const setFileIcon = useCallback((filePath: string, icon: string, color?: string) => {
+    setSettings((prev) => {
+      const current = prev.fileIcons || {};
+      const nextIcons = { ...current, [filePath]: { icon, color } };
+      const next = normalizeSettings({ ...prev, fileIcons: nextIcons });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const removeFileIcon = useCallback((filePath: string) => {
+    setSettings((prev) => {
+      const current = { ...(prev.fileIcons || {}) };
+      delete current[filePath];
+      const next = normalizeSettings({ ...prev, fileIcons: current });
       saveSettings(next);
       return next;
     });
@@ -695,18 +1061,43 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.colorScheme]);
 
+  useEffect(() => {
+    const isAnim = settings.enableAnimations !== false;
+    document.documentElement.setAttribute("data-animations", isAnim ? "true" : "false");
+    if (!isAnim) {
+      document.documentElement.classList.add("reduce-motion");
+    } else {
+      document.documentElement.classList.remove("reduce-motion");
+    }
+  }, [settings.enableAnimations]);
+
   const value = useMemo(
     () => ({
       settings,
       updateSetting,
       updateSettings,
+      setFolderIcon,
+      removeFolderIcon,
+      setFileIcon,
+      removeFileIcon,
       applyAppearanceStyle,
       resetSettings,
     }),
-    [settings, updateSetting, updateSettings, applyAppearanceStyle, resetSettings],
+    [settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, setFileIcon, removeFileIcon, applyAppearanceStyle, resetSettings],
   );
 
-  return createElement(AppSettingsContext.Provider, { value }, children);
+  return createElement(
+    AppSettingsContext.Provider,
+    { value },
+    createElement(
+      MotionConfig,
+      {
+        reducedMotion: settings.enableAnimations !== false ? "never" : "always",
+        transition: settings.enableAnimations === false ? { duration: 0 } : undefined,
+      },
+      children
+    )
+  );
 }
 
 export function useAppSettings() {

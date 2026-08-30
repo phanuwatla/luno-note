@@ -4,6 +4,7 @@ import { markNoteAsDeleted } from "@/lib/fileHandles";
 import {
   parseFrontmatterAndTags,
   updateFrontmatterTags,
+  updateFrontmatterIcon,
   renameTagInMarkdown,
   removeTagFromMarkdown,
   isTiptapJson,
@@ -28,6 +29,8 @@ export interface Note {
   isLocked?: boolean;
   isDecrypted?: boolean;
   tags?: string[];
+  icon?: string;
+  iconColor?: string;
   driveFileId?: string;
   driveSyncedAt?: number;
 }
@@ -42,11 +45,18 @@ function loadNotes(): Note[] {
     return loaded.map((n) => {
       const isMd = isMarkdownNote(n);
       const isLocked = isEncryptedNote(n.content);
-      const extracted = (isMd && n.content && !isLocked && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content).allTags : [];
+      const parsedFm = (isMd && n.content && !isLocked && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content) : undefined;
+      const extracted = parsedFm ? parsedFm.allTags : [];
+      const fmIcon = typeof parsedFm?.frontmatterData?.icon === "string" ? parsedFm.frontmatterData.icon : undefined;
+      const fmIconColor = typeof (parsedFm?.frontmatterData?.iconColor || parsedFm?.frontmatterData?.icon_color) === "string"
+        ? (parsedFm?.frontmatterData?.iconColor || parsedFm?.frontmatterData?.icon_color)
+        : undefined;
       return {
         ...n,
         isLocked: isLocked || n.isLocked || false,
         tags: isMd ? Array.from(new Set([...(n.tags || []), ...extracted])) : [],
+        icon: n.icon ?? fmIcon,
+        iconColor: n.iconColor ?? fmIconColor,
       };
     });
   } catch {
@@ -54,11 +64,26 @@ function loadNotes(): Note[] {
   }
 }
 
-function saveNotes(notes: Note[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-  } catch (err) {
-    console.error("Failed to save notes to LocalStorage (QuotaExceededError or disabled):", err);
+let saveNotesTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function saveNotes(notes: Note[], immediate = false) {
+  if (saveNotesTimeout) {
+    clearTimeout(saveNotesTimeout);
+    saveNotesTimeout = null;
+  }
+
+  const doSave = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+    } catch (err) {
+      console.warn("Failed to save notes to LocalStorage (QuotaExceededError or disabled):", err);
+    }
+  };
+
+  if (immediate) {
+    doSave();
+  } else {
+    saveNotesTimeout = setTimeout(doSave, 300);
   }
 }
 
@@ -192,7 +217,17 @@ export function useNotes() {
       const id = item.id ?? existingNote?.id ?? crypto.randomUUID();
 
       const isMd = isMarkdownNote(item);
-      const extractedTags = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content).allTags : [];
+      const parsedFm = (isMd && typeof item.content === "string" && !isTiptapJson(item.content)) ? parseFrontmatterAndTags(item.content) : undefined;
+      const extractedTags = parsedFm ? parsedFm.allTags : [];
+      const fmIcon = typeof parsedFm?.frontmatterData?.icon === "string" ? parsedFm.frontmatterData.icon : undefined;
+      const fmIconColor = typeof (parsedFm?.frontmatterData?.iconColor || parsedFm?.frontmatterData?.icon_color) === "string"
+        ? (parsedFm?.frontmatterData?.iconColor || parsedFm?.frontmatterData?.icon_color)
+        : undefined;
+      const fmFavorite = typeof parsedFm?.frontmatterData?.favorite === "boolean"
+        ? parsedFm.frontmatterData.favorite
+        : (typeof parsedFm?.frontmatterData?.isFavorite === "boolean"
+          ? parsedFm.frontmatterData.isFavorite
+          : undefined);
       const mergedTags = isMd ? (item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]))) : [];
 
       const isEncrypted = isEncryptedNote(item.content);
@@ -220,7 +255,11 @@ export function useNotes() {
         isLocked,
         isDecrypted,
         tags: mergedTags,
-        isFavorite: (item as any).isFavorite !== undefined ? (item as any).isFavorite : (existingNote?.isFavorite ?? false),
+        isFavorite: (item as any).isFavorite !== undefined
+          ? (item as any).isFavorite
+          : (fmFavorite !== undefined ? fmFavorite : (existingNote?.isFavorite ?? false)),
+        icon: (item as any).icon !== undefined ? (item as any).icon : (existingNote?.icon ?? fmIcon),
+        iconColor: (item as any).iconColor !== undefined ? (item as any).iconColor : (existingNote?.iconColor ?? fmIconColor),
         driveFileId: (item as any).driveFileId ?? existingNote?.driveFileId,
         driveSyncedAt: (item as any).driveSyncedAt ?? existingNote?.driveSyncedAt,
       };
@@ -231,7 +270,7 @@ export function useNotes() {
     // bleed into the new state before React commits the setNotes update.
     if (isNewWorkspace) {
       notesRef.current = [];
-      saveNotes([]);
+      saveNotes([], true);
     }
 
     notesRef.current = resultNotes;
@@ -260,7 +299,7 @@ export function useNotes() {
           };
           const isMd = isMarkdownNote(updatedNoteMeta);
 
-          let finalTags: string[] = n.tags || [];
+          let finalTags: string[] = isMd ? (n.tags || []) : [];
           if (isMd) {
             if (normalizedPatch.tags !== undefined) {
               finalTags = normalizedPatch.tags;
@@ -279,11 +318,25 @@ export function useNotes() {
                 }
               }
             }
+
+            if ("icon" in normalizedPatch || "iconColor" in normalizedPatch) {
+              const nextIcon = "icon" in normalizedPatch ? normalizedPatch.icon : n.icon;
+              const nextIconColor = "iconColor" in normalizedPatch ? normalizedPatch.iconColor : n.iconColor;
+              if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
+                mergedContent = updateFrontmatterIcon(
+                  mergedContent,
+                  nextIcon,
+                  nextIconColor
+                );
+              }
+            }
           }
 
           return {
             ...n,
             ...normalizedPatch,
+            icon: "icon" in normalizedPatch ? normalizedPatch.icon : n.icon,
+            iconColor: "iconColor" in normalizedPatch ? normalizedPatch.iconColor : n.iconColor,
             content: mergedContent,
             tags: finalTags,
             updatedAt: Date.now(),

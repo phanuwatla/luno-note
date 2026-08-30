@@ -538,10 +538,10 @@ export default function FloatingTranslator({
         dragMomentum={false}
         dragElastic={0}
         onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.18, ease: "easeOut" }}
+        initial={{ opacity: 0, scale: 0.92, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.92, y: 16 }}
+        transition={{ type: "spring", damping: 25, stiffness: 350 }}
         className="fixed w-[320px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
         data-floating-window="true"
         style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
@@ -595,7 +595,7 @@ export default function FloatingTranslator({
                 }}
               >
                 <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-2xs transition-colors">
-                  <SelectValue placeholder="Source" />
+                  <SelectValue placeholder={t("editor.sourceLanguage") || (isTh ? "ภาษาต้นทาง" : "Source")} />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   {SUPPORTED_LANGUAGES.map((lang) => (
@@ -618,7 +618,7 @@ export default function FloatingTranslator({
                   <ArrowLeftRight className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{isTh ? "สลับภาษา" : "Swap"}</TooltipContent>
+              <TooltipContent>{t("editor.swapLanguages") || (isTh ? "สลับภาษา" : "Swap")}</TooltipContent>
             </Tooltip>
 
             <div className="flex-1">
@@ -630,7 +630,7 @@ export default function FloatingTranslator({
                 }}
               >
                 <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-2xs transition-colors">
-                  <SelectValue placeholder="Target" />
+                  <SelectValue placeholder={t("editor.targetLanguage") || (isTh ? "ภาษาปลายทาง" : "Target")} />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   {SUPPORTED_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
@@ -660,32 +660,46 @@ export default function FloatingTranslator({
               </span>
               <div className="flex items-center gap-1">
                 {inputText && (
-                  <button
-                    type="button"
-                    onClick={() => handleSpeak(inputText, sourceLang, "source")}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${
-                      speakingTarget === "source"
-                        ? "text-primary bg-primary/15 animate-pulse"
-                        : "hover:text-foreground hover:bg-foreground/10"
-                    }`}
-                    title={speakingTarget === "source" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
-                  >
-                    <Volume2 className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => handleSpeak(inputText, sourceLang, "source")}
+                        className={`p-1 rounded-md transition-colors cursor-pointer ${
+                          speakingTarget === "source"
+                            ? "text-primary bg-primary/15 animate-pulse"
+                            : "hover:text-foreground hover:bg-foreground/10"
+                        }`}
+                        aria-label={speakingTarget === "source" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                      >
+                        <Volume2 className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={4}>
+                      {speakingTarget === "source" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                    </TooltipContent>
+                  </Tooltip>
                 )}
                 {inputText && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopSpeaking();
-                      setInputText("");
-                      setTranslatedText("");
-                    }}
-                    className="p-1 hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
-                    title={isTh ? "ล้างข้อความ" : "Clear"}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          stopSpeaking();
+                          setInputText("");
+                          setTranslatedText("");
+                        }}
+                        className="p-1 hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
+                        aria-label={isTh ? "ล้างข้อความ" : "Clear"}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={4}>
+                      {isTh ? "ล้างข้อความ" : "Clear"}
+                    </TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             </div>
@@ -706,19 +720,26 @@ export default function FloatingTranslator({
                   </div>
 
                   <div className="flex items-center justify-between pt-1.5 mt-1.5 border-t border-border/30">
-                    <button
-                      type="button"
-                      onClick={() => handleSpeak(translatedText, targetLang, "target")}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
-                        speakingTarget === "target"
-                          ? "text-primary bg-primary/15 font-medium animate-pulse"
-                          : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08]"
-                      }`}
-                      title={speakingTarget === "target" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
-                    >
-                      <Volume2 className="h-3.5 w-3.5" />
-                      <span>{speakingTarget === "target" ? (isTh ? "กำลังอ่าน..." : "Playing...") : (isTh ? "ฟังเสียง" : "Listen")}</span>
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => handleSpeak(translatedText, targetLang, "target")}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
+                            speakingTarget === "target"
+                              ? "text-primary bg-primary/15 font-medium animate-pulse"
+                              : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08]"
+                          }`}
+                          aria-label={speakingTarget === "target" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                        >
+                          <Volume2 className="h-3.5 w-3.5" />
+                          <span>{speakingTarget === "target" ? (isTh ? "กำลังอ่าน..." : "Playing...") : (isTh ? "ฟังเสียง" : "Listen")}</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>
+                        {speakingTarget === "target" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                      </TooltipContent>
+                    </Tooltip>
 
                     <div className="flex items-center gap-0.5">
                       {onInsertTranslation && (

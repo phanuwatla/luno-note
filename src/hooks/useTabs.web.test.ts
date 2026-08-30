@@ -82,11 +82,39 @@ describe("useTabs with web viewer tabs", () => {
     const { result } = renderHook(() => useTabs(notesRef));
 
     act(() => {
-      result.current.restoreTabsFromSession([], true);
+      result.current.restoreTabsFromSession([], true, "lastNote");
     });
 
     expect(result.current.openTabIds).toContain("web:https://vitejs.dev");
     expect(result.current.openTabIds).toContain("settings");
     expect(result.current.activeTabId).toBe("web:https://vitejs.dev");
+  });
+
+  it("should open home by default on startup", () => {
+    const notesRef = { current: [] as Note[] };
+    const { result } = renderHook(() => useTabs(notesRef));
+
+    act(() => {
+      result.current.restoreTabsFromSession([], true, "home");
+    });
+
+    expect(result.current.openTabIds).toContain("home");
+    expect(result.current.activeTabId).toBe("home");
+  });
+
+  it("should reset tabs when onStartup is blank", () => {
+    const notesRef = { current: [] as Note[] };
+    localStorageMock.setItem(
+      "notes-app-open-tab-paths",
+      JSON.stringify(["web:https://vitejs.dev", "settings"])
+    );
+    const { result } = renderHook(() => useTabs(notesRef));
+
+    act(() => {
+      result.current.restoreTabsFromSession([], true, "blank");
+    });
+
+    expect(result.current.openTabIds).toHaveLength(0);
+    expect(result.current.activeTabId).toBeNull();
   });
 });

@@ -7,7 +7,7 @@ const TAB_PATHS_STORAGE_KEY = "notes-app-open-tab-paths";
 const ACTIVE_TAB_PATH_STORAGE_KEY = "notes-app-active-tab-path";
 
 function getTabPath(id: string, notes?: Note[]): string {
-  if (id === "settings" || id === "luno-ai" || id.startsWith("web:")) return id;
+  if (id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id.startsWith("web:")) return id;
   if (!notes) return id;
   const found = notes.find((n) => n.id === id);
   if (found) {
@@ -97,9 +97,9 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
   const removeTabsForDeletedNotes = useCallback((existingIds: Set<string>) => {
-    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || id.startsWith("web:") || existingIds.has(id));
+    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id.startsWith("web:") || existingIds.has(id));
     syncedSetOpenTabIds(() => next);
-    if (activeTabIdRef.current && activeTabIdRef.current !== "settings" && activeTabIdRef.current !== "luno-ai" && !activeTabIdRef.current.startsWith("web:") && !existingIds.has(activeTabIdRef.current)) {
+    if (activeTabIdRef.current && activeTabIdRef.current !== "settings" && activeTabIdRef.current !== "luno-ai" && activeTabIdRef.current !== "home" && activeTabIdRef.current !== "trash" && activeTabIdRef.current !== "templates" && !activeTabIdRef.current.startsWith("web:") && !existingIds.has(activeTabIdRef.current)) {
       syncedSetActiveTabId(next[0] ?? null);
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
@@ -128,8 +128,17 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     } catch {}
   }, []);
 
-  const restoreTabsFromSession = useCallback((notes: Note[], reopenTabs: boolean = true) => {
-    if (!reopenTabs) {
+  /**
+   * Restores previously opened tabs from localStorage on startup / workspace load.
+   * Matches stored paths against the newly loaded notes list so tab IDs match the fresh in-memory note objects.
+   * Respects onStartup setting ("home", "lastNote", "blank").
+   */
+  const restoreTabsFromSession = useCallback((
+    notes: Note[],
+    reopenTabs: boolean = true,
+    onStartup: string = "home"
+  ) => {
+    if (onStartup === "blank") {
       resetTabs();
       return;
     }
@@ -142,7 +151,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
 
       const hasStoredSession = rawPaths !== null || rawTabs !== null;
 
-      if (hasStoredSession) {
+      if (reopenTabs && hasStoredSession) {
         const savedPaths: string[] = rawPaths
           ? JSON.parse(rawPaths)
           : (rawTabs ? JSON.parse(rawTabs) : []);
@@ -150,16 +159,10 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
           ? JSON.parse(rawActivePath)
           : (rawActive ? JSON.parse(rawActive) : null);
 
-        // If the user closed all tabs before closing the app, keep 0 tabs open
-        if (!Array.isArray(savedPaths) || savedPaths.length === 0) {
-          resetTabs();
-          return;
-        }
-
         const resolvedTabIds: string[] = [];
         for (const item of savedPaths) {
           if (!item) continue;
-          if (item === "settings" || item === "luno-ai" || item.startsWith("web:")) {
+          if (item === "settings" || item === "luno-ai" || item === "home" || item === "trash" || item === "templates" || item.startsWith("web:")) {
             resolvedTabIds.push(item);
             continue;
           }
@@ -172,9 +175,23 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
           }
         }
 
+        if (onStartup === "home") {
+          // Ensure "home" is open and set as the active tab
+          if (!resolvedTabIds.includes("home")) {
+            resolvedTabIds.unshift("home");
+          }
+          openTabIdsRef.current = resolvedTabIds;
+          activeTabIdRef.current = "home";
+          setOpenTabIds(resolvedTabIds);
+          setActiveTabId("home");
+          saveTabs(resolvedTabIds, "home", notes);
+          return;
+        }
+
+        // onStartup === "lastNote"
         if (resolvedTabIds.length > 0) {
           let resolvedActiveId: string | null = null;
-          if (savedActivePath === "settings" || savedActivePath === "luno-ai" || (savedActivePath && savedActivePath.startsWith("web:"))) {
+          if (savedActivePath === "settings" || savedActivePath === "luno-ai" || savedActivePath === "home" || savedActivePath === "trash" || savedActivePath === "templates" || (savedActivePath && savedActivePath.startsWith("web:"))) {
             resolvedActiveId = savedActivePath;
           } else if (savedActivePath) {
             const matchedActive = notes.find((n) => {
@@ -195,19 +212,33 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
           setActiveTabId(resolvedActiveId);
           saveTabs(resolvedTabIds, resolvedActiveId, notes);
           return;
-        } else {
-          // If stored tabs could not be resolved (e.g. deleted files), stay empty
-          resetTabs();
-          return;
         }
       }
     } catch (e) {
       console.warn("Failed to restore tabs from session:", e);
     }
 
-    // Default for brand-new empty session
+    if (onStartup === "home") {
+      openTabIdsRef.current = ["home"];
+      activeTabIdRef.current = "home";
+      setOpenTabIds(["home"]);
+      setActiveTabId("home");
+      saveTabs(["home"], "home", notes);
+      return;
+    }
+
+    if (onStartup === "lastNote" && notes.length > 0) {
+      openTabIdsRef.current = [notes[0].id];
+      activeTabIdRef.current = notes[0].id;
+      setOpenTabIds([notes[0].id]);
+      setActiveTabId(notes[0].id);
+      saveTabs([notes[0].id], notes[0].id, notes);
+      return;
+    }
+
+    // Default for blank
     resetTabs();
-  }, [resetTabs]);
+  }, [resetTabs, saveTabs]);
 
   return {
     openTabIds,

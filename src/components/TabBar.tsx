@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, memo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { X, FileText, FileCode, Plus, FileImage, File, FolderArchive, Settings, Globe } from "lucide-react";
+import { X, FileText, FileCode, Plus, FileImage, File, FolderArchive, Settings, Globe, Home } from "lucide-react";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import type { Note } from "@/hooks/useNotes";
 import { Columns2Icon } from "@/components/icons/Columns2Icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import WindowControls from "@/components/WindowControls";
+import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { useAppSettings } from "@/hooks/useAppSettings";
 
 interface TabBarProps {
   tabs: Note[];
@@ -17,7 +19,7 @@ interface TabBarProps {
   onReorderTabs?: (fromIndex: number, toIndex: number) => void;
 }
 
-export default function TabBar({
+function TabBarComponent({
   tabs,
   activeTabId,
   onSelectTab,
@@ -27,6 +29,8 @@ export default function TabBar({
   onReorderTabs,
 }: TabBarProps) {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
+  const pack = settings?.iconPack || "lucide";
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
@@ -74,17 +78,62 @@ export default function TabBar({
 
   function NoteIcon({ note, isActive }: { note: Note; isActive: boolean }) {
     const cls = `h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-primary" : "text-muted-foreground/70"}`;
-    if (note.id === "settings" || note.fileType === "settings") return <Settings className={cls} />;
-    if (note.id === "luno-ai" || note.fileType === "luno-ai") return <Sparkles className={cls} />;
+    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+    const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+    if (customIcon) {
+      const custom = renderCustomIcon(customIcon, cls, { color: customColor });
+      if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+    }
+    if (note.id === "home" || note.fileType === "home") {
+      const HomeIcon = getToolbarIcon("home", pack);
+      return <HomeIcon className={cls} />;
+    }
+    if (note.id === "trash" || note.fileType === "trash") {
+      const TrashIcon = getToolbarIcon("trash", pack);
+      return <TrashIcon className={cls} />;
+    }
+    if (note.id === "settings" || note.fileType === "settings") {
+      const SettingsIcon = getToolbarIcon("settings", pack);
+      return <SettingsIcon className={cls} />;
+    }
+    if (note.id === "luno-ai" || note.fileType === "luno-ai") {
+      const SparklesIconComp = getToolbarIcon("sparkles", pack);
+      return <SparklesIconComp className={cls} />;
+    }
+    if (note.id === "templates" || note.fileType === "templates") {
+      const TemplatesIcon = getToolbarIcon("templates", pack);
+      return <TemplatesIcon className={cls} />;
+    }
+    if (note.id === "favorites" || note.fileType === "favorites") {
+      const StarIcon = getToolbarIcon("star", pack);
+      return <StarIcon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-amber-500 fill-amber-500" : "text-amber-500/70"}`} />;
+    }
+    if (note.id === "tags" || note.fileType === "tags") {
+      const TagIcon = getToolbarIcon("tag", pack);
+      return <TagIcon className={cls} />;
+    }
     if (note.fileType === "web-viewer" || note.id.startsWith("web:")) return <WebFaviconIcon note={note} isActive={isActive} />;
     const type = getFileType(note);
     const name = note.fileName?.toLowerCase() || "";
-    if (name.endsWith(".zip")) return <FolderArchive className={cls} />;
-    if (type === "image") return <FileImage className={cls} />;
-    if (type === "html") return <FileCode className={cls} />;
-    if (type === "txt") return <FileText className={cls} />;
-    if (type === "md") return <FileCode className={cls} />;
-    return <File className={cls} />;
+    if (name.endsWith(".zip") || type === "zip") {
+      const ZipIcon = getToolbarIcon("fileZip", pack);
+      return <ZipIcon className={cls} />;
+    }
+    if (type === "image") {
+      const ImgIcon = getToolbarIcon("fileImage", pack);
+      return <ImgIcon className={cls} />;
+    }
+    if (type === "html" || type === "md") {
+      const CodeIcon = getToolbarIcon("fileCode", pack);
+      return <CodeIcon className={cls} />;
+    }
+    if (type === "txt") {
+      const TextIcon = getToolbarIcon("fileText", pack);
+      return <TextIcon className={cls} />;
+    }
+    const FileIcon = getToolbarIcon("file", pack);
+    return <FileIcon className={cls} />;
   }
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -109,21 +158,36 @@ export default function TabBar({
           {tabs.length === 0 ? (
             <div
               style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-              className="group flex min-w-0 max-w-[190px] shrink-0 cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 bg-background text-foreground shadow-xs border-t border-x border-border/40 font-semibold"
+              className="group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 bg-background text-foreground shadow-xs border-t border-x border-border/40 font-semibold"
             >
               <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
-              <span className="min-w-0 truncate">{(t as any)("editor.newTab") || "New tab"}</span>
+              <span className="min-w-0 flex-1 truncate">{(t as any)("editor.newTab") || "New tab"}</span>
             </div>
           ) : (
             tabs.map((note, index) => {
               const isActive = note.id === activeTabId;
+              const isHome = note.id === "home" || note.fileType === "home";
+              const isTrash = note.id === "trash" || note.fileType === "trash";
               const isSettings = note.id === "settings" || note.fileType === "settings";
               const isLunoAi = note.id === "luno-ai" || note.fileType === "luno-ai";
+              const isTemplates = note.id === "templates" || note.fileType === "templates";
+              const isFavorites = note.id === "favorites" || note.fileType === "favorites";
+              const isTags = note.id === "tags" || note.fileType === "tags";
               const isWebViewer = note.fileType === "web-viewer" || note.id.startsWith("web:");
-              const label = isSettings
+              const label = isHome
+                ? (t("sidebar.home") || "Home")
+                : isTrash
+                ? (t("trash.title") || "Trash")
+                : isSettings
                 ? (t("settings.title") || "Settings")
                 : isLunoAi
                 ? "Luno AI"
+                : isTemplates
+                ? (t("sidebar.templates") || (settings?.language === "th" ? "เทมเพลต" : "Templates"))
+                : isFavorites
+                ? (t("sidebar.favorites") || (settings?.language === "th" ? "ที่ติดดาว" : "Favorites"))
+                : isTags
+                ? (t("sidebar.tags") || (settings?.language === "th" ? "แท็ก" : "Tags"))
                 : isWebViewer
                 ? (note.title || note.fileName || t("webViewer.title") || "Web Viewer")
                 : (note.fileName || note.title?.trim() || t("editor.untitled"));
@@ -157,7 +221,7 @@ export default function TabBar({
                   onDragEnd={() => {
                     setDraggedIndex(null);
                   }}
-                  className={`group flex min-w-0 max-w-[190px] shrink-0 cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 ${
+                  className={`group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-1.5 rounded-t-xl px-2.5 py-2 text-xs transition-all duration-150 ${
                     isDragging ? "opacity-40 scale-[0.98] bg-muted/60" : ""
                   } ${
                     isActive
@@ -167,7 +231,7 @@ export default function TabBar({
                   onClick={() => onSelectTab(note.id)}
                 >
                   <NoteIcon note={note} isActive={isActive} />
-                  <span className="min-w-0 truncate">{label}</span>
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
 
                   {/* Action buttons (Split + Close right next to each other) */}
                   <div className="ml-auto flex items-center gap-0.5 shrink-0">
@@ -238,3 +302,5 @@ export default function TabBar({
     </TooltipProvider>
   );
 }
+
+export default React.memo(TabBarComponent);

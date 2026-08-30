@@ -154,6 +154,8 @@ export type CreateNoteOptions = {
   fileName?: string;
   contentFormat?: "plain" | "markdown" | "html";
   initialContent?: string;
+  icon?: string;
+  iconColor?: string;
 };
 
 export async function requestPermissionIfAvailable(

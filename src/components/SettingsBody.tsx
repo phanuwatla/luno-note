@@ -8,6 +8,7 @@ import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, FONT_OPTIONS, FontFamilyOption, u
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check } from "lucide-react";
+import { getDatePatternLabel } from "@/lib/dateTimeFormatter";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -199,11 +200,6 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
                         </div>
                       )}
                     </div>
-                    {isSelected && (
-                      <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5 shadow-2xs">
-                        <Check className="h-2 w-2" />
-                      </div>
-                    )}
                   </div>
                   <span className={`text-xs font-semibold line-clamp-1 ${isSelected ? "text-primary" : "text-foreground"}`}>
                     {t(style.nameKey as any) || style.id}
@@ -264,8 +260,8 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="en">{t("settings.english")}</SelectItem>
-                <SelectItem value="th">{t("settings.thai")}</SelectItem>
+                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="th">ภาษาไทย</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -365,6 +361,29 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             />
           </div>
         </div>
+
+        <div>
+          <label htmlFor={`${idPrefix}-trashRetentionDays`} className="mb-1.5 block text-sm font-medium text-foreground">
+            {t("trash.trashRetention")}
+          </label>
+          <p className="mb-2 text-xs text-muted-foreground">{t("trash.trashRetentionDesc")}</p>
+          <Select
+            value={String(settings.trashRetentionDays ?? 30)}
+            onValueChange={(v) => updateSetting("trashRetentionDays", Number(v))}
+          >
+            <SelectTrigger id={`${idPrefix}-trashRetentionDays`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">{t("trash.retention7Days")}</SelectItem>
+              <SelectItem value="14">{t("trash.retention14Days")}</SelectItem>
+              <SelectItem value="30">{t("trash.retention30Days")}</SelectItem>
+              <SelectItem value="60">{t("trash.retention60Days")}</SelectItem>
+              <SelectItem value="90">{t("trash.retention90Days")}</SelectItem>
+              <SelectItem value="0">{t("trash.retentionNever")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* 2. File Settings */}
@@ -401,8 +420,16 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="untitled">{t("settings.patternUntitled")}</SelectItem>
-              <SelectItem value="date">{t("settings.patternDate")}</SelectItem>
-              <SelectItem value="daily">{t("settings.patternDaily")}</SelectItem>
+              <SelectItem value="date">
+                {settings.language === "th"
+                  ? `ตามวันที่ (Note_${getDatePatternLabel(settings.dateFormat)})`
+                  : `Date (Note_${getDatePatternLabel(settings.dateFormat)})`}
+              </SelectItem>
+              <SelectItem value="daily">
+                {settings.language === "th"
+                  ? `บันทึกประจำวัน (Daily-${getDatePatternLabel(settings.dateFormat)})`
+                  : `Daily (Daily-${getDatePatternLabel(settings.dateFormat)})`}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -11,27 +11,39 @@ import Breadcrumb from "@/components/Breadcrumb";
 import SettingsTabView, { type SettingsCategory } from "@/components/SettingsTabView";
 import LunoAiView from "@/components/LunoAiView";
 import WebViewerView from "@/components/WebViewerView";
+import HomeView from "@/components/HomeView";
+import TrashView from "@/components/TrashView";
+import TemplatesView from "@/components/TemplatesView";
+import FavoritesTabView from "@/components/FavoritesTabView";
+import TagsTabView from "@/components/TagsTabView";
 import { WorkspaceLauncher } from "@/components/WorkspaceLauncher";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
+import { useTrash, type TrashedNote } from "@/hooks/useTrash";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTabs } from "@/hooks/useTabs";
 import type { CreateNoteOptions } from "@/lib/fileHandles";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
+import { updateFrontmatterIcon, updateFrontmatterTags, updateFrontmatterFavorite, isMarkdownNote, isMarkdownFileName, isTiptapJson, parseFrontmatterAndTags } from "@/lib/frontmatter";
+import { saveWorkspaceFavorites, loadWorkspaceFavorites } from "@/lib/workspaceFavorites";
 import { marked } from "marked";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo } from "@/lib/googleDriveAuth";
 import { createCloudWorkspace } from "@/lib/googleDriveApi";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
 import { encryptNoteContent, decryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
-import { getNoteTemplateContent } from "@/lib/templates";
+import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, type NoteTemplateType } from "@/lib/templates";
+import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
+import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
 
 export default function Index() {
   const { t } = useTranslation();
+  const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, setFileIcon, removeFileIcon } = useAppSettings();
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true);
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
@@ -42,6 +54,19 @@ export default function Index() {
   }, [notes]);
   const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, resetTabs, restoreTabsFromSession, setActiveTabId } = useTabs(notesRef);
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
+  const workspaceFavoritesRef = useRef<Set<string>>(new Set());
+  const HOME_NOTE: Note = useMemo(
+    () => ({
+      id: "home",
+      title: t("sidebar.home") || "Home",
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("sidebar.home") || "Home",
+      fileType: "home" as any,
+    }),
+    [t]
+  );
 
   const SETTINGS_NOTE: Note = useMemo(
     () => ({
@@ -68,6 +93,73 @@ export default function Index() {
     }),
     []
   );
+
+  const TRASH_NOTE: Note = useMemo(
+    () => ({
+      id: "trash",
+      title: t("trash.title") || "Trash",
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("trash.title") || "Trash",
+      fileType: "trash" as any,
+    }),
+    [t]
+  );
+
+  const TEMPLATES_NOTE: Note = useMemo(
+    () => ({
+      id: "templates",
+      title: t("sidebar.templates") || (settings.language === "th" ? "เทมเพลต" : "Templates"),
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("sidebar.templates") || (settings.language === "th" ? "เทมเพลต" : "Templates"),
+      fileType: "templates" as any,
+    }),
+    [t, settings.language]
+  );
+
+  const FAVORITES_NOTE: Note = useMemo(
+    () => ({
+      id: "favorites",
+      title: t("sidebar.favorites") || (settings.language === "th" ? "ที่ติดดาว" : "Favorites"),
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("sidebar.favorites") || (settings.language === "th" ? "ที่ติดดาว" : "Favorites"),
+      fileType: "favorites" as any,
+    }),
+    [t, settings.language]
+  );
+
+  const TAGS_NOTE: Note = useMemo(
+    () => ({
+      id: "tags",
+      title: t("sidebar.tags") || (settings.language === "th" ? "แท็ก" : "Tags"),
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("sidebar.tags") || (settings.language === "th" ? "แท็ก" : "Tags"),
+      fileType: "tags" as any,
+    }),
+    [t, settings.language]
+  );
+
+  const {
+    trashedNotes,
+    moveToTrash,
+    restoreFromTrash,
+    deletePermanently,
+    emptyTrash,
+    autoCleanExpired,
+  } = useTrash();
+
+  useEffect(() => {
+    if (settings.autoEmptyTrash !== false && settings.trashRetentionDays !== undefined) {
+      autoCleanExpired(settings.trashRetentionDays);
+    }
+  }, [autoCleanExpired, settings.autoEmptyTrash, settings.trashRetentionDays]);
 
   const [webTabs, setWebTabs] = useState<Record<string, { id: string; url: string; title: string }>>(() => {
     try {
@@ -116,20 +208,29 @@ export default function Index() {
   );
 
   const activeTabNote =
-    activeTabId === "settings"
+    activeTabId === "home"
+      ? HOME_NOTE
+      : activeTabId === "trash"
+      ? TRASH_NOTE
+      : activeTabId === "settings"
       ? SETTINGS_NOTE
       : activeTabId === "luno-ai"
       ? LUNO_AI_NOTE
+      : activeTabId === "templates"
+      ? TEMPLATES_NOTE
+      : activeTabId === "favorites"
+      ? FAVORITES_NOTE
+      : activeTabId === "tags"
+      ? TAGS_NOTE
       : activeTabId?.startsWith("web:")
       ? getWebTabNote(activeTabId)
       : (notes.find((n) => n.id === activeTabId) ?? null);
 
   const activeEditorNote =
-    activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId?.startsWith("web:")
-      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "settings" && id !== "luno-ai" && !id.startsWith("web:"))) ?? notes[0] ?? null)
+    activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:")
+      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "home" && id !== "trash" && id !== "settings" && id !== "luno-ai" && id !== "templates" && id !== "favorites" && id !== "tags" && !id.startsWith("web:"))) ?? notes[0] ?? null)
       : (notes.find((n) => n.id === activeTabId) ?? null);
 
-  const { settings, updateSetting } = useAppSettings();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openedFolderName, setOpenedFolderName] = useState<string | null>(null);
@@ -139,17 +240,27 @@ export default function Index() {
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
   const splitTabNote =
-    splitTabId === "settings"
+    splitTabId === "home"
+      ? HOME_NOTE
+      : splitTabId === "trash"
+      ? TRASH_NOTE
+      : splitTabId === "settings"
       ? SETTINGS_NOTE
       : splitTabId === "luno-ai"
       ? LUNO_AI_NOTE
+      : splitTabId === "templates"
+      ? TEMPLATES_NOTE
+      : splitTabId === "favorites"
+      ? FAVORITES_NOTE
+      : splitTabId === "tags"
+      ? TAGS_NOTE
       : splitTabId?.startsWith("web:")
       ? getWebTabNote(splitTabId)
       : (notes.find((n) => n.id === splitTabId) ?? null);
 
   const splitEditorNote =
-    splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId?.startsWith("web:")
-      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "settings" && id !== "luno-ai" && !id.startsWith("web:") && id !== activeTabId)) ?? notes[0] ?? null)
+    splitTabId === "home" || splitTabId === "trash" || splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId === "templates" || splitTabId === "favorites" || splitTabId === "tags" || splitTabId?.startsWith("web:")
+      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "home" && id !== "trash" && id !== "settings" && id !== "luno-ai" && id !== "templates" && id !== "favorites" && id !== "tags" && !id.startsWith("web:") && id !== activeTabId)) ?? notes[0] ?? null)
       : (notes.find((n) => n.id === splitTabId) ?? null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -282,10 +393,121 @@ export default function Index() {
   );
 
   const handleUpdateNote = useCallback(
-    (id: string, patch: Partial<Note>) => {
+    async (id: string, patch: Partial<Note>) => {
       updateNote(id, patch);
       const currentNote = notesRef.current.find((n) => n.id === id);
-      if (currentNote && settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      if (!currentNote) return;
+
+      // If icon, iconColor, tags, or isFavorite changed, persist to disk
+      if ("icon" in patch || "iconColor" in patch || "tags" in patch || "isFavorite" in patch) {
+        if ("isFavorite" in patch && patch.isFavorite !== undefined) {
+          // Only non-markdown files (images, html, txt, binary, etc.) are stored in .luno/favorites.json
+          if (!isMarkdownNote(currentNote) && currentNote.fileName) {
+            const relPath = currentNote.folderPath ? `${currentNote.folderPath}/${currentNote.fileName}` : currentNote.fileName;
+            if (patch.isFavorite) {
+              workspaceFavoritesRef.current.add(relPath);
+            } else {
+              workspaceFavoritesRef.current.delete(relPath);
+            }
+            const allFavs = Array.from(workspaceFavoritesRef.current);
+            void saveWorkspaceFavorites(openedRootDirHandle, allFavs);
+          }
+        }
+
+        // For non-markdown files, save custom icon in settings.fileIcons
+        if (!isMarkdownNote(currentNote) && currentNote.fileName && ("icon" in patch || "iconColor" in patch)) {
+          const relPath = currentNote.folderPath ? `${currentNote.folderPath}/${currentNote.fileName}` : currentNote.fileName;
+          const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
+          const nextColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
+          if (nextIcon) {
+            setFileIcon(relPath, nextIcon, nextColor);
+          } else {
+            removeFileIcon(relPath);
+          }
+        }
+
+        // Only update file content and frontmatter if it is a Markdown note!
+        // DO NOT overwrite image or binary files!
+        if (isMarkdownNote(currentNote) && currentNote.fileType !== "image" && currentNote.fileType !== "binary" && currentNote.fileName) {
+          const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
+          const nextIconColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
+          const nextTags = "tags" in patch ? patch.tags : currentNote.tags;
+          const nextFavorite = "isFavorite" in patch ? patch.isFavorite : currentNote.isFavorite;
+
+          const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+          if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && electronAPI?.readFileContent) {
+            try {
+              const saved = await electronAPI.getSavedWorkspace();
+              if (saved?.folderPath) {
+                const fullPath = currentNote.folderPath
+                  ? `${saved.folderPath}/${currentNote.folderPath}/${currentNote.fileName}`
+                  : `${saved.folderPath}/${currentNote.fileName}`;
+
+                let diskContent = "";
+                try {
+                  const readText = await electronAPI.readFileContent(fullPath);
+                  if (typeof readText === "string") diskContent = readText;
+                } catch {}
+
+                if (!diskContent) {
+                  diskContent = currentNote.content || "";
+                }
+
+                let newContent = diskContent;
+                if ("icon" in patch || "iconColor" in patch || nextIcon !== undefined || nextIconColor !== undefined) {
+                  newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
+                }
+                if ("tags" in patch || (nextTags && nextTags.length > 0)) {
+                  newContent = updateFrontmatterTags(newContent, nextTags || []);
+                }
+                if ("isFavorite" in patch || nextFavorite !== undefined) {
+                  newContent = updateFrontmatterFavorite(newContent, nextFavorite);
+                }
+
+                await electronAPI.writeFileContent({ fullPath, content: newContent });
+              }
+            } catch (err) {
+              console.warn("Failed to persist updated note icon to disk:", err);
+            }
+          } else {
+            try {
+              const handle = await getStoredFileHandle(id);
+              if (handle) {
+                let diskContent = "";
+                try {
+                  const file = await handle.getFile();
+                  diskContent = await file.text();
+                } catch {}
+
+                if (!diskContent) {
+                  diskContent = currentNote.content || "";
+                }
+
+                let newContent = diskContent;
+                if ("icon" in patch || "iconColor" in patch || nextIcon !== undefined || nextIconColor !== undefined) {
+                  newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
+                }
+                if ("tags" in patch || (nextTags && nextTags.length > 0)) {
+                  newContent = updateFrontmatterTags(newContent, nextTags || []);
+                }
+                if ("isFavorite" in patch || nextFavorite !== undefined) {
+                  newContent = updateFrontmatterFavorite(newContent, nextFavorite);
+                }
+
+                if (handle.createWritable) {
+                  const writable = await handle.createWritable();
+                  await writable.write(newContent);
+                  await writable.close();
+                }
+              }
+            } catch (err) {
+              console.warn("Failed saving note icon to file handle:", err);
+            }
+          }
+        }
+      }
+
+      if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
         const mergedNote: Note = { ...currentNote, ...patch };
         queueSync(mergedNote, (syncedNote) => {
           updateNote(syncedNote.id, {
@@ -542,7 +764,7 @@ export default function Index() {
     const defaultFormat = defaultExt === "html" ? ("html" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
 
     if (!safe) {
-      const dateStr = new Date().toISOString().slice(0, 10);
+      const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
       let baseName = "Untitled";
       if (settings.newFilePattern === "date") {
         baseName = `Note_${dateStr}`;
@@ -720,11 +942,27 @@ export default function Index() {
       (unlockedSessionPinsRef.current.has(existing.id) || (existing.isDecrypted && !isEncryptedNote(existing.content)))
     );
     const isDecrypted = isCurrentlyDecrypted;
-    const content = (isCurrentlyDecrypted && isEncrypted) ? (existing?.content ?? e.content) : e.content;
+    const relPath = getRelativePath(e.folderPath || "", e.fileName || "");
+    const isFavorite = existing?.isFavorite !== undefined
+      ? existing.isFavorite
+      : (workspaceFavoritesRef.current.has(relPath) ? true : undefined);
+
+    const isMd = isMarkdownFileName(e.fileName, e.contentFormat, e.fileType);
+    let parsedTags: string[] = [];
+    if (isMd && typeof e.content === "string" && e.content && !isEncrypted && !isTiptapJson(e.content)) {
+      try {
+        parsedTags = parseFrontmatterAndTags(e.content).allTags || [];
+      } catch {}
+    }
+    const mergedTags = isMd
+      ? (existing?.tags !== undefined && existing.tags.length > 0
+          ? Array.from(new Set([...existing.tags, ...parsedTags]))
+          : (parsedTags.length > 0 ? parsedTags : (existing?.tags || [])))
+      : [];
 
     return {
       id: overrideId ?? existing?.id,
-      content,
+      content: e.content,
       fileName: e.fileName,
       contentFormat: e.contentFormat,
       isLinkedFile: true as const,
@@ -732,6 +970,8 @@ export default function Index() {
       fileType: e.fileType,
       isLocked,
       isDecrypted,
+      isFavorite,
+      tags: mergedTags,
       createdAt: e.createdAt || existing?.createdAt || Date.now(),
       updatedAt: e.updatedAt || existing?.updatedAt || Date.now(),
       driveFileId: overrideDriveFileId ?? existing?.driveFileId,
@@ -970,13 +1210,13 @@ export default function Index() {
       }
 
       if (openTabIds.length === 0) {
-        restoreTabsFromSession(nextNotes, settings.reopenTabs);
+        restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
       } else {
         removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
       }
       return nextNotes;
     },
-    [activeTabId, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes, openTabIds.length, restoreTabsFromSession, settings.reopenTabs, resetTabs]
+    [activeTabId, replaceNotes, scanFolderEntries, openTab, setActiveTabId, removeTabsForDeletedNotes, openTabIds.length, restoreTabsFromSession, settings.reopenTabs, settings.onStartup, resetTabs]
   );
 
   const createNoteInFolder = async (
@@ -994,9 +1234,15 @@ export default function Index() {
     const isTxt = desiredFileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
     const rawTitle = extractBaseTitleFromFileName(desiredFileName);
     const initialTitle = isTxt ? "" : (rawTitle || "Untitled");
-    const targetExt = desiredFileName.split(".").pop()?.toLowerCase() || settings.defaultExtension;
-    const resolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (targetExt === "html" ? "html" : isTxt || targetExt === "txt" ? "plain" : "markdown")) as any;
-    const templateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, resolvedFormat);
+    const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, desiredFileName);
+    const templateContent = getNoteTemplateContent(
+      effectiveTemplate,
+      settings.language,
+      contentFormat,
+      settings.dateFormat,
+      settings.timeFormat,
+      settings.iconPack
+    );
     const initialContent = options?.initialContent ?? (templateContent ? templateContent : (isTxt ? "" : `<h1>${initialTitle}</h1>`));
 
     // 1. Electron Desktop Native File Creation
@@ -1036,6 +1282,12 @@ export default function Index() {
         );
 
         const targetId = createdNote?.id ?? newNoteId;
+        if (targetId && (options?.icon || options?.iconColor)) {
+          updateNote(targetId, {
+            icon: options?.icon,
+            iconColor: options?.iconColor,
+          });
+        }
         newlyCreatedNoteIdRef.current = targetId;
         openTab(targetId);
         setActiveTabId(targetId);
@@ -1060,6 +1312,8 @@ export default function Index() {
         content: initialContent,
         isLinkedFile: false,
         contentFormat,
+        icon: options?.icon,
+        iconColor: options?.iconColor,
       });
       openTab(note.id);
       return note;
@@ -1076,9 +1330,15 @@ export default function Index() {
       const isFileTxt = fileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
       const rawFileTitle = extractBaseTitleFromFileName(fileName);
       const fileTitle = isFileTxt ? "" : (rawFileTitle || "Untitled");
-      const isFileHtml = fileName.toLowerCase().endsWith(".html") || contentFormat === "html";
-      const fileResolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (isFileHtml ? "html" : isFileTxt || fileName.toLowerCase().endsWith(".txt") ? "plain" : "markdown")) as any;
-      const fileTemplateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, fileResolvedFormat);
+      const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, fileName);
+      const fileTemplateContent = getNoteTemplateContent(
+        effectiveTemplate,
+        settings.language,
+        contentFormat,
+        settings.dateFormat,
+        settings.timeFormat,
+        settings.iconPack
+      );
       const fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isFileTxt ? "" : `<h1>${fileTitle}</h1>`));
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
@@ -1096,6 +1356,8 @@ export default function Index() {
         content: fileContent,
         isLinkedFile: true,
         contentFormat,
+        icon: options?.icon,
+        iconColor: options?.iconColor,
       });
       openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
@@ -1110,6 +1372,8 @@ export default function Index() {
         content: initialContent,
         isLinkedFile: false,
         contentFormat,
+        icon: options?.icon,
+        iconColor: options?.iconColor,
       });
       openTab(note.id);
       return note;
@@ -1136,6 +1400,14 @@ export default function Index() {
           folderPath: normalizedPath,
           folderName: safeName,
         });
+
+        const newFolderPath = normalizedPath ? `${normalizedPath}/${safeName}` : safeName;
+        const autoIcon = (settings.autoFolderIcons !== false)
+          ? getAutoFolderIconAndColor(safeName, settings.iconPack || "lucide")
+          : null;
+        if (autoIcon) {
+          setFolderIcon(newFolderPath, autoIcon.icon, autoIcon.color);
+        }
 
         const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
         setOpenedFolderPaths(folderPaths);
@@ -1171,6 +1443,13 @@ export default function Index() {
       await parentDir.getDirectoryHandle(targetFolderName, { create: true });
 
       const newFolderPath = normalizedPath ? `${normalizedPath}/${targetFolderName}` : targetFolderName;
+      const autoIcon = (settings.autoFolderIcons !== false)
+        ? getAutoFolderIconAndColor(targetFolderName, settings.iconPack || "lucide")
+        : null;
+      if (autoIcon) {
+        setFolderIcon(newFolderPath, autoIcon.icon, autoIcon.color);
+      }
+
       for (const p of Array.from(globalDeletedRelativePaths)) {
         if (p === newFolderPath || p.startsWith(`${newFolderPath}/`)) {
           clearDeletedRelativePath(p);
@@ -1224,6 +1503,13 @@ export default function Index() {
             const isGdrive = settings.storageMode === "gdrive" && isGoogleDriveConnected();
             if (isGdrive && note.driveFileId) {
               void renameDriveNote(note, safeName);
+            }
+
+            if (settings.fileIcons?.[oldRelPath]) {
+              const existingIcon = settings.fileIcons[oldRelPath];
+              const newRelPath = getRelativePath(note.folderPath || "", safeName);
+              setFileIcon(newRelPath, existingIcon.icon, existingIcon.color);
+              removeFileIcon(oldRelPath);
             }
 
             clearNoteEditorState(note.id);
@@ -1319,6 +1605,21 @@ export default function Index() {
 
           const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
           if (ok) {
+            const renamedPath = parentPath ? `${parentPath}/${safeName}` : safeName;
+            const autoIcon = (settings.autoFolderIcons !== false)
+              ? getAutoFolderIconAndColor(safeName, settings.iconPack || "lucide")
+              : null;
+            if (autoIcon) {
+              if (settings.folderIcons?.[folderPath]) {
+                removeFolderIcon(folderPath);
+              }
+              setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
+            } else if (settings.folderIcons?.[folderPath]) {
+              const existingIcon = settings.folderIcons[folderPath];
+              removeFolderIcon(folderPath);
+              setFolderIcon(renamedPath, existingIcon.icon, existingIcon.color);
+            }
+
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
             setOpenedFolderPaths(folderPaths);
 
@@ -1360,6 +1661,20 @@ export default function Index() {
       // Keep selection on the renamed folder when possible.
       const parentPath = segments.slice(0, -1).join("/");
       const renamedPath = parentPath ? `${parentPath}/${newFolderName}` : newFolderName;
+      const autoIcon = (settings.autoFolderIcons !== false)
+        ? getAutoFolderIconAndColor(newFolderName, settings.iconPack || "lucide")
+        : null;
+      if (autoIcon) {
+        if (settings.folderIcons?.[folderPath]) {
+          removeFolderIcon(folderPath);
+        }
+        setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
+      } else if (settings.folderIcons?.[folderPath]) {
+        const existingIcon = settings.folderIcons[folderPath];
+        removeFolderIcon(folderPath);
+        setFolderIcon(renamedPath, existingIcon.icon, existingIcon.color);
+      }
+
       notesInFolder.forEach((n) => {
         const suffix = (n.folderPath || "").slice(folderPath.length);
         const updatedPath = `${renamedPath}${suffix}`.replace(/^\/+/, "");
@@ -1892,8 +2207,6 @@ export default function Index() {
   };
 
   const deleteFileInFolder = async (note: { id: string; folderPath?: string; fileName?: string; title?: string }) => {
-    const deletedFileName = note.fileName || note.title || t("editor.untitled");
-
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
@@ -1904,6 +2217,10 @@ export default function Index() {
             : `${saved.folderPath}/${note.fileName}`;
 
           await electronAPI.deleteFileOrFolder(fullPath);
+          const relPath = getRelativePath(note.folderPath || "", note.fileName);
+          if (settings.fileIcons?.[relPath]) {
+            removeFileIcon(relPath);
+          }
           handleDeleteNote(note.id);
 
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
@@ -1923,10 +2240,7 @@ export default function Index() {
           });
 
           replaceNotes(nextItems);
-          toast({
-            title: t("editor.deleteToastTitle"),
-            description: t("editor.deleteToastSuccess", { file: deletedFileName }),
-          });
+          removeTabsForDeletedNotes(new Set(nextItems.map((n) => n.id)));
           return;
         }
       } catch (error) {
@@ -1940,11 +2254,6 @@ export default function Index() {
     }
 
     handleDeleteNote(note.id);
-
-    toast({
-      title: t("editor.deleteToastTitle"),
-      description: t("editor.deleteToastSuccess", { file: deletedFileName }),
-    });
   };
 
   const deleteFilesInFolder = async (targetNotes: Note[]) => {
@@ -1956,15 +2265,49 @@ export default function Index() {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
+          const notesToTrash: Note[] = [];
           for (const n of targetNotes) {
             if (n.fileName) {
               const fullPath = n.folderPath
                 ? `${saved.folderPath}/${n.folderPath}/${n.fileName}`
                 : `${saved.folderPath}/${n.fileName}`;
+
+              const isImg =
+                n.fileType === "image" ||
+                n.fileType === "binary" ||
+                /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(n.fileName || "");
+
+              if (isImg && electronAPI.readFileBase64) {
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                if (b64) {
+                  const ext = (n.fileName || "").toLowerCase();
+                  const mime = ext.endsWith(".png")
+                    ? "image/png"
+                    : ext.endsWith(".gif")
+                    ? "image/gif"
+                    : ext.endsWith(".webp")
+                    ? "image/webp"
+                    : ext.endsWith(".svg")
+                    ? "image/svg+xml"
+                    : "image/jpeg";
+                  notesToTrash.push({ ...n, content: `data:${mime};base64,${b64}` });
+                } else {
+                  notesToTrash.push(n);
+                }
+              } else {
+                notesToTrash.push(n);
+              }
+
               await electronAPI.deleteFileOrFolder(fullPath);
             }
-            handleDeleteNote(n.id);
+            if (splitTabId === n.id) {
+              setSplitTabId(null);
+            }
+            clearNoteEditorHistory(n.id);
+            closeTab(n.id, notes.map((item) => item.id));
+            deleteNote(n.id);
           }
+          moveToTrash(notesToTrash);
 
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
           setOpenedFolderPaths(folderPaths);
@@ -1983,9 +2326,15 @@ export default function Index() {
           });
 
           replaceNotes(nextItems);
+          removeTabsForDeletedNotes(new Set(nextItems.map((n) => n.id)));
           toast({
-            title: t("editor.deleteToastTitle"),
-            description: t("editor.deleteToastSuccess", { file: `${count} items` }),
+            title: t("trash.title"),
+            description: t("trash.movedBatchToTrash", { count }),
+            action: (
+              <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(targetNotes.map((n) => n.id))}>
+                {t("trash.undo")}
+              </ToastAction>
+            ),
           });
           return;
         }
@@ -1998,12 +2347,22 @@ export default function Index() {
       if (n.fileName) {
         trackDeletedRelativePath(getRelativePath(n.folderPath || "", n.fileName));
       }
-      handleDeleteNote(n.id);
+      if (splitTabId === n.id) {
+        setSplitTabId(null);
+      }
+      clearNoteEditorHistory(n.id);
+      closeTab(n.id, notes.map((item) => item.id));
+      deleteNote(n.id);
     });
 
     toast({
-      title: t("editor.deleteToastTitle"),
-      description: t("editor.deleteToastSuccess", { file: `${count} items` }),
+      title: t("trash.title"),
+      description: t("trash.movedBatchToTrash", { count }),
+      action: (
+        <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(targetNotes.map((n) => n.id))}>
+          {t("trash.undo")}
+        </ToastAction>
+      ),
     });
   };
 
@@ -2016,19 +2375,59 @@ export default function Index() {
     );
 
     const relPaths = new Set<string>();
-    notesInFolder.forEach((n) => {
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const saved = electronAPI?.getSavedWorkspace ? await electronAPI.getSavedWorkspace() : null;
+
+    const notesToTrash: Note[] = [];
+    for (const n of notesInFolder) {
       if (n.fileName) {
         const relPath = getRelativePath(n.folderPath || "", n.fileName);
         relPaths.add(relPath);
         trackDeletedRelativePath(relPath);
       }
-      handleDeleteNote(n.id);
-    });
+      if (splitTabId === n.id) {
+        setSplitTabId(null);
+      }
+      clearNoteEditorHistory(n.id);
+      closeTab(n.id, notes.map((item) => item.id));
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const isImg =
+        n.fileType === "image" ||
+        n.fileType === "binary" ||
+        /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(n.fileName || "");
+
+      if (isImg && electronAPI?.readFileBase64 && saved?.folderPath && n.fileName) {
+        const fullPath = n.folderPath
+          ? `${saved.folderPath}/${n.folderPath}/${n.fileName}`
+          : `${saved.folderPath}/${n.fileName}`;
+        const b64 = await electronAPI.readFileBase64(fullPath);
+        if (b64) {
+          const ext = (n.fileName || "").toLowerCase();
+          const mime = ext.endsWith(".png")
+            ? "image/png"
+            : ext.endsWith(".gif")
+            ? "image/gif"
+            : ext.endsWith(".webp")
+            ? "image/webp"
+            : ext.endsWith(".svg")
+            ? "image/svg+xml"
+            : "image/jpeg";
+          notesToTrash.push({ ...n, content: `data:${mime};base64,${b64}` });
+        } else {
+          notesToTrash.push(n);
+        }
+      } else {
+        notesToTrash.push(n);
+      }
+      deleteNote(n.id);
+    }
+
+    if (notesToTrash.length > 0) {
+      moveToTrash(notesToTrash);
+    }
+
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
-        const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
           const fullPath = `${saved.folderPath}/${folderPath}`;
           await electronAPI.deleteFileOrFolder(fullPath);
@@ -2036,7 +2435,9 @@ export default function Index() {
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
           setOpenedFolderPaths(folderPaths);
 
-          const currentNotes = notesRef.current;
+          const currentNotes = notesRef.current.filter(
+            (n) => n.folderPath !== folderPath && !n.folderPath?.startsWith(`${folderPath}/`)
+          );
           const existingByPath = new Map(
             currentNotes
               .filter((n) => n.fileName)
@@ -2050,9 +2451,17 @@ export default function Index() {
           });
 
           replaceNotes(nextItems);
+          removeTabsForDeletedNotes(new Set(nextItems.map((n) => n.id)));
           toast({
-            title: t("editor.deleteToastTitle"),
-            description: t("editor.deleteToastSuccess", { file: folderName }),
+            title: t("trash.title"),
+            description: notesToTrash.length > 0
+              ? t("trash.movedBatchToTrash", { count: notesToTrash.length })
+              : (isTh ? `ลบโฟลเดอร์ "${folderName}" เรียบร้อยแล้ว` : `Deleted folder "${folderName}"`),
+            action: notesToTrash.length > 0 ? (
+              <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(notesToTrash.map((n) => n.id))}>
+                {t("trash.undo")}
+              </ToastAction>
+            ) : undefined,
           });
           return;
         }
@@ -2081,9 +2490,20 @@ export default function Index() {
       }
     }
 
+    setOpenedFolderPaths((prev) =>
+      prev.filter((p) => p !== folderPath && !p.startsWith(`${folderPath}/`))
+    );
+
     toast({
-      title: t("editor.deleteToastTitle"),
-      description: t("editor.deleteToastSuccess", { file: folderName }),
+      title: t("trash.title"),
+      description: notesToTrash.length > 0
+        ? t("trash.movedBatchToTrash", { count: notesToTrash.length })
+        : (isTh ? `ลบโฟลเดอร์ "${folderName}" เรียบร้อยแล้ว` : `Deleted folder "${folderName}"`),
+      action: notesToTrash.length > 0 ? (
+        <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(notesToTrash.map((n) => n.id))}>
+          {t("trash.undo")}
+        </ToastAction>
+      ) : undefined,
     });
   };
 
@@ -2109,10 +2529,16 @@ export default function Index() {
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
-      const isFileHtml = fileName.toLowerCase().endsWith(".html") || contentFormat === "html";
-      const fileResolvedFormat: "markdown" | "html" | "plain" = (contentFormat || (isFileHtml ? "html" : isFileTxt ? "plain" : "markdown")) as any;
-      const templateContent = getNoteTemplateContent(settings.defaultNoteTemplate, settings.language, fileResolvedFormat);
-      const fileContent = isFileTxt ? "" : templateContent;
+      const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, fileName);
+      const templateContent = getNoteTemplateContent(
+        effectiveTemplate,
+        settings.language,
+        contentFormat,
+        settings.dateFormat,
+        settings.timeFormat,
+        settings.iconPack
+      );
+      const fileContent = isFileTxt && !templateContent ? "" : templateContent;
       const writable = await fileHandle.createWritable();
       await writable.write(fileContent);
       await writable.close();
@@ -2152,6 +2578,13 @@ export default function Index() {
       await parentDir.getDirectoryHandle(targetFolderName, { create: true });
 
       const newFolderPath = normalizedPath ? `${normalizedPath}/${targetFolderName}` : targetFolderName;
+      const autoIcon = (settings.autoFolderIcons !== false)
+        ? getAutoFolderIconAndColor(targetFolderName, settings.iconPack || "lucide")
+        : null;
+      if (autoIcon) {
+        setFolderIcon(newFolderPath, autoIcon.icon, autoIcon.color);
+      }
+
       for (const p of Array.from(globalDeletedRelativePaths)) {
         if (p === newFolderPath || p.startsWith(`${newFolderPath}/`)) {
           clearDeletedRelativePath(p);
@@ -2172,6 +2605,10 @@ export default function Index() {
       try {
         const data = await electronAPI.selectWorkspaceDialog();
         if (data?.folderPath) {
+          if (data.openedInNewWindow) {
+            // New workspace was launched in a new window; keep current window intact!
+            return;
+          }
           setIsWorkspaceLoading(true);
           setOpenedRootDirHandle(null);
           setPendingReconnectDirHandle(null);
@@ -2201,7 +2638,7 @@ export default function Index() {
           const nextItems = (entries || []).map((e: any) => mapTreeEntryToItem(e));
 
           const nextNotes = replaceNotes(nextItems, true);
-          restoreTabsFromSession(nextNotes, settings.reopenTabs);
+          restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
 
           if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
             void triggerSync(nextNotes, (updated) => {
@@ -2268,12 +2705,16 @@ export default function Index() {
   const handleCreateWorkspace = useCallback(
     async (parentPath: string, workspaceName: string) => {
       setIsCreatingWorkspace(true);
-      setIsWorkspaceLoading(true);
       try {
         const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
         if (electronAPI?.createNewWorkspace) {
           const data = await electronAPI.createNewWorkspace({ parentPath, workspaceName });
           if (data?.folderPath) {
+            if (data.openedInNewWindow) {
+              // New workspace was launched in a new window; keep current window intact!
+              return;
+            }
+            setIsWorkspaceLoading(true);
             setOpenedRootDirHandle(null);
             setPendingReconnectDirHandle(null);
             await setStoredDirectoryHandle(null);
@@ -2298,7 +2739,7 @@ export default function Index() {
             const nextItems = (tree?.entries || []).map((e: any) => mapTreeEntryToItem(e));
 
             const nextNotes = replaceNotes(nextItems, true);
-            restoreTabsFromSession(nextNotes, settings.reopenTabs);
+            restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
 
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
               void triggerSync(nextNotes, (updated) => {
@@ -2316,7 +2757,7 @@ export default function Index() {
         setIsWorkspaceLoading(false);
       }
     },
-    [replaceNotes, resetTabs, restoreTabsFromSession, settings.reopenTabs, settings.storageMode, triggerSync]
+    [replaceNotes, resetTabs, restoreTabsFromSession, settings.reopenTabs, settings.onStartup, settings.storageMode, triggerSync]
   );
 
   const handleCloseWorkspace = useCallback(async () => {
@@ -2471,7 +2912,7 @@ export default function Index() {
             const folderName = dirHandle.name || "My Notes";
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
-            restoreTabsFromSession(notesLoaded, settings.reopenTabs);
+            restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup);
           },
         });
       } else {
@@ -2523,7 +2964,7 @@ export default function Index() {
             const nextItems = entries.map((e: any) => mapTreeEntryToItem(e));
 
             const nextNotes = replaceNotes(nextItems, true);
-            restoreTabsFromSession(nextNotes, settings.reopenTabs);
+            restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
 
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
               void triggerSync(nextNotes, (updated) => {
@@ -2669,17 +3110,36 @@ export default function Index() {
     void initDefaultFolders();
   }, [openedRootDirHandle]);
 
-  // Load .luno/settings.json when workspace opens
+  // Load .luno/settings.json and .luno/favorites.json when workspace opens
   useEffect(() => {
     let active = true;
     const loadMeta = async () => {
-      const workspaceSettings = await loadWorkspaceSettings(openedRootDirHandle);
-      if (active && workspaceSettings) {
-        Object.entries(workspaceSettings).forEach(([k, v]) => {
-          updateSetting(k as keyof AppSettings, v as AppSettings[keyof AppSettings]);
-        });
-      } else if (active && settings) {
-        await saveWorkspaceSettings(openedRootDirHandle, settings);
+      const [workspaceSettings, favList] = await Promise.all([
+        loadWorkspaceSettings(openedRootDirHandle),
+        loadWorkspaceFavorites(openedRootDirHandle),
+      ]);
+      if (active) {
+        if (workspaceSettings) {
+          updateSettings(workspaceSettings);
+        } else if (settings) {
+          await saveWorkspaceSettings(openedRootDirHandle, settings);
+        }
+
+        if (favList && favList.length > 0) {
+          const nonMdFavs = favList.filter((p) => !p.toLowerCase().endsWith(".md") && !p.toLowerCase().endsWith(".markdown"));
+          workspaceFavoritesRef.current = new Set(nonMdFavs);
+          notesRef.current.forEach((n) => {
+            if (!isMarkdownNote(n)) {
+              const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
+              if (relPath && workspaceFavoritesRef.current.has(relPath) && !n.isFavorite) {
+                updateNote(n.id, { isFavorite: true });
+              }
+            }
+          });
+          if (nonMdFavs.length !== favList.length) {
+            void saveWorkspaceFavorites(openedRootDirHandle, nonMdFavs);
+          }
+        }
       }
     };
     void loadMeta();
@@ -2698,8 +3158,13 @@ export default function Index() {
   // Keep open tabs in sync when notes are deleted (non-folder-sync deletions)
   useEffect(() => {
     const existingSet = new Set(notes.map((n) => n.id));
+    existingSet.add("home");
     existingSet.add("settings");
     existingSet.add("luno-ai");
+    existingSet.add("templates");
+    existingSet.add("favorites");
+    existingSet.add("tags");
+    existingSet.add("trash");
     if (newlyCreatedNoteIdRef.current) {
       existingSet.add(newlyCreatedNoteIdRef.current);
     }
@@ -2709,13 +3174,18 @@ export default function Index() {
   const openTabNotes = useMemo(() => {
     return openTabIds
       .map((id) => {
+        if (id === "home") return HOME_NOTE;
+        if (id === "trash") return TRASH_NOTE;
         if (id === "settings") return SETTINGS_NOTE;
         if (id === "luno-ai") return LUNO_AI_NOTE;
+        if (id === "templates") return TEMPLATES_NOTE;
+        if (id === "favorites") return FAVORITES_NOTE;
+        if (id === "tags") return TAGS_NOTE;
         if (id.startsWith("web:")) return getWebTabNote(id);
         return notes.find((n) => n.id === id);
       })
       .filter((n): n is Note => Boolean(n));
-  }, [openTabIds, notes, SETTINGS_NOTE, LUNO_AI_NOTE, getWebTabNote]);
+  }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
 
   // Cycle open tabs with Ctrl+Tab / Ctrl+Shift+Tab
   const cycleActiveTab = useCallback((direction: 1 | -1) => {
@@ -2759,7 +3229,7 @@ export default function Index() {
       const code = e.code || "";
 
       // 1. Ctrl + N / Cmd + N (New Note)
-      if ((key === "n" || code === "KeyN") && !e.shiftKey && !e.altKey) {
+      if ((key === "n" || code === "KeyN" || key === "ื" || e.keyCode === 78 || e.which === 78) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         void createNoteInFolder();
@@ -2767,7 +3237,7 @@ export default function Index() {
       }
 
       // 2. Ctrl + O / Cmd + O (Open Workspace Folder)
-      if ((key === "o" || code === "KeyO") && !e.shiftKey && !e.altKey) {
+      if ((key === "o" || code === "KeyO" || key === "น" || e.keyCode === 79 || e.which === 79) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         void handleOpenFolder();
@@ -2775,7 +3245,7 @@ export default function Index() {
       }
 
       // 3. Ctrl + W / Cmd + W (Close Active Tab)
-      if ((key === "w" || code === "KeyW") && !e.shiftKey && !e.altKey) {
+      if ((key === "w" || code === "KeyW" || key === "ไ" || e.keyCode === 87 || e.which === 87) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         if (activeTabId) {
@@ -2808,20 +3278,91 @@ export default function Index() {
         return;
       }
 
-      // 7. Ctrl + K / Ctrl + F (Quick Search Focus when not in editor)
-      if ((key === "k" || key === "f" || code === "KeyK" || code === "KeyF") && !e.shiftKey && !e.altKey && !isEditing) {
+      // 7. Ctrl + K / Ctrl + F (Universal Search Focus)
+      const isSearchTrigger =
+        (key === "k" || code === "KeyK" || key === "า" || e.keyCode === 75) ||
+        ((key === "f" || code === "KeyF" || key === "ด" || e.keyCode === 70) && !isEditing);
+
+      if (isSearchTrigger && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
+
+        if (activeTabId === "home") {
+          const homeSearchInput = document.querySelector<HTMLInputElement>(
+            'input[data-home-search="true"]'
+          );
+          if (homeSearchInput) {
+            homeSearchInput.focus();
+            homeSearchInput.select();
+            return;
+          }
+        }
+
+        if (activeTabId === "trash") {
+          const trashSearchInput = document.querySelector<HTMLInputElement>(
+            'input[data-trash-search="true"]'
+          );
+          if (trashSearchInput) {
+            trashSearchInput.focus();
+            trashSearchInput.select();
+            return;
+          }
+        }
+
+        if (activeTabId === "templates") {
+          const templatesSearchInput = document.querySelector<HTMLInputElement>(
+            'input[data-templates-search="true"]'
+          );
+          if (templatesSearchInput) {
+            templatesSearchInput.focus();
+            templatesSearchInput.select();
+            return;
+          }
+        }
+
+        if (activeTabId === "favorites") {
+          const favoritesSearchInput = document.querySelector<HTMLInputElement>(
+            'input[data-favorites-search="true"]'
+          );
+          if (favoritesSearchInput) {
+            favoritesSearchInput.focus();
+            favoritesSearchInput.select();
+            return;
+          }
+        }
+
+        if (activeTabId === "tags") {
+          const tagsSearchInput = document.querySelector<HTMLInputElement>(
+            'input[data-tags-search="true"]'
+          );
+          if (tagsSearchInput) {
+            tagsSearchInput.focus();
+            tagsSearchInput.select();
+            return;
+          }
+        }
+
+        // On any other page (editor, settings, web tab, etc.), open sidebar and focus sidebar search
         setSidebarOpen(true);
-        setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("luno:focus-sidebar-search"));
+        const focusSidebarSearch = () => {
           const searchInput = document.querySelector<HTMLInputElement>(
-            'input[type="text"][placeholder*="Search"], input[type="text"][placeholder*="ค้นหา"]'
+            'input[data-sidebar-search="true"], aside input[type="text"]'
           );
           if (searchInput) {
             searchInput.focus();
             searchInput.select();
+            return true;
           }
-        }, 50);
+          return false;
+        };
+
+        if (!focusSidebarSearch()) {
+          setTimeout(focusSidebarSearch, 30);
+          setTimeout(focusSidebarSearch, 80);
+          setTimeout(focusSidebarSearch, 200);
+          setTimeout(focusSidebarSearch, 400);
+        }
         return;
       }
 
@@ -2869,9 +3410,131 @@ export default function Index() {
     [closeTab, notes]
   );
 
+  const handleRestoreFromTrash = useCallback((ids: string[]) => {
+    const restored = restoreFromTrash(ids);
+    if (restored.length === 0) return;
+
+    const currentNotes = notesRef.current;
+    const existingIds = new Set(currentNotes.map((n) => n.id));
+    const newNotes = restored.map((n) => {
+      const isImg =
+        n.fileType === "image" ||
+        /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n.fileName || "");
+      const base = existingIds.has(n.id) ? { ...n, id: crypto.randomUUID() } : n;
+      return isImg ? { ...base, fileType: "image" as const } : base;
+    });
+
+    // Clear deleted path tracking
+    for (const n of newNotes) {
+      if (n.fileName) {
+        const relPath = getRelativePath(n.folderPath || "", n.fileName);
+        clearDeletedRelativePath(relPath);
+      }
+      unmarkNoteAsDeleted(n.id);
+    }
+
+    // Write restored files to physical disk (Electron workspace)
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && (electronAPI?.writeFileContent || electronAPI?.writeFileBase64)) {
+      void (async () => {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            for (const n of newNotes) {
+              if (n.fileName && typeof n.content === "string") {
+                const fullPath = n.folderPath
+                  ? `${saved.folderPath}/${n.folderPath}/${n.fileName}`
+                  : `${saved.folderPath}/${n.fileName}`;
+
+                const isImageOrBinary =
+                  n.fileType === "image" ||
+                  n.fileType === "binary" ||
+                  /\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf|zip|mp3|mp4|avif)$/i.test(n.fileName || "");
+
+                if (isImageOrBinary && n.content.startsWith("data:") && electronAPI.writeFileBase64) {
+                  await electronAPI.writeFileBase64({ fullPath, base64: n.content });
+                } else if (electronAPI.writeFileContent && n.content) {
+                  await electronAPI.writeFileContent({ fullPath, content: n.content });
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to restore file in Electron workspace:", err);
+        }
+      })();
+    }
+
+    if (openedRootDirHandle) {
+      void (async () => {
+        try {
+          for (const n of newNotes) {
+            if (n.fileName && typeof n.content === "string") {
+              let targetDir = openedRootDirHandle;
+              const segments = (n.folderPath ?? "").split("/").filter(Boolean);
+              for (const segment of segments) {
+                targetDir = await targetDir.getDirectoryHandle(segment, { create: true });
+              }
+              await requestPermissionIfAvailable(targetDir, "readwrite");
+              const fileHandle = await targetDir.getFileHandle(n.fileName, { create: true });
+              const writable = await fileHandle.createWritable();
+              if (n.content.startsWith("data:")) {
+                const res = await fetch(n.content);
+                const blob = await res.blob();
+                await writable.write(blob);
+              } else if (n.content) {
+                await writable.write(n.content);
+              }
+              await writable.close();
+              const relPath = getRelativePath(n.folderPath || "", n.fileName);
+              await setStoredFileHandle(relPath, fileHandle);
+              await setStoredFileHandle(n.id, fileHandle);
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to write restored file to File System Access:", err);
+        }
+      })();
+    }
+
+    replaceNotes([...newNotes, ...currentNotes]);
+
+    if (newNotes.length === 1) {
+      openTab(newNotes[0].id);
+      toast({
+        title: t("trash.title"),
+        description: t("trash.restoreSuccess", { file: newNotes[0].fileName || newNotes[0].title || "Note" }),
+      });
+    } else {
+      toast({
+        title: t("trash.title"),
+        description: t("trash.restoreBatchSuccess", { count: newNotes.length }),
+      });
+    }
+  }, [restoreFromTrash, replaceNotes, openTab, openedRootDirHandle, t]);
+
+  const handleDeletePermanently = useCallback((ids: string[]) => {
+    deletePermanently(ids);
+    toast({
+      title: t("trash.title"),
+      description: t("trash.deleteSuccess"),
+    });
+  }, [deletePermanently, t]);
+
+  const handleEmptyTrash = useCallback(() => {
+    emptyTrash();
+    toast({
+      title: t("trash.title"),
+      description: t("trash.emptySuccess"),
+    });
+  }, [emptyTrash, t]);
+
   const handleDeleteNote = (id: string): boolean => {
     const targetNote = notes.find((n) => n.id === id);
     if (!targetNote) return false;
+
+    // Move to Trash initially
+    moveToTrash(targetNote);
 
     if (targetNote.driveFileId && settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
       trashDriveNote(targetNote.driveFileId);
@@ -2880,6 +3543,9 @@ export default function Index() {
     if (targetNote.fileName) {
       const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
       trackDeletedRelativePath(relPath);
+    }
+    if (splitTabId === id) {
+      setSplitTabId(null);
     }
     clearNoteEditorHistory(id);
     closeTab(id, notes.map((n) => n.id));
@@ -2894,6 +3560,29 @@ export default function Index() {
             const fullPath = targetNote.folderPath
               ? `${saved.folderPath}/${targetNote.folderPath}/${targetNote.fileName}`
               : `${saved.folderPath}/${targetNote.fileName}`;
+
+            const isImg =
+              targetNote.fileType === "image" ||
+              targetNote.fileType === "binary" ||
+              /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(targetNote.fileName || "");
+
+            if (isImg && electronAPI.readFileBase64) {
+              const b64 = await electronAPI.readFileBase64(fullPath);
+              if (b64) {
+                const ext = (targetNote.fileName || "").toLowerCase();
+                const mime = ext.endsWith(".png")
+                  ? "image/png"
+                  : ext.endsWith(".gif")
+                  ? "image/gif"
+                  : ext.endsWith(".webp")
+                  ? "image/webp"
+                  : ext.endsWith(".svg")
+                  ? "image/svg+xml"
+                  : "image/jpeg";
+                moveToTrash({ ...targetNote, content: `data:${mime};base64,${b64}` });
+              }
+            }
+
             await electronAPI.deleteFileOrFolder(fullPath);
             if (electronAPI.readWorkspaceTree) {
               const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
@@ -2906,6 +3595,7 @@ export default function Index() {
               );
               const nextItems = entries.map((e: any) => mapTreeEntryToItem(e, existingByPath.get(e.relativePath)));
               replaceNotes(nextItems);
+              removeTabsForDeletedNotes(new Set(nextItems.map((n) => n.id)));
             }
           }
         } catch (err) {
@@ -2925,6 +3615,27 @@ export default function Index() {
           }
           await requestPermissionIfAvailable(targetDir, "readwrite");
           const fname = targetNote.fileName as string;
+
+          const isImg =
+            targetNote.fileType === "image" ||
+            targetNote.fileType === "binary" ||
+            /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(fname);
+
+          if (isImg) {
+            try {
+              const fileHandle = await targetDir.getFileHandle(fname);
+              const file = await fileHandle.getFile();
+              const reader = new FileReader();
+              const dataUrl = await new Promise<string>((resolve) => {
+                reader.onload = () => resolve(reader.result as string);
+                reader.readAsDataURL(file);
+              });
+              if (dataUrl) {
+                moveToTrash({ ...targetNote, content: dataUrl });
+              }
+            } catch {}
+          }
+
           try {
             await targetDir.removeEntry(fname);
           } catch {
@@ -2954,6 +3665,17 @@ export default function Index() {
       })();
     }
 
+    const deletedFileName = targetNote.fileName || targetNote.title || t("editor.untitled");
+    toast({
+      title: t("trash.title"),
+      description: t("trash.movedToTrash", { file: deletedFileName }),
+      action: (
+        <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash([targetNote.id])}>
+          {t("trash.undo")}
+        </ToastAction>
+      ),
+    });
+
     return result;
   };
 
@@ -2974,6 +3696,65 @@ export default function Index() {
     }
     openTab(note.id);
     return note;
+  };
+
+  const handleCreateFromHomeTemplate = async (
+    templateType: NoteTemplateType,
+    explicitFormat?: "markdown" | "html" | "plain"
+  ) => {
+    const isTxt = explicitFormat ? explicitFormat === "plain" : settings.defaultExtension === "txt";
+    const defaultExt = explicitFormat === "html" ? "html" : explicitFormat === "plain" ? "txt" : explicitFormat === "markdown" ? "md" : settings.defaultExtension || "md";
+    const format: "markdown" | "html" | "plain" = explicitFormat || (defaultExt === "html" ? "html" : isTxt ? "plain" : "markdown");
+    const meta = getNoteTemplateMetadata(templateType);
+    const templateIcon = getTemplateIcon(templateType, settings.iconPack);
+    const templateContent = getNoteTemplateContent(
+      templateType,
+      settings.language,
+      format,
+      settings.dateFormat,
+      settings.timeFormat,
+      settings.iconPack
+    );
+    const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
+    const prefix = meta.filePrefix || (templateType === "daily" ? "Daily" : "Note");
+    const fileName = `${prefix}-${dateStr}.${defaultExt}`;
+    const initialTitle = settings.language === "th" ? meta.defaultTitleTh : meta.defaultTitleEn;
+
+    if (openedRootDirHandle || electronWorkspacePathRef.current) {
+      const created = await createNoteInFolder(undefined, {
+        fileName,
+        contentFormat: format,
+        initialContent: templateContent,
+        icon: templateIcon,
+        iconColor: meta.iconColor,
+      });
+      if (created?.id && templateIcon) {
+        updateNote(created.id, {
+          icon: templateIcon,
+          iconColor: meta.iconColor,
+        });
+      }
+    } else {
+      const note = createNote();
+      updateNote(note.id, {
+        fileName,
+        contentFormat: format,
+        content: templateContent,
+        title: initialTitle,
+        icon: templateIcon || undefined,
+        iconColor: meta.iconColor || undefined,
+      });
+      openTab(note.id);
+    }
+  };
+
+  const handleCreateBlankFromHome = async () => {
+    if (openedRootDirHandle) {
+      await createNoteInFolder();
+    } else {
+      const note = createNote();
+      openTab(note.id);
+    }
   };
 
   if (isWorkspaceLoading) {
@@ -3036,6 +3817,7 @@ export default function Index() {
           pendingReconnectFolder={Boolean(pendingReconnectDirHandle)}
           onReconnectFolder={handleReconnectFolder}
           onSelect={openTab}
+          onUpdateNote={handleUpdateNote}
           onCreate={(fp, opt) => { void createNoteInFolder(fp, opt); }}
           onCreateFolder={createFolderInFolder}
           onDeleteFile={deleteFileInFolder}
@@ -3063,13 +3845,14 @@ export default function Index() {
           onDeleteTagGlobally={deleteTagGlobally}
           onToggleFavorite={(id) => {
             const n = notes.find((item) => item.id === id);
-            if (n) updateNote(id, { isFavorite: !n.isFavorite });
+            if (n) handleUpdateNote(id, { isFavorite: !n.isFavorite });
           }}
           onOpenPinModal={handleOpenPinModal}
           onOpenSettings={() => handleOpenSettings()}
           isCloudWorkspace={isCloudWorkspace}
           isLoadingWorkspace={isWorkspaceLoading || (settings.storageMode === "gdrive" && syncStatus === "syncing")}
           onOpenWebTab={handleOpenWebTab}
+          trashCount={trashedNotes.length}
         />
       </div>
 
@@ -3093,7 +3876,7 @@ export default function Index() {
                 onNewTab={() => void createNoteInFolder()}
                 onReorderTabs={reorderTabs}
               />
-              {openedFolderName && activeTabId !== "settings" && activeTabId !== "luno-ai" && !activeTabId?.startsWith("web:") && (
+              {openedFolderName && activeTabNote && activeTabId !== "home" && activeTabId !== "trash" && activeTabId !== "settings" && activeTabId !== "luno-ai" && activeTabId !== "templates" && activeTabId !== "favorites" && activeTabId !== "tags" && !activeTabId?.startsWith("web:") && (
                 <Breadcrumb
                   note={activeTabNote}
                   rootFolderName={openedFolderName}
@@ -3116,6 +3899,81 @@ export default function Index() {
                   </div>
                 ) : (
                   <>
+                    <div className={activeTabId === "home" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                      {openTabIds.includes("home") && (
+                        <HomeView
+                          notes={notes}
+                          onOpenNote={(id) => openTab(id)}
+                          onCreateWithTemplate={handleCreateFromHomeTemplate}
+                          onCreateBlankNote={handleCreateBlankFromHome}
+                          onViewAllTemplates={() => openTab("templates")}
+                          onToggleFavorite={(id) => {
+                            const found = notes.find((n) => n.id === id);
+                            if (found) {
+                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                            }
+                          }}
+                          onOpenSearch={() => {
+                            window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+                          }}
+                          onViewAllNotes={() => {
+                            setSidebarOpen(true);
+                            window.dispatchEvent(new CustomEvent("luno:filter-notes", { detail: "all" }));
+                          }}
+                          onViewAllFavorites={() => openTab("favorites")}
+                        />
+                      )}
+                    </div>
+                    <div className={activeTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.includes("templates") && (
+                        <TemplatesView
+                          onCreateWithTemplate={handleCreateFromHomeTemplate}
+                        />
+                      )}
+                    </div>
+                    <div className={activeTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.includes("favorites") && (
+                        <FavoritesTabView
+                          notes={notes}
+                          onOpenNote={(id) => openTab(id)}
+                          onToggleFavorite={(id) => {
+                            const found = notes.find((n) => n.id === id);
+                            if (found) {
+                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                            }
+                          }}
+                          onCreateBlankNote={handleCreateBlankFromHome}
+                        />
+                      )}
+                    </div>
+                    <div className={activeTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.includes("tags") && (
+                        <TagsTabView
+                          notes={notes}
+                          onOpenNote={(id) => openTab(id)}
+                          onToggleFavorite={(id) => {
+                            const found = notes.find((n) => n.id === id);
+                            if (found) {
+                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                            }
+                          }}
+                          onRenameTagGlobally={renameTagGlobally}
+                          onDeleteTagGlobally={deleteTagGlobally}
+                          onCreateBlankNote={handleCreateBlankFromHome}
+                        />
+                      )}
+                    </div>
+                    <div className={activeTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.includes("trash") && (
+                        <TrashView
+                          trashedNotes={trashedNotes}
+                          onRestore={handleRestoreFromTrash}
+                          onDeletePermanently={handleDeletePermanently}
+                          onEmptyTrash={handleEmptyTrash}
+                          onOpenSettings={() => handleOpenSettings("files")}
+                        />
+                      )}
+                    </div>
                     <div className={activeTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
                       {openTabIds.includes("settings") && (
                         <SettingsTabView
@@ -3192,7 +4050,7 @@ export default function Index() {
                         />
                       </div>
                     ))}
-                    <div className={(activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                    <div className={(activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
                       <Editor
                         key="editor-pane-left"
                         note={activeEditorNote}
@@ -3262,7 +4120,7 @@ export default function Index() {
                 onSplitTab={(id) => setSplitTabId(null)}
                 onReorderTabs={reorderTabs}
               />
-              {splitTabNote && splitTabNote.id !== "settings" && splitTabNote.id !== "luno-ai" && !splitTabId?.startsWith("web:") && (
+              {splitTabNote && splitTabNote.id !== "home" && splitTabNote.id !== "trash" && splitTabNote.id !== "settings" && splitTabNote.id !== "luno-ai" && splitTabNote.id !== "templates" && splitTabNote.id !== "favorites" && splitTabNote.id !== "tags" && !splitTabId?.startsWith("web:") && (
                 <Breadcrumb
                   note={splitTabNote}
                   rootFolderName={openedFolderName}
@@ -3274,6 +4132,56 @@ export default function Index() {
                 />
               )}
               <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+                <div className={splitTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {splitTabId === "templates" && (
+                    <TemplatesView
+                      onCreateWithTemplate={handleCreateFromHomeTemplate}
+                    />
+                  )}
+                </div>
+                <div className={splitTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {splitTabId === "favorites" && (
+                    <FavoritesTabView
+                      notes={notes}
+                      onOpenNote={(id) => setSplitTabId(id)}
+                      onToggleFavorite={(id) => {
+                        const found = notes.find((n) => n.id === id);
+                        if (found) {
+                          handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                        }
+                      }}
+                      onCreateBlankNote={handleCreateBlankFromHome}
+                    />
+                  )}
+                </div>
+                <div className={splitTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {splitTabId === "tags" && (
+                    <TagsTabView
+                      notes={notes}
+                      onOpenNote={(id) => setSplitTabId(id)}
+                      onToggleFavorite={(id) => {
+                        const found = notes.find((n) => n.id === id);
+                        if (found) {
+                          handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                        }
+                      }}
+                      onRenameTagGlobally={renameTagGlobally}
+                      onDeleteTagGlobally={deleteTagGlobally}
+                      onCreateBlankNote={handleCreateBlankFromHome}
+                    />
+                  )}
+                </div>
+                <div className={splitTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {splitTabId === "trash" && (
+                    <TrashView
+                      trashedNotes={trashedNotes}
+                      onRestore={handleRestoreFromTrash}
+                      onDeletePermanently={handleDeletePermanently}
+                      onEmptyTrash={handleEmptyTrash}
+                      onOpenSettings={() => handleOpenSettings("files")}
+                    />
+                  )}
+                </div>
                 <div className={splitTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
                   {splitTabId === "settings" && (
                     <SettingsTabView
@@ -3317,21 +4225,21 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={(splitTabId?.startsWith("web:") || splitTabNote?.fileType === "web-viewer") ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
-                  {(splitTabId?.startsWith("web:") || splitTabNote?.fileType === "web-viewer") && (
+                {splitTabId?.startsWith("web:") && (
+                  <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
                     <WebViewerView
                       initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
-                      onUrlChange={(newUrl) => splitTabId && handleWebTabUrlChange(splitTabId, newUrl)}
-                      onTitleChange={(newTitle) => splitTabId && handleWebTabTitleChange(splitTabId, newTitle)}
-                      onFaviconChange={(icon) => splitTabId && handleWebTabFaviconChange(splitTabId, icon)}
+                      onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
+                      onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
+                      onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
                       onInsertToActiveNote={handleInsertLinkToActiveNote}
                       onClose={() => setSplitTabId(null)}
                       onSplit={() => setSplitTabId(null)}
                       isSplit={true}
                     />
-                  )}
-                </div>
-                <div className={(splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId?.startsWith("web:") || splitTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                  </div>
+                )}
+                <div className={(splitTabId === "home" || splitTabId === "trash" || splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId === "templates" || splitTabId === "favorites" || splitTabId === "tags" || splitTabId?.startsWith("web:")) ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
                   <Editor
                     key="editor-pane-right"
                     note={splitEditorNote}
@@ -3350,12 +4258,13 @@ export default function Index() {
                     editorFontSize={settings.editorFontSize}
                     isMobile={isMobile}
                     rootDirHandle={openedRootDirHandle}
+                    onCloseSplit={() => setSplitTabId(null)}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={(open) => {
                       if (open) openTab("settings");
                       else closeTab("settings", notes.map((n) => n.id));
                     }}
-                    onSelectNote={(id) => setSplitTabId(id)}
+                    onSelectNote={setSplitTabId}
                     onOpenWebTab={handleOpenWebTab}
                     onUnlockNote={handleUnlockNote}
                     onRelockNote={handleRelockNote}
@@ -3368,24 +4277,22 @@ export default function Index() {
           </div>
         ) : (
           /* Normal Single Pane Mode */
-          <>
+          <div className="flex-1 min-h-0 flex flex-col">
             <TabBar
               tabs={openTabNotes}
               activeTabId={activeTabId}
-              onSelectTab={setActiveTabId}
+              onSelectTab={(id) => openTab(id)}
               onCloseTab={handleCloseTab}
-              onSplitTab={(id) => {
-                setSplitTabId(prev => prev === id ? null : id);
-              }}
-              onNewTab={() => void createNoteInFolder()}
+              onSplitTab={(id) => setSplitTabId(id)}
+              onNewTab={() => handleCreateBlankFromHome()}
               onReorderTabs={reorderTabs}
             />
-            {openedFolderName && activeTabId !== "settings" && activeTabId !== "luno-ai" && !activeTabId?.startsWith("web:") && (
+            {activeTabNote && activeTabNote.id !== "home" && activeTabNote.id !== "trash" && activeTabNote.id !== "settings" && activeTabNote.id !== "luno-ai" && activeTabNote.id !== "templates" && activeTabNote.id !== "favorites" && activeTabNote.id !== "tags" && !activeTabId?.startsWith("web:") && (
               <Breadcrumb
                 note={activeTabNote}
                 rootFolderName={openedFolderName}
                 notes={notes}
-                onSelectNote={setActiveTabId}
+                onSelectNote={(id) => openTab(id)}
                 onOpenRightPanel={() => setRightPanelOpen((prev) => !prev)}
                 isCloudWorkspace={isCloudWorkspace}
               />
@@ -3404,6 +4311,81 @@ export default function Index() {
                 </div>
               ) : (
                 <>
+                  <div className={activeTabId === "home" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    {openTabIds.includes("home") && (
+                      <HomeView
+                        notes={notes}
+                        onOpenNote={(id) => openTab(id)}
+                        onCreateWithTemplate={handleCreateFromHomeTemplate}
+                        onCreateBlankNote={handleCreateBlankFromHome}
+                        onViewAllTemplates={() => openTab("templates")}
+                        onToggleFavorite={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                          }
+                        }}
+                        onOpenSearch={() => {
+                          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+                        }}
+                        onViewAllNotes={() => {
+                          setSidebarOpen(true);
+                          window.dispatchEvent(new CustomEvent("luno:filter-notes", { detail: "all" }));
+                        }}
+                        onViewAllFavorites={() => openTab("favorites")}
+                      />
+                    )}
+                  </div>
+                  <div className={activeTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.includes("templates") && (
+                      <TemplatesView
+                        onCreateWithTemplate={handleCreateFromHomeTemplate}
+                      />
+                    )}
+                  </div>
+                  <div className={activeTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.includes("favorites") && (
+                      <FavoritesTabView
+                        notes={notes}
+                        onOpenNote={(id) => openTab(id)}
+                        onToggleFavorite={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                          }
+                        }}
+                        onCreateBlankNote={handleCreateBlankFromHome}
+                      />
+                    )}
+                  </div>
+                  <div className={activeTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.includes("tags") && (
+                      <TagsTabView
+                        notes={notes}
+                        onOpenNote={(id) => openTab(id)}
+                        onToggleFavorite={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                          }
+                        }}
+                        onRenameTagGlobally={renameTagGlobally}
+                        onDeleteTagGlobally={deleteTagGlobally}
+                        onCreateBlankNote={handleCreateBlankFromHome}
+                      />
+                    )}
+                  </div>
+                  <div className={activeTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.includes("trash") && (
+                      <TrashView
+                        trashedNotes={trashedNotes}
+                        onRestore={handleRestoreFromTrash}
+                        onDeletePermanently={handleDeletePermanently}
+                        onEmptyTrash={handleEmptyTrash}
+                        onOpenSettings={() => handleOpenSettings("files")}
+                      />
+                    )}
+                  </div>
                   <div className={activeTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
                     {openTabIds.includes("settings") && (
                       <SettingsTabView
@@ -3487,7 +4469,7 @@ export default function Index() {
                       />
                     </div>
                   ))}
-                  <div className={(activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                  <div className={(activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
                     <Editor
                       key="editor-pane-main"
                       note={activeEditorNote}
@@ -3523,7 +4505,7 @@ export default function Index() {
                 </>
               )}
             </div>
-          </>
+          </div>
         )}
       </div>
 

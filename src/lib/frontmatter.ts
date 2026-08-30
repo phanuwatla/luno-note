@@ -144,8 +144,8 @@ export function parseFrontmatterAndTags(markdown: string): ParsedFrontmatter {
     };
   }
 
-  // Find closing '---' or '...'
-  const match = /^---\r?\n([\s\S]*?)\r?\n(?:---|View-State|\.\.\.)\r?\n?/.exec(trimmed);
+  // Find closing '---' or '...' (closing line ending only)
+  const match = /^---\r?\n([\s\S]*?)\r?\n(?:---|View-State|\.\.\.)(?:\r?\n|$)/.exec(trimmed);
   if (!match) {
     const inlineTags = parseInlineTags(markdown);
     return {
@@ -216,7 +216,10 @@ export function parseFrontmatterAndTags(markdown: string): ParsedFrontmatter {
         }
       } else {
         inTagsSection = false;
-        if (valStr.startsWith("[") && valStr.endsWith("]")) {
+        if (key === "favorite" || key === "isFavorite") {
+          const lower = valStr.toLowerCase().replace(/^['"]|['"]$/g, "");
+          frontmatterData[key] = lower === "true" || lower === "yes" || lower === "1";
+        } else if (valStr.startsWith("[") && valStr.endsWith("]")) {
           const inner = valStr.slice(1, -1);
           frontmatterData[key] = inner.split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, ""));
         } else {
@@ -259,7 +262,7 @@ export function updateFrontmatterTags(markdown: string, newTags: string[]): stri
     }
     // Create new Frontmatter block
     const yamlTags = cleanTags.map((t) => `  - ${t}`).join("\n");
-    const frontmatter = `---\ntags:\n${yamlTags}\n---\n\n`;
+    const frontmatter = `---\ntags:\n${yamlTags}\n---\n`;
     return frontmatter + (markdown || "");
   }
 
@@ -267,7 +270,7 @@ export function updateFrontmatterTags(markdown: string, newTags: string[]): stri
   const lines = parsed.frontmatterRaw.split(/\r?\n/);
   // Remove top and bottom --- lines
   if (lines[0].startsWith("---")) lines.shift();
-  if (lines.length > 0 && (lines[lines.length - 1].startsWith("---") || lines[lines.length - 1].startsWith("..."))) {
+  while (lines.length > 0 && (lines[lines.length - 1] === "" || lines[lines.length - 1].startsWith("---") || lines[lines.length - 1].startsWith("..."))) {
     lines.pop();
   }
 
@@ -359,6 +362,121 @@ export function removeTagFromMarkdown(markdown: string, tagToRemove: string): st
   updatedContent = updatedContent.replace(inlineTagRegex, "$1");
 
   return updatedContent;
+}
+
+/**
+ * Updates or removes the icon and iconColor in Markdown Frontmatter.
+ */
+export function updateFrontmatterIcon(markdown: string, icon?: string, iconColor?: string): string {
+  if (!markdown || typeof markdown !== "string" || isTiptapJson(markdown)) {
+    return markdown;
+  }
+  const parsed = parseFrontmatterAndTags(markdown);
+
+  if (!parsed.hasFrontmatter) {
+    if (!icon) return markdown;
+    const lines = [`icon: "${icon}"`];
+    if (iconColor) lines.push(`iconColor: "${iconColor}"`);
+    const frontmatter = `---\n${lines.join("\n")}\n---\n`;
+    return frontmatter + (markdown || "");
+  }
+
+  // Frontmatter exists: update icon and iconColor keys
+  const lines = parsed.frontmatterRaw.split(/\r?\n/);
+  if (lines[0].startsWith("---")) lines.shift();
+  while (lines.length > 0 && (lines[lines.length - 1] === "" || lines[lines.length - 1].startsWith("---") || lines[lines.length - 1].startsWith("..."))) {
+    lines.pop();
+  }
+
+  const updatedLines: string[] = [];
+  let iconHandled = false;
+  let iconColorHandled = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kvMatch = /^([a-zA-Z0-9_\-]+)\s*:\s*(.*)$/.exec(line);
+    if (kvMatch) {
+      const key = kvMatch[1];
+      if (key === "icon") {
+        iconHandled = true;
+        if (icon) updatedLines.push(`icon: "${icon}"`);
+        continue;
+      }
+      if (key === "iconColor" || key === "icon_color") {
+        iconColorHandled = true;
+        if (icon && iconColor) updatedLines.push(`iconColor: "${iconColor}"`);
+        continue;
+      }
+    }
+    updatedLines.push(line);
+  }
+
+  if (!iconHandled && icon) {
+    updatedLines.push(`icon: "${icon}"`);
+  }
+  if (!iconColorHandled && icon && iconColor) {
+    updatedLines.push(`iconColor: "${iconColor}"`);
+  }
+
+  if (updatedLines.length === 0) {
+    return parsed.bodyContent.replace(/^\r?\n/, "");
+  }
+
+  const newFrontmatter = `---\n${updatedLines.join("\n")}\n---\n`;
+  return newFrontmatter + parsed.bodyContent;
+}
+
+/**
+ * Updates or removes the favorite status in Markdown Frontmatter (favorite: true).
+ */
+export function updateFrontmatterFavorite(markdown: string, isFavorite?: boolean): string {
+  if (!markdown || typeof markdown !== "string" || isTiptapJson(markdown)) {
+    return markdown;
+  }
+  const parsed = parseFrontmatterAndTags(markdown);
+
+  if (!parsed.hasFrontmatter) {
+    if (!isFavorite) return markdown;
+    const frontmatter = `---\nfavorite: true\n---\n`;
+    return frontmatter + (markdown || "");
+  }
+
+  // Frontmatter exists: update favorite key while preserving all other keys
+  const lines = parsed.frontmatterRaw.split(/\r?\n/);
+  if (lines[0].startsWith("---")) lines.shift();
+  while (lines.length > 0 && (lines[lines.length - 1] === "" || lines[lines.length - 1].startsWith("---") || lines[lines.length - 1].startsWith("..."))) {
+    lines.pop();
+  }
+
+  const updatedLines: string[] = [];
+  let favoriteHandled = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kvMatch = /^([a-zA-Z0-9_\-]+)\s*:\s*(.*)$/.exec(line);
+    if (kvMatch) {
+      const key = kvMatch[1];
+      if (key === "favorite" || key === "isFavorite") {
+        favoriteHandled = true;
+        if (isFavorite) {
+          updatedLines.push("favorite: true");
+        }
+        continue;
+      }
+    }
+    updatedLines.push(line);
+  }
+
+  if (!favoriteHandled && isFavorite) {
+    updatedLines.push("favorite: true");
+  }
+
+  if (updatedLines.length === 0) {
+    return parsed.bodyContent.replace(/^\r?\n/, "");
+  }
+
+  const newFrontmatter = `---\n${updatedLines.join("\n")}\n---\n`;
+  return newFrontmatter + parsed.bodyContent;
 }
 
 function escapeRegExp(string: string): string {

@@ -47,6 +47,7 @@ import { PencilIcon as Pencil } from "@/components/icons/PencilIcon";
 import { marked } from "marked";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { runGeminiPrompt, runGeminiAction, runGeminiChatHistory } from "@/lib/geminiApi";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -1393,17 +1394,24 @@ export default function LunoAiView({
                       <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
                       <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingUserMsgId(null);
-                        setPrompt("");
-                      }}
-                      className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
-                      title="Cancel edit"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingUserMsgId(null);
+                            setPrompt("");
+                          }}
+                          className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
+                          aria-label="Cancel edit"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>
+                        Cancel edit
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 )}
                 {attachedFiles.length > 0 && (
@@ -1436,13 +1444,20 @@ export default function LunoAiView({
                 <div className="relative w-full rounded-2xl border border-border/80 bg-card p-3.5 shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all space-y-2.5">
                   <div className="flex flex-wrap items-baseline gap-1 min-h-[56px] max-h-[160px]">
                     {activePrefix && (
-                      <span
-                        onClick={() => setActivePrefix(null)}
-                        className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
-                        title="Click or Backspace to remove"
-                      >
-                        {activePrefix}
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            onClick={() => setActivePrefix(null)}
+                            className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
+                            aria-label="Click or Backspace to remove"
+                          >
+                            {activePrefix}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={4}>
+                          Click or Backspace to remove
+                        </TooltipContent>
+                      </Tooltip>
                     )}
                     <textarea
                       ref={textareaRef}
@@ -1870,17 +1885,24 @@ export default function LunoAiView({
                     <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingUserMsgId(null);
-                      setPrompt("");
-                    }}
-                    className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
-                    title="Cancel edit"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUserMsgId(null);
+                          setPrompt("");
+                        }}
+                        className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
+                        aria-label="Cancel edit"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={4}>
+                      Cancel edit
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               )}
               {attachedFiles.length > 0 && (
@@ -1968,13 +1990,20 @@ export default function LunoAiView({
                 <div className="flex-1 flex items-center gap-1.5 min-w-0 relative">
 
                   {activePrefix && (
-                    <span
-                      onClick={() => setActivePrefix(null)}
-                      className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0 whitespace-nowrap"
-                      title="Click or Backspace to remove"
-                    >
-                      {activePrefix}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          onClick={() => setActivePrefix(null)}
+                          className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0 whitespace-nowrap"
+                          aria-label="Click or Backspace to remove"
+                        >
+                          {activePrefix}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>
+                        Click or Backspace to remove
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                   <input
                     ref={chatInputRef}
@@ -2355,64 +2384,78 @@ export default function LunoAiView({
                 ) : (
                   filteredSessions.map((session) => {
                     const isActive = session.id === currentSessionId;
-                    const timeStr = new Date(session.createdAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    });
+                    const timeStr = formatRelativeDateTime(
+                      session.createdAt || session.updatedAt || Date.now(),
+                      settings.dateFormat,
+                      settings.timeFormat,
+                      settings.language
+                    );
 
                     // Extract preview snippet from messages with all markdown syntax stripped
                     const lastMsgContent = [...(session.messages || [])].reverse().find((m) => (m?.content || "").trim())?.content || "";
                     const previewText = stripMarkdownSyntax(lastMsgContent) || "No messages";
 
                     return (
-                      <button
+                      <div
                         key={session.id}
-                        type="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleSelectSession(session);
+                          }
+                        }}
                         onClick={() => handleSelectSession(session)}
-                        className={`w-full flex flex-col gap-1 px-3 py-2 text-left transition-colors rounded-lg cursor-pointer group relative my-0.5 border border-transparent outline-none focus-visible:ring-0 focus-visible:bg-sidebar-accent/60 ${
+                        className={`group relative rounded-xl border-[1.5px] p-2.5 transition-all cursor-pointer select-none outline-none ${
                           isActive
-                            ? "bg-sidebar-accent font-semibold text-foreground"
-                            : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                            ? "bg-primary/10 border-primary/50 text-primary shadow-2xs"
+                            : "border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 text-foreground/90"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 min-w-0 w-full">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
                             <MessageSquare
                               className={`h-3.5 w-3.5 shrink-0 transition-colors ${
-                                isActive ? "text-primary font-bold" : "text-muted-foreground"
+                                isActive ? "text-primary font-semibold" : "text-muted-foreground"
                               }`}
                             />
                             <span
-                              className={`truncate text-xs transition-colors ${
-                                isActive ? "font-semibold text-primary" : "font-medium text-foreground"
+                              className={`truncate text-xs ${
+                                isActive ? "font-bold text-primary" : "font-semibold text-foreground"
                               }`}
                             >
                               {session.title || "Luno AI Chat"}
                             </span>
                           </div>
-                          <span className="shrink-0 text-[10px] text-muted-foreground group-hover:opacity-0 transition-opacity">
+                          <span className="shrink-0 text-[10px] text-muted-foreground font-medium">
                             {timeStr}
                           </span>
                         </div>
 
-                        <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground pl-5.5">
-                          {previewText}
-                        </p>
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground flex-1">
+                            {previewText}
+                          </p>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteSession(session.id, e)}
-                              className="absolute right-1.5 top-1.5 p-1 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity rounded-md hover:bg-muted shrink-0 cursor-pointer"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t("lunoAi.deleteChat") || "Delete chat"}</TooltipContent>
-                        </Tooltip>
-                      </button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteSession(session.id, e);
+                                }}
+                                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer [&_svg]:size-3.5"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("lunoAi.deleteChat") || "Delete chat"}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
                     );
                   })
                 )}

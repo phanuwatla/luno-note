@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const { getSpellingSuggestions } = require("./spellDictionary");
 
@@ -145,52 +146,83 @@ function saveWorkspaceData(data) {
   }
 }
 
-let currentWatcher = null;
-let watcherDebounceTimer = null;
+const windowWorkspaceMap = new Map(); // windowId -> folderPath (string | null)
+const windowWatchers = new Map(); // windowId -> { watcher, debounceTimer }
 
-function stopWorkspaceWatcher() {
-  if (watcherDebounceTimer) {
-    clearTimeout(watcherDebounceTimer);
-    watcherDebounceTimer = null;
-  }
-  if (currentWatcher) {
-    try {
-      currentWatcher.close();
-    } catch {
-      /* ignore */
+function stopWorkspaceWatcherForWindow(windowId) {
+  const item = windowWatchers.get(windowId);
+  if (item) {
+    if (item.debounceTimer) clearTimeout(item.debounceTimer);
+    if (item.watcher) {
+      try {
+        item.watcher.close();
+      } catch {
+        /* ignore */
+      }
     }
-    currentWatcher = null;
+    windowWatchers.delete(windowId);
   }
 }
 
 function startWorkspaceWatcher(folderPath, targetWindow) {
-  stopWorkspaceWatcher();
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  const windowId = targetWindow.id;
+  stopWorkspaceWatcherForWindow(windowId);
   if (!folderPath || !fs.existsSync(folderPath)) return;
 
   try {
-    currentWatcher = fs.watch(folderPath, { recursive: true }, (eventType, filename) => {
+    let debounceTimer = null;
+    const watcher = fs.watch(folderPath, { recursive: true }, (eventType, filename) => {
       if (filename) {
         const norm = filename.replace(/\\/g, "/").toLowerCase();
+        const baseName = path.basename(norm);
+        if (
+          baseName.startsWith(".") ||
+          baseName.startsWith("~$") ||
+          baseName.endsWith(".tmp") ||
+          baseName.endsWith(".swp") ||
+          baseName.endsWith(".crdownload") ||
+          baseName === "thumbs.db" ||
+          baseName === "desktop.ini"
+        ) {
+          return;
+        }
         const parts = norm.split("/");
         if (parts.some((p) => p.startsWith(".") || IGNORED_SCAN_FOLDERS.has(p))) {
           return;
         }
       }
 
-      if (watcherDebounceTimer) clearTimeout(watcherDebounceTimer);
-      watcherDebounceTimer = setTimeout(() => {
-        if (targetWindow && !targetWindow.isDestroyed()) {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (!targetWindow.isDestroyed()) {
           const tree = scanWorkspaceTree(folderPath);
           targetWindow.webContents.send("workspace-changed", {
             folderPath,
             ...tree,
           });
         }
-      }, 500);
+      }, 400);
     });
+
+    windowWatchers.set(windowId, { watcher, debounceTimer });
   } catch (err) {
     console.warn("Failed starting workspace watcher:", folderPath, err);
   }
+}
+
+function findWindowWithWorkspace(folderPath) {
+  if (!folderPath) return null;
+  const targetNorm = path.normalize(folderPath).toLowerCase();
+  for (const [winId, wsPath] of windowWorkspaceMap.entries()) {
+    if (wsPath && path.normalize(wsPath).toLowerCase() === targetNorm) {
+      const win = BrowserWindow.fromId(winId);
+      if (win && !win.isDestroyed()) {
+        return win;
+      }
+    }
+  }
+  return null;
 }
 
 function scanWorkspaceTree(rootDir) {
@@ -211,7 +243,16 @@ function scanWorkspaceTree(rootDir) {
       if (entries.length >= MAX_ENTRIES) break;
       const name = file.name;
       const lowerName = name.toLowerCase();
-      if (name.startsWith(".") || IGNORED_SCAN_FOLDERS.has(lowerName)) {
+      if (
+        name.startsWith(".") ||
+        name.startsWith("~$") ||
+        lowerName.endsWith(".tmp") ||
+        lowerName.endsWith(".swp") ||
+        lowerName.endsWith(".crdownload") ||
+        lowerName === "thumbs.db" ||
+        lowerName === "desktop.ini" ||
+        IGNORED_SCAN_FOLDERS.has(lowerName)
+      ) {
         continue;
       }
 
@@ -304,9 +345,9 @@ function getNativeAppIcon() {
   return iconPath;
 }
 
-function createWindow() {
+function createWindow(initialWorkspacePath = null) {
   const appIcon = getNativeAppIcon();
-  const mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 600,
@@ -324,21 +365,25 @@ function createWindow() {
     },
   });
 
+  if (initialWorkspacePath) {
+    windowWorkspaceMap.set(win.id, initialWorkspacePath);
+  }
+
   // Remove default application menu so ALL shortcuts (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+W, etc.) pass cleanly to React
   Menu.setApplicationMenu(null);
 
   // Prevent pinch-to-zoom from distorting the whole window layout
   try {
-    mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+    win.webContents.setVisualZoomLevelLimits(1, 1);
   } catch {
     /* ignore */
   }
 
   // Configure spell checker languages for Thai and English
   try {
-    const session = mainWindow.webContents.session;
-    const cleanUserAgent = mainWindow.webContents.userAgent.replace(/Electron\/\S+\s?/, "").replace(/luno-note(s)?\/\S+\s?/, "");
-    mainWindow.webContents.setUserAgent(cleanUserAgent);
+    const session = win.webContents.session;
+    const cleanUserAgent = win.webContents.userAgent.replace(/Electron\/\S+\s?/, "").replace(/luno-note(s)?\/\S+\s?/, "");
+    win.webContents.setUserAgent(cleanUserAgent);
 
     const availableLangs = session.availableSpellCheckerLanguages || [];
     const desiredLangs = ["en-US", "th", "th-TH"];
@@ -362,40 +407,59 @@ function createWindow() {
   }
 
   // Forward Chromium's native spell check suggestions to renderer
-  mainWindow.webContents.on("context-menu", (_event, params) => {
+  win.webContents.on("context-menu", (_event, params) => {
     if (params.misspelledWord && ["luno", "luno-ai"].includes(params.misspelledWord.toLowerCase())) {
       return;
     }
     if (params.misspelledWord || (params.dictionarySuggestions && params.dictionarySuggestions.length > 0)) {
-      mainWindow.webContents.send("native-spell-suggestions", {
+      win.webContents.send("native-spell-suggestions", {
         word: params.misspelledWord,
         suggestions: params.dictionarySuggestions || [],
       });
     }
   });
 
-  ipcMain.removeAllListeners("window-minimize");
-  ipcMain.removeAllListeners("window-maximize");
-  ipcMain.removeAllListeners("window-snap");
-  ipcMain.removeAllListeners("window-close");
-  ipcMain.removeHandler("window-is-maximized");
-  ipcMain.removeHandler("get-saved-workspace");
-  ipcMain.removeHandler("set-saved-workspace");
-  ipcMain.removeHandler("select-workspace-dialog");
-  ipcMain.removeHandler("select-directory-dialog");
-  ipcMain.removeHandler("create-new-workspace");
-  ipcMain.removeHandler("read-workspace-tree");
-  ipcMain.removeHandler("read-file-content");
-  ipcMain.removeHandler("read-image-data-url");
-  ipcMain.removeHandler("write-file-content");
-  ipcMain.removeHandler("write-file-base64");
-  ipcMain.removeHandler("delete-file-or-folder");
-  ipcMain.removeHandler("create-workspace-folder");
-  ipcMain.removeHandler("rename-file-or-folder");
-  ipcMain.removeHandler("copy-file-or-folder");
-  ipcMain.removeHandler("open-external");
-  ipcMain.removeHandler("fetch-tts-audio");
+  win.on("closed", () => {
+    stopWorkspaceWatcherForWindow(win.id);
+    windowWorkspaceMap.delete(win.id);
+  });
 
+  const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
+
+  if (isDev) {
+    win.loadURL("http://localhost:8080");
+  } else {
+    win.loadFile(path.join(__dirname, "../dist/index.html"));
+  }
+
+  // Open external links in user's default browser, but allow Google OAuth login popup
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes("accounts.google.com") || url.includes("google.com/gsi/")) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 650,
+          autoHideMenuBar: true,
+          icon: getAppIconPath(),
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+          },
+        },
+      };
+    }
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+
+  return win;
+}
+
+function setupIpcHandlers() {
   ipcMain.handle("open-external", async (event, url) => {
     try {
       if (url && (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("mailto:") || url.startsWith("tel:"))) {
@@ -446,27 +510,32 @@ function createWindow() {
     });
   });
 
-  ipcMain.on("window-minimize", () => {
-    if (!mainWindow.isDestroyed()) mainWindow.minimize();
+  ipcMain.on("window-minimize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.minimize();
   });
-  ipcMain.on("window-maximize", () => {
-    if (!mainWindow.isDestroyed()) {
-      if (mainWindow.isMaximized()) {
-        mainWindow.unmaximize();
+
+  ipcMain.on("window-maximize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      if (win.isMaximized()) {
+        win.unmaximize();
       } else {
-        mainWindow.maximize();
+        win.maximize();
       }
     }
   });
-  ipcMain.on("window-snap", (_event, boundsRatio) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  ipcMain.on("window-snap", (event, boundsRatio) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
     try {
-      const currentBounds = mainWindow.getBounds();
+      const currentBounds = win.getBounds();
       const currentDisplay = screen.getDisplayMatching(currentBounds) || screen.getPrimaryDisplay();
       const workArea = currentDisplay.workArea;
 
-      if (mainWindow.isMaximized()) {
-        mainWindow.unmaximize();
+      if (win.isMaximized()) {
+        win.unmaximize();
       }
 
       const x = Math.round(workArea.x + workArea.width * (boundsRatio.xRatio || 0));
@@ -474,26 +543,62 @@ function createWindow() {
       const width = Math.round(workArea.width * (boundsRatio.wRatio || 1));
       const height = Math.round(workArea.height * (boundsRatio.hRatio || 1));
 
-      mainWindow.setBounds({ x, y, width, height }, true);
+      win.setBounds({ x, y, width, height }, true);
     } catch (err) {
       console.warn("window-snap failed:", err);
     }
   });
-  ipcMain.on("window-close", () => {
-    if (!mainWindow.isDestroyed()) mainWindow.close();
-  });
-  ipcMain.handle("window-is-maximized", () => {
-    return !mainWindow.isDestroyed() && mainWindow.isMaximized();
+
+  ipcMain.on("window-close", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.close();
   });
 
-  ipcMain.handle("get-saved-workspace", () => {
-    const data = getSavedWorkspaceData() || {};
-    const recent = getRecentWorkspacesList();
-    if (data?.folderPath) {
-      ensureDefaultWorkspaceFolders(data.folderPath);
-      startWorkspaceWatcher(data.folderPath, mainWindow);
+  ipcMain.handle("window-is-maximized", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return !!win && !win.isDestroyed() && win.isMaximized();
+  });
+
+  ipcMain.handle("get-os-user-info", async () => {
+    try {
+      const userInfo = os.userInfo();
+      return {
+        username: userInfo.username || process.env.USERNAME || process.env.USER || "",
+        homedir: userInfo.homedir || "",
+      };
+    } catch {
+      return {
+        username: process.env.USERNAME || process.env.USER || "",
+        homedir: "",
+      };
     }
-    return { ...data, recentWorkspaces: recent };
+  });
+
+  ipcMain.handle("get-saved-workspace", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winWorkspacePath = win ? windowWorkspaceMap.get(win.id) : null;
+    const recent = getRecentWorkspacesList();
+
+    if (winWorkspacePath && fs.existsSync(winWorkspacePath)) {
+      ensureDefaultWorkspaceFolders(winWorkspacePath);
+      if (win) startWorkspaceWatcher(winWorkspacePath, win);
+      return {
+        folderPath: winWorkspacePath,
+        folderName: path.basename(winWorkspacePath),
+        recentWorkspaces: recent,
+      };
+    }
+
+    // Initial window fallback: load default saved workspace from config
+    const data = getSavedWorkspaceData() || {};
+    if (data?.folderPath && fs.existsSync(data.folderPath)) {
+      if (win) {
+        windowWorkspaceMap.set(win.id, data.folderPath);
+        startWorkspaceWatcher(data.folderPath, win);
+      }
+      return { ...data, recentWorkspaces: recent };
+    }
+    return { folderPath: null, folderName: null, recentWorkspaces: recent };
   });
 
   ipcMain.handle("get-recent-workspaces", () => {
@@ -587,19 +692,35 @@ function createWindow() {
   });
 
   ipcMain.handle("set-saved-workspace", (event, data) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
     try {
       if (data?.folderPath) {
         saveWorkspaceData(data);
-        startWorkspaceWatcher(data.folderPath, mainWindow);
+        if (win) {
+          windowWorkspaceMap.set(win.id, data.folderPath);
+          startWorkspaceWatcher(data.folderPath, win);
+        }
       } else {
-        const recent = getRecentWorkspacesList();
-        const toSave = {
-          folderPath: null,
-          folderName: null,
-          recentWorkspaces: recent,
-        };
-        fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), "utf8");
-        stopWorkspaceWatcher();
+        if (win) {
+          windowWorkspaceMap.set(win.id, null);
+          stopWorkspaceWatcherForWindow(win.id);
+        }
+        let hasOtherWorkspace = false;
+        for (const [id, ws] of windowWorkspaceMap.entries()) {
+          if (id !== (win?.id ?? -1) && ws) {
+            hasOtherWorkspace = true;
+            break;
+          }
+        }
+        if (!hasOtherWorkspace) {
+          const recent = getRecentWorkspacesList();
+          const toSave = {
+            folderPath: null,
+            folderName: null,
+            recentWorkspaces: recent,
+          };
+          fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), "utf8");
+        }
       }
       return true;
     } catch (err) {
@@ -609,9 +730,13 @@ function createWindow() {
   });
 
   ipcMain.handle("read-workspace-tree", (event, folderPath) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
     if (!folderPath || !fs.existsSync(folderPath)) return { entries: [], folderPaths: [] };
     ensureDefaultWorkspaceFolders(folderPath);
-    startWorkspaceWatcher(folderPath, mainWindow);
+    if (win) {
+      windowWorkspaceMap.set(win.id, folderPath);
+      startWorkspaceWatcher(folderPath, win);
+    }
     return scanWorkspaceTree(folderPath);
   });
 
@@ -797,8 +922,9 @@ function createWindow() {
     return false;
   });
 
-  ipcMain.handle("select-workspace-dialog", async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle("select-workspace-dialog", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win || undefined, {
       properties: ["openDirectory"],
       title: "Select Workspace Folder",
     });
@@ -807,8 +933,30 @@ function createWindow() {
       const folderPath = result.filePaths[0];
       const folderName = path.basename(folderPath);
       ensureDefaultWorkspaceFolders(folderPath);
-      startWorkspaceWatcher(folderPath, mainWindow);
-      const data = { folderPath, folderName };
+
+      // Check if another window already has this workspace open
+      const existingWin = findWindowWithWorkspace(folderPath);
+      if (existingWin) {
+        if (existingWin.isMinimized()) existingWin.restore();
+        existingWin.focus();
+        return { folderPath, folderName, openedInNewWindow: true, focusedExisting: true };
+      }
+
+      // Check if current window already has an open workspace
+      const currentWs = win ? windowWorkspaceMap.get(win.id) : null;
+      if (currentWs) {
+        // Existing workspace was not closed -> Open in a NEW window!
+        saveWorkspaceData({ folderPath, folderName });
+        createWindow(folderPath);
+        return { folderPath, folderName, openedInNewWindow: true };
+      }
+
+      // Current window has no workspace open (e.g. Launcher screen) -> Open in current window
+      if (win) {
+        windowWorkspaceMap.set(win.id, folderPath);
+        startWorkspaceWatcher(folderPath, win);
+      }
+      const data = { folderPath, folderName, openedInNewWindow: false };
       saveWorkspaceData(data);
       return data;
     }
@@ -816,7 +964,8 @@ function createWindow() {
   });
 
   ipcMain.handle("select-directory-dialog", async (event, title) => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win || undefined, {
       properties: ["openDirectory"],
       title: title || "Select Location",
     });
@@ -827,7 +976,8 @@ function createWindow() {
   });
 
   ipcMain.handle("show-save-dialog", async (event, options) => {
-    const result = await dialog.showSaveDialog(mainWindow, {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showSaveDialog(win || undefined, {
       title: options?.title || "Save As",
       defaultPath: options?.defaultPath || "Untitled.md",
       filters: options?.filters || [
@@ -844,6 +994,7 @@ function createWindow() {
   });
 
   ipcMain.handle("create-new-workspace", async (event, { parentPath, workspaceName }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
     try {
       if (!parentPath || !workspaceName) return null;
       const targetPath = path.join(parentPath, workspaceName.trim());
@@ -851,8 +1002,22 @@ function createWindow() {
         fs.mkdirSync(targetPath, { recursive: true });
       }
       ensureDefaultWorkspaceFolders(targetPath);
-      startWorkspaceWatcher(targetPath, mainWindow);
-      const data = { folderPath: targetPath, folderName: workspaceName.trim() };
+
+      const folderName = workspaceName.trim();
+      const currentWs = win ? windowWorkspaceMap.get(win.id) : null;
+
+      if (currentWs) {
+        // Existing workspace was not closed -> Open new workspace in a NEW window!
+        saveWorkspaceData({ folderPath: targetPath, folderName });
+        createWindow(targetPath);
+        return { folderPath: targetPath, folderName, openedInNewWindow: true };
+      }
+
+      if (win) {
+        windowWorkspaceMap.set(win.id, targetPath);
+        startWorkspaceWatcher(targetPath, win);
+      }
+      const data = { folderPath: targetPath, folderName, openedInNewWindow: false };
       saveWorkspaceData(data);
       return data;
     } catch (err) {
@@ -861,40 +1026,18 @@ function createWindow() {
     }
   });
 
-  mainWindow.on("closed", () => {
-    stopWorkspaceWatcher();
-  });
-
-  const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
-
-  if (isDev) {
-    mainWindow.loadURL("http://localhost:8080");
-  } else {
-    mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
-  }
-
-  // Open external links in user's default browser, but allow Google OAuth login popup
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.includes("accounts.google.com") || url.includes("google.com/gsi/")) {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          width: 520,
-          height: 650,
-          autoHideMenuBar: true,
-          icon: getAppIconPath(),
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-          },
-        },
-      };
+  ipcMain.handle("open-workspace-in-new-window", async (_event, folderPath) => {
+    if (!folderPath || !fs.existsSync(folderPath)) return false;
+    ensureDefaultWorkspaceFolders(folderPath);
+    const existingWin = findWindowWithWorkspace(folderPath);
+    if (existingWin) {
+      if (existingWin.isMinimized()) existingWin.restore();
+      existingWin.focus();
+      return true;
     }
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      shell.openExternal(url);
-      return { action: "deny" };
-    }
-    return { action: "allow" };
+    saveWorkspaceData({ folderPath, folderName: path.basename(folderPath) });
+    createWindow(folderPath);
+    return true;
   });
 }
 
@@ -931,6 +1074,8 @@ app.whenReady().then(() => {
       });
     }
   });
+
+  setupIpcHandlers();
 
   createWindow();
 

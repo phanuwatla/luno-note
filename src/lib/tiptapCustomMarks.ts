@@ -79,3 +79,67 @@ export const Highlight = Mark.create({
     };
   },
 });
+
+export const Superscript = Mark.create({
+  name: "superscript",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "sup" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["sup", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setSuperscript: () => ({ commands }) => commands.setMark(this.name),
+      toggleSuperscript: () => ({ commands }) => commands.toggleMark(this.name),
+      unsetSuperscript: () => ({ commands }) => commands.unsetMark(this.name),
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      "Mod-.": () => this.editor.commands.toggleSuperscript(),
+    };
+  },
+});
+
+export const Subscript = Mark.create({
+  name: "subscript",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "sub" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["sub", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setSubscript: () => ({ commands }) => commands.setMark(this.name),
+      toggleSubscript: () => ({ commands }) => commands.toggleMark(this.name),
+      unsetSubscript: () => ({ commands }) => commands.unsetMark(this.name),
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      "Mod-,": () => this.editor.commands.toggleSubscript(),
+    };
+  },
+});

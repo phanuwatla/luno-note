@@ -5,7 +5,7 @@ import { Maximize2, RotateCcw, X, ImageOff } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
 
-export const ImageNodeView: React.FC<NodeViewProps> = ({
+const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   node,
   updateAttributes,
   selected,
@@ -130,112 +130,112 @@ export const ImageNodeView: React.FC<NodeViewProps> = ({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <TooltipProvider delayDuration={150}>
-        <div
-          ref={containerRef}
-          className="relative inline-block max-w-full rounded-xl transition-all duration-150 overflow-visible align-middle"
+      <div
+        ref={containerRef}
+        className="relative inline-block max-w-full rounded-xl transition-all duration-150 overflow-visible align-middle"
+        style={{
+          width: currentWidth ? `${currentWidth}px` : "fit-content",
+          maxWidth: "100%",
+        }}
+      >
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt || ""}
+          title={title || ""}
+          data-relative-src={dataRelativeSrc || undefined}
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setHasError(false)}
+          onError={() => setHasError(true)}
+          className="!m-0 !p-0 block h-auto max-w-full rounded-xl border border-border/80 object-contain"
           style={{
-            width: currentWidth ? `${currentWidth}px` : "fit-content",
+            width: currentWidth ? `${currentWidth}px` : "auto",
             maxWidth: "100%",
           }}
-        >
-          <img
-            ref={imgRef}
-            src={src}
-            alt={alt || ""}
-            title={title || ""}
-            data-relative-src={dataRelativeSrc || undefined}
-            draggable={false}
-            onLoad={() => setHasError(false)}
-            onError={() => setHasError(true)}
-            className="!m-0 !p-0 block h-auto max-w-full rounded-xl border border-border/80 object-contain"
-            style={{
-              width: currentWidth ? `${currentWidth}px` : "auto",
-              maxWidth: "100%",
-            }}
-          />
+        />
 
-          {/* Floating Width Indicator while resizing */}
-          {isResizing && currentWidth && (
-            <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-mono font-semibold shadow-xs backdrop-blur-sm z-30 pointer-events-none">
-              {currentWidth}px
-            </div>
-          )}
+        {/* Floating Width Indicator while resizing */}
+        {isResizing && currentWidth && (
+          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-mono font-semibold shadow-xs backdrop-blur-sm z-30 pointer-events-none">
+            {currentWidth}px
+          </div>
+        )}
 
-          {/* Top-Right Control Buttons (View Full Image & Reset Size) */}
-          {(isHovered || selected) && !isResizing && (
-            <div className="absolute top-2 right-2 flex items-center gap-1.5 z-30">
-              {/* Fullscreen Preview Button */}
+        {/* Top-Right Control Buttons (View Full Image & Reset Size) */}
+        {(isHovered || selected) && !isResizing && (
+          <div className="absolute top-2 right-2 flex items-center gap-1.5 z-30">
+            {/* Fullscreen Preview Button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsPreviewOpen(true);
+                  }}
+                  className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {t("editor.imageViewFull")}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Reset Size Button (Shown if resized) */}
+            {currentWidth && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsPreviewOpen(true);
-                    }}
+                    onClick={handleResetSize}
                     className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                   >
-                    <Maximize2 className="w-3.5 h-3.5" />
+                    <RotateCcw className="w-3.5 h-3.5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="left">
-                  {t("editor.imageViewFull")}
+                  {t("editor.imageResetSize")}
                 </TooltipContent>
               </Tooltip>
+            )}
+          </div>
+        )}
 
-              {/* Reset Size Button (Shown if resized) */}
-              {currentWidth && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleResetSize}
-                      className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
-                    {t("editor.imageResetSize")}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          )}
-
-          {/* Bottom-Right Corner Resize Grip (⌟ corner angle locked to image corner, matches button background color) */}
-          {(isHovered || selected) && !isResizing && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  onPointerDown={handlePointerDown}
-                  onDoubleClick={handleResetSize}
-                  className="absolute bottom-1 right-1 p-0.5 text-background/80 hover:text-background opacity-50 hover:opacity-100 active:opacity-100 cursor-nwse-resize z-30 flex items-center justify-center select-none filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)] transition-all duration-150"
+        {/* Bottom-Right Corner Resize Grip (⌟ corner angle locked to image corner, matches button background color) */}
+        {(isHovered || selected) && !isResizing && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                onPointerDown={handlePointerDown}
+                onDoubleClick={handleResetSize}
+                className="absolute bottom-1 right-1 p-0.5 text-background/80 hover:text-background opacity-50 hover:opacity-100 active:opacity-100 cursor-nwse-resize z-30 flex items-center justify-center select-none filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)] transition-all duration-150"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3.5 h-3.5"
                 >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-3.5 h-3.5"
-                  >
-                    <path d="M5 13h6a2 2 0 0 0 2-2V5" />
-                  </svg>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {t("editor.imageResizeTooltip")}
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </TooltipProvider>
+                  <path d="M5 13h6a2 2 0 0 0 2-2V5" />
+                </svg>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {t("editor.imageResizeTooltip")}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
 
       {/* Full-Screen Image Lightbox Preview */}
       {isPreviewOpen &&
@@ -296,5 +296,16 @@ export const ImageNodeView: React.FC<NodeViewProps> = ({
     </NodeViewWrapper>
   );
 };
+
+export const ImageNodeView = React.memo(ImageNodeViewComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.node.attrs.src === nextProps.node.attrs.src &&
+    prevProps.node.attrs.width === nextProps.node.attrs.width &&
+    prevProps.node.attrs["data-relative-src"] === nextProps.node.attrs["data-relative-src"] &&
+    prevProps.node.attrs.alt === nextProps.node.attrs.alt &&
+    prevProps.node.attrs.title === nextProps.node.attrs.title &&
+    prevProps.selected === nextProps.selected
+  );
+});
 
 export default ImageNodeView;

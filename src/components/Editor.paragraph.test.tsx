@@ -237,6 +237,27 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(pElements.some((p) => p.textContent?.trim() === "ข้อความหลังตาราง")).toBe(true);
   });
 
+  it("preserves tables containing images, emojis and prevents pipe accumulation across save cycles", () => {
+    const tableMd = [
+      "| Feature | Status |",
+      "| --- | --- |",
+      "| Images | ✅ |",
+      "| HTML | ⚠️ |",
+      "| Preview | ![Luno](https://picsum.photos/600/300) |",
+      "",
+      "> End of test.",
+    ].join("\n");
+
+    let current = tableMd;
+    for (let i = 0; i < 5; i++) {
+      current = runCycle(current);
+      expect(current).not.toContain("||");
+      expect(current).not.toMatch(/\n\s*\|\s*\n/);
+      expect(current).toContain("| Images | ✅ |");
+      expect(current).toContain("| HTML | ⚠️ |");
+    }
+  });
+
   it("preserves horizontal rule followed by blank line and prose text", () => {
     const md = "---\n\nข้อความหลังเส้นคั่น";
     const preprocessed = preprocessMarkdownForEditor(md);
@@ -644,6 +665,11 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(getRelativePathBetween("docs", "attachments", "photo.png")).toBe("../attachments/photo.png");
     expect(getRelativePathBetween("docs/sub", "attachments", "photo.png")).toBe("../../attachments/photo.png");
 
+    // Path with spaces (folders and filename) - must encode spaces as %20
+    expect(getRelativePathBetween("docs", "Generate Artwork/part2", "part2_5.jpg")).toBe("../Generate%20Artwork/part2/part2_5.jpg");
+    expect(getRelativePathBetween("", "attachments", "my photo.png")).toBe("attachments/my%20photo.png");
+    expect(getRelativePathBetween("Folder A", "Folder B/Sub Space", "test image.png")).toBe("../Folder%20B/Sub%20Space/test%20image.png");
+
     // Same folder
     expect(getRelativePathBetween("photos", "photos", "sunset.jpg")).toBe("sunset.jpg");
 
@@ -658,5 +684,61 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(isAttachmentNote({ id: "1", title: "pic.png", folderPath: "attachments", content: "", createdAt: 0, updatedAt: 0 })).toBe(true);
     expect(isAttachmentNote({ id: "2", title: "pic.png", folderPath: "attachments/2026", content: "", createdAt: 0, updatedAt: 0 })).toBe(true);
     expect(isAttachmentNote({ id: "3", title: "pic.png", folderPath: "photos", content: "", createdAt: 0, updatedAt: 0 })).toBe(false);
+  });
+
+  it("Test 16.1 — Markdown images with spaces in path are encoded with %20 during preprocessing and serialization", () => {
+    const rawMd = "![part2_5.jpg](../Generate Artwork/part2/part2_5.jpg)";
+    const preprocessed = preprocessMarkdownForEditor(rawMd);
+    expect(preprocessed).toBe("![part2_5.jpg](../Generate%20Artwork/part2/part2_5.jpg)");
+
+    const sizedMd = "![part2_5.jpg|400](../Generate Artwork/part2/part2_5.jpg)";
+    const preprocessedSized = preprocessMarkdownForEditor(sizedMd);
+    expect(preprocessedSized).toContain('src="../Generate%20Artwork/part2/part2_5.jpg"');
+    expect(preprocessedSized).toContain('data-relative-src="../Generate%20Artwork/part2/part2_5.jpg"');
+
+    const td = createTurndownService();
+    const htmlWithSpaces = '<img src="../Generate Artwork/part2/part2_5.jpg" alt="part2_5.jpg" data-relative-src="../Generate Artwork/part2/part2_5.jpg" />';
+    const serialized = td.turndown(htmlWithSpaces);
+    expect(serialized).toBe("![part2_5.jpg](../Generate%20Artwork/part2/part2_5.jpg)");
+  });
+
+  it("Test 17 — Image directly below paragraph does not accumulate trailing spaces on roundtrip", () => {
+    const input = `## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า
+"ในช่วงศตวรรษที่ 6 ก่อนคริสตกาล โลกยังเต็มไปด้วยเวทมนตร์
+![part1_1.jpg|636](../../attachments/part1_1.jpg)`;
+
+    const preprocessed = preprocessMarkdownForEditor(input);
+    const parsedHtml = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
+    const div = document.createElement("div");
+    div.innerHTML = parsedHtml;
+
+    // Apply prepareDomForEditor logic
+    div.querySelectorAll("p").forEach((p) => {
+      const img = p.querySelector("img");
+      if (img) {
+        if (p.children.length === 1 && !p.textContent?.trim()) {
+          p.replaceWith(img);
+        } else {
+          p.querySelectorAll("br").forEach((br) => {
+            if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
+              br.remove();
+            }
+          });
+          if (p.contains(img)) {
+            p.after(img);
+          }
+          if (!p.textContent?.trim() && !p.children.length) {
+            p.remove();
+          }
+        }
+      }
+    });
+
+    let saved = td.turndown(div.innerHTML).replace(/\r\n?/g, "\n");
+    saved = saved.replace(/[ \t]+(?=\n)/g, "");
+    saved = normalizeSaved(saved);
+
+    expect(saved).not.toContain("เวทมนตร์  ");
+    expect(saved).toContain("![part1_1.jpg|636](../../attachments/part1_1.jpg)");
   });
 });

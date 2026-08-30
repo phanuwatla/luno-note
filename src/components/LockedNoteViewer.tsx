@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { Lock, KeyRound, Eye, EyeOff, AlertCircle, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import { getToolbarIcon } from "@/lib/iconPacks";
 import { Note } from "@/hooks/useNotes";
 
 interface LockedNoteViewerProps {
@@ -11,6 +13,7 @@ interface LockedNoteViewerProps {
 
 export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlock }) => {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
 
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [showPin, setShowPin] = useState(false);
@@ -136,7 +139,11 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
       >
         {/* Lock Icon */}
         <div className="text-primary flex items-center justify-center mb-3">
-          <Lock className="w-7 h-7" />
+          {(() => {
+            const pack = settings?.iconPack || "lucide";
+            const LockIcon = getToolbarIcon("lock", pack);
+            return <LockIcon className="w-7 h-7" />;
+          })()}
         </div>
 
         {/* Note Name & Heading */}

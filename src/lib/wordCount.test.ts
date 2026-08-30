@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countWords, countCharacters } from "./wordCount";
+import { countWords, countCharacters, stripMarkdownForWordCount } from "./wordCount";
 
 describe("countWords", () => {
   it("counts English words accurately", () => {
@@ -31,5 +31,11 @@ describe("countWords", () => {
 
   it("strips HTML tags before counting", () => {
     expect(countWords("<h1>Title</h1><p>Hello <b>world</b></p>")).toBe(3);
+  });
+
+  it("strips Markdown images and syntax so count matches editor text", () => {
+    const rawMarkdown = "## Heading Text\n\n![image1.png](../../attachments/image1.png)\n\nHello [Google](https://google.com) world.";
+    // Words: Heading, Text, Hello, Google, world -> 5 words
+    expect(countWords(rawMarkdown)).toBe(5);
   });
 });
