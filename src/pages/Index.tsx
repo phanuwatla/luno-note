@@ -3023,6 +3023,7 @@ export default function Index() {
         // 3. Fallback: No local workspace found
         if (active) {
           setOpenedFolderName(null);
+          resetTabs();
           replaceNotes([], true);
           setIsWorkspaceLoading(false);
         }

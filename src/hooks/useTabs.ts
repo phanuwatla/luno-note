@@ -5,9 +5,26 @@ const TABS_STORAGE_KEY = "notes-app-open-tabs";
 const ACTIVE_TAB_STORAGE_KEY = "notes-app-active-tab";
 const TAB_PATHS_STORAGE_KEY = "notes-app-open-tab-paths";
 const ACTIVE_TAB_PATH_STORAGE_KEY = "notes-app-active-tab-path";
+const VERSION_STORAGE_KEY = "notes-app-version";
+const CURRENT_APP_VERSION = "1.0.2";
+
+function checkAndClearOldVersionSession(): boolean {
+  try {
+    const savedVersion = localStorage.getItem(VERSION_STORAGE_KEY);
+    if (savedVersion !== CURRENT_APP_VERSION) {
+      localStorage.removeItem(TABS_STORAGE_KEY);
+      localStorage.removeItem(ACTIVE_TAB_STORAGE_KEY);
+      localStorage.removeItem(TAB_PATHS_STORAGE_KEY);
+      localStorage.removeItem(ACTIVE_TAB_PATH_STORAGE_KEY);
+      localStorage.setItem(VERSION_STORAGE_KEY, CURRENT_APP_VERSION);
+      return true;
+    }
+  } catch {}
+  return false;
+}
 
 function getTabPath(id: string, notes?: Note[]): string {
-  if (id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id.startsWith("web:")) return id;
+  if (id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id === "favorites" || id === "tags" || id.startsWith("web:")) return id;
   if (!notes) return id;
   const found = notes.find((n) => n.id === id);
   if (found) {
@@ -18,6 +35,9 @@ function getTabPath(id: string, notes?: Note[]): string {
 
 function loadSavedTabs(): { openTabIds: string[]; activeTabId: string | null } {
   try {
+    if (checkAndClearOldVersionSession()) {
+      return { openTabIds: [], activeTabId: null };
+    }
     const rawSettings = localStorage.getItem("notes-app-settings");
     if (rawSettings) {
       const parsedSettings = JSON.parse(rawSettings);
