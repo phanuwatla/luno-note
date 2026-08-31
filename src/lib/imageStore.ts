@@ -3,7 +3,7 @@
  * Prevents LocalStorage 5MB quota overflow and persists image blobs reliably.
  */
 
-const DB_NAME = "notes-plus-image-store";
+const DB_NAME = "luno-note-image-store";
 const STORE_NAME = "images";
 const DB_VERSION = 1;
 
