@@ -43,7 +43,7 @@ import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
 
 export default function Index() {
   const { t } = useTranslation();
-  const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, setFileIcon, removeFileIcon } = useAppSettings();
+  const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon } = useAppSettings();
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true);
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
@@ -55,6 +55,7 @@ export default function Index() {
   const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, resetTabs, restoreTabsFromSession, setActiveTabId } = useTabs(notesRef);
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
   const workspaceFavoritesRef = useRef<Set<string>>(new Set());
+  const loadedWorkspaceKeyRef = useRef<string | null>(null);
   const HOME_NOTE: Note = useMemo(
     () => ({
       id: "home",
@@ -934,6 +935,26 @@ export default function Index() {
 
   const getRelativePath = (folderPath: string, fileName: string) => (folderPath ? `${folderPath}/${fileName}` : fileName);
 
+  const getMimeType = (fileName: string): string => {
+    const ext = (fileName || "").toLowerCase();
+    if (ext.endsWith(".png")) return "image/png";
+    if (ext.endsWith(".jpg") || ext.endsWith(".jpeg")) return "image/jpeg";
+    if (ext.endsWith(".gif")) return "image/gif";
+    if (ext.endsWith(".webp")) return "image/webp";
+    if (ext.endsWith(".svg")) return "image/svg+xml";
+    if (ext.endsWith(".bmp")) return "image/bmp";
+    if (ext.endsWith(".ico")) return "image/x-icon";
+    if (ext.endsWith(".avif")) return "image/avif";
+    if (ext.endsWith(".pdf")) return "application/pdf";
+    if (ext.endsWith(".zip")) return "application/zip";
+    if (ext.endsWith(".mp3")) return "audio/mpeg";
+    if (ext.endsWith(".mp4")) return "video/mp4";
+    if (ext.endsWith(".wav")) return "audio/wav";
+    if (ext.endsWith(".ogg")) return "audio/ogg";
+    if (ext.endsWith(".m4a")) return "audio/mp4";
+    return "application/octet-stream";
+  };
+
   const mapTreeEntryToItem = (e: any, existing?: Note, overrideId?: string, overrideDriveFileId?: string) => {
     const isEncrypted = isEncryptedNote(e.content);
     const isLocked = isEncrypted || existing?.isLocked || false;
@@ -949,9 +970,20 @@ export default function Index() {
 
     const isMd = isMarkdownFileName(e.fileName, e.contentFormat, e.fileType);
     let parsedTags: string[] = [];
+    let fmIcon: string | undefined = undefined;
+    let fmIconColor: string | undefined = undefined;
+
     if (isMd && typeof e.content === "string" && e.content && !isEncrypted && !isTiptapJson(e.content)) {
       try {
-        parsedTags = parseFrontmatterAndTags(e.content).allTags || [];
+        const parsedFm = parseFrontmatterAndTags(e.content);
+        parsedTags = parsedFm.allTags || [];
+        if (typeof parsedFm.frontmatterData?.icon === "string") {
+          fmIcon = parsedFm.frontmatterData.icon;
+        }
+        const colorVal = parsedFm.frontmatterData?.iconColor || parsedFm.frontmatterData?.icon_color;
+        if (typeof colorVal === "string") {
+          fmIconColor = colorVal;
+        }
       } catch {}
     }
     const mergedTags = isMd
@@ -960,8 +992,13 @@ export default function Index() {
           : (parsedTags.length > 0 ? parsedTags : (existing?.tags || [])))
       : [];
 
+    const customFileIcon = settings?.fileIcons?.[relPath];
+    const resolvedIcon = fmIcon || existing?.icon || customFileIcon?.icon;
+    const resolvedIconColor = fmIconColor || existing?.iconColor || customFileIcon?.color;
+
     return {
-      id: overrideId ?? existing?.id,
+      id: overrideId ?? existing?.id ?? crypto.randomUUID(),
+      title: existing?.title || (e.fileName ? e.fileName.replace(/\.md$/i, "") : "Untitled"),
       content: e.content,
       fileName: e.fileName,
       contentFormat: e.contentFormat,
@@ -971,12 +1008,15 @@ export default function Index() {
       isLocked,
       isDecrypted,
       isFavorite,
+      icon: resolvedIcon,
+      iconColor: resolvedIconColor,
       tags: mergedTags,
       createdAt: e.createdAt || existing?.createdAt || Date.now(),
       updatedAt: e.updatedAt || existing?.updatedAt || Date.now(),
       driveFileId: overrideDriveFileId ?? existing?.driveFileId,
       driveSyncedAt: existing?.driveSyncedAt,
-    };
+      fullPath: e.fullPath || (existing as any)?.fullPath,
+    } as any;
   };
 
   const scanFolderEntries = useCallback(async (dirHandle: FileSystemDirectoryHandle) => {
@@ -1606,18 +1646,15 @@ export default function Index() {
           const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
           if (ok) {
             const renamedPath = parentPath ? `${parentPath}/${safeName}` : safeName;
-            const autoIcon = (settings.autoFolderIcons !== false)
-              ? getAutoFolderIconAndColor(safeName, settings.iconPack || "lucide")
-              : null;
-            if (autoIcon) {
-              if (settings.folderIcons?.[folderPath]) {
-                removeFolderIcon(folderPath);
+            if (settings.folderIcons?.[folderPath]) {
+              moveFolderIcons(folderPath, renamedPath);
+            } else {
+              const autoIcon = (settings.autoFolderIcons !== false)
+                ? getAutoFolderIconAndColor(safeName, settings.iconPack || "lucide")
+                : null;
+              if (autoIcon) {
+                setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
               }
-              setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
-            } else if (settings.folderIcons?.[folderPath]) {
-              const existingIcon = settings.folderIcons[folderPath];
-              removeFolderIcon(folderPath);
-              setFolderIcon(renamedPath, existingIcon.icon, existingIcon.color);
             }
 
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
@@ -1661,18 +1698,15 @@ export default function Index() {
       // Keep selection on the renamed folder when possible.
       const parentPath = segments.slice(0, -1).join("/");
       const renamedPath = parentPath ? `${parentPath}/${newFolderName}` : newFolderName;
-      const autoIcon = (settings.autoFolderIcons !== false)
-        ? getAutoFolderIconAndColor(newFolderName, settings.iconPack || "lucide")
-        : null;
-      if (autoIcon) {
-        if (settings.folderIcons?.[folderPath]) {
-          removeFolderIcon(folderPath);
+      if (settings.folderIcons?.[folderPath]) {
+        moveFolderIcons(folderPath, renamedPath);
+      } else {
+        const autoIcon = (settings.autoFolderIcons !== false)
+          ? getAutoFolderIconAndColor(newFolderName, settings.iconPack || "lucide")
+          : null;
+        if (autoIcon) {
+          setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
         }
-        setFolderIcon(renamedPath, autoIcon.icon, autoIcon.color);
-      } else if (settings.folderIcons?.[folderPath]) {
-        const existingIcon = settings.folderIcons[folderPath];
-        removeFolderIcon(folderPath);
-        setFolderIcon(renamedPath, existingIcon.icon, existingIcon.color);
       }
 
       notesInFolder.forEach((n) => {
@@ -2133,6 +2167,11 @@ export default function Index() {
     if (!sourceFolderPath) return;
     if (sourceFolderPath === targetFolderPath || targetFolderPath.startsWith(`${sourceFolderPath}/`)) return;
 
+    const folderName = sourceFolderPath.split("/").filter(Boolean).pop() || sourceFolderPath;
+    const newFolderPath = targetFolderPath
+      ? `${targetFolderPath}/${folderName}`
+      : folderName;
+
     const notesInFolder = notes.filter(
       (n) => n.folderPath === sourceFolderPath || n.folderPath?.startsWith(`${sourceFolderPath}/`)
     );
@@ -2149,7 +2188,6 @@ export default function Index() {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
-          const folderName = sourceFolderPath.split("/").filter(Boolean).pop() || sourceFolderPath;
           const oldFullPath = `${saved.folderPath}/${sourceFolderPath}`;
           const newFullPath = targetFolderPath
             ? `${saved.folderPath}/${targetFolderPath}/${folderName}`
@@ -2157,6 +2195,7 @@ export default function Index() {
 
           const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
           if (ok) {
+            moveFolderIcons(sourceFolderPath, newFolderPath);
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
             setOpenedFolderPaths(folderPaths);
 
@@ -2200,6 +2239,7 @@ export default function Index() {
 
       await copyDirectoryRecursive(sourceDir, targetDir, sourceName);
       await sourceParentDir.removeEntry(sourceName, { recursive: true });
+      moveFolderIcons(sourceFolderPath, newFolderPath);
       await syncFolderFromDisk(openedRootDirHandle);
     } catch (error) {
       console.error("Move folder failed", error);
@@ -2207,21 +2247,59 @@ export default function Index() {
   };
 
   const deleteFileInFolder = async (note: { id: string; folderPath?: string; fileName?: string; title?: string }) => {
+    const targetNote = notesRef.current.find((n) => n.id === note.id) || (note as Note);
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
-        if (saved?.folderPath && note.fileName) {
-          const fullPath = note.folderPath
-            ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
-            : `${saved.folderPath}/${note.fileName}`;
+        if (saved?.folderPath && targetNote.fileName) {
+          const fullPath = targetNote.folderPath
+            ? `${saved.folderPath}/${targetNote.folderPath}/${targetNote.fileName}`
+            : `${saved.folderPath}/${targetNote.fileName}`;
 
-          await electronAPI.deleteFileOrFolder(fullPath);
-          const relPath = getRelativePath(note.folderPath || "", note.fileName);
+          const isImg =
+            targetNote.fileType === "image" ||
+            /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(targetNote.fileName || "");
+          const isBinary =
+            targetNote.fileType === "binary" ||
+            /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(targetNote.fileName || "");
+
+          let contentToTrash = targetNote.content;
+          if ((isImg || isBinary) && (!contentToTrash || !contentToTrash.startsWith("data:"))) {
+            if (isImg && electronAPI.readImageDataUrl) {
+              const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+              if (dataUrl) contentToTrash = dataUrl;
+            }
+            if (!contentToTrash && electronAPI.readFileBase64) {
+              const b64 = await electronAPI.readFileBase64(fullPath);
+              if (b64) {
+                const mime = getMimeType(targetNote.fileName || "");
+                contentToTrash = `data:${mime};base64,${b64}`;
+              }
+            }
+          } else if (!contentToTrash && electronAPI.readFileContent) {
+            const text = await electronAPI.readFileContent(fullPath);
+            if (typeof text === "string") contentToTrash = text;
+          }
+
+          const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
           if (settings.fileIcons?.[relPath]) {
             removeFileIcon(relPath);
           }
-          handleDeleteNote(note.id);
+          if (splitTabId === targetNote.id) {
+            setSplitTabId(null);
+          }
+          clearNoteEditorHistory(targetNote.id);
+          closeTab(targetNote.id, notes.map((item) => item.id));
+          deleteNote(targetNote.id);
+
+          moveToTrash({
+            ...targetNote,
+            content: contentToTrash || "",
+            fileType: isImg ? "image" : isBinary ? "binary" : targetNote.fileType,
+          });
+
+          await electronAPI.deleteFileOrFolder(fullPath);
 
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
           setOpenedFolderPaths(folderPaths);
@@ -2234,13 +2312,24 @@ export default function Index() {
           );
 
           const nextItems = entries.map((e: any) => {
-            const relPath = e.relativePath;
-            const existing = existingByPath.get(relPath);
+            const rPath = e.relativePath;
+            const existing = existingByPath.get(rPath);
             return mapTreeEntryToItem(e, existing);
           });
 
           replaceNotes(nextItems);
           removeTabsForDeletedNotes(new Set(nextItems.map((n) => n.id)));
+
+          const deletedFileName = targetNote.fileName || targetNote.title || t("editor.untitled");
+          toast({
+            title: t("trash.title"),
+            description: t("trash.movedToTrash", { file: deletedFileName }),
+            action: (
+              <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash([targetNote.id])}>
+                {t("trash.undo")}
+              </ToastAction>
+            ),
+          });
           return;
         }
       } catch (error) {
@@ -2248,12 +2337,12 @@ export default function Index() {
       }
     }
 
-    if (note.fileName) {
-      const relPath = getRelativePath(note.folderPath || "", note.fileName);
+    if (openedRootDirHandle && targetNote.fileName) {
+      const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
       trackDeletedRelativePath(relPath);
     }
 
-    handleDeleteNote(note.id);
+    handleDeleteNote(targetNote.id);
   };
 
   const deleteFilesInFolder = async (targetNotes: Note[]) => {
@@ -2274,29 +2363,34 @@ export default function Index() {
 
               const isImg =
                 n.fileType === "image" ||
+                /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n.fileName || "");
+              const isBinary =
                 n.fileType === "binary" ||
-                /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(n.fileName || "");
+                /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(n.fileName || "");
 
-              if (isImg && electronAPI.readFileBase64) {
-                const b64 = await electronAPI.readFileBase64(fullPath);
-                if (b64) {
-                  const ext = (n.fileName || "").toLowerCase();
-                  const mime = ext.endsWith(".png")
-                    ? "image/png"
-                    : ext.endsWith(".gif")
-                    ? "image/gif"
-                    : ext.endsWith(".webp")
-                    ? "image/webp"
-                    : ext.endsWith(".svg")
-                    ? "image/svg+xml"
-                    : "image/jpeg";
-                  notesToTrash.push({ ...n, content: `data:${mime};base64,${b64}` });
-                } else {
-                  notesToTrash.push(n);
+              let contentToTrash = n.content;
+              if ((isImg || isBinary) && (!contentToTrash || !contentToTrash.startsWith("data:"))) {
+                if (isImg && electronAPI.readImageDataUrl) {
+                  const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+                  if (dataUrl) contentToTrash = dataUrl;
                 }
-              } else {
-                notesToTrash.push(n);
+                if (!contentToTrash && electronAPI.readFileBase64) {
+                  const b64 = await electronAPI.readFileBase64(fullPath);
+                  if (b64) {
+                    const mime = getMimeType(n.fileName || "");
+                    contentToTrash = `data:${mime};base64,${b64}`;
+                  }
+                }
+              } else if (!contentToTrash && electronAPI.readFileContent) {
+                const text = await electronAPI.readFileContent(fullPath);
+                if (typeof text === "string") contentToTrash = text;
               }
+
+              notesToTrash.push({
+                ...n,
+                content: contentToTrash || "",
+                fileType: isImg ? "image" : isBinary ? "binary" : n.fileType,
+              });
 
               await electronAPI.deleteFileOrFolder(fullPath);
             }
@@ -2307,7 +2401,9 @@ export default function Index() {
             closeTab(n.id, notes.map((item) => item.id));
             deleteNote(n.id);
           }
-          moveToTrash(notesToTrash);
+          if (notesToTrash.length > 0) {
+            moveToTrash(notesToTrash);
+          }
 
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
           setOpenedFolderPaths(folderPaths);
@@ -2343,6 +2439,74 @@ export default function Index() {
       }
     }
 
+    if (openedRootDirHandle) {
+      void (async () => {
+        const notesToTrash: Note[] = [];
+        const relPaths = new Set<string>();
+        for (const n of targetNotes) {
+          if (n.fileName) {
+            const relPath = getRelativePath(n.folderPath || "", n.fileName);
+            relPaths.add(relPath);
+            trackDeletedRelativePath(relPath);
+            try {
+              let targetDir = openedRootDirHandle;
+              const segments = (n.folderPath ?? "").split("/").filter(Boolean);
+              for (const segment of segments) {
+                targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+              }
+              await requestPermissionIfAvailable(targetDir, "readwrite");
+              let contentToTrash = n.content;
+              const isImg = n.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n.fileName);
+              const isBinary = n.fileType === "binary" || /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(n.fileName);
+              try {
+                const fh = await targetDir.getFileHandle(n.fileName);
+                const f = await fh.getFile();
+                if (isImg || isBinary) {
+                  const reader = new FileReader();
+                  const dataUrl = await new Promise<string>((resolve) => {
+                    reader.onload = () => resolve(reader.result as string);
+                    reader.readAsDataURL(f);
+                  });
+                  if (dataUrl) contentToTrash = dataUrl;
+                } else if (!contentToTrash) {
+                  contentToTrash = await f.text();
+                }
+              } catch {}
+              notesToTrash.push({
+                ...n,
+                content: contentToTrash || "",
+                fileType: isImg ? "image" : isBinary ? "binary" : n.fileType,
+              });
+              await targetDir.removeEntry(n.fileName);
+            } catch (err) {
+              console.warn("Disk file delete error:", err);
+            }
+          }
+          if (splitTabId === n.id) {
+            setSplitTabId(null);
+          }
+          clearNoteEditorHistory(n.id);
+          closeTab(n.id, notes.map((item) => item.id));
+          deleteNote(n.id);
+        }
+        if (notesToTrash.length > 0) {
+          moveToTrash(notesToTrash);
+        }
+        await syncFolderFromDisk(openedRootDirHandle, relPaths);
+      })();
+
+      toast({
+        title: t("trash.title"),
+        description: t("trash.movedBatchToTrash", { count }),
+        action: (
+          <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(targetNotes.map((n) => n.id))}>
+            {t("trash.undo")}
+          </ToastAction>
+        ),
+      });
+      return;
+    }
+
     targetNotes.forEach((n) => {
       if (n.fileName) {
         trackDeletedRelativePath(getRelativePath(n.folderPath || "", n.fileName));
@@ -2354,6 +2518,7 @@ export default function Index() {
       closeTab(n.id, notes.map((item) => item.id));
       deleteNote(n.id);
     });
+    moveToTrash(targetNotes);
 
     toast({
       title: t("trash.title"),
@@ -2368,6 +2533,8 @@ export default function Index() {
 
   const deleteFolderInFolder = async (folderPath: string) => {
     if (!folderPath) return;
+
+    removeFolderIconsTree(folderPath);
 
     const folderName = folderPath.split("/").filter(Boolean).pop() || folderPath;
     const notesInFolder = notes.filter(
@@ -2393,32 +2560,39 @@ export default function Index() {
 
       const isImg =
         n.fileType === "image" ||
+        /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n.fileName || "");
+      const isBinary =
         n.fileType === "binary" ||
-        /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(n.fileName || "");
+        /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(n.fileName || "");
 
-      if (isImg && electronAPI?.readFileBase64 && saved?.folderPath && n.fileName) {
+      let contentToTrash = n.content;
+      if (saved?.folderPath && n.fileName) {
         const fullPath = n.folderPath
           ? `${saved.folderPath}/${n.folderPath}/${n.fileName}`
           : `${saved.folderPath}/${n.fileName}`;
-        const b64 = await electronAPI.readFileBase64(fullPath);
-        if (b64) {
-          const ext = (n.fileName || "").toLowerCase();
-          const mime = ext.endsWith(".png")
-            ? "image/png"
-            : ext.endsWith(".gif")
-            ? "image/gif"
-            : ext.endsWith(".webp")
-            ? "image/webp"
-            : ext.endsWith(".svg")
-            ? "image/svg+xml"
-            : "image/jpeg";
-          notesToTrash.push({ ...n, content: `data:${mime};base64,${b64}` });
-        } else {
-          notesToTrash.push(n);
+        if ((isImg || isBinary) && (!contentToTrash || !contentToTrash.startsWith("data:"))) {
+          if (isImg && electronAPI?.readImageDataUrl) {
+            const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+            if (dataUrl) contentToTrash = dataUrl;
+          }
+          if (!contentToTrash && electronAPI?.readFileBase64) {
+            const b64 = await electronAPI.readFileBase64(fullPath);
+            if (b64) {
+              const mime = getMimeType(n.fileName || "");
+              contentToTrash = `data:${mime};base64,${b64}`;
+            }
+          }
+        } else if (!contentToTrash && electronAPI?.readFileContent) {
+          const text = await electronAPI.readFileContent(fullPath);
+          if (typeof text === "string") contentToTrash = text;
         }
-      } else {
-        notesToTrash.push(n);
       }
+
+      notesToTrash.push({
+        ...n,
+        content: contentToTrash || "",
+        fileType: isImg ? "image" : isBinary ? "binary" : n.fileType,
+      });
       deleteNote(n.id);
     }
 
@@ -2613,10 +2787,12 @@ export default function Index() {
           setOpenedRootDirHandle(null);
           setPendingReconnectDirHandle(null);
           await setStoredDirectoryHandle(null);
-          resetTabs();
-          replaceNotes([], true);
+          resetTabs(false);
           electronWorkspacePathRef.current = data.folderPath;
           const folderName = data.folderName || data.folderPath.split(/[\\/]/).pop() || "My Notes";
+          try {
+            localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
+          } catch {}
           setOpenedFolderName(folderName);
           setRootFolderName(folderName);
           setElectronWorkspacePath(data.folderPath);
@@ -2638,12 +2814,12 @@ export default function Index() {
           const nextItems = (entries || []).map((e: any) => mapTreeEntryToItem(e));
 
           const nextNotes = replaceNotes(nextItems, true);
-          restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+          resetTabs(true);
 
           if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
             void triggerSync(nextNotes, (updated) => {
               replaceNotes(updated);
-            });
+            }, folderPaths);
           }
 
           await new Promise((resolve) => setTimeout(resolve, 200));
@@ -2668,6 +2844,11 @@ export default function Index() {
       resetTabs();
       replaceNotes([], true);
       const folderName = dirHandle.name ?? null;
+      if (folderName) {
+        try {
+          localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
+        } catch {}
+      }
       setOpenedFolderName(folderName);
       setOpenedRootDirHandle(dirHandle);
       setPendingReconnectDirHandle(null);
@@ -2687,7 +2868,7 @@ export default function Index() {
       if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
         void triggerSync(notesRef.current, (updated) => {
           replaceNotes(updated);
-        });
+        }, openedFolderPaths);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -2718,10 +2899,13 @@ export default function Index() {
             setOpenedRootDirHandle(null);
             setPendingReconnectDirHandle(null);
             await setStoredDirectoryHandle(null);
-            resetTabs();
+            resetTabs(false);
             replaceNotes([], true);
             electronWorkspacePathRef.current = data.folderPath;
             const folderName = data.folderName || workspaceName;
+            try {
+              localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
+            } catch {}
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
             setElectronWorkspacePath(data.folderPath);
@@ -2739,12 +2923,12 @@ export default function Index() {
             const nextItems = (tree?.entries || []).map((e: any) => mapTreeEntryToItem(e));
 
             const nextNotes = replaceNotes(nextItems, true);
-            restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+            resetTabs(true);
 
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
               void triggerSync(nextNotes, (updated) => {
                 replaceNotes(updated);
-              });
+              }, tree?.folderPaths);
             }
 
             await new Promise((resolve) => setTimeout(resolve, 200));
@@ -2766,21 +2950,30 @@ export default function Index() {
       if (electronAPI?.setSavedWorkspace) {
         await electronAPI.setSavedWorkspace(null);
       }
+      if (openedFolderName) {
+        try {
+          localStorage.removeItem(`luno_open_folders_${openedFolderName}`);
+        } catch {}
+      }
       electronWorkspacePathRef.current = null;
       setElectronWorkspacePath(null);
+      loadedWorkspaceKeyRef.current = null;
       await setStoredDirectoryHandle(null);
       setOpenedRootDirHandle(null);
       setPendingReconnectDirHandle(null);
       setOpenedFolderName(null);
       setRootFolderName("Luno Notes");
       setOpenedFolderPaths([]);
-      resetTabs();
+      resetTabs(true);
       replaceNotes([], true);
       setIsWorkspaceLoading(false);
+      try {
+        localStorage.removeItem("luno_last_workspace_name");
+      } catch {}
     } catch (err) {
       console.warn("Failed closing workspace:", err);
     }
-  }, [replaceNotes, resetTabs]);
+  }, [replaceNotes, resetTabs, openedFolderName]);
 
   const handleOpenCloudWorkspace = useCallback(
     async (cloudWs: CloudWorkspaceInfo) => {
@@ -2969,7 +3162,7 @@ export default function Index() {
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
               void triggerSync(nextNotes, (updated) => {
                 replaceNotes(updated);
-              });
+              }, folderPaths);
             }
 
             await new Promise((resolve) => setTimeout(resolve, 200));
@@ -3114,6 +3307,12 @@ export default function Index() {
   // Load .luno/settings.json and .luno/favorites.json when workspace opens
   useEffect(() => {
     let active = true;
+    const currentWsKey = electronWorkspacePathRef.current || openedRootDirHandle?.name || openedFolderName;
+    if (!currentWsKey) {
+      loadedWorkspaceKeyRef.current = null;
+      return;
+    }
+
     const loadMeta = async () => {
       const [workspaceSettings, favList] = await Promise.all([
         loadWorkspaceSettings(openedRootDirHandle),
@@ -3125,6 +3324,7 @@ export default function Index() {
         } else if (settings) {
           await saveWorkspaceSettings(openedRootDirHandle, settings);
         }
+        loadedWorkspaceKeyRef.current = currentWsKey;
 
         if (favList && favList.length > 0) {
           const nonMdFavs = favList.filter((p) => !p.toLowerCase().endsWith(".md") && !p.toLowerCase().endsWith(".markdown"));
@@ -3151,10 +3351,11 @@ export default function Index() {
 
   // Save settings to .luno/settings.json whenever settings change
   useEffect(() => {
-    if (settings) {
+    const currentWsKey = electronWorkspacePathRef.current || openedRootDirHandle?.name || openedFolderName;
+    if (settings && currentWsKey && loadedWorkspaceKeyRef.current === currentWsKey) {
       void saveWorkspaceSettings(openedRootDirHandle, settings);
     }
-  }, [openedRootDirHandle, settings]);
+  }, [openedRootDirHandle, openedFolderName, settings]);
 
   // Keep open tabs in sync when notes are deleted (non-folder-sync deletions)
   useEffect(() => {
@@ -3421,8 +3622,15 @@ export default function Index() {
       const isImg =
         n.fileType === "image" ||
         /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n.fileName || "");
+      const isBinary =
+        n.fileType === "binary" ||
+        /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(n.fileName || "");
       const base = existingIds.has(n.id) ? { ...n, id: crypto.randomUUID() } : n;
-      return isImg ? { ...base, fileType: "image" as const } : base;
+      return isImg
+        ? { ...base, fileType: "image" as const }
+        : isBinary
+        ? { ...base, fileType: "binary" as const }
+        : base;
     });
 
     // Clear deleted path tracking
@@ -3450,14 +3658,27 @@ export default function Index() {
                 const isImageOrBinary =
                   n.fileType === "image" ||
                   n.fileType === "binary" ||
-                  /\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf|zip|mp3|mp4|avif)$/i.test(n.fileName || "");
+                  /\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf|zip|mp3|mp4|wav|ogg|m4a|flac|avif)$/i.test(n.fileName || "");
 
-                if (isImageOrBinary && n.content.startsWith("data:") && electronAPI.writeFileBase64) {
+                if (isImageOrBinary && electronAPI.writeFileBase64) {
                   await electronAPI.writeFileBase64({ fullPath, base64: n.content });
-                } else if (electronAPI.writeFileContent && n.content) {
+                } else if (electronAPI.writeFileContent) {
                   await electronAPI.writeFileContent({ fullPath, content: n.content });
                 }
               }
+            }
+
+            if (electronAPI.readWorkspaceTree) {
+              const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
+              setOpenedFolderPaths(folderPaths);
+              const allNotes = notesRef.current;
+              const existingByPath = new Map(
+                allNotes
+                  .filter((item) => item.fileName)
+                  .map((item) => [item.folderPath ? `${item.folderPath}/${item.fileName}` : (item.fileName as string), item] as const)
+              );
+              const nextItems = entries.map((e: any) => mapTreeEntryToItem(e, existingByPath.get(e.relativePath)));
+              replaceNotes(nextItems);
             }
           }
         } catch (err) {
@@ -3483,7 +3704,7 @@ export default function Index() {
                 const res = await fetch(n.content);
                 const blob = await res.blob();
                 await writable.write(blob);
-              } else if (n.content) {
+              } else {
                 await writable.write(n.content);
               }
               await writable.close();
@@ -3492,6 +3713,7 @@ export default function Index() {
               await setStoredFileHandle(n.id, fileHandle);
             }
           }
+          await syncFolderFromDisk(openedRootDirHandle);
         } catch (err) {
           console.warn("Failed to write restored file to File System Access:", err);
         }
@@ -3501,7 +3723,6 @@ export default function Index() {
     replaceNotes([...newNotes, ...currentNotes]);
 
     if (newNotes.length === 1) {
-      openTab(newNotes[0].id);
       toast({
         title: t("trash.title"),
         description: t("trash.restoreSuccess", { file: newNotes[0].fileName || newNotes[0].title || "Note" }),
@@ -3512,7 +3733,7 @@ export default function Index() {
         description: t("trash.restoreBatchSuccess", { count: newNotes.length }),
       });
     }
-  }, [restoreFromTrash, replaceNotes, openTab, openedRootDirHandle, t]);
+  }, [restoreFromTrash, replaceNotes, openedRootDirHandle, t, syncFolderFromDisk]);
 
   const handleDeletePermanently = useCallback((ids: string[]) => {
     deletePermanently(ids);
@@ -3533,9 +3754,6 @@ export default function Index() {
   const handleDeleteNote = (id: string): boolean => {
     const targetNote = notes.find((n) => n.id === id);
     if (!targetNote) return false;
-
-    // Move to Trash initially
-    moveToTrash(targetNote);
 
     if (targetNote.driveFileId && settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
       trashDriveNote(targetNote.driveFileId);
@@ -3564,25 +3782,34 @@ export default function Index() {
 
             const isImg =
               targetNote.fileType === "image" ||
+              /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(targetNote.fileName || "");
+            const isBinary =
               targetNote.fileType === "binary" ||
-              /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(targetNote.fileName || "");
+              /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(targetNote.fileName || "");
 
-            if (isImg && electronAPI.readFileBase64) {
-              const b64 = await electronAPI.readFileBase64(fullPath);
-              if (b64) {
-                const ext = (targetNote.fileName || "").toLowerCase();
-                const mime = ext.endsWith(".png")
-                  ? "image/png"
-                  : ext.endsWith(".gif")
-                  ? "image/gif"
-                  : ext.endsWith(".webp")
-                  ? "image/webp"
-                  : ext.endsWith(".svg")
-                  ? "image/svg+xml"
-                  : "image/jpeg";
-                moveToTrash({ ...targetNote, content: `data:${mime};base64,${b64}` });
+            let contentToTrash = targetNote.content;
+            if ((isImg || isBinary) && (!contentToTrash || !contentToTrash.startsWith("data:"))) {
+              if (isImg && electronAPI.readImageDataUrl) {
+                const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+                if (dataUrl) contentToTrash = dataUrl;
               }
+              if (!contentToTrash && electronAPI.readFileBase64) {
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                if (b64) {
+                  const mime = getMimeType(targetNote.fileName || "");
+                  contentToTrash = `data:${mime};base64,${b64}`;
+                }
+              }
+            } else if (!contentToTrash && electronAPI.readFileContent) {
+              const text = await electronAPI.readFileContent(fullPath);
+              if (typeof text === "string") contentToTrash = text;
             }
+
+            moveToTrash({
+              ...targetNote,
+              content: contentToTrash || "",
+              fileType: isImg ? "image" : isBinary ? "binary" : targetNote.fileType,
+            });
 
             await electronAPI.deleteFileOrFolder(fullPath);
             if (electronAPI.readWorkspaceTree) {
@@ -3603,9 +3830,7 @@ export default function Index() {
           console.warn("Electron deleteFileOrFolder failed in handleDeleteNote:", err);
         }
       })();
-    }
-
-    if (openedRootDirHandle && targetNote.fileName) {
+    } else if (openedRootDirHandle && targetNote.fileName) {
       const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
       void (async () => {
         try {
@@ -3619,23 +3844,34 @@ export default function Index() {
 
           const isImg =
             targetNote.fileType === "image" ||
+            /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(fname);
+          const isBinary =
             targetNote.fileType === "binary" ||
-            /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(fname);
+            /\.(pdf|zip|mp3|mp4|wav|ogg|m4a|flac)$/i.test(fname);
 
-          if (isImg) {
-            try {
-              const fileHandle = await targetDir.getFileHandle(fname);
-              const file = await fileHandle.getFile();
+          let contentToTrash = targetNote.content;
+          try {
+            const fileHandle = await targetDir.getFileHandle(fname);
+            const file = await fileHandle.getFile();
+            if (isImg || isBinary) {
               const reader = new FileReader();
               const dataUrl = await new Promise<string>((resolve) => {
                 reader.onload = () => resolve(reader.result as string);
                 reader.readAsDataURL(file);
               });
               if (dataUrl) {
-                moveToTrash({ ...targetNote, content: dataUrl });
+                contentToTrash = dataUrl;
               }
-            } catch {}
-          }
+            } else if (!contentToTrash) {
+              contentToTrash = await file.text();
+            }
+          } catch {}
+
+          moveToTrash({
+            ...targetNote,
+            content: contentToTrash || "",
+            fileType: isImg ? "image" : isBinary ? "binary" : targetNote.fileType,
+          });
 
           try {
             await targetDir.removeEntry(fname);
@@ -3664,6 +3900,8 @@ export default function Index() {
           await syncFolderFromDisk(openedRootDirHandle, new Set([relPath]));
         }
       })();
+    } else {
+      moveToTrash(targetNote);
     }
 
     const deletedFileName = targetNote.fileName || targetNote.title || t("editor.untitled");
@@ -3684,19 +3922,7 @@ export default function Index() {
     folderPath?: string,
     options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" },
   ): Note | void => {
-    if (openedRootDirHandle) {
-      void createNoteInFolder(folderPath, options);
-      return;
-    }
-    const note = createNote(folderPath);
-    if (options) {
-      updateNote(note.id, {
-        fileName: options.fileName,
-        contentFormat: options.contentFormat,
-      });
-    }
-    openTab(note.id);
-    return note;
+    void createNoteInFolder(folderPath, options);
   };
 
   const handleCreateFromHomeTemplate = async (
@@ -3721,7 +3947,7 @@ export default function Index() {
     const fileName = `${prefix}-${dateStr}.${defaultExt}`;
     const initialTitle = settings.language === "th" ? meta.defaultTitleTh : meta.defaultTitleEn;
 
-    if (openedRootDirHandle || electronWorkspacePathRef.current) {
+    if (openedRootDirHandle || electronWorkspacePathRef.current || isCloudWorkspace) {
       const created = await createNoteInFolder(undefined, {
         fileName,
         contentFormat: format,
@@ -3750,12 +3976,7 @@ export default function Index() {
   };
 
   const handleCreateBlankFromHome = async () => {
-    if (openedRootDirHandle) {
-      await createNoteInFolder();
-    } else {
-      const note = createNote();
-      openTab(note.id);
-    }
+    await createNoteInFolder();
   };
 
   if (isWorkspaceLoading) {
@@ -3768,7 +3989,7 @@ export default function Index() {
         >
           <div className="flex items-center gap-2 pl-1 select-none">
             <div className="relative flex h-[20px] w-[20px] items-center justify-center shrink-0">
-              <img src={lunoLogo} alt="Luno Logo" className="h-[20px] w-auto object-contain shrink-0" />
+              <img src={lunoLogo} alt="Luno Logo" className="h-[20px] w-auto object-contain shrink-0 luno-app-logo" />
             </div>
             <span className="font-krona text-[15px] font-normal tracking-tight text-foreground">Luno</span>
           </div>
@@ -3984,6 +4205,8 @@ export default function Index() {
                           notes={notes}
                           onNotesUpdated={replaceNotes}
                           openedFolderName={openedFolderName}
+                          folderPaths={openedFolderPaths}
+                          isCloudWorkspace={isCloudWorkspace}
                           onCloseWorkspace={handleCloseWorkspace}
                           onOpenWebTab={handleOpenWebTab}
                         />
@@ -4119,6 +4342,7 @@ export default function Index() {
                   }
                 }}
                 onSplitTab={(id) => setSplitTabId(null)}
+                onNewTab={() => void createNoteInFolder()}
                 onReorderTabs={reorderTabs}
               />
               {splitTabNote && splitTabNote.id !== "home" && splitTabNote.id !== "trash" && splitTabNote.id !== "settings" && splitTabNote.id !== "luno-ai" && splitTabNote.id !== "templates" && splitTabNote.id !== "favorites" && splitTabNote.id !== "tags" && !splitTabId?.startsWith("web:") && (
@@ -4192,6 +4416,8 @@ export default function Index() {
                       notes={notes}
                       onNotesUpdated={replaceNotes}
                       openedFolderName={openedFolderName}
+                      folderPaths={openedFolderPaths}
+                      isCloudWorkspace={isCloudWorkspace}
                       onCloseWorkspace={handleCloseWorkspace}
                       onOpenWebTab={handleOpenWebTab}
                     />
@@ -4285,7 +4511,7 @@ export default function Index() {
               onSelectTab={(id) => openTab(id)}
               onCloseTab={handleCloseTab}
               onSplitTab={(id) => setSplitTabId(id)}
-              onNewTab={() => handleCreateBlankFromHome()}
+              onNewTab={() => void createNoteInFolder()}
               onReorderTabs={reorderTabs}
             />
             {activeTabNote && activeTabNote.id !== "home" && activeTabNote.id !== "trash" && activeTabNote.id !== "settings" && activeTabNote.id !== "luno-ai" && activeTabNote.id !== "templates" && activeTabNote.id !== "favorites" && activeTabNote.id !== "tags" && !activeTabId?.startsWith("web:") && (
@@ -4396,6 +4622,8 @@ export default function Index() {
                         notes={notes}
                         onNotesUpdated={replaceNotes}
                         openedFolderName={openedFolderName}
+                        folderPaths={openedFolderPaths}
+                        isCloudWorkspace={isCloudWorkspace}
                         onCloseWorkspace={handleCloseWorkspace}
                         onOpenWebTab={handleOpenWebTab}
                       />

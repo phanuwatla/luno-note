@@ -38,6 +38,36 @@ export const APP_THEMES: AppThemeConfig[] = [
   { id: "slate",   color: "hsl(215 16% 40%)", label: "Slate" },
 ];
 
+export function getThemeLogoFilter(theme: AppTheme = "emerald"): string {
+  switch (theme) {
+    case "cyan":
+      return "hue-rotate(15deg) saturate(1.1)";
+    case "blue":
+      return "hue-rotate(43deg) saturate(1.15)";
+    case "indigo":
+      return "hue-rotate(65deg) saturate(1.2)";
+    case "violet":
+      return "hue-rotate(88deg) saturate(1.2)";
+    case "fuchsia":
+      return "hue-rotate(118deg) saturate(1.2)";
+    case "rose":
+      return "hue-rotate(173deg) saturate(1.1)";
+    case "ruby":
+      return "hue-rotate(172deg) saturate(1.25)";
+    case "orange":
+      return "hue-rotate(211deg) saturate(1.3)";
+    case "amber":
+      return "hue-rotate(224deg) saturate(1.3)";
+    case "lime":
+      return "hue-rotate(270deg) saturate(1.2)";
+    case "slate":
+      return "grayscale(0.85) brightness(1.1)";
+    case "emerald":
+    default:
+      return "none";
+  }
+}
+
 export const DEFAULT_TOOLBAR_ORDER: string[] = [
   "undo",
   "redo",
@@ -550,6 +580,7 @@ export interface AppSettings {
   showCodeLineNumbers: boolean;
   highlightInlineCode: boolean;
   spellCheck: boolean;
+  smartTypography: boolean;
   toolbarItemsOrder: string[];
   hiddenToolbarItems: string[];
 
@@ -623,11 +654,23 @@ export const FONT_OPTIONS: { id: FontFamilyOption; nameKey: string; css: string 
   { id: "chonburi", nameKey: "settings.fontChonburi", css: FONT_FAMILY_CSS.chonburi },
 ];
 
+function detectSystemLanguage(): "th" | "en" {
+  try {
+    if (typeof navigator !== "undefined" && navigator.language) {
+      const lang = navigator.language.toLowerCase();
+      if (lang.startsWith("th")) {
+        return "th";
+      }
+    }
+  } catch {}
+  return "en";
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   editorFontSize: 15,
   sidebarWidth: FIXED_SIDEBAR_WIDTH,
   confirmBeforeDelete: true,
-  language: "en",
+  language: detectSystemLanguage(),
   fontFamily: "inter",
   editorFontFamily: "inter",
   theme: "emerald",
@@ -671,6 +714,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showCodeLineNumbers: false,
   highlightInlineCode: false,
   spellCheck: true,
+  smartTypography: true,
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
@@ -685,7 +729,8 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSettings {
-  const language = raw?.language === "th" ? "th" : "en";
+  const defaultLang = detectSystemLanguage();
+  const language = raw?.language === "th" || raw?.language === "en" ? raw.language : defaultLang;
   const fontFamily: FontFamilyOption =
     raw?.fontFamily && VALID_FONT_FAMILIES.includes(raw.fontFamily as FontFamilyOption)
       ? (raw.fontFamily as FontFamilyOption)
@@ -823,6 +868,7 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     showCodeLineNumbers,
     highlightInlineCode,
     spellCheck: raw?.spellCheck !== undefined ? Boolean(raw.spellCheck) : DEFAULT_SETTINGS.spellCheck,
+    smartTypography: raw?.smartTypography !== undefined ? Boolean(raw.smartTypography) : DEFAULT_SETTINGS.smartTypography,
     toolbarItemsOrder,
     hiddenToolbarItems,
     geminiApiKey,
@@ -909,14 +955,121 @@ interface AppSettingsContextValue {
   updateSettings: (partial: Partial<AppSettings>) => void;
   setFolderIcon: (folderPath: string, icon: string, color?: string) => void;
   removeFolderIcon: (folderPath: string) => void;
+  moveFolderIcons: (oldFolderPath: string, newFolderPath: string) => void;
+  removeFolderIconsTree: (folderPath: string) => void;
+  setFileIcon: (filePath: string, icon: string, color?: string) => void;
+  removeFileIcon: (filePath: string) => void;
   applyAppearanceStyle: (styleId: AppearanceStyle) => void;
   resetSettings: () => void;
+  keyboardLanguage: "th" | "en";
+  setKeyboardLanguage: (lang: "th" | "en") => void;
+  toggleKeyboardLanguage: () => void;
 }
 
 const AppSettingsContext = createContext<AppSettingsContextValue | undefined>(undefined);
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const [keyboardLanguage, setKeyboardLanguageState] = useState<"th" | "en">(() => {
+    return detectSystemLanguage() === "th" ? "th" : "en";
+  });
+
+  const setKeyboardLanguage = useCallback((lang: "th" | "en") => {
+    setKeyboardLanguageState(lang);
+  }, []);
+
+  const toggleKeyboardLanguage = useCallback(() => {
+    setKeyboardLanguageState((prev) => (prev === "th" ? "en" : "th"));
+  }, []);
+
+  useEffect(() => {
+    let lastToggleTime = 0;
+    const triggerToggle = () => {
+      const now = Date.now();
+      if (now - lastToggleTime < 200) return;
+      lastToggleTime = now;
+      setKeyboardLanguageState((prev) => (prev === "th" ? "en" : "th"));
+    };
+
+    const handleSwitchKey = (e: KeyboardEvent) => {
+      // 1. ตัวหนอน (Grave Accent / Backquote / ~ / ` / KeyCode 192 / Windows IME toggle)
+      if (
+        e.code === "Backquote" ||
+        e.key === "`" ||
+        e.key === "~" ||
+        e.keyCode === 192 ||
+        (e as any).which === 192 ||
+        (e.code === "Backquote" && (e.key === "Process" || e.key === "Unidentified" || e.key === "Dead"))
+      ) {
+        triggerToggle();
+        return;
+      }
+
+      // 2. Win + Spacebar
+      if (
+        (e.metaKey || e.code === "OSLeft" || e.code === "OSRight" || e.key === "Meta") &&
+        (e.code === "Space" || e.key === " " || e.keyCode === 32)
+      ) {
+        triggerToggle();
+        return;
+      }
+      if (e.metaKey && e.code === "Space") {
+        triggerToggle();
+        return;
+      }
+
+      // 3. Real-time key character detection
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key && e.key.length === 1) {
+        if (/[\u0E00-\u0E7F]/.test(e.key)) {
+          setKeyboardLanguageState("th");
+        } else if (/[A-Za-z]/.test(e.key)) {
+          setKeyboardLanguageState("en");
+        }
+      }
+    };
+
+    const handleInputChar = (e: Event) => {
+      const inputEvent = e as InputEvent;
+      const data = inputEvent.data;
+      if (data && data.length > 0) {
+        if (/[\u0E00-\u0E7F]/.test(data)) {
+          setKeyboardLanguageState("th");
+        } else if (/[A-Za-z]/.test(data)) {
+          setKeyboardLanguageState("en");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleSwitchKey, true);
+    window.addEventListener("keyup", handleSwitchKey, true);
+    window.addEventListener("beforeinput", handleInputChar, true);
+    window.addEventListener("input", handleInputChar, true);
+
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    let unsubNative: (() => void) | undefined;
+    if (electronAPI?.onNativeKeyboardLanguageChanged) {
+      unsubNative = electronAPI.onNativeKeyboardLanguageChanged((lang: string) => {
+        if (lang === "th" || lang === "en") {
+          setKeyboardLanguageState(lang);
+        }
+      });
+      electronAPI.getNativeKeyboardLanguage?.().then((lang: string) => {
+        if (lang === "th" || lang === "en") {
+          setKeyboardLanguageState(lang);
+        }
+      });
+    }
+
+    return () => {
+      window.removeEventListener("keydown", handleSwitchKey, true);
+      window.removeEventListener("keyup", handleSwitchKey, true);
+      window.removeEventListener("beforeinput", handleInputChar, true);
+      window.removeEventListener("input", handleInputChar, true);
+      if (typeof unsubNative === "function") {
+        unsubNative();
+      }
+    };
+  }, []);
 
   const updateSetting = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => {
@@ -949,6 +1102,85 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const current = { ...(prev.folderIcons || {}) };
       delete current[folderPath];
       const next = normalizeSettings({ ...prev, folderIcons: current });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const moveFolderIcons = useCallback((oldFolderPath: string, newFolderPath: string) => {
+    if (!oldFolderPath || !newFolderPath || oldFolderPath === newFolderPath) return;
+    setSettings((prev) => {
+      const currentFolderIcons = { ...(prev.folderIcons || {}) };
+      const currentFileIcons = { ...(prev.fileIcons || {}) };
+      let changed = false;
+
+      // Update folder icons for this folder and all nested subfolders
+      const nextFolderIcons: Record<string, { icon: string; color?: string }> = {};
+      for (const [path, val] of Object.entries(currentFolderIcons)) {
+        if (path === oldFolderPath) {
+          nextFolderIcons[newFolderPath] = val;
+          changed = true;
+        } else if (path.startsWith(`${oldFolderPath}/`)) {
+          const suffix = path.slice(oldFolderPath.length);
+          nextFolderIcons[`${newFolderPath}${suffix}`] = val;
+          changed = true;
+        } else {
+          nextFolderIcons[path] = val;
+        }
+      }
+
+      // Update file icons inside the moved folder
+      const nextFileIcons: Record<string, { icon: string; color?: string }> = {};
+      for (const [path, val] of Object.entries(currentFileIcons)) {
+        if (path.startsWith(`${oldFolderPath}/`)) {
+          const suffix = path.slice(oldFolderPath.length);
+          nextFileIcons[`${newFolderPath}${suffix}`] = val;
+          changed = true;
+        } else {
+          nextFileIcons[path] = val;
+        }
+      }
+
+      if (!changed) return prev;
+
+      const next = normalizeSettings({
+        ...prev,
+        folderIcons: nextFolderIcons,
+        fileIcons: nextFileIcons,
+      });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const removeFolderIconsTree = useCallback((folderPath: string) => {
+    if (!folderPath) return;
+    setSettings((prev) => {
+      const currentFolderIcons = { ...(prev.folderIcons || {}) };
+      const currentFileIcons = { ...(prev.fileIcons || {}) };
+      let changed = false;
+
+      for (const path of Object.keys(currentFolderIcons)) {
+        if (path === folderPath || path.startsWith(`${folderPath}/`)) {
+          delete currentFolderIcons[path];
+          changed = true;
+        }
+      }
+
+      for (const path of Object.keys(currentFileIcons)) {
+        if (path.startsWith(`${folderPath}/`)) {
+          delete currentFileIcons[path];
+          changed = true;
+        }
+      }
+
+      if (!changed) return prev;
+
+      const next = normalizeSettings({
+        ...prev,
+        folderIcons: currentFolderIcons,
+        fileIcons: currentFileIcons,
+      });
       saveSettings(next);
       return next;
     });
@@ -995,8 +1227,17 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   }, [updateSetting, updateSettings]);
 
   const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS);
-    saveSettings(DEFAULT_SETTINGS);
+    setSettings((prev) => {
+      const next: AppSettings = {
+        ...DEFAULT_SETTINGS,
+        folderIcons: prev.folderIcons || {},
+        fileIcons: prev.fileIcons || {},
+        geminiApiKey: prev.geminiApiKey || "",
+        googleDriveClientId: prev.googleDriveClientId || "",
+      };
+      saveSettings(next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -1005,6 +1246,29 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
     document.documentElement.setAttribute("data-editor-font", settings.editorFontFamily || settings.fontFamily);
   }, [settings.theme, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily]);
+
+  // Dynamically update document favicon to match theme accent color
+  useEffect(() => {
+    try {
+      const link = document.querySelector<HTMLLinkElement>("link[rel*='icon']");
+      if (!link) return;
+      const img = new Image();
+      img.src = "./luno-logo.png";
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width || 64;
+        canvas.height = img.naturalHeight || img.height || 64;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const filter = getThemeLogoFilter(settings.theme);
+        if (filter && filter !== "none") {
+          ctx.filter = filter;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        link.href = canvas.toDataURL("image/png");
+      };
+    } catch {}
+  }, [settings.theme]);
 
   useEffect(() => {
     const scale = settings.interfaceScale || 100;
@@ -1078,12 +1342,17 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       updateSettings,
       setFolderIcon,
       removeFolderIcon,
+      moveFolderIcons,
+      removeFolderIconsTree,
       setFileIcon,
       removeFileIcon,
       applyAppearanceStyle,
       resetSettings,
+      keyboardLanguage,
+      setKeyboardLanguage,
+      toggleKeyboardLanguage,
     }),
-    [settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, setFileIcon, removeFileIcon, applyAppearanceStyle, resetSettings],
+    [settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon, applyAppearanceStyle, resetSettings, keyboardLanguage, setKeyboardLanguage, toggleKeyboardLanguage],
   );
 
   return createElement(

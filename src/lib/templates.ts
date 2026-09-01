@@ -9,14 +9,20 @@ export type NoteTemplateType =
   | "todo"
   | "study"
   | "bug"
+  | "weekly-review"
+  | "book-notes"
   | "basic-website"
   | "landing-page"
   | "portfolio"
   | "blog"
   | "dashboard"
+  | "documentation"
+  | "link-tree"
   | "notes"
   | "journal"
-  | "readme";
+  | "readme"
+  | "changelog"
+  | "work-log";
 
 export interface TemplateMetadata {
   type: NoteTemplateType;
@@ -118,6 +124,34 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
       phosphor: "phosphor:Bug",
     },
   },
+  "weekly-review": {
+    type: "weekly-review",
+    titleKey: "settings.optWeeklyReview",
+    defaultTitleEn: "Weekly Review",
+    defaultTitleTh: "สรุปประจำสัปดาห์",
+    filePrefix: "Weekly",
+    icon: "lucide:CalendarCheck",
+    iconColor: "#0ea5e9",
+    icons: {
+      lucide: "lucide:CalendarCheck",
+      tabler: "tabler:IconCalendarStats",
+      phosphor: "phosphor:CalendarCheck",
+    },
+  },
+  "book-notes": {
+    type: "book-notes",
+    titleKey: "settings.optBookNotes",
+    defaultTitleEn: "Book Notes",
+    defaultTitleTh: "สรุปหนังสือ",
+    filePrefix: "Book",
+    icon: "lucide:Bookmark",
+    iconColor: "#a855f7",
+    icons: {
+      lucide: "lucide:Bookmark",
+      tabler: "tabler:IconBookmark",
+      phosphor: "phosphor:BookmarkSimple",
+    },
+  },
   "basic-website": {
     type: "basic-website",
     titleKey: "settings.optHtmlBasic",
@@ -188,6 +222,34 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
       phosphor: "phosphor:SquaresFour",
     },
   },
+  documentation: {
+    type: "documentation",
+    titleKey: "settings.optHtmlDoc",
+    defaultTitleEn: "Documentation",
+    defaultTitleTh: "Documentation",
+    filePrefix: "Docs",
+    icon: "lucide:FileCode",
+    iconColor: "#6366f1",
+    icons: {
+      lucide: "lucide:FileCode",
+      tabler: "tabler:IconCode",
+      phosphor: "phosphor:CodeBlock",
+    },
+  },
+  "link-tree": {
+    type: "link-tree",
+    titleKey: "settings.optHtmlLinks",
+    defaultTitleEn: "Link in Bio",
+    defaultTitleTh: "Link in Bio",
+    filePrefix: "Links",
+    icon: "lucide:Share2",
+    iconColor: "#ec4899",
+    icons: {
+      lucide: "lucide:Share2",
+      tabler: "tabler:IconShare",
+      phosphor: "phosphor:ShareNetwork",
+    },
+  },
   notes: {
     type: "notes",
     titleKey: "settings.optTxtNotes",
@@ -228,6 +290,34 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
       lucide: "lucide:BookOpen",
       tabler: "tabler:IconBook",
       phosphor: "phosphor:BookOpen",
+    },
+  },
+  changelog: {
+    type: "changelog",
+    titleKey: "settings.optTxtChangelog",
+    defaultTitleEn: "CHANGELOG",
+    defaultTitleTh: "CHANGELOG",
+    filePrefix: "CHANGELOG",
+    icon: "lucide:History",
+    iconColor: "#f97316",
+    icons: {
+      lucide: "lucide:History",
+      tabler: "tabler:IconHistory",
+      phosphor: "phosphor:ClockCounterClockwise",
+    },
+  },
+  "work-log": {
+    type: "work-log",
+    titleKey: "settings.optTxtWorkLog",
+    defaultTitleEn: "Work Log",
+    defaultTitleTh: "Work Log",
+    filePrefix: "WorkLog",
+    icon: "lucide:Clock",
+    iconColor: "#14b8a6",
+    icons: {
+      lucide: "lucide:Clock",
+      tabler: "tabler:IconClock",
+      phosphor: "phosphor:Clock",
     },
   },
   blank: {
@@ -653,6 +743,143 @@ export function getNoteTemplateContent(
       );
     }
 
+    if (templateType === "journal") {
+      if (isTh) {
+        return (
+          `ไดอารี่และบันทึกประจำวัน - ${dateStr}\n` +
+          `=======================================\n\n` +
+          `สิ่งดีๆ & เรื่องที่รู้สึกขอบคุณวันนี้ (Highlights & Gratitude)\n` +
+          `----------------------------------------------------------\n` +
+          `- วันนี้มีเรื่องดีอะไรเกิดขึ้นบ้าง?\n` +
+          `- บุคคลหรือเรื่องราวที่รู้สึกขอบคุณ:\n\n` +
+          `บันทึกความคิด & เหตุการณ์สำคัญ (Reflections)\n` +
+          `--------------------------------------------\n` +
+          `- \n\n` +
+          `เช็กลิสต์สุขภาพ & นิสัยประจำวัน (Habits & Wellbeing)\n` +
+          `-------------------------------------------------\n` +
+          `- [ ] ออกกำลังกาย / เคลื่อนไหวร่างกาย\n` +
+          `- [ ] เรียนรู้ / โฟกัสงานสำคัญ\n` +
+          `- [ ] พักผ่อนและดื่มน้ำเพียงพอ\n\n` +
+          `เป้าหมาย & สิ่งที่จะโฟกัสในวันพรุ่งนี้ (Tomorrow's Priorities)\n` +
+          `---------------------------------------------------------\n` +
+          `- [ ] เป้าหมายที่ 1\n` +
+          `- [ ] เป้าหมายที่ 2\n`
+        );
+      }
+      return (
+        `Daily Journal - ${dateStr}\n` +
+        `=======================================\n\n` +
+        `Highlights & Gratitude\n` +
+        `----------------------\n` +
+        `- What am I grateful for today?\n` +
+        `- What went exceptionally well?\n\n` +
+        `Today's Reflections & Key Events\n` +
+        `--------------------------------\n` +
+        `- \n\n` +
+        `Habits & Wellbeing\n` +
+        `------------------\n` +
+        `- [ ] Exercise & Physical Movement\n` +
+        `- [ ] Learning & Deep Focus\n` +
+        `- [ ] Rest & Hydration\n\n` +
+        `Tomorrow's Focus & Priorities\n` +
+        `-----------------------------\n` +
+        `- [ ] Priority 1\n` +
+        `- [ ] Priority 2\n`
+      );
+    }
+
+    if (templateType === "changelog") {
+      if (isTh) {
+        return (
+          `=======================================\n` +
+          `บันทึกการเปลี่ยนแปลง (CHANGELOG)\n` +
+          `=======================================\n` +
+          `บันทึกรายการปรับปรุง เปลี่ยนแปลง และแก้ไขทั้งหมดของโปรเจกต์นี้\n\n` +
+          `[เวอร์ชันที่กำลังพัฒนา / Unreleased]\n` +
+          `---------------------------------------\n` +
+          `เพิ่มใหม่ (Added):\n` +
+          `- \n\n` +
+          `ปรับปรุง (Changed):\n` +
+          `- \n\n` +
+          `แก้ไขปัญหา (Fixed):\n` +
+          `- \n\n\n` +
+          `[1.0.0] - ${dateStr}\n` +
+          `---------------------------------------\n` +
+          `เพิ่มใหม่ (Added):\n` +
+          `- เปิดตัวโปรเจกต์เวอร์ชันแรกพร้อมฟีเจอร์หลัก\n`
+        );
+      }
+      return (
+        `=======================================\n` +
+        `CHANGELOG\n` +
+        `=======================================\n` +
+        `All notable changes to this project will be documented in this file.\n\n` +
+        `[Unreleased]\n` +
+        `---------------------------------------\n` +
+        `Added:\n` +
+        `- \n\n` +
+        `Changed:\n` +
+        `- \n\n` +
+        `Fixed:\n` +
+        `- \n\n\n` +
+        `[1.0.0] - ${dateStr}\n` +
+        `---------------------------------------\n` +
+        `Added:\n` +
+        `- Initial project release and core features.\n`
+      );
+    }
+
+    if (templateType === "work-log") {
+      if (isTh) {
+        return (
+          `บันทึกการทำงาน (Work Log) - ${dateStr}\n` +
+          `=======================================\n\n` +
+          `เป้าหมายหลักประจำวัน (Daily Goals)\n` +
+          `---------------------------------\n` +
+          `- [ ] เป้าหมายสำคัญที่ 1\n` +
+          `- [ ] เป้าหมายสำคัญที่ 2\n\n` +
+          `บันทึกช่วงเวลาและงานที่ทำ (Time & Activity Log)\n` +
+          `----------------------------------------------\n` +
+          `- 09:00 - 10:30 : \n` +
+          `- 10:30 - 12:00 : \n` +
+          `- 13:00 - 15:00 : \n` +
+          `- 15:00 - 17:00 : \n\n` +
+          `งานที่ทำเสร็จแล้ว (Completed Tasks)\n` +
+          `-----------------------------------\n` +
+          `- [x] \n\n` +
+          `งานที่ค้าง / ปัญหาและอุปสรรค (Blockers)\n` +
+          `---------------------------------------\n` +
+          `- \n\n` +
+          `บันทึกเพิ่มเติมและแผนงานพรุ่งนี้ (Tomorrow's Plan)\n` +
+          `-----------------------------------------------\n` +
+          `- \n`
+        );
+      }
+      return (
+        `Work Log - ${dateStr}\n` +
+        `=======================================\n\n` +
+        `Summary of Goals for Today\n` +
+        `--------------------------\n` +
+        `- [ ] Primary Goal 1\n` +
+        `- [ ] Primary Goal 2\n\n` +
+        `Time & Activity Log\n` +
+        `-------------------\n` +
+        `- 09:00 - 10:30 : \n` +
+        `- 10:30 - 12:00 : \n` +
+        `- 13:00 - 15:00 : \n` +
+        `- 15:00 - 17:00 : \n\n` +
+        `Completed Tasks\n` +
+        `---------------\n` +
+        `- [x] \n\n` +
+        `Pending & Blockers\n` +
+        `------------------\n` +
+        `- \n\n` +
+        `Notes & Tomorrow's Plan\n` +
+        `-----------------------\n` +
+        `- \n`
+      );
+    }
+
     return "";
   }
 
@@ -675,6 +902,7 @@ export function getNoteTemplateContent(
         `    main { max-width: 1000px; margin: 2rem auto; padding: 0 1.5rem; }\n` +
         `    section { margin-bottom: 2.5rem; }\n` +
         `    h1, h2 { margin-bottom: 1rem; color: #0f172a; }\n` +
+        `    .banner-img { width: 100%; height: 320px; object-fit: cover; border-radius: 8px; margin: 1.5rem 0; }\n` +
         `    footer { background: #f1f5f9; text-align: center; padding: 1.5rem; margin-top: 3rem; color: #64748b; font-size: 0.9rem; }\n` +
         `  </style>\n` +
         `</head>\n` +
@@ -692,6 +920,7 @@ export function getNoteTemplateContent(
         `    <section id="home">\n` +
         `      <h1>Welcome to Our Website</h1>\n` +
         `      <p>This is a modern, responsive website template with a clean semantic layout.</p>\n` +
+        `      <img src="https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&auto=format&fit=crop&q=80" alt="Website Banner" class="banner-img">\n` +
         `    </section>\n\n` +
         `    <section id="about">\n` +
         `      <h2>About Us</h2>\n` +
@@ -729,6 +958,7 @@ export function getNoteTemplateContent(
         `    .hero { text-align: center; padding: 5rem 0 4rem; }\n` +
         `    .hero h1 { font-size: 3rem; font-weight: 800; line-height: 1.2; margin-bottom: 1.25rem; color: #0f172a; }\n` +
         `    .hero p { font-size: 1.2rem; color: #64748b; max-width: 650px; margin: 0 auto 2rem; }\n` +
+        `    .hero-img { width: 100%; max-width: 850px; height: auto; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); margin: 2.5rem auto 0; display: block; }\n` +
         `    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; padding: 4rem 0; }\n` +
         `    .feature-card { background: #fff; padding: 2rem; border-radius: 12px; border: 1px solid #e2e8f0; }\n` +
         `    .feature-card h3 { margin-bottom: 0.5rem; color: #0f172a; }\n` +
@@ -746,6 +976,7 @@ export function getNoteTemplateContent(
         `      <h1>Build something amazing with our platform</h1>\n` +
         `      <p>The all-in-one solution designed to help your team work faster, smarter, and achieve better results.</p>\n` +
         `      <a href="#cta" class="btn">Start Free Trial</a>\n` +
+        `      <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1200&auto=format&fit=crop&q=80" alt="Platform Dashboard Preview" class="hero-img">\n` +
         `    </section>\n\n` +
         `    <section class="features">\n` +
         `      <div class="feature-card">\n` +
@@ -783,15 +1014,17 @@ export function getNoteTemplateContent(
         `    body { font-family: system-ui, -apple-system, sans-serif; color: #334155; line-height: 1.6; background: #fff; }\n` +
         `    .container { max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem; }\n` +
         `    .profile { text-align: center; margin-bottom: 4rem; }\n` +
-        `    .avatar { width: 100px; height: 100px; border-radius: 50%; background: #e2e8f0; margin: 0 auto 1.25rem; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; }\n` +
+        `    .avatar { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; margin: 0 auto 1.25rem; border: 3px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.08); display: block; }\n` +
         `    h1 { font-size: 2.25rem; color: #0f172a; margin-bottom: 0.5rem; }\n` +
         `    .tagline { color: #64748b; font-size: 1.1rem; margin-bottom: 1.5rem; }\n` +
         `    section { margin-bottom: 3.5rem; }\n` +
         `    h2 { font-size: 1.5rem; color: #0f172a; margin-bottom: 1.25rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }\n` +
         `    .projects-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }\n` +
-        `    .project-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.5rem; background: #f8fafc; }\n` +
-        `    .project-card h3 { margin-bottom: 0.5rem; color: #0f172a; }\n` +
-        `    .project-card p { font-size: 0.9rem; color: #64748b; margin-bottom: 1rem; }\n` +
+        `    .project-card { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #f8fafc; }\n` +
+        `    .project-card img { width: 100%; height: 150px; object-fit: cover; display: block; }\n` +
+        `    .project-info { padding: 1.25rem; }\n` +
+        `    .project-info h3 { margin-bottom: 0.5rem; color: #0f172a; }\n` +
+        `    .project-info p { font-size: 0.9rem; color: #64748b; margin-bottom: 1rem; }\n` +
         `    .skills-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }\n` +
         `    .skill-tag { background: #e0f2fe; color: #0369a1; padding: 0.35rem 0.85rem; border-radius: 20px; font-size: 0.85rem; font-weight: 500; }\n` +
         `    footer { text-align: center; color: #94a3b8; font-size: 0.85rem; padding-top: 2rem; border-top: 1px solid #f1f5f9; }\n` +
@@ -800,7 +1033,7 @@ export function getNoteTemplateContent(
         `<body>\n` +
         `  <div class="container">\n` +
         `    <header class="profile">\n` +
-        `      <div class="avatar">👨‍💻</div>\n` +
+        `      <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80" alt="Profile Avatar" class="avatar">\n` +
         `      <h1>Your Name</h1>\n` +
         `      <p class="tagline">Designer & Frontend Developer</p>\n` +
         `      <p>Building thoughtful and engaging digital experiences with clean code.</p>\n` +
@@ -813,14 +1046,20 @@ export function getNoteTemplateContent(
         `      <h2>Featured Projects</h2>\n` +
         `      <div class="projects-grid">\n` +
         `        <div class="project-card">\n` +
-        `          <h3>Project One</h3>\n` +
-        `          <p>A full-stack web application designed for task management and team collaboration.</p>\n` +
-        `          <a href="#" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 0.9rem;">View Project &rarr;</a>\n` +
+        `          <img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=600&auto=format&fit=crop&q=80" alt="Project One">\n` +
+        `          <div class="project-info">\n` +
+        `            <h3>Project One</h3>\n` +
+        `            <p>A full-stack web application designed for task management and team collaboration.</p>\n` +
+        `            <a href="#" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 0.9rem;">View Project &rarr;</a>\n` +
+        `          </div>\n` +
         `        </div>\n` +
         `        <div class="project-card">\n` +
-        `          <h3>Project Two</h3>\n` +
-        `          <p>Interactive dashboard UI kit built with modern web components and data charts.</p>\n` +
-        `          <a href="#" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 0.9rem;">View Project &rarr;</a>\n` +
+        `          <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80" alt="Project Two">\n` +
+        `          <div class="project-info">\n` +
+        `            <h3>Project Two</h3>\n` +
+        `            <p>Interactive dashboard UI kit built with modern web components and data charts.</p>\n` +
+        `            <a href="#" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 0.9rem;">View Project &rarr;</a>\n` +
+        `          </div>\n` +
         `        </div>\n` +
         `      </div>\n` +
         `    </section>\n\n` +
@@ -859,6 +1098,7 @@ export function getNoteTemplateContent(
         `    .category { font-family: system-ui, sans-serif; font-size: 0.85rem; font-weight: 700; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }\n` +
         `    h1 { font-size: 2.5rem; color: #1a202c; line-height: 1.25; margin-bottom: 1rem; }\n` +
         `    .meta { font-family: system-ui, sans-serif; font-size: 0.9rem; color: #718096; }\n` +
+        `    .featured-img { width: 100%; height: 340px; object-fit: cover; border-radius: 10px; margin: 1.5rem 0 2rem; display: block; }\n` +
         `    .article-body p { margin-bottom: 1.5rem; font-size: 1.1rem; }\n` +
         `    .article-body h2 { font-family: system-ui, sans-serif; font-size: 1.6rem; color: #1a202c; margin: 2.5rem 0 1rem; }\n` +
         `    blockquote { border-left: 4px solid #8b5cf6; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #4a5568; }\n` +
@@ -873,6 +1113,7 @@ export function getNoteTemplateContent(
         `      <div class="meta">By Author Name &bull; Published on ${dateStr} &bull; 5 min read</div>\n` +
         `    </header>\n\n` +
         `    <article class="article-body">\n` +
+        `      <img src="https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=1200&auto=format&fit=crop&q=80" alt="Featured Cover" class="featured-img">\n` +
         `      <p>The landscape of modern web development continues to evolve rapidly. From AI-assisted tools to hyper-optimized browser rendering engines, developers now have more powerful tools than ever before.</p>\n\n` +
         `      <h2>Embracing Simplicity and Performance</h2>\n` +
         `      <p>While frameworks come and go, fundamental principles of good software engineering remain unchanged. Fast load times, clean semantics, and accessible user interfaces create the best experience for everyone.</p>\n\n` +
@@ -979,6 +1220,131 @@ export function getNoteTemplateContent(
         `        </table>\n` +
         `      </div>\n` +
         `    </main>\n` +
+        `  </div>\n` +
+        `</body>\n` +
+        `</html>`
+      );
+    }
+
+    if (templateType === "documentation") {
+      return (
+        `<!DOCTYPE html>\n` +
+        `<html lang="${lang}">\n` +
+        `<head>\n` +
+        `  <meta charset="UTF-8">\n` +
+        `  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n` +
+        `  <title>Developer Documentation</title>\n` +
+        `  <style>\n` +
+        `    * { box-sizing: border-box; margin: 0; padding: 0; }\n` +
+        `    body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; background: #fff; line-height: 1.6; }\n` +
+        `    .layout { display: flex; min-height: 100vh; }\n` +
+        `    aside { width: 260px; background: #f8fafc; border-right: 1px solid #e2e8f0; padding: 1.5rem 1rem; }\n` +
+        `    aside h3 { font-size: 0.8rem; text-transform: uppercase; color: #64748b; margin: 1.25rem 0 0.5rem 0.5rem; letter-spacing: 0.05em; }\n` +
+        `    aside a { display: block; color: #475569; text-decoration: none; padding: 0.45rem 0.5rem; border-radius: 6px; font-size: 0.9rem; margin-bottom: 0.2rem; }\n` +
+        `    aside a:hover, aside a.active { background: #e0e7ff; color: #4338ca; font-weight: 600; }\n` +
+        `    main { flex: 1; padding: 3rem 4rem; max-width: 900px; }\n` +
+        `    h1 { font-size: 2.25rem; color: #0f172a; margin-bottom: 0.75rem; }\n` +
+        `    .lead { font-size: 1.1rem; color: #64748b; margin-bottom: 2rem; }\n` +
+        `    h2 { font-size: 1.4rem; color: #0f172a; margin: 2rem 0 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; }\n` +
+        `    pre { background: #0f172a; color: #f8fafc; padding: 1rem 1.25rem; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 0.9rem; margin: 1rem 0; }\n` +
+        `    code { font-family: monospace; font-size: 0.9em; background: #f1f5f9; padding: 0.2rem 0.4rem; border-radius: 4px; color: #6366f1; }\n` +
+        `    .callout { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 1rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; font-size: 0.95rem; }\n` +
+        `    table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.9rem; }\n` +
+        `    th, td { padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0; text-align: left; }\n` +
+        `    th { background: #f8fafc; color: #475569; font-weight: 600; }\n` +
+        `  </style>\n` +
+        `</head>\n` +
+        `<body>\n` +
+        `  <div class="layout">\n` +
+        `    <aside>\n` +
+        `      <h2 style="font-size: 1.15rem; color: #4338ca; margin-bottom: 1rem; padding-left: 0.5rem;">📘 Documentation</h2>\n` +
+        `      <h3>Getting Started</h3>\n` +
+        `      <a href="#" class="active">Overview & Installation</a>\n` +
+        `      <a href="#">Configuration</a>\n` +
+        `      <h3>Guides</h3>\n` +
+        `      <a href="#">Authentication</a>\n` +
+        `      <a href="#">API Endpoints</a>\n` +
+        `      <a href="#">Deployment</a>\n` +
+        `    </aside>\n` +
+        `    <main>\n` +
+        `      <h1>Getting Started</h1>\n` +
+        `      <p class="lead">Everything you need to integrate and build with our modern API.</p>\n` +
+        `      <h2>Quick Install</h2>\n` +
+        `      <pre>npm install @app/core --save</pre>\n` +
+        `      <div class="callout">\n` +
+        `        <strong>Tip:</strong> Make sure you are using Node.js version 18 or higher for full LTS support.\n` +
+        `      </div>\n` +
+        `      <h2>API Endpoints</h2>\n` +
+        `      <table>\n` +
+        `        <thead>\n` +
+        `          <tr>\n` +
+        `            <th>Method</th>\n` +
+        `            <th>Endpoint</th>\n` +
+        `            <th>Description</th>\n` +
+        `          </tr>\n` +
+        `        </thead>\n` +
+        `        <tbody>\n` +
+        `          <tr>\n` +
+        `            <td><code>GET</code></td>\n` +
+        `            <td>/api/v1/notes</td>\n` +
+        `            <td>Retrieve all user notes</td>\n` +
+        `          </tr>\n` +
+        `          <tr>\n` +
+        `            <td><code>POST</code></td>\n` +
+        `            <td>/api/v1/notes</td>\n` +
+        `            <td>Create a new note entry</td>\n` +
+        `          </tr>\n` +
+        `        </tbody>\n` +
+        `      </table>\n` +
+        `    </main>\n` +
+        `  </div>\n` +
+        `</body>\n` +
+        `</html>`
+      );
+    }
+
+    if (templateType === "link-tree") {
+      return (
+        `<!DOCTYPE html>\n` +
+        `<html lang="${lang}">\n` +
+        `<head>\n` +
+        `  <meta charset="UTF-8">\n` +
+        `  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n` +
+        `  <title>My Links</title>\n` +
+        `  <style>\n` +
+        `    * { box-sizing: border-box; margin: 0; padding: 0; }\n` +
+        `    body { font-family: system-ui, -apple-system, sans-serif; background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%); color: #f8fafc; min-height: 100vh; display: flex; justify-content: center; padding: 3rem 1.5rem; }\n` +
+        `    .container { max-width: 480px; width: 100%; text-align: center; }\n` +
+        `    .avatar { width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 1.25rem; border: 3px solid #ec4899; box-shadow: 0 4px 20px rgba(236,72,153,0.3); object-fit: cover; display: block; }\n` +
+        `    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }\n` +
+        `    .bio { font-size: 0.95rem; color: #94a3b8; margin-bottom: 2rem; }\n` +
+        `    .links { display: flex; flex-direction: column; gap: 1rem; }\n` +
+        `    .link-card { display: flex; align-items: center; justify-content: center; padding: 1rem 1.5rem; background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 14px; color: #fff; text-decoration: none; font-weight: 600; font-size: 1rem; transition: all 0.2s ease; }\n` +
+        `    .link-card:hover { transform: translateY(-2px); background: rgba(255, 255, 255, 0.16); border-color: #ec4899; box-shadow: 0 8px 24px rgba(236,72,153,0.2); }\n` +
+        `    .socials { display: flex; justify-content: center; gap: 1.25rem; margin-top: 2.5rem; }\n` +
+        `    .social-btn { color: #94a3b8; text-decoration: none; font-size: 1.25rem; transition: color 0.2s; }\n` +
+        `    .social-btn:hover { color: #ec4899; }\n` +
+        `    footer { margin-top: 3rem; font-size: 0.8rem; color: #64748b; }\n` +
+        `  </style>\n` +
+        `</head>\n` +
+        `<body>\n` +
+        `  <div class="container">\n` +
+        `    <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80" alt="Profile Avatar" class="avatar">\n` +
+        `    <h1>Creator Name</h1>\n` +
+        `    <p class="bio">Designer, Developer & Content Creator</p>\n` +
+        `    <div class="links">\n` +
+        `      <a href="#" class="link-card">🌐 Visit My Portfolio Website</a>\n` +
+        `      <a href="#" class="link-card">📝 Read My Latest Blog Articles</a>\n` +
+        `      <a href="#" class="link-card">🚀 Check Out My Recent Project</a>\n` +
+        `      <a href="#" class="link-card">💌 Join My Weekly Newsletter</a>\n` +
+        `    </div>\n` +
+        `    <div class="socials">\n` +
+        `      <a href="#" class="social-btn" title="Twitter">𝕏</a>\n` +
+        `      <a href="#" class="social-btn" title="GitHub">🐙</a>\n` +
+        `      <a href="#" class="social-btn" title="LinkedIn">💼</a>\n` +
+        `      <a href="#" class="social-btn" title="YouTube">▶️</a>\n` +
+        `    </div>\n` +
+        `    <footer>&copy; ${new Date().getFullYear()} Creator Name. Powered by Luno.</footer>\n` +
         `  </div>\n` +
         `</body>\n` +
         `</html>`
@@ -1491,6 +1857,96 @@ export function getNoteTemplateContent(
         `## Proposed Fix & Action Items\n` +
         `- [ ] Investigate root cause\n` +
         `- [ ] Implement fix & verify\n`
+      );
+    }
+  } else if (templateType === "weekly-review") {
+    if (isTh) {
+      rawMarkdown = (
+        `# สรุปประจำสัปดาห์ (Weekly Review) - ${dateStr}\n\n` +
+        `## ผลงานและความสำเร็จในสัปดาห์นี้ (Wins & Highlights)\n` +
+        `- [x] \n` +
+        `- [ ] \n\n` +
+        `## ทบทวนเป้าหมายและความคืบหน้า (Goal Review & Metrics)\n` +
+        `- **เป้าหมายที่สำเร็จตามแผน:** \n` +
+        `- **สิ่งที่ทำได้ดีเป็นพิเศษ:** \n` +
+        `- **ปัญหาหรือจุดที่ต้องปรับปรุง:** \n\n` +
+        `## บทเรียนและข้อคิดที่ได้ (Lessons & Insights)\n` +
+        `- \n\n` +
+        `## เป้าหมายสำคัญ 3 ข้อสำหรับสัปดาห์หน้า (Next Week's Big 3)\n` +
+        `1. [ ] \n` +
+        `2. [ ] \n` +
+        `3. [ ] \n\n` +
+        `## เช็กลิสต์การเตรียมตัวสำหรับสัปดาห์หน้า\n` +
+        `- [ ] เคลียร์กล่องข้อความและงานตกค้าง\n` +
+        `- [ ] จัดตารางนัดหมายและวางแผนปฏิทิน\n` +
+        `- [ ] จัดระเบียบโต๊ะทำงานและโฟลเดอร์ไฟล์\n`
+      );
+    } else {
+      rawMarkdown = (
+        `# Weekly Review - ${dateStr}\n\n` +
+        `## Wins & Highlights\n` +
+        `- [x] \n` +
+        `- [ ] \n\n` +
+        `## Goal Progress & Key Metrics\n` +
+        `- **Completed Objectives:** \n` +
+        `- **What went well:** \n` +
+        `- **Challenges & Roadblocks:** \n\n` +
+        `## Lessons & Insights\n` +
+        `- \n\n` +
+        `## Top 3 Priorities for Next Week (The Big 3)\n` +
+        `1. [ ] \n` +
+        `2. [ ] \n` +
+        `3. [ ] \n\n` +
+        `## Weekly Reset & Preparation Checklist\n` +
+        `- [ ] Clear inbox & pending messages\n` +
+        `- [ ] Review calendar & upcoming deadlines\n` +
+        `- [ ] Organize workspace and files\n`
+      );
+    }
+  } else if (templateType === "book-notes") {
+    if (isTh) {
+      rawMarkdown = (
+        `# สรุปหนังสือ: [ชื่อหนังสือ]\n\n` +
+        `## ข้อมูลหนังสือ (Book Details)\n` +
+        `- **ผู้เขียน (Author):** \n` +
+        `- **คะแนนความประทับใจ:** ⭐⭐⭐⭐⭐\n` +
+        `- **วันที่อ่านจบ:** ${dateStr}\n` +
+        `- **หมวดหมู่ / แท็ก:** #reading #book-notes\n\n` +
+        `## สรุปใจความสำคัญใน 3 ประโยค (3-Sentence Summary)\n` +
+        `1. \n` +
+        `2. \n` +
+        `3. \n\n` +
+        `## สาระสำคัญและแนวคิดหลัก (Key Takeaways)\n` +
+        `- **แนวคิดที่ 1:** \n` +
+        `- **แนวคิดที่ 2:** \n` +
+        `- **แนวคิดที่ 3:** \n\n` +
+        `## คำคมและประโยคที่ประทับใจ (Favorite Quotes)\n` +
+        `> " "\n\n` +
+        `## สิ่งที่จะนำไปลงมือทำจริง (Actionable Next Steps)\n` +
+        `- [ ] \n` +
+        `- [ ] \n`
+      );
+    } else {
+      rawMarkdown = (
+        `# Book Notes: [Book Title]\n\n` +
+        `## Book Details\n` +
+        `- **Author:** \n` +
+        `- **Rating:** ⭐⭐⭐⭐⭐\n` +
+        `- **Date Finished:** ${dateStr}\n` +
+        `- **Category / Tags:** #reading #book-notes\n\n` +
+        `## 3-Sentence Summary\n` +
+        `1. \n` +
+        `2. \n` +
+        `3. \n\n` +
+        `## Key Takeaways & Core Concepts\n` +
+        `- **Core Idea 1:** \n` +
+        `- **Core Idea 2:** \n` +
+        `- **Core Idea 3:** \n\n` +
+        `## Favorite Quotes & Highlights\n` +
+        `> " "\n\n` +
+        `## Actionable Next Steps & Implementation\n` +
+        `- [ ] \n` +
+        `- [ ] \n`
       );
     }
   }

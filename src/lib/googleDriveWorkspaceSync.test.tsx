@@ -53,4 +53,30 @@ describe("Workspace-scoped Google Drive folder caching", () => {
     // In-memory folderStructure must be cleared to force lookup/creation of workspace2
     expect(syncEngine.getState().folderStructure).toBeNull();
   });
+
+  it("should sort folder paths shallowest first to ensure parents exist before children", () => {
+    const rawPaths = [
+      "Chapter 1/Generate Artwork/part1",
+      "Chapter 3/Storyboard",
+      "Chapter 1",
+      "Chapter 3",
+      "Chapter 1/Generate Artwork",
+      "Chapter 3/Generate Artwork",
+    ];
+
+    const sorted = Array.from(new Set(rawPaths)).sort((a, b) => {
+      const depthA = a.split("/").length;
+      const depthB = b.split("/").length;
+      if (depthA !== depthB) return depthA - depthB;
+      return a.localeCompare(b);
+    });
+
+    expect(sorted[0]).toBe("Chapter 1");
+    expect(sorted[1]).toBe("Chapter 3");
+    expect(sorted[2]).toBe("Chapter 1/Generate Artwork");
+    expect(sorted[3]).toBe("Chapter 3/Generate Artwork");
+    expect(sorted[4]).toBe("Chapter 3/Storyboard");
+    expect(sorted[5]).toBe("Chapter 1/Generate Artwork/part1");
+  });
 });
+

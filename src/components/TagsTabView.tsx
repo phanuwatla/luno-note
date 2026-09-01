@@ -238,9 +238,6 @@ export default function TagsTabView({
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   {isTh ? "แท็กทั้งหมด" : "Tags"}
                 </h1>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
-                  {tagStats.length} {isTh ? "แท็ก" : "tags"}
-                </span>
               </div>
               <p className="text-xs text-muted-foreground">
                 {isTh
@@ -307,8 +304,8 @@ export default function TagsTabView({
                   onClick={() => setSelectedTag(tag)}
                   className={`group inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
                     isSelected
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
-                      : `border-border bg-card/60 text-foreground/80 hover:text-foreground hover:border-foreground/30 hover:bg-muted/40`
+                      ? `${colorClass} font-semibold shadow-2xs`
+                      : "border-border bg-card/60 text-foreground/80 hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
                   }`}
                 >
                   <span>#{tag}</span>
@@ -487,11 +484,7 @@ export default function TagsTabView({
                                     e.stopPropagation();
                                     setSelectedTag(tag);
                                   }}
-                                  className={`px-1.5 py-0.2 rounded-md font-medium border text-[10px] truncate max-w-[100px] cursor-pointer hover:opacity-80 transition-opacity ${
-                                    selectedTag === tag
-                                      ? "ring-1 ring-primary font-semibold"
-                                      : ""
-                                  } ${getTagColorClass(
+                                  className={`px-1.5 py-0.2 rounded-md font-medium border text-[10px] truncate max-w-[100px] cursor-pointer hover:opacity-80 transition-opacity ${getTagColorClass(
                                     tag,
                                     settings.theme,
                                     idx,
@@ -509,7 +502,7 @@ export default function TagsTabView({
                             ) : null}
                           </div>
 
-                          <span className="text-[10px] shrink-0 text-muted-foreground/70 font-mono">
+                          <span className="text-[10px] shrink-0 text-muted-foreground/70 font-normal">
                             {dateFormatted}
                           </span>
                         </div>

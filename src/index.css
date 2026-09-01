@@ -2479,4 +2479,22 @@ html:not([data-animations="false"]) .animate-in {
   will-change: transform, opacity;
 }
 
+/* Dynamic App Logo Accent Color Theming */
+.luno-app-logo {
+  transition: filter 0.25s ease;
+}
+[data-app-theme="emerald"] .luno-app-logo { filter: none; }
+[data-app-theme="cyan"] .luno-app-logo { filter: hue-rotate(15deg) saturate(1.1); }
+[data-app-theme="blue"] .luno-app-logo { filter: hue-rotate(43deg) saturate(1.15); }
+[data-app-theme="indigo"] .luno-app-logo { filter: hue-rotate(65deg) saturate(1.2); }
+[data-app-theme="violet"] .luno-app-logo { filter: hue-rotate(88deg) saturate(1.2); }
+[data-app-theme="fuchsia"] .luno-app-logo { filter: hue-rotate(118deg) saturate(1.2); }
+[data-app-theme="rose"] .luno-app-logo { filter: hue-rotate(173deg) saturate(1.1); }
+[data-app-theme="ruby"] .luno-app-logo { filter: hue-rotate(172deg) saturate(1.25); }
+[data-app-theme="orange"] .luno-app-logo { filter: hue-rotate(211deg) saturate(1.3); }
+[data-app-theme="amber"] .luno-app-logo { filter: hue-rotate(224deg) saturate(1.3); }
+[data-app-theme="lime"] .luno-app-logo { filter: hue-rotate(270deg) saturate(1.2); }
+[data-app-theme="slate"] .luno-app-logo { filter: grayscale(0.85) brightness(1.1); }
+
+
 

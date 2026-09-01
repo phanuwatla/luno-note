@@ -18,6 +18,7 @@ import { computeLineDiff, summarizeDiff } from "@/lib/diffUtils";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { marked } from "marked";
 import { preprocessMarkdownForEditor } from "@/components/Editor";
+import { getTagColorClass } from "@/lib/tagColors";
 
 interface VersionHistorySplitDiffViewProps {
   note: Note;
@@ -342,7 +343,12 @@ export default function VersionHistorySplitDiffView({
                   {note.tags.map((tag, idx) => (
                     <span
                       key={idx}
-                      className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border ${getTagColorClass(
+                        tag,
+                        settings.theme,
+                        idx,
+                        settings.tagColorStyle
+                      )}`}
                     >
                       #{tag}
                     </span>

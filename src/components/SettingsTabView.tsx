@@ -151,6 +151,8 @@ interface SettingsTabViewProps {
   notes?: Note[];
   onNotesUpdated?: (notes: Note[]) => void;
   openedFolderName?: string | null;
+  folderPaths?: string[];
+  isCloudWorkspace?: boolean;
   onCloseWorkspace?: () => void;
   onOpenWebTab?: (url: string) => void;
 }
@@ -162,6 +164,8 @@ export default function SettingsTabView({
   notes = [],
   onNotesUpdated,
   openedFolderName,
+  folderPaths,
+  isCloudWorkspace = false,
   onCloseWorkspace,
   onOpenWebTab,
 }: SettingsTabViewProps) {
@@ -1339,7 +1343,11 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.smartTypo")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.smartTypoDesc")}</p>
                       </div>
-                      <Switch checked={true} className="scale-85 origin-right" />
+                      <Switch
+                        checked={settings.smartTypography !== false}
+                        onCheckedChange={(val) => updateSetting("smartTypography", val)}
+                        className="scale-85 origin-right cursor-pointer shrink-0"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1370,10 +1378,13 @@ export default function SettingsTabView({
                         <SelectContent>
                           <SelectItem value="blank">{t("settings.optBlankDocument")}</SelectItem>
                           <SelectItem value="daily">{t("settings.optDailyNote")}</SelectItem>
+                          <SelectItem value="weekly-review">{t("settings.optWeeklyReview") || "Weekly Review"}</SelectItem>
                           <SelectItem value="todo">{t("settings.optTodoList")}</SelectItem>
                           <SelectItem value="meeting">{t("settings.optMeetingNotes")}</SelectItem>
                           <SelectItem value="project">{t("settings.optProjectPlan")}</SelectItem>
                           <SelectItem value="study">{t("settings.optIdeaBrainstorm")}</SelectItem>
+                          <SelectItem value="book-notes">{t("settings.optBookNotes") || "Book Notes"}</SelectItem>
+                          <SelectItem value="bug">{t("settings.optBugReport") || "Bug Report"}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1397,7 +1408,9 @@ export default function SettingsTabView({
                           <SelectItem value="todo">{t("settings.optTxtTodoList") || "To-Do List"}</SelectItem>
                           <SelectItem value="meeting">{t("settings.optTxtMeetingNotes") || "Meeting Notes"}</SelectItem>
                           <SelectItem value="journal">{t("settings.optTxtJournal") || "Journal"}</SelectItem>
+                          <SelectItem value="work-log">{t("settings.optTxtWorkLog") || "Work Log"}</SelectItem>
                           <SelectItem value="readme">{t("settings.optTxtReadme") || "README"}</SelectItem>
+                          <SelectItem value="changelog">{t("settings.optTxtChangelog") || "Changelog"}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1422,6 +1435,8 @@ export default function SettingsTabView({
                           <SelectItem value="portfolio">{t("settings.optHtmlPortfolio") || "Portfolio"}</SelectItem>
                           <SelectItem value="blog">{t("settings.optHtmlBlog") || "Blog"}</SelectItem>
                           <SelectItem value="dashboard">{t("settings.optHtmlDashboard") || "Dashboard"}</SelectItem>
+                          <SelectItem value="documentation">{t("settings.optHtmlDoc") || "Documentation"}</SelectItem>
+                          <SelectItem value="link-tree">{t("settings.optHtmlLinks") || "Link in Bio"}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1698,7 +1713,7 @@ export default function SettingsTabView({
                             onCheckedChange={(v) => {
                               const mode = v ? "gdrive" : "local";
                               updateSetting("storageMode", mode);
-                              if (v) triggerSync(notes, onNotesUpdated);
+                              if (v) triggerSync(notes, onNotesUpdated, folderPaths);
                             }}
                             className="scale-85 origin-right cursor-pointer"
                           />
@@ -1722,7 +1737,7 @@ export default function SettingsTabView({
                             type="button"
                             disabled={syncStatus === "syncing"}
                             onClick={() => {
-                              triggerSync(notes, onNotesUpdated);
+                              triggerSync(notes, onNotesUpdated, folderPaths);
                               toast({
                                 title: t("settings.syncState") || "Syncing",
                                 description: t("settings.gdriveConnectedDesc") || "Syncing notes to Google Drive...",
@@ -1769,12 +1784,12 @@ export default function SettingsTabView({
                     <button
                       type="button"
                       onClick={() => {
-                        const isCloudActive = settings.storageMode === "gdrive" || openedFolderName === "Google Drive";
+                        const isPureCloud = isCloudWorkspace === true || (openedFolderName === "Google Drive" && (!folderPaths || folderPaths.length === 0));
                         disconnectGoogleDrive();
                         updateSetting("storageMode", "local");
                         setDisconnectModalOpen(false);
 
-                        if (isCloudActive) {
+                        if (isPureCloud) {
                           if (onCloseWorkspace) {
                             onCloseWorkspace();
                           }
@@ -1785,7 +1800,7 @@ export default function SettingsTabView({
                         } else {
                           toast({
                             title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
-                            description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your files remain safe in Google Drive.",
+                            description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your local workspace files remain intact.",
                           });
                         }
                       }}

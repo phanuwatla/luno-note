@@ -94,7 +94,7 @@ describe("Sidebar workspace folder rendering when empty", () => {
     expect(screen.queryByText("Child Note.md")).toBeNull();
   });
 
-  it("restores previously opened subfolders when returning to the same workspace", () => {
+  it("restores expanded subfolders when reopening an existing workspace with saved open folders", () => {
     window.localStorage.setItem("luno_last_workspace_name", "Persisted Workspace");
     window.localStorage.setItem("luno_open_folders_Persisted Workspace", JSON.stringify(["__opened_root__", "subfolder"]));
 
@@ -125,17 +125,14 @@ describe("Sidebar workspace folder rendering when empty", () => {
       </TooltipProvider>
     );
 
-    // Both root and subfolder should be open, and child note should be visible
+    // Root folder and subfolder are open, child note inside expanded subfolder IS visible
     expect(screen.getByText("Persisted Workspace")).toBeDefined();
     expect(screen.getByText("subfolder")).toBeDefined();
     expect(screen.getByText("Child Note.md")).toBeDefined();
   });
 
-  it("opens only root folder when switching to a different workspace", () => {
-    // Previous workspace was Workspace A
-    window.localStorage.setItem("luno_last_workspace_name", "Workspace A");
-    window.localStorage.setItem("luno_open_folders_Workspace B", JSON.stringify(["__opened_root__", "subfolder"]));
-
+  it("opens with subfolders collapsed when opening a brand new workspace without saved open folders", () => {
+    // No saved open folders for New Workspace
     const notes = [
       {
         id: "note-1",
@@ -155,7 +152,7 @@ describe("Sidebar workspace folder rendering when empty", () => {
             notes={notes}
             folderPaths={["subfolder"]}
             activeNoteId={null}
-            openedFolderName="Workspace B"
+            openedFolderName="New Workspace"
             onSelect={() => {}}
             onCreate={() => {}}
           />
@@ -163,9 +160,7 @@ describe("Sidebar workspace folder rendering when empty", () => {
       </TooltipProvider>
     );
 
-    // Because last workspace was "Workspace A" and now we open "Workspace B",
-    // it treats it as switching to a new workspace and starts with subfolder collapsed
-    expect(screen.getByText("Workspace B")).toBeDefined();
+    expect(screen.getByText("New Workspace")).toBeDefined();
     expect(screen.getByText("subfolder")).toBeDefined();
     expect(screen.queryByText("Child Note.md")).toBeNull();
   });

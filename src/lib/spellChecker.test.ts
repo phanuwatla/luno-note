@@ -60,5 +60,38 @@ describe("spellChecker", () => {
     expect(getSpellingSuggestions("อนุญาติ")).toEqual(["อนุญาต"]);
 
     expect(isWordMisspelled("อนุญาต")).toBe(false);
+
+    // Common typing slip / slang typos
+    expect(isWordMisspelled("ดดน")).toBe(true);
+    expect(getSpellingSuggestions("ดดน")).toEqual(["โดน"]);
+
+    expect(isWordMisspelled("นะค่ะ")).toBe(true);
+    expect(getSpellingSuggestions("นะค่ะ")).toEqual(["นะคะ"]);
+
+    expect(isWordMisspelled("ผัดกระเพรา")).toBe(true);
+    expect(getSpellingSuggestions("ผัดกระเพรา")).toEqual(["ผัดกะเพรา"]);
+
+    // Structural anomalies (double sara-e)
+    expect(isWordMisspelled("เเละ")).toBe(true);
+    expect(getSpellingSuggestions("เเละ")).toEqual(["และ"]);
+
+    // Additional common typos
+    expect(isWordMisspelled("กระเทย")).toBe(true);
+    expect(getSpellingSuggestions("กระเทย")).toEqual(["กะเทย"]);
+
+    expect(isWordMisspelled("แหมว")).toBe(true);
+    expect(getSpellingSuggestions("แหมว")).toEqual(["แมว"]);
+
+    expect(isWordMisspelled("แอปพลิเคชั่น")).toBe(true);
+    expect(getSpellingSuggestions("แอปพลิเคชั่น")).toEqual(["แอปพลิเคชัน"]);
+
+    expect(isWordMisspelled("แอพพลิเคชัน")).toBe(true);
+    expect(getSpellingSuggestions("แอพพลิเคชัน")).toEqual(["แอปพลิเคชัน"]);
+
+    expect(isWordMisspelled("เต้นท์")).toBe(true);
+    expect(getSpellingSuggestions("เต้นท์")).toEqual(["เต็นท์"]);
+
+    expect(isWordMisspelled("คฑา")).toBe(true);
+    expect(getSpellingSuggestions("คฑา")).toEqual(["คทา"]);
   });
 });

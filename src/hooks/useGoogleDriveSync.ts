@@ -47,8 +47,8 @@ export function useGoogleDriveSync() {
     syncEngine.setRootFolderName(name);
   }, []);
 
-  const triggerSync = useCallback((notes?: Note[], onNotesUpdated?: (notes: Note[]) => void) => {
-    syncEngine.triggerFullSync(notes, onNotesUpdated);
+  const triggerSync = useCallback((notes?: Note[], onNotesUpdated?: (notes: Note[]) => void, folderPaths?: string[]) => {
+    syncEngine.triggerFullSync(notes, onNotesUpdated, folderPaths);
   }, []);
 
   const setRootDirHandle = useCallback((handle: FileSystemDirectoryHandle | null) => {

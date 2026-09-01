@@ -235,12 +235,12 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       <div className="w-full max-w-[540px] flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-200">
         {/* App Logo & Title Branding */}
         <div className="flex flex-col items-center text-center gap-2 mb-1">
-          <img src={lunoLogo} alt="Luno Logo" className="h-16 w-16 object-contain select-none drop-shadow-sm" />
+          <img src={lunoLogo} alt="Luno Logo" className="h-16 w-16 object-contain select-none drop-shadow-sm luno-app-logo" />
           <h1 className="font-krona text-2xl md:text-3xl font-semibold tracking-tight text-foreground">
             Luno
           </h1>
           <p className="text-xs text-muted-foreground font-medium">
-            Version 1.0.0
+            Version 1.1.0
           </p>
         </div>
 

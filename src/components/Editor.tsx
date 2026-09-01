@@ -5,7 +5,7 @@ import VersionHistorySplitDiffView from "@/components/VersionHistorySplitDiffVie
 import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHistoryStorage";
 import { AnimatePresence } from "framer-motion";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, THAI_SPELL_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
   Check,
@@ -149,6 +149,7 @@ import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import { EditorState, TextSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { InputRule, inputRules } from "@tiptap/pm/inputrules";
 import Image from "@tiptap/extension-image";
 import ImageNodeView from "@/components/editor/ImageNodeView";
 import Link from "@tiptap/extension-link";
@@ -496,6 +497,9 @@ export const HashtagDecoration = Extension.create({
             return createHashtagDecorations(doc, options.theme, options.tagColorStyle);
           },
           apply(tr, oldState) {
+            if (tr.getMeta(hashtagPluginKey)?.recompute) {
+              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
+            }
             if (!tr.docChanged) return oldState;
             if (!oldState || tr.steps.length === 0) {
               return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
@@ -565,6 +569,9 @@ const THAI_CHAR_TEST = /[\u0E00-\u0E7F]/;
 function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet {
   if (!enabled) return DecorationSet.empty;
   const decorations: Decoration[] = [];
+  const thaiSpellRegex = getThaiSpellRegex();
+  const thaiAnomalyRegex = getThaiAnomalyRegex();
+  const latinSpellRegex = /[A-Za-z']+/g;
 
   doc.descendants((node: any, pos: number) => {
     if (
@@ -579,11 +586,11 @@ function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet 
     if (node.isText && node.text) {
       const text = node.text;
 
-      // 1. Thai Misspellings check via single precompiled regex
+      // 1. Thai Misspellings & Typographical Anomalies check
       if (THAI_CHAR_TEST.test(text)) {
-        THAI_SPELL_REGEX.lastIndex = 0;
+        thaiSpellRegex.lastIndex = 0;
         let match: RegExpExecArray | null;
-        while ((match = THAI_SPELL_REGEX.exec(text)) !== null) {
+        while ((match = thaiSpellRegex.exec(text)) !== null) {
           const misspelled = match[0];
           const from = pos + match.index;
           const to = from + misspelled.length;
@@ -594,12 +601,25 @@ function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet 
             })
           );
         }
+
+        thaiAnomalyRegex.lastIndex = 0;
+        while ((match = thaiAnomalyRegex.exec(text)) !== null) {
+          const anomaly = match[0];
+          const from = pos + match.index;
+          const to = from + anomaly.length;
+          decorations.push(
+            Decoration.inline(from, to, {
+              class: "luno-spell-error",
+              "data-spell-word": anomaly,
+            })
+          );
+        }
       }
 
       // 2. English words check
-      LATIN_SPELL_REGEX.lastIndex = 0;
+      latinSpellRegex.lastIndex = 0;
       let match: RegExpExecArray | null;
-      while ((match = LATIN_SPELL_REGEX.exec(text)) !== null) {
+      while ((match = latinSpellRegex.exec(text)) !== null) {
         const word = match[0];
         if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
           if (isWordMisspelled(word)) {
@@ -630,88 +650,18 @@ export const SpellCheckDecoration = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    const options = this.options;
+    const extension = this;
     return [
       new Plugin({
         key: spellCheckPluginKey,
         state: {
           init(_, { doc }) {
-            return createSpellCheckDecorations(doc, options.enabled);
+            return createSpellCheckDecorations(doc, extension.options.enabled);
           },
           apply(tr, oldState) {
-            if (!options.enabled) return DecorationSet.empty;
+            if (!extension.options.enabled) return DecorationSet.empty;
             if (!tr.docChanged) return oldState;
-            if (!oldState || tr.steps.length === 0) {
-              return createSpellCheckDecorations(tr.doc, options.enabled);
-            }
-            try {
-              let set = oldState.map(tr.mapping, tr.doc);
-              for (const step of tr.steps) {
-                step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
-                  const safeStart = Math.min(newStart, tr.doc.content.size);
-                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
-                  const $from = tr.doc.resolve(safeStart);
-                  const $to = tr.doc.resolve(safeEnd);
-                  const start = $from.start();
-                  const end = $to.end();
-                  set = set.remove(set.find(start, end));
-                  const newDecos: Decoration[] = [];
-                  const parentNode = $from.parent;
-                  parentNode.descendants((child: any, childPos: number) => {
-                    if (
-                      child.type.name === "codeBlock" ||
-                      child.type.name === "codeBlockLowlight" ||
-                      child.type.name === "mathBlock" ||
-                      child.type.name === "image"
-                    ) {
-                      return false;
-                    }
-                    if (child.isText && child.text) {
-                      const text = child.text;
-                      const absPos = start + childPos;
-                      if (THAI_CHAR_TEST.test(text)) {
-                        THAI_SPELL_REGEX.lastIndex = 0;
-                        let match: RegExpExecArray | null;
-                        while ((match = THAI_SPELL_REGEX.exec(text)) !== null) {
-                          const misspelled = match[0];
-                          const from = absPos + match.index;
-                          const to = from + misspelled.length;
-                          newDecos.push(
-                            Decoration.inline(from, to, {
-                              class: "luno-spell-error",
-                              "data-spell-word": misspelled,
-                            })
-                          );
-                        }
-                      }
-                      LATIN_SPELL_REGEX.lastIndex = 0;
-                      let match: RegExpExecArray | null;
-                      while ((match = LATIN_SPELL_REGEX.exec(text)) !== null) {
-                        const word = match[0];
-                        if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
-                          if (isWordMisspelled(word)) {
-                            const from = absPos + match.index;
-                            const to = from + word.length;
-                            newDecos.push(
-                              Decoration.inline(from, to, {
-                                class: "luno-spell-error",
-                                "data-spell-word": word,
-                              })
-                            );
-                          }
-                        }
-                      }
-                    }
-                  });
-                  if (newDecos.length > 0) {
-                    set = set.add(tr.doc, newDecos);
-                  }
-                });
-              }
-              return set;
-            } catch {
-              return createSpellCheckDecorations(tr.doc, options.enabled);
-            }
+            return createSpellCheckDecorations(tr.doc, extension.options.enabled);
           },
         },
         props: {
@@ -818,6 +768,95 @@ export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>(
         },
       }),
     ];
+  },
+});
+
+export interface SmartTypographyOptions {
+  enabled: boolean;
+}
+
+function makeSmartRule(
+  match: RegExp,
+  replacement: string,
+  isEnabled: () => boolean
+): InputRule {
+  return new InputRule(
+    match,
+    (state, matchArr, start, end) => {
+      if (!isEnabled()) return null;
+      let insert = replacement;
+      if (matchArr[1]) {
+        const offset = matchArr[0].lastIndexOf(matchArr[1]);
+        insert += matchArr[0].slice(offset + matchArr[1].length);
+        start += offset;
+        const cutOff = start - end;
+        if (cutOff > 0) {
+          insert = matchArr[0].slice(offset - cutOff, offset) + insert;
+          start = end;
+        }
+      }
+      return state.tr.insertText(insert, start, end);
+    },
+    { inCodeMark: false, inCode: false }
+  );
+}
+
+function buildSmartTypographyRules(isEnabled: () => boolean): InputRule[] {
+  return [
+    // 1. Em-dash: '---' or when adding third dash after en-dash '–-'
+    makeSmartRule(/(?:^|[^\-])(---)$/, "—", isEnabled),
+    makeSmartRule(/(–-)$/, "—", isEnabled),
+
+    // 2. En-dash: '--'
+    makeSmartRule(/(?:^|[^\-])(--)$/, "–", isEnabled),
+
+    // 3. Ellipsis: '...' -> '…'
+    makeSmartRule(/(\.\.\.)$/, "…", isEnabled),
+
+    // 4. Smart Double Quotes:
+    // Opening quote: after space, start of line, or open brackets/quotes
+    makeSmartRule(/(?:^|[\s\{\[\(\<'"\u2018\u201C])(")$/, "“", isEnabled),
+    // Closing quote: after any non-whitespace
+    makeSmartRule(/(")$/, "”", isEnabled),
+
+    // 5. Smart Single Quotes & Apostrophe:
+    // Opening single quote: after space, start of line, or open brackets/quotes
+    makeSmartRule(/(?:^|[\s\{\[\(\<'"\u2018\u201C])(')$/, "‘", isEnabled),
+    // Closing single quote / apostrophe: after any character
+    makeSmartRule(/(')$/, "’", isEnabled),
+
+    // 6. Arrows:
+    makeSmartRule(/(?:^|\s)(->)$/, "→", isEnabled),
+    makeSmartRule(/(?:^|\s)(<-)$/, "←", isEnabled),
+    makeSmartRule(/(?:^|\s)(=>)$/, "⇒", isEnabled),
+
+    // 7. Symbols:
+    makeSmartRule(/(\(c\))$/i, "©", isEnabled),
+    makeSmartRule(/(\(r\))$/i, "®", isEnabled),
+    makeSmartRule(/(\(tm\))$/i, "™", isEnabled),
+    makeSmartRule(/(?:^|\s)(\+-)$/, "±", isEnabled),
+    makeSmartRule(/(?:^|\s)(!=)$/, "≠", isEnabled),
+
+    // 8. Fractions:
+    makeSmartRule(/(?:^|\s)(1\/2)$/, "½", isEnabled),
+    makeSmartRule(/(?:^|\s)(1\/4)$/, "¼", isEnabled),
+    makeSmartRule(/(?:^|\s)(3\/4)$/, "¾", isEnabled),
+  ];
+}
+
+export const SmartTypography = Extension.create<SmartTypographyOptions>({
+  name: "smartTypography",
+
+  addOptions() {
+    return {
+      enabled: true,
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const extension = this;
+    const rules = buildSmartTypographyRules(() => Boolean(extension.options.enabled));
+    return [inputRules({ rules })];
   },
 });
 
@@ -3306,12 +3345,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   }, [bringClockToFront]);
 
-  const { settings, updateSetting, resetSettings } = useAppSettings();
+  const { settings, updateSetting, resetSettings, keyboardLanguage, toggleKeyboardLanguage } = useAppSettings();
   const spellCheckEnabled = settings.spellCheck !== false;
   const settingsRef = useRef(settings);
+  const keyboardLanguageRef = useRef(keyboardLanguage);
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+  useEffect(() => {
+    keyboardLanguageRef.current = keyboardLanguage;
+  }, [keyboardLanguage]);
 
   useEffect(() => {
     if (note) {
@@ -4196,6 +4239,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       InlineCodeHighlight.configure({
         enabled: settings.highlightInlineCode === true,
       }),
+      SmartTypography.configure({
+        enabled: settings.smartTypography !== false,
+      }),
       Underline,
       Highlight,
       Superscript,
@@ -4259,12 +4305,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         },
       }).configure({
         openOnClick: false,
-        autolink: false,
+        autolink: settings.smartTypography !== false,
         validate: () => true,
         HTMLAttributes: {
           class: "text-primary underline underline-offset-4",
           rel: "noopener noreferrer nofollow",
-          target: "_blank",
         },
       }),
       Image.extend({
@@ -4429,9 +4474,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (href.startsWith("http://") || href.startsWith("https://")) {
             if (onOpenWebTab) {
               onOpenWebTab(href);
+            } else if (window.electronAPI?.openExternal) {
+              void window.electronAPI.openExternal(href);
             } else {
               window.open(href, "_blank", "noopener,noreferrer");
             }
+          } else if (window.electronAPI?.openExternal) {
+            void window.electronAPI.openExternal(href);
           } else {
             window.open(href, "_blank", "noopener,noreferrer");
           }
@@ -4815,6 +4864,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
+    // 4.5. Check Thai structural typing anomalies (double vowels, fake sara-ae, repeated tone marks)
+    THAI_STRUCTURAL_ANOMALY_REGEX.lastIndex = 0;
+    let anomalyMatch: RegExpExecArray | null;
+    while ((anomalyMatch = THAI_STRUCTURAL_ANOMALY_REGEX.exec(parentText)) !== null) {
+      const start = anomalyMatch.index;
+      const end = anomalyMatch.index + anomalyMatch[0].length;
+      if (offsetInParent >= start - 1 && offsetInParent <= end + 1) {
+        const anomaly = anomalyMatch[0];
+        const suggestions = getSpellingSuggestions(anomaly);
+        if (suggestions.length > 0) {
+          setContextSpellData({
+            word: anomaly,
+            suggestions,
+            from: parentStartPos + start,
+            to: parentStartPos + end,
+          });
+          return;
+        }
+      }
+    }
+
     // 5. English / latin word regex boundary around offset
     const latinWordRegex = /[A-Za-z0-9_']+/g;
     let match: RegExpExecArray | null;
@@ -5044,6 +5114,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     });
   }, [editor, editorTick, settings.showCodeLineNumbers, note?.content]);
+
+  // Dynamically update Hashtag badges when theme or tagColorStyle changes in settings
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    try {
+      const ext = editor.extensionManager.extensions.find((e) => e.name === "hashtagDecoration");
+      if (ext) {
+        ext.options.theme = settings.theme;
+        ext.options.tagColorStyle = settings.tagColorStyle;
+        const tr = editor.state.tr.setMeta(hashtagPluginKey, { recompute: true });
+        editor.view.dispatch(tr);
+      }
+    } catch {}
+  }, [editor, settings.theme, settings.tagColorStyle]);
+
+  // Dynamically sync SmartTypography and autolink when changed in settings
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    try {
+      const linkExt = editor.extensionManager.extensions.find((e) => e.name === "link");
+      if (linkExt) {
+        linkExt.options.autolink = settings.smartTypography !== false;
+      }
+      const typoExt = editor.extensionManager.extensions.find((e) => e.name === "smartTypography");
+      if (typoExt) {
+        typoExt.options.enabled = settings.smartTypography !== false;
+      }
+    } catch {}
+  }, [editor, settings.smartTypography]);
 
   useEffect(() => {
     return () => {
@@ -7699,7 +7798,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
-          {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (note.contentFormat === 'markdown' || note.contentFormat === 'plain'))) ? (() => {
+          {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
               group: "history" | "heading" | "inline" | "list" | "block" | "media" | "ai";
@@ -9225,6 +9324,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             targetEl.classList.remove("bg-primary/20");
                           }, 1200);
                         }
+                      } else if (href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:") || href.startsWith("tel:"))) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (href.startsWith("http://") || href.startsWith("https://")) {
+                          if (onOpenWebTab) {
+                            onOpenWebTab(href);
+                          } else if (window.electronAPI?.openExternal) {
+                            void window.electronAPI.openExternal(href);
+                          } else {
+                            window.open(href, "_blank", "noopener,noreferrer");
+                          }
+                        } else if (window.electronAPI?.openExternal) {
+                          void window.electronAPI.openExternal(href);
+                        } else {
+                          window.open(href, "_blank", "noopener,noreferrer");
+                        }
                       }
                     }}
                   />
@@ -9496,6 +9611,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </TooltipContent>
               </Tooltip>
 
+              <div className="h-3 w-[1px] bg-border/60" />
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-muted-foreground font-normal cursor-default hover:text-foreground transition-colors px-1">
@@ -9520,6 +9637,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {t("editor.lineEndingToggle", { lineEnding })}
+                </TooltipContent>
+              </Tooltip>
+
+              <div className="h-3 w-[1px] bg-border/60" />
+
+              {/* Keyboard Input Language Indicator: EN / ไทย (View-only indicator) */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground select-none font-normal leading-none cursor-default"
+                  >
+                    <span>
+                      {settings.language === "th"
+                        ? keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"
+                        : keyboardLanguage === "th" ? "TH" : "EN"}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  <p className="font-semibold">
+                    {settings.language === "th"
+                      ? `แป้นพิมพ์: ${keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"}`
+                      : `Keyboard: ${keyboardLanguage === "th" ? "TH" : "EN"}`}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {settings.language === "th"
+                      ? "สลับภาษา: Win+Spacebar"
+                      : "Switch: Win+Spacebar"}
+                  </p>
                 </TooltipContent>
               </Tooltip>
 

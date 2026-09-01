@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
-import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X } from "lucide-react";
+import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X, LayoutTemplate } from "lucide-react";
 import { marked } from "marked";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import { preprocessMarkdownForEditor } from "@/components/Editor";
@@ -32,7 +32,7 @@ export interface TemplateItemDef {
 }
 
 const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
-  // 1. Markdown (.md) - 6 items
+  // 1. Markdown (.md) - 8 items
   {
     type: "daily",
     titleEn: "Daily Note",
@@ -44,6 +44,18 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     category: "daily",
     icon: "lucide:Calendar",
     color: "#10b981",
+  },
+  {
+    type: "weekly-review",
+    titleEn: "Weekly Review",
+    titleTh: "สรุปประจำสัปดาห์",
+    descEn: "Review progress, lessons and plan next week",
+    descTh: "ทบทวนผลงาน สรุปบทเรียน และวางแผนสัปดาห์ถัดไป",
+    format: "markdown",
+    formatExt: "md",
+    category: "work",
+    icon: "lucide:CalendarCheck",
+    color: "#0ea5e9",
   },
   {
     type: "todo",
@@ -94,6 +106,18 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     color: "#f43f5e",
   },
   {
+    type: "book-notes",
+    titleEn: "Book Notes",
+    titleTh: "สรุปหนังสือ",
+    descEn: "Key takeaways, quotes & actionable insights",
+    descTh: "สรุปใจความสำคัญ คำคม และบทเรียนจากหนังสือ",
+    format: "markdown",
+    formatExt: "md",
+    category: "daily",
+    icon: "lucide:Bookmark",
+    color: "#a855f7",
+  },
+  {
     type: "bug",
     titleEn: "Bug Report",
     titleTh: "รายงานปัญหา",
@@ -106,7 +130,7 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     color: "#ef4444",
   },
 
-  // 2. HTML (.html) - 5 items
+  // 2. HTML (.html) - 7 items
   {
     type: "basic-website",
     titleEn: "Basic Website",
@@ -167,8 +191,32 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     icon: "lucide:LayoutDashboard",
     color: "#06b6d4",
   },
+  {
+    type: "documentation",
+    titleEn: "Documentation",
+    titleTh: "เอกสารคู่มือ",
+    descEn: "API reference & developer docs layout",
+    descTh: "หน้าเอกสารคู่มือ API และการใช้งาน",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:FileCode",
+    color: "#6366f1",
+  },
+  {
+    type: "link-tree",
+    titleEn: "Link in Bio",
+    titleTh: "รวมลิงก์โปรไฟล์",
+    descEn: "Mobile-friendly social link aggregator",
+    descTh: "หน้ารวมลิงก์ผลงานและโซเชียลมีเดีย",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:Share2",
+    color: "#ec4899",
+  },
 
-  // 3. Plain Text (.txt) - 5 items
+  // 3. Plain Text (.txt) - 7 items
   {
     type: "notes",
     titleEn: "Quick Notes",
@@ -218,6 +266,18 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     color: "#10b981",
   },
   {
+    type: "work-log",
+    titleEn: "Work Log",
+    titleTh: "บันทึกเวลาทำงาน",
+    descEn: "Daily time tracking and task logging",
+    descTh: "บันทึกเวลาและงานที่ทำประจำวัน",
+    format: "plain",
+    formatExt: "txt",
+    category: "work",
+    icon: "lucide:Clock",
+    color: "#14b8a6",
+  },
+  {
     type: "readme",
     titleEn: "README",
     titleTh: "เอกสาร README",
@@ -228,6 +288,18 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     category: "work",
     icon: "lucide:BookOpen",
     color: "#6366f1",
+  },
+  {
+    type: "changelog",
+    titleEn: "Changelog",
+    titleTh: "บันทึกการเปลี่ยนแปลง",
+    descEn: "Version history, updates and fixes",
+    descTh: "ประวัติเวอร์ชันและการปรับปรุง",
+    format: "plain",
+    formatExt: "txt",
+    category: "work",
+    icon: "lucide:History",
+    color: "#f97316",
   },
 ];
 
@@ -250,6 +322,67 @@ export default function TemplatesView({
   const [iframeKey, setIframeKey] = useState(0);
   const [copied, setCopied] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [containerHeight, setContainerHeight] = useState<number>(0);
+
+  // Monitor preview viewport container size for responsive iframe scaling
+  useEffect(() => {
+    if (!previewContainerRef.current) return;
+    const el = previewContainerRef.current;
+    const updateSize = () => {
+      if (el) {
+        setContainerWidth(el.clientWidth);
+        setContainerHeight(el.clientHeight);
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [previewItem, previewTab, deviceMode]);
+
+  const deviceViewport = useMemo(() => {
+    const pad = 16;
+    const availW = Math.max((containerWidth || 720) - pad, 280);
+    const availH = Math.max((containerHeight || 450) - pad, 200);
+
+    if (deviceMode === "mobile") {
+      const targetW = 375;
+      const scale = availW < targetW ? availW / targetW : 1;
+      return {
+        targetW,
+        scale,
+        wrapperW: `${targetW * scale}px`,
+        wrapperH: `${availH}px`,
+        iframeH: `${availH / scale}px`,
+        isScaled: scale < 1,
+      };
+    }
+
+    if (deviceMode === "tablet") {
+      const targetW = 768;
+      const scale = availW < targetW ? availW / targetW : 1;
+      return {
+        targetW,
+        scale,
+        wrapperW: `${targetW * scale}px`,
+        wrapperH: `${availH}px`,
+        iframeH: `${availH / scale}px`,
+        isScaled: scale < 1,
+      };
+    }
+
+    // desktop: 100%
+    return {
+      targetW: 0,
+      scale: 1,
+      wrapperW: "100%",
+      wrapperH: "100%",
+      iframeH: "100%",
+      isScaled: false,
+    };
+  }, [deviceMode, containerWidth, containerHeight]);
 
   const renderIcon = (key: string, cls = "h-4 w-4") => {
     const IconComp = getToolbarIcon(key, pack);
@@ -286,15 +419,38 @@ export default function TemplatesView({
   const categories = useMemo(
     () => [
       { id: "all", label: isTh ? "ทั้งหมด" : "All" },
-      { id: "md", label: "Markdown (.md)" },
-      { id: "html", label: "HTML (.html)" },
-      { id: "txt", label: isTh ? "ข้อความ (.txt)" : "Text (.txt)" },
+      { id: "md", label: "Markdown" },
+      { id: "html", label: "HTML" },
+      { id: "txt", label: isTh ? "ข้อความ" : "Text" },
       { id: "work", label: isTh ? "งานและโครงการ" : "Work & Projects" },
       { id: "daily", label: isTh ? "ประจำวันและส่วนตัว" : "Daily & Personal" },
       { id: "web", label: isTh ? "เว็บไซต์และโค้ด" : "Web & Code" },
     ],
     [isTh]
   );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: TEMPLATE_DEFINITIONS.length,
+      md: 0,
+      html: 0,
+      txt: 0,
+      work: 0,
+      daily: 0,
+      web: 0,
+    };
+
+    TEMPLATE_DEFINITIONS.forEach((item) => {
+      if (item.formatExt === "md") counts.md++;
+      if (item.formatExt === "html") counts.html++;
+      if (item.formatExt === "txt") counts.txt++;
+      if (item.category === "work") counts.work++;
+      if (item.category === "daily") counts.daily++;
+      if (item.category === "web") counts.web++;
+    });
+
+    return counts;
+  }, []);
 
   const filterItem = (item: TemplateItemDef) => {
     if (selectedCategory === "md" && item.formatExt !== "md") return false;
@@ -462,9 +618,12 @@ export default function TemplatesView({
           {/* 1. Header Section (Matching HomeView Style) */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
             <div className="space-y-0.5">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                {isTh ? "เทมเพลตทั้งหมด" : "All Templates"}
-              </h1>
+              <div className="flex items-center gap-2">
+                <LayoutTemplate className="h-6 w-6 text-primary shrink-0" />
+                <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                  {isTh ? "เทมเพลตทั้งหมด" : "All Templates"}
+                </h1>
+              </div>
               <p className="text-xs text-muted-foreground">
                 {isTh
                   ? "เลือกเทมเพลตสำเร็จรูปเพื่อเริ่มต้นเขียนโน้ต ออกแบบหน้าเว็บ หรือจัดระเบียบงานได้ทันที"
@@ -510,6 +669,7 @@ export default function TemplatesView({
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
             {categories.map((cat) => {
               const isSelected = selectedCategory === cat.id;
+              const count = categoryCounts[cat.id] ?? 0;
               return (
                 <button
                   key={cat.id}
@@ -521,7 +681,7 @@ export default function TemplatesView({
                       : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
                   }`}
                 >
-                  {cat.label}
+                  {cat.label} ({count})
                 </button>
               );
             })}
@@ -614,7 +774,7 @@ export default function TemplatesView({
         {/* High-Fidelity Full-Featured Preview Dialog */}
         <Dialog open={Boolean(previewItem)} onOpenChange={(open) => !open && setPreviewItem(null)}>
           <DialogContent
-            className="w-[95vw] max-w-6xl h-[88vh] max-h-[88vh] rounded-2xl flex flex-col p-5 overflow-hidden bg-card border border-border shadow-2xl transition-all duration-200 [&>button:last-child]:hidden"
+            className="w-[94vw] max-w-4xl h-[78vh] max-h-[680px] rounded-2xl flex flex-col p-4 sm:p-5 overflow-hidden bg-card border border-border shadow-2xl transition-all duration-200 [&>button:last-child]:hidden"
           >
             {/* Header with Title & Preview Controls (Clean horizontal alignment) */}
             <DialogHeader className="shrink-0">
@@ -788,32 +948,58 @@ export default function TemplatesView({
                       </button>
                     </div>
 
-                    {/* Responsive Device Container */}
-                    <div className="flex-1 min-h-0 w-full flex items-center justify-center p-2 overflow-auto bg-muted/10">
-                      <div
-                        className={`h-full transition-all duration-300 shadow-md rounded-lg overflow-hidden border border-border/50 ${
-                          deviceMode === "mobile"
-                            ? "w-[375px]"
-                            : deviceMode === "tablet"
-                            ? "w-[768px]"
-                            : "w-full"
-                        }`}
-                      >
-                        <iframe
-                          key={iframeKey}
-                          title="Live HTML Preview"
-                          srcDoc={previewContent}
-                          sandbox="allow-scripts allow-same-origin"
-                          className="w-full h-full border-0 bg-white"
-                        />
-                      </div>
+                    {/* Responsive Device Container with High-Fidelity Exact Viewport Simulation */}
+                    <div
+                      ref={previewContainerRef}
+                      className="flex-1 min-h-0 w-full flex items-center justify-center p-2 overflow-hidden bg-muted/10"
+                    >
+                      {deviceMode === "desktop" ? (
+                        <div className="w-full h-full transition-all duration-300 shadow-md rounded-lg overflow-hidden border border-border/50 bg-white">
+                          <iframe
+                            key={iframeKey}
+                            title="Live HTML Preview"
+                            srcDoc={previewContent}
+                            sandbox="allow-scripts allow-same-origin"
+                            className="w-full h-full border-0 bg-white block"
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className="transition-all duration-300 shadow-md rounded-lg overflow-hidden border border-border/50 bg-white relative flex-shrink-0"
+                          style={{
+                            width: deviceViewport.wrapperW,
+                            height: deviceViewport.wrapperH,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${deviceViewport.targetW}px`,
+                              height: deviceViewport.iframeH,
+                              transform: deviceViewport.isScaled ? `scale(${deviceViewport.scale})` : undefined,
+                              transformOrigin: "top left",
+                            }}
+                          >
+                            <iframe
+                              key={iframeKey}
+                              title="Live HTML Preview"
+                              srcDoc={previewContent}
+                              sandbox="allow-scripts allow-same-origin"
+                              style={{
+                                width: `${deviceViewport.targetW}px`,
+                                height: deviceViewport.iframeH,
+                              }}
+                              className="border-0 bg-white block"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : previewItem?.format === "markdown" ? (
                   // 100% Editor-Matching Realistic Markdown Preview (Scrollbar on the far right edge)
                   <div className="flex-1 h-full overflow-y-auto w-full">
                     <div
-                      className="max-w-4xl mx-auto px-10 py-8 text-foreground leading-relaxed break-words [overflow-wrap:anywhere] outline-none select-text
+                      className="max-w-2xl mx-auto px-6 py-5 text-foreground leading-relaxed break-words [overflow-wrap:anywhere] outline-none select-text
                         [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
                         [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-foreground [&_h1]:my-0 [&_h1]:mb-3 [&_h1]:leading-tight [&_h1]:border-0
                         [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h2]:my-0 [&_h2]:mt-4 [&_h2]:mb-1
@@ -846,7 +1032,7 @@ export default function TemplatesView({
                   // Plain Text Formatting (Matching Plain Text Editor with scrollbar on the far right edge)
                   <div className="flex-1 h-full overflow-y-auto w-full">
                     <div
-                      className="max-w-4xl mx-auto px-10 py-8 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed selection:bg-primary/20"
+                      className="max-w-2xl mx-auto px-6 py-5 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed selection:bg-primary/20"
                       style={{
                         fontSize: settings?.fontSize ? `${settings.fontSize}px` : undefined,
                       }}
@@ -857,7 +1043,7 @@ export default function TemplatesView({
                 )
               ) : (
                 // Raw Source Code
-                <div className="flex-1 h-full overflow-auto p-6 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed bg-muted/40 selection:bg-primary/20">
+                <div className="flex-1 h-full overflow-auto p-4 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed bg-muted/40 selection:bg-primary/20">
                   {previewContent}
                 </div>
               )}

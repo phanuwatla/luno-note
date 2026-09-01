@@ -71,7 +71,7 @@ describe("useTabs with web viewer tabs", () => {
     expect(result.current.openTabIds).not.toContain("note-1");
   });
 
-  it("should restore web tabs from session", () => {
+  it("should restore web tabs from session", async () => {
     const notesRef = { current: [] as Note[] };
     localStorageMock.setItem(
       "notes-app-open-tab-paths",
@@ -81,8 +81,8 @@ describe("useTabs with web viewer tabs", () => {
 
     const { result } = renderHook(() => useTabs(notesRef));
 
-    act(() => {
-      result.current.restoreTabsFromSession([], true, "lastNote");
+    await act(async () => {
+      await result.current.restoreTabsFromSession([], true, "lastNote");
     });
 
     expect(result.current.openTabIds).toContain("web:https://vitejs.dev");
@@ -90,19 +90,19 @@ describe("useTabs with web viewer tabs", () => {
     expect(result.current.activeTabId).toBe("web:https://vitejs.dev");
   });
 
-  it("should open home by default on startup", () => {
+  it("should open home by default on startup", async () => {
     const notesRef = { current: [] as Note[] };
     const { result } = renderHook(() => useTabs(notesRef));
 
-    act(() => {
-      result.current.restoreTabsFromSession([], true, "home");
+    await act(async () => {
+      await result.current.restoreTabsFromSession([], true, "home");
     });
 
     expect(result.current.openTabIds).toContain("home");
     expect(result.current.activeTabId).toBe("home");
   });
 
-  it("should reset tabs when onStartup is blank", () => {
+  it("should reset tabs when onStartup is blank", async () => {
     const notesRef = { current: [] as Note[] };
     localStorageMock.setItem(
       "notes-app-open-tab-paths",
@@ -110,8 +110,8 @@ describe("useTabs with web viewer tabs", () => {
     );
     const { result } = renderHook(() => useTabs(notesRef));
 
-    act(() => {
-      result.current.restoreTabsFromSession([], true, "blank");
+    await act(async () => {
+      await result.current.restoreTabsFromSession([], true, "blank");
     });
 
     expect(result.current.openTabIds).toHaveLength(0);

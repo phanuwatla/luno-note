@@ -178,4 +178,38 @@ describe("useTrash Hook and helpers", () => {
     expect(result.current.trashedNotes.some((n) => n.id === "old-note")).toBe(false);
     expect(result.current.trashedNotes.some((n) => n.id === "recent-note")).toBe(true);
   });
+
+  it("handles image files with data URLs in trash and restore", () => {
+    const { result } = renderHook(() => useTrash());
+
+    const imgNote: Note = {
+      id: "img-1",
+      title: "photo.png",
+      fileName: "photo.png",
+      folderPath: "images",
+      fileType: "image",
+      content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    act(() => {
+      result.current.moveToTrash(imgNote);
+    });
+
+    expect(result.current.trashedNotes.length).toBe(1);
+    expect(result.current.trashedNotes[0].fileType).toBe("image");
+    expect(result.current.trashedNotes[0].content).toContain("data:image/png;base64");
+    expect(result.current.trashedNotes[0].originalFolderPath).toBe("images");
+
+    let restored: any[] = [];
+    act(() => {
+      restored = result.current.restoreFromTrash(["img-1"]);
+    });
+
+    expect(restored.length).toBe(1);
+    expect(restored[0].id).toBe("img-1");
+    expect(restored[0].content).toContain("data:image/png;base64");
+    expect(result.current.trashedNotes.length).toBe(0);
+  });
 });

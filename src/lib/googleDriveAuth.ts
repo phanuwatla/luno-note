@@ -149,12 +149,33 @@ export async function requestGoogleDriveAuth(customClientId?: string): Promise<{
   tokenInfo: GoogleTokenInfo;
   profile: GoogleUserProfile;
 }> {
-  await loadGsiScript();
   const clientId = customClientId || getStoredClientId();
 
   if (clientId.includes("placeholder")) {
     throw new Error("Invalid Client ID: Please set a valid Google OAuth Client ID in your .env file (VITE_GOOGLE_CLIENT_ID).");
   }
+
+  // 1. Electron Desktop: Use native loopback authentication via user's default browser
+  const electronAPI = (window as unknown as { electronAPI?: { googleOAuthLogin?: (clientId: string) => Promise<any> } })?.electronAPI;
+  if (electronAPI?.googleOAuthLogin) {
+    const result = await electronAPI.googleOAuthLogin(clientId);
+    if (result?.access_token) {
+      const expiresIn = Number(result.expires_in) || 3600;
+      const tokenInfo = saveTokenInfo(result.access_token, expiresIn, result.scope);
+      try {
+        const profile = await fetchGoogleUserProfile(result.access_token);
+        return { tokenInfo, profile };
+      } catch {
+        const fallbackProfile: GoogleUserProfile = { email: "user@drive.google.com" };
+        saveUserProfile(fallbackProfile);
+        return { tokenInfo, profile: fallbackProfile };
+      }
+    }
+    throw new Error("Failed to obtain Google access token");
+  }
+
+  // 2. Web Browser: Use Google Identity Services SDK
+  await loadGsiScript();
 
   return new Promise((resolve, reject) => {
     try {

@@ -559,7 +559,9 @@ export default function HomeView({
                             key={tag}
                             className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
                               tag,
-                              settings.theme
+                              settings.theme,
+                              undefined,
+                              settings.tagColorStyle
                             )}`}
                           >
                             {tag}
@@ -582,7 +584,7 @@ export default function HomeView({
             <div className="flex items-center justify-between pb-2 border-b border-border/30 shrink-0">
               <h3 className="text-xs font-semibold text-foreground flex items-center gap-2">
                 {renderIcon("star", "h-3.5 w-3.5 text-muted-foreground")}
-                {isTh ? "ไฟล์ที่ถูกใจ" : "Favorite Files"}
+                {isTh ? "รายการโปรด" : "Favorite Files"}
               </h3>
               <button
                 type="button"
@@ -606,7 +608,7 @@ export default function HomeView({
                       ? `ไม่พบไฟล์ที่ถูกใจที่ตรงกับ "${query}"`
                       : `No favorite files found matching "${query}"`
                     : isTh
-                    ? "ยังไม่มีไฟล์ที่ถูกใจ"
+                    ? "ยังไม่มีรายการโปรด"
                     : "No favorite files yet"}
                 </p>
               </div>
@@ -638,7 +640,9 @@ export default function HomeView({
                             key={tag}
                             className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
                               tag,
-                              settings.theme
+                              settings.theme,
+                              undefined,
+                              settings.tagColorStyle
                             )}`}
                           >
                             {tag}

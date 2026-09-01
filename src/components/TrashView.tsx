@@ -297,9 +297,12 @@ export default function TrashView({
           {/* 1. Header Section */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
             <div className="space-y-0.5 min-w-0">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">
-                {t("trash.title") || (isTh ? "ถังขยะ" : "Trash")}
-              </h1>
+              <div className="flex items-center gap-2">
+                <Trash2 className="h-6 w-6 text-primary shrink-0" />
+                <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">
+                  {t("trash.title") || (isTh ? "ถังขยะ" : "Trash")}
+                </h1>
+              </div>
               <p className="text-xs text-muted-foreground truncate">
                 {retentionDays > 0
                   ? (isTh

@@ -96,13 +96,38 @@ export default function FavoritesTabView({
   const formatCategories = useMemo(
     () => [
       { id: "all", label: isTh ? "ทั้งหมด" : "All" },
-      { id: "md", label: "Markdown (.md)" },
-      { id: "html", label: "HTML (.html)" },
-      { id: "txt", label: isTh ? "ข้อความ (.txt)" : "Text (.txt)" },
+      { id: "md", label: "Markdown" },
+      { id: "html", label: "HTML" },
+      { id: "txt", label: isTh ? "ข้อความ" : "Text" },
       { id: "image", label: isTh ? "รูปภาพ" : "Images" },
     ],
     [isTh]
   );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: favoriteNotes.length,
+      md: 0,
+      html: 0,
+      txt: 0,
+      image: 0,
+    };
+
+    favoriteNotes.forEach((note) => {
+      const name = note.fileName?.toLowerCase() || "";
+      const isMd = name.endsWith(".md") || name.endsWith(".markdown") || note.contentFormat === "markdown";
+      const isHtml = name.endsWith(".html") || name.endsWith(".htm") || note.contentFormat === "html";
+      const isTxt = name.endsWith(".txt") || note.contentFormat === "plain";
+      const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(name);
+
+      if (isMd) counts.md++;
+      if (isHtml) counts.html++;
+      if (isTxt) counts.txt++;
+      if (isImg) counts.image++;
+    });
+
+    return counts;
+  }, [favoriteNotes]);
 
   const filteredNotes = useMemo(() => {
     return favoriteNotes.filter((note) => {
@@ -165,9 +190,6 @@ export default function FavoritesTabView({
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   {isTh ? "โน้ตที่ติดดาว" : "Favorites"}
                 </h1>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                  {favoriteNotes.length}
-                </span>
               </div>
               <p className="text-xs text-muted-foreground">
                 {isTh
@@ -214,6 +236,7 @@ export default function FavoritesTabView({
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
             {formatCategories.map((cat) => {
               const isSelected = selectedFormat === cat.id;
+              const count = categoryCounts[cat.id] ?? 0;
               return (
                 <button
                   key={cat.id}
@@ -225,7 +248,7 @@ export default function FavoritesTabView({
                       : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
                   }`}
                 >
-                  {cat.label}
+                  {cat.label} ({count})
                 </button>
               );
             })}
@@ -371,7 +394,7 @@ export default function FavoritesTabView({
                             )}
                           </div>
 
-                          <span className="text-[10px] shrink-0 text-muted-foreground/70 font-mono">
+                          <span className="text-[10px] shrink-0 text-muted-foreground/70 font-normal">
                             {dateFormatted}
                           </span>
                         </div>

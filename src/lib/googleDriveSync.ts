@@ -9,6 +9,7 @@ import {
   trashDriveFile,
   cleanDriveDuplicates,
   syncLocalAttachmentsToDrive,
+  syncWorkspaceMediaAndFoldersToDrive,
   syncDriveAttachmentsToLocal,
   syncLocalLunoMetaToDrive,
   clearFolderPathCache,
@@ -243,6 +244,9 @@ class GoogleDriveSyncEngine {
 
       const newOrUpdatedNotes: Note[] = [...existingLocalNotes];
       let hasChanges = false;
+      const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif"]);
+      const BINARY_EXTS = new Set([".mp4", ".webm", ".mp3", ".wav", ".pdf", ".zip", ".tar", ".gz", ".docx", ".xlsx", ".pptx"]);
+      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
 
       for (const file of driveFiles) {
         const fileKey = `${(file.folderPath || "").toLowerCase()}/${file.name.toLowerCase()}`;
@@ -251,12 +255,66 @@ class GoogleDriveSyncEngine {
         const matchingNote = matchingByDriveId || matchingByName;
 
         const remoteTime = new Date(file.modifiedTime).getTime();
+        const dotIdx = file.name.lastIndexOf(".");
+        const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : "";
+        const isImage = IMAGE_EXTS.has(ext);
+        const isBinary = BINARY_EXTS.has(ext);
 
         if (!matchingNote) {
-          // Download new remote file
-          const content = await fetchDriveFileContent(tokenInfo.access_token, file.id);
-          const baseName = file.name.replace(/\.(md|txt|html)$/i, "");
-          const format = file.name.endsWith(".html") ? "html" : file.name.endsWith(".txt") ? "plain" : "markdown";
+          let content = "";
+          let format: "markdown" | "html" | "plain" = "markdown";
+
+          if (isImage || isBinary) {
+            format = "plain";
+            content = "";
+            // Download binary content to local workspace if available
+            try {
+              const resMedia = await fetch(`${BASE_URL}/files/${file.id}?alt=media`, {
+                headers: { Authorization: `Bearer ${tokenInfo.access_token}` },
+              });
+              if (resMedia.ok) {
+                const arrayBuffer = await resMedia.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+
+                // 1. Electron Desktop
+                if (this.electronWorkspacePath && electronAPI?.writeFileBase64) {
+                  let binaryStr = "";
+                  const CHUNK = 8192;
+                  for (let i = 0; i < bytes.length; i += CHUNK) {
+                    binaryStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+                  }
+                  const b64 = btoa(binaryStr);
+                  const fullPath = file.folderPath
+                    ? `${this.electronWorkspacePath}/${file.folderPath}/${file.name}`
+                    : `${this.electronWorkspacePath}/${file.name}`;
+                  await electronAPI.writeFileBase64({ fullPath, base64: b64 });
+                }
+
+                // 2. Web File System Access
+                if (this.rootDirHandle) {
+                  let dirHandle = this.rootDirHandle;
+                  if (file.folderPath) {
+                    const parts = file.folderPath.replace(/\\/g, "/").split("/").filter(Boolean);
+                    for (const p of parts) {
+                      dirHandle = await dirHandle.getDirectoryHandle(p, { create: true });
+                    }
+                  }
+                  const fileHandle = await dirHandle.getFileHandle(file.name, { create: true });
+                  const writable = await fileHandle.createWritable();
+                  await writable.write(new Blob([bytes]));
+                  await writable.close();
+                }
+              }
+            } catch (dlErr) {
+              console.warn(`Failed downloading binary file ${file.name}:`, dlErr);
+            }
+          } else {
+            // Download text/markdown file
+            content = await fetchDriveFileContent(tokenInfo.access_token, file.id);
+            format = file.name.endsWith(".html") ? "html" : file.name.endsWith(".txt") ? "plain" : "markdown";
+          }
+
+          const baseName = file.name.replace(/\.(md|txt|html|png|jpg|jpeg|gif|webp|svg|bmp|ico|pdf|mp4|mp3|zip)$/i, "");
           const newId = crypto.randomUUID();
           this.noteIdToDriveFileId.set(newId, file.id);
 
@@ -265,6 +323,7 @@ class GoogleDriveSyncEngine {
             title: baseName,
             content,
             fileName: file.name,
+            fileType: isImage ? "image" : isBinary ? "binary" : undefined,
             createdAt: remoteTime,
             updatedAt: remoteTime,
             driveFileId: file.id,
@@ -485,7 +544,8 @@ class GoogleDriveSyncEngine {
   // Sync ALL local notes to Google Drive
   public async syncAllNotes(
     notes: Note[],
-    onNotesUpdated?: (updatedNotes: Note[]) => void
+    onNotesUpdated?: (updatedNotes: Note[]) => void,
+    folderPaths?: string[]
   ): Promise<void> {
     const tokenInfo = getStoredTokenInfo();
     if (!tokenInfo || !isGoogleDriveConnected() || !navigator.onLine) {
@@ -497,16 +557,51 @@ class GoogleDriveSyncEngine {
     this.updateState({ status: "syncing" });
 
     try {
-      let structure = this.state.folderStructure;
-      if (!structure) {
-        structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
-        this.updateState({ folderStructure: structure });
+      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+
+      // 0. Ensure electronWorkspacePath and rootFolderName are populated before folder structure creation
+      if ((!this.electronWorkspacePath || !this.rootFolderName) && electronAPI?.getSavedWorkspace) {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath && !this.electronWorkspacePath) {
+            this.electronWorkspacePath = saved.folderPath;
+          }
+          if (saved?.folderName && !this.rootFolderName) {
+            this.rootFolderName = saved.folderName;
+          } else if (saved?.folderPath && !this.rootFolderName) {
+            this.rootFolderName = saved.folderPath.split(/[\\/]/).pop() || null;
+          }
+        } catch {
+          // ignore
+        }
       }
 
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId, structure.workspacesId || structure.rootId);
+      const activeWorkspaceName = this.rootFolderName || "Luno Notes";
+      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, activeWorkspaceName);
+      this.updateState({ folderStructure: structure });
 
-      // 1. Ensure ALL folder paths exist on Google Drive (even empty subfolders)
+      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId);
+      clearFolderPathCache();
+
+      // 1. Ensure ALL folder paths exist on Google Drive (including empty and image folders)
       const allFolderPaths = new Set<string>();
+
+      // A. Add folders from explicit folderPaths parameter
+      if (folderPaths && Array.isArray(folderPaths)) {
+        for (const fp of folderPaths) {
+          const clean = fp.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+          if (clean && !clean.startsWith(".luno") && !clean.startsWith("attachments")) {
+            const parts = clean.split("/").filter(Boolean);
+            let cur = "";
+            for (const p of parts) {
+              cur = cur ? `${cur}/${p}` : p;
+              allFolderPaths.add(cur);
+            }
+          }
+        }
+      }
+
+      // B. Add folders from all notes (text notes + image/binary files)
       notes.forEach((n) => {
         if (n.folderPath && n.folderPath.trim()) {
           const fp = n.folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
@@ -521,9 +616,128 @@ class GoogleDriveSyncEngine {
         }
       });
 
-      for (const fp of allFolderPaths) {
+      const BINARY_IMAGE_EXTS = new Set([
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif",
+        ".mp4", ".webm", ".mp3", ".wav", ".pdf", ".zip", ".tar", ".gz", ".docx", ".xlsx", ".pptx",
+      ]);
+
+      const diskDiscoveredBinaryNotes: Note[] = [];
+      const existingBinaryKeys = new Set(
+        notes
+          .filter((n) => n.fileName)
+          .map((n) => `${(n.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase()}/${(n.fileName || "").toLowerCase()}`)
+      );
+
+      // C. In Electron Desktop, discover all subfolders and media files directly from disk via readWorkspaceTree or readDirectoryFiles
+      if (this.electronWorkspacePath && electronAPI?.readWorkspaceTree) {
+        try {
+          const tree = await electronAPI.readWorkspaceTree(this.electronWorkspacePath);
+          if (tree?.folderPaths && Array.isArray(tree.folderPaths)) {
+            for (const fp of tree.folderPaths) {
+              const clean = fp.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").trim();
+              if (clean && !clean.startsWith(".luno") && !clean.startsWith("attachments")) {
+                const parts = clean.split("/").filter(Boolean);
+                let cur = "";
+                for (const p of parts) {
+                  cur = cur ? `${cur}/${p}` : p;
+                  allFolderPaths.add(cur);
+                }
+              }
+            }
+          }
+          if (tree?.entries && Array.isArray(tree.entries)) {
+            for (const entry of tree.entries) {
+              const lname = (entry.fileName || "").toLowerCase();
+              const dotIdx = lname.lastIndexOf(".");
+              const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
+              if (BINARY_IMAGE_EXTS.has(ext)) {
+                const cleanFp = (entry.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                const key = `${cleanFp.toLowerCase()}/${lname}`;
+                if (!existingBinaryKeys.has(key)) {
+                  existingBinaryKeys.add(key);
+                  const newId = crypto.randomUUID();
+                  diskDiscoveredBinaryNotes.push({
+                    id: newId,
+                    title: entry.fileName,
+                    content: "",
+                    fileName: entry.fileName,
+                    folderPath: cleanFp || undefined,
+                    fileType: ext.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff|avif)$/i) ? "image" : "binary",
+                    createdAt: entry.createdAt || Date.now(),
+                    updatedAt: entry.updatedAt || Date.now(),
+                    ...(entry.fullPath ? { fullPath: entry.fullPath } as any : {}),
+                  });
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore tree read errors
+        }
+      } else if (this.electronWorkspacePath && electronAPI?.readDirectoryFiles) {
+        const scanDiskFolders = async (dir: string, rel: string) => {
+          try {
+            const items: Array<{ name: string; fullPath: string; isDirectory: boolean }> =
+              await electronAPI.readDirectoryFiles(dir);
+            for (const it of items) {
+              const lname = it.name.toLowerCase();
+              if (
+                lname.startsWith(".") ||
+                lname === "node_modules" ||
+                lname === "attachments" ||
+                lname === "dist" ||
+                lname === "build" ||
+                lname === ".git"
+              ) {
+                continue;
+              }
+              if (it.isDirectory) {
+                const subRel = rel ? `${rel}/${it.name}` : it.name;
+                allFolderPaths.add(subRel);
+                await scanDiskFolders(it.fullPath, subRel);
+              } else {
+                const dotIdx = lname.lastIndexOf(".");
+                const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
+                if (BINARY_IMAGE_EXTS.has(ext)) {
+                  const cleanFp = rel.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                  const key = `${cleanFp.toLowerCase()}/${lname}`;
+                  if (!existingBinaryKeys.has(key)) {
+                    existingBinaryKeys.add(key);
+                    const newId = crypto.randomUUID();
+                    diskDiscoveredBinaryNotes.push({
+                      id: newId,
+                      title: it.name,
+                      content: "",
+                      fileName: it.name,
+                      folderPath: cleanFp || undefined,
+                      fileType: ext.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff|avif)$/i) ? "image" : "binary",
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                      ...(it.fullPath ? { fullPath: it.fullPath } as any : {}),
+                    });
+                  }
+                }
+              }
+            }
+          } catch {
+            // ignore directory read errors
+          }
+        };
+        await scanDiskFolders(this.electronWorkspacePath, "");
+      }
+
+      // Sort all folder paths shallowest first so parent folders are always ensured before children
+      const sortedFolderPaths = Array.from(allFolderPaths).sort((a, b) => {
+        const depthA = a.split("/").length;
+        const depthB = b.split("/").length;
+        if (depthA !== depthB) return depthA - depthB;
+        return a.localeCompare(b);
+      });
+
+      for (const fp of sortedFolderPaths) {
         try {
           await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+          await new Promise((r) => setTimeout(r, 60));
         } catch (err) {
           console.warn(`Failed ensuring Drive folder path ${fp}:`, err);
         }
@@ -539,7 +753,15 @@ class GoogleDriveSyncEngine {
         );
       }
 
-      // 2. Sync all local metadata files in .luno/ (workspace.json, settings.json, etc.) to Google Drive
+      // 2. Sync all local workspace subfolders and media files directly from disk to Google Drive
+      await syncWorkspaceMediaAndFoldersToDrive(
+        tokenInfo.access_token,
+        structure.projectId,
+        this.electronWorkspacePath,
+        this.rootDirHandle
+      );
+
+      // 3. Sync all local metadata files in .luno/ (workspace.json, settings.json, etc.) to Google Drive
       if (structure.lunoMetaId) {
         await syncLocalLunoMetaToDrive(
           tokenInfo.access_token,
@@ -568,17 +790,21 @@ class GoogleDriveSyncEngine {
         return true;
       });
 
-      const binaryNotes = notes.filter((n) => {
-        if (n.fileType === "image" || n.fileType === "binary") return true;
-        const fp = (n.folderPath || "").toLowerCase();
-        if (fp === "attachments" || fp.startsWith("attachments/")) return true;
-        return false;
-      });
+      const binaryNotes = [
+        ...notes.filter((n) => {
+          if (n.fileType === "image" || n.fileType === "binary") return true;
+          const fp = (n.folderPath || "").toLowerCase();
+          if (fp === "attachments" || fp.startsWith("attachments/")) return true;
+          return false;
+        }),
+        ...diskDiscoveredBinaryNotes,
+      ];
 
       const failedTextNotes: Note[] = [];
+      const failedBinaryNotes: Note[] = [];
 
       // 3. Process parallel chunks of text notes
-      const CHUNK_SIZE = 5;
+      const CHUNK_SIZE = 4;
       for (let i = 0; i < textNotes.length; i += CHUNK_SIZE) {
         const chunk = textNotes.slice(i, i + CHUNK_SIZE);
         await Promise.all(
@@ -613,7 +839,7 @@ class GoogleDriveSyncEngine {
           })
         );
         if (i + CHUNK_SIZE < textNotes.length) {
-          await new Promise((r) => setTimeout(r, 150));
+          await new Promise((r) => setTimeout(r, 200));
         }
       }
 
@@ -646,13 +872,14 @@ class GoogleDriveSyncEngine {
         }
       }
 
-      // 4. Process binary and image notes (including nested assets and attachments)
-      for (let i = 0; i < binaryNotes.length; i += CHUNK_SIZE) {
-        const chunk = binaryNotes.slice(i, i + CHUNK_SIZE);
+      // 4. Process binary and image notes (including nested assets and image folders)
+      const BINARY_CHUNK_SIZE = 3;
+      for (let i = 0; i < binaryNotes.length; i += BINARY_CHUNK_SIZE) {
+        const chunk = binaryNotes.slice(i, i + BINARY_CHUNK_SIZE);
         await Promise.all(
           chunk.map(async (note) => {
             try {
-              if (!note.fileName || !note.content) return;
+              if (!note.fileName) return;
               let targetFolderId = structure.projectId;
               const fp = (note.folderPath || "").trim();
               if (fp.toLowerCase().startsWith("attachments")) {
@@ -661,11 +888,47 @@ class GoogleDriveSyncEngine {
                 targetFolderId = await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
               }
 
+              let fileData: File | Blob | ArrayBuffer | Uint8Array | string = note.content;
+
+              // 1. Electron Desktop: read on-demand if empty
+              if ((!fileData || fileData === "") && this.electronWorkspacePath && electronAPI?.readFileBase64) {
+                const cleanFp = fp.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                const exactPath = (note as any).fullPath || (cleanFp
+                  ? `${this.electronWorkspacePath}/${cleanFp}/${note.fileName}`
+                  : `${this.electronWorkspacePath}/${note.fileName}`);
+                const b64 = await electronAPI.readFileBase64(exactPath);
+                if (b64) {
+                  fileData = b64;
+                }
+              }
+
+              // 2. Web File System Access API: read on-demand if empty
+              if ((!fileData || fileData === "") && this.rootDirHandle) {
+                try {
+                  let dirHandle = this.rootDirHandle;
+                  if (fp) {
+                    const parts = fp.replace(/\\/g, "/").split("/").filter(Boolean);
+                    for (const p of parts) {
+                      dirHandle = await dirHandle.getDirectoryHandle(p, { create: false });
+                    }
+                  }
+                  const fileHandle = await dirHandle.getFileHandle(note.fileName, { create: false });
+                  const file = await fileHandle.getFile();
+                  fileData = file;
+                } catch (readErr) {
+                  console.warn(`Could not read Web FS binary ${note.fileName}:`, readErr);
+                }
+              }
+
+              if (!fileData) return;
+
+              const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
               const uploaded = await uploadDriveAttachmentFile(
                 tokenInfo.access_token,
                 targetFolderId,
-                note.content,
-                note.fileName
+                fileData,
+                note.fileName,
+                targetDriveId
               );
 
               this.noteIdToDriveFileId.set(note.id, uploaded.id);
@@ -676,10 +939,59 @@ class GoogleDriveSyncEngine {
                 updated.driveSyncedAt = remoteTime;
               }
             } catch (err) {
-              console.warn(`Failed to sync binary file ${note.fileName}:`, err);
+              console.warn(`Failed to sync binary file ${note.fileName}, will retry:`, err);
+              failedBinaryNotes.push(note);
             }
           })
         );
+        if (i + BINARY_CHUNK_SIZE < binaryNotes.length) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+
+      // Retry any failed binary notes sequentially
+      for (const note of failedBinaryNotes) {
+        try {
+          if (!note.fileName) continue;
+          let targetFolderId = structure.projectId;
+          const fp = (note.folderPath || "").trim();
+          if (fp.toLowerCase().startsWith("attachments")) {
+            targetFolderId = structure.attachmentsId;
+          } else if (fp) {
+            targetFolderId = await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+          }
+
+          let fileData: File | Blob | ArrayBuffer | Uint8Array | string = note.content;
+          if ((!fileData || fileData === "") && this.electronWorkspacePath && electronAPI?.readFileBase64) {
+            const cleanFp = fp.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+            const exactPath = (note as any).fullPath || (cleanFp
+              ? `${this.electronWorkspacePath}/${cleanFp}/${note.fileName}`
+              : `${this.electronWorkspacePath}/${note.fileName}`);
+            const b64 = await electronAPI.readFileBase64(exactPath);
+            if (b64) fileData = b64;
+          }
+
+          if (!fileData) continue;
+
+          const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
+          const uploaded = await uploadDriveAttachmentFile(
+            tokenInfo.access_token,
+            targetFolderId,
+            fileData,
+            note.fileName,
+            targetDriveId
+          );
+
+          this.noteIdToDriveFileId.set(note.id, uploaded.id);
+          const remoteTime = new Date(uploaded.modifiedTime).getTime();
+          const updated = updatedNotesMap.get(note.id);
+          if (updated) {
+            updated.driveFileId = uploaded.id;
+            updated.driveSyncedAt = remoteTime;
+          }
+        } catch (retryErr) {
+          console.error(`Persistent failure syncing binary file ${note.fileName}:`, retryErr);
+        }
       }
 
       const updatedList = Array.from(updatedNotesMap.values());
@@ -702,13 +1014,9 @@ class GoogleDriveSyncEngine {
     }
   }
 
-  public triggerFullSync(notes?: Note[], onNotesUpdated?: (updatedNotes: Note[]) => void): void {
+  public triggerFullSync(notes?: Note[], onNotesUpdated?: (updatedNotes: Note[]) => void, folderPaths?: string[]): void {
     if (isGoogleDriveConnected() && navigator.onLine) {
-      if (notes && notes.length > 0) {
-        this.syncAllNotes(notes, onNotesUpdated);
-      } else {
-        this.initializeSync();
-      }
+      this.syncAllNotes(notes || [], onNotesUpdated, folderPaths);
     }
   }
 }

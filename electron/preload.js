@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   renameFileOrFolder: (data) => ipcRenderer.invoke("rename-file-or-folder", data),
   copyFileOrFolder: (data) => ipcRenderer.invoke("copy-file-or-folder", data),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
+  googleOAuthLogin: (clientId) => ipcRenderer.invoke("google-oauth-login", clientId),
   fetchTtsAudio: (data) => ipcRenderer.invoke("fetch-tts-audio", data),
   getOsUserInfo: () => ipcRenderer.invoke("get-os-user-info"),
   onWorkspaceChanged: (callback) => {
@@ -61,5 +62,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on("native-spell-suggestions", subscription);
     return () => ipcRenderer.removeListener("native-spell-suggestions", subscription);
+  },
+  getNativeKeyboardLanguage: () => ipcRenderer.invoke("get-native-keyboard-language"),
+  onNativeKeyboardLanguageChanged: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on("native-keyboard-language-changed", subscription);
+    return () => ipcRenderer.removeListener("native-keyboard-language-changed", subscription);
   },
 });

@@ -3,6 +3,8 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+const http = require("http");
+const url = require("url");
 const { getSpellingSuggestions } = require("./spellDictionary");
 
 const configPath = path.join(app.getPath("userData"), "workspace-config.json");
@@ -37,27 +39,58 @@ const IGNORED_SCAN_FOLDERS = new Set([
   ".luno",
 ]);
 
+function detectSystemLanguage() {
+  try {
+    const locale = (app.getLocale() || "").toLowerCase();
+    if (locale.startsWith("th")) {
+      return "th";
+    }
+  } catch {}
+  return "en";
+}
+
 const DEFAULT_WORKSPACE_SETTINGS = {
   editorFontSize: 15,
   sidebarWidth: 280,
   confirmBeforeDelete: true,
-  language: "en",
+  language: detectSystemLanguage(),
   fontFamily: "inter",
   editorFontFamily: "inter",
   theme: "emerald",
+  appearanceStyle: "default",
   colorScheme: "system",
   autoSave: true,
+  reopenTabs: true,
+  onStartup: "home",
+  checkUpdates: true,
+  dateFormat: "YYYY-MM-DD",
+  timeFormat: "24h",
+  startWeekOn: "monday",
+  enableAnimations: true,
+  sendUsageData: false,
+  trashRetentionDays: 30,
+  autoEmptyTrash: true,
   defaultExtension: "md",
   newFilePattern: "untitled",
   defaultNoteTemplate: "blank",
+  defaultTemplateMd: "blank",
+  defaultTemplateTxt: "blank",
+  defaultTemplateHtml: "blank",
+  autoFolderIcons: true,
+  interfaceScale: 100,
+  iconPack: "lucide",
+  folderIcons: {},
+  fileIcons: {},
   editorWidth: "standard",
   lineHeight: "1.6",
   sidebarDensity: "comfortable",
   showGuideLines: true,
   tagColorStyle: "multicolor",
+  accentHeadings: false,
   showWordCount: true,
   autoPairBrackets: true,
   showCodeLineNumbers: false,
+  highlightInlineCode: false,
   spellCheck: true,
   geminiApiKey: "",
   storageMode: "local",
@@ -477,6 +510,123 @@ function createWindow(initialWorkspacePath = null) {
 }
 
 function setupIpcHandlers() {
+  ipcMain.handle("google-oauth-login", async (event, clientId) => {
+    return new Promise((resolve, reject) => {
+      let isSettled = false;
+      const server = http.createServer((req, res) => {
+        try {
+          const parsedUrl = url.parse(req.url, true);
+
+          if (parsedUrl.pathname === "/") {
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta charset="utf-8">
+                <title>Luno Note - Google Sign-In</title>
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
+                  .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #334155; }
+                  h2 { margin: 0 0 0.75rem 0; color: #38bdf8; font-size: 1.5rem; }
+                  p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <h2>เข้าสู่ระบบสำเร็จ!</h2>
+                  <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>คุณสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
+                </div>
+                <script>
+                  const hash = window.location.hash.substring(1);
+                  const params = new URLSearchParams(hash || window.location.search);
+                  const accessToken = params.get('access_token');
+                  const expiresIn = params.get('expires_in');
+                  const error = params.get('error');
+                  
+                  fetch('/callback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accessToken, expiresIn, error })
+                  }).then(() => {
+                    setTimeout(() => window.close(), 1200);
+                  }).catch(() => {});
+                </script>
+              </body>
+              </html>
+            `);
+            return;
+          }
+
+          if (parsedUrl.pathname === "/callback" && req.method === "POST") {
+            let body = "";
+            req.on("data", (chunk) => { body += chunk; });
+            req.on("end", () => {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true }));
+
+              if (isSettled) return;
+              isSettled = true;
+              try {
+                const data = JSON.parse(body);
+                server.close();
+                if (data.error) {
+                  reject(new Error(data.error));
+                } else if (data.accessToken) {
+                  resolve({
+                    access_token: data.accessToken,
+                    expires_in: Number(data.expiresIn) || 3600,
+                  });
+                } else {
+                  reject(new Error("No access token received"));
+                }
+              } catch (err) {
+                server.close();
+                reject(err);
+              }
+            });
+            return;
+          }
+        } catch (err) {
+          if (!isSettled) {
+            isSettled = true;
+            server.close();
+            reject(err);
+          }
+        }
+      });
+
+      server.listen(0, "127.0.0.1", () => {
+        const port = server.address().port;
+        const redirectUri = `http://127.0.0.1:${port}`;
+        const scope = encodeURIComponent(
+          "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email"
+        );
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
+          clientId
+        )}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
+
+        shell.openExternal(authUrl);
+
+        // Auto timeout after 3 minutes
+        setTimeout(() => {
+          if (!isSettled) {
+            isSettled = true;
+            try { server.close(); } catch {}
+            reject(new Error("Google login timed out"));
+          }
+        }, 180000);
+      });
+
+      server.on("error", (err) => {
+        if (!isSettled) {
+          isSettled = true;
+          reject(err);
+        }
+      });
+    });
+  });
+
   ipcMain.handle("open-external", async (event, url) => {
     try {
       if (url && (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("mailto:") || url.startsWith("tel:"))) {
@@ -1056,6 +1206,56 @@ function setupIpcHandlers() {
     createWindow(folderPath);
     return true;
   });
+
+  ipcMain.handle("get-native-keyboard-language", async () => {
+    return currentNativeKeyboardLang;
+  });
+}
+
+let currentNativeKeyboardLang = "en";
+let keyboardWatcherProcess = null;
+
+function startNativeKeyboardWatcher() {
+  if (process.platform !== "win32") return;
+  try {
+    const { spawn } = require("child_process");
+    const scriptPath = path.join(__dirname, "keyboardLayoutWatcher.ps1");
+    if (!fs.existsSync(scriptPath)) return;
+
+    keyboardWatcherProcess = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+      {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      }
+    );
+
+    keyboardWatcherProcess.stdout.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      const lines = text.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean);
+      for (const line of lines) {
+        if (line === "th" || line === "en") {
+          currentNativeKeyboardLang = line;
+          BrowserWindow.getAllWindows().forEach((w) => {
+            if (!w.isDestroyed()) {
+              w.webContents.send("native-keyboard-language-changed", line);
+            }
+          });
+        }
+      }
+    });
+
+    keyboardWatcherProcess.on("error", (e) => {
+      console.warn("Keyboard watcher error", e);
+    });
+
+    keyboardWatcherProcess.on("exit", () => {
+      keyboardWatcherProcess = null;
+    });
+  } catch (err) {
+    console.warn("Failed to start keyboard watcher", err);
+  }
 }
 
 app.whenReady().then(() => {
@@ -1093,6 +1293,7 @@ app.whenReady().then(() => {
   });
 
   setupIpcHandlers();
+  startNativeKeyboardWatcher();
 
   createWindow();
 
@@ -1101,6 +1302,15 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on("will-quit", () => {
+  if (keyboardWatcherProcess) {
+    try {
+      keyboardWatcherProcess.kill();
+    } catch {}
+    keyboardWatcherProcess = null;
+  }
 });
 
 app.on("window-all-closed", () => {

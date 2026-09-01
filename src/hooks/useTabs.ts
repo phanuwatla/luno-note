@@ -5,22 +5,96 @@ const TABS_STORAGE_KEY = "notes-app-open-tabs";
 const ACTIVE_TAB_STORAGE_KEY = "notes-app-active-tab";
 const TAB_PATHS_STORAGE_KEY = "notes-app-open-tab-paths";
 const ACTIVE_TAB_PATH_STORAGE_KEY = "notes-app-active-tab-path";
-const VERSION_STORAGE_KEY = "notes-app-version";
-const CURRENT_APP_VERSION = "1.0.2";
 
-function checkAndClearOldVersionSession(): boolean {
-  try {
-    const savedVersion = localStorage.getItem(VERSION_STORAGE_KEY);
-    if (savedVersion !== CURRENT_APP_VERSION) {
-      localStorage.removeItem(TABS_STORAGE_KEY);
-      localStorage.removeItem(ACTIVE_TAB_STORAGE_KEY);
-      localStorage.removeItem(TAB_PATHS_STORAGE_KEY);
-      localStorage.removeItem(ACTIVE_TAB_PATH_STORAGE_KEY);
-      localStorage.setItem(VERSION_STORAGE_KEY, CURRENT_APP_VERSION);
-      return true;
+export interface WorkspaceSessionData {
+  openTabs: string[];
+  activeTab: string | null;
+  updatedAt: number;
+}
+
+export async function saveWorkspaceSession(
+  rootDirHandle: FileSystemDirectoryHandle | null,
+  openTabPaths: string[],
+  activeTabPath: string | null
+) {
+  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const sessionData: WorkspaceSessionData = {
+    openTabs: openTabPaths,
+    activeTab: activeTabPath,
+    updatedAt: Date.now(),
+  };
+
+  if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
+    try {
+      const saved = await electronAPI.getSavedWorkspace();
+      if (saved?.folderPath) {
+        const fullPath = `${saved.folderPath}/.luno/session.json`;
+        await electronAPI.writeFileContent({ fullPath, content: JSON.stringify(sessionData, null, 2) });
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed to write .luno/session.json in Electron", err);
     }
-  } catch {}
-  return false;
+  }
+
+  if (!rootDirHandle) return;
+
+  try {
+    const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: true });
+    const fileHandle = await metaDir.getFileHandle("session.json", { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(sessionData, null, 2));
+    await writable.close();
+  } catch (err) {
+    console.warn("Failed to write .luno/session.json in Web FS", err);
+  }
+}
+
+export async function loadWorkspaceSession(
+  rootDirHandle: FileSystemDirectoryHandle | null
+): Promise<WorkspaceSessionData | null> {
+  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
+    try {
+      const saved = await electronAPI.getSavedWorkspace();
+      if (saved?.folderPath) {
+        const fullPath = `${saved.folderPath}/.luno/session.json`;
+        const content = await electronAPI.readFileContent(fullPath);
+        if (content) {
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed?.openTabs)) {
+            return {
+              openTabs: parsed.openTabs,
+              activeTab: typeof parsed.activeTab === "string" ? parsed.activeTab : null,
+              updatedAt: parsed.updatedAt || Date.now(),
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to read .luno/session.json in Electron", err);
+    }
+  }
+
+  if (!rootDirHandle) return null;
+
+  try {
+    const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: false });
+    const fileHandle = await metaDir.getFileHandle("session.json", { create: false });
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed?.openTabs)) {
+      return {
+        openTabs: parsed.openTabs,
+        activeTab: typeof parsed.activeTab === "string" ? parsed.activeTab : null,
+        updatedAt: parsed.updatedAt || Date.now(),
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function getTabPath(id: string, notes?: Note[]): string {
@@ -35,9 +109,6 @@ function getTabPath(id: string, notes?: Note[]): string {
 
 function loadSavedTabs(): { openTabIds: string[]; activeTabId: string | null } {
   try {
-    if (checkAndClearOldVersionSession()) {
-      return { openTabIds: [], activeTabId: null };
-    }
     const rawSettings = localStorage.getItem("notes-app-settings");
     if (rawSettings) {
       const parsedSettings = JSON.parse(rawSettings);
@@ -68,6 +139,7 @@ function saveTabs(openTabIds: string[], activeTabId: string | null, notes?: Note
       const activePath = activeTabId ? getTabPath(activeTabId, notes) : null;
       localStorage.setItem(TAB_PATHS_STORAGE_KEY, JSON.stringify(paths));
       localStorage.setItem(ACTIVE_TAB_PATH_STORAGE_KEY, JSON.stringify(activePath));
+      void saveWorkspaceSession(null, paths, activePath);
     }
   } catch {
     /* ignore storage errors */
@@ -117,7 +189,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
   const removeTabsForDeletedNotes = useCallback((existingIds: Set<string>) => {
-    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id.startsWith("web:") || existingIds.has(id));
+    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id === "favorites" || id === "tags" || id.startsWith("web:") || existingIds.has(id));
     syncedSetOpenTabIds(() => next);
     if (activeTabIdRef.current && activeTabIdRef.current !== "settings" && activeTabIdRef.current !== "luno-ai" && activeTabIdRef.current !== "home" && activeTabIdRef.current !== "trash" && activeTabIdRef.current !== "templates" && !activeTabIdRef.current.startsWith("web:") && !existingIds.has(activeTabIdRef.current)) {
       syncedSetActiveTabId(next[0] ?? null);
@@ -136,54 +208,69 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     });
   }, [syncedSetOpenTabIds]);
 
-  const resetTabs = useCallback(() => {
+  const resetTabs = useCallback((clearStorage: boolean = false) => {
     openTabIdsRef.current = [];
     activeTabIdRef.current = null;
     setOpenTabIds([]);
     setActiveTabId(null);
-    saveTabs([], null, []);
-    try {
-      localStorage.removeItem(TAB_PATHS_STORAGE_KEY);
-      localStorage.removeItem(ACTIVE_TAB_PATH_STORAGE_KEY);
-    } catch {}
+    if (clearStorage) {
+      saveTabs([], null, []);
+      try {
+        localStorage.removeItem(TAB_PATHS_STORAGE_KEY);
+        localStorage.removeItem(ACTIVE_TAB_PATH_STORAGE_KEY);
+      } catch {}
+    }
   }, []);
 
   /**
-   * Restores previously opened tabs from localStorage on startup / workspace load.
+   * Restores previously opened tabs from workspace .luno/session.json or localStorage on startup / workspace load.
    * Matches stored paths against the newly loaded notes list so tab IDs match the fresh in-memory note objects.
    * Respects onStartup setting ("home", "lastNote", "blank").
    */
-  const restoreTabsFromSession = useCallback((
+  const restoreTabsFromSession = useCallback(async (
     notes: Note[],
     reopenTabs: boolean = true,
-    onStartup: string = "home"
+    onStartup: string = "home",
+    rootDirHandle?: FileSystemDirectoryHandle | null
   ) => {
     if (onStartup === "blank") {
-      resetTabs();
+      resetTabs(true);
       return;
     }
 
     try {
-      const rawPaths = localStorage.getItem(TAB_PATHS_STORAGE_KEY);
-      const rawActivePath = localStorage.getItem(ACTIVE_TAB_PATH_STORAGE_KEY);
-      const rawTabs = localStorage.getItem(TABS_STORAGE_KEY);
-      const rawActive = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+      // 1. Try reading from workspace .luno/session.json
+      const fileSession = await loadWorkspaceSession(rootDirHandle ?? null);
 
-      const hasStoredSession = rawPaths !== null || rawTabs !== null;
+      let savedPaths: string[] = [];
+      let savedActivePath: string | null = null;
 
-      if (reopenTabs && hasStoredSession) {
-        const savedPaths: string[] = rawPaths
+      if (fileSession && Array.isArray(fileSession.openTabs) && fileSession.openTabs.length > 0) {
+        savedPaths = fileSession.openTabs;
+        savedActivePath = fileSession.activeTab;
+      } else {
+        // 2. Fallback to localStorage
+        const rawPaths = localStorage.getItem(TAB_PATHS_STORAGE_KEY);
+        const rawActivePath = localStorage.getItem(ACTIVE_TAB_PATH_STORAGE_KEY);
+        const rawTabs = localStorage.getItem(TABS_STORAGE_KEY);
+        const rawActive = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+
+        savedPaths = rawPaths
           ? JSON.parse(rawPaths)
           : (rawTabs ? JSON.parse(rawTabs) : []);
-        const savedActivePath: string | null = rawActivePath
+        savedActivePath = rawActivePath
           ? JSON.parse(rawActivePath)
           : (rawActive ? JSON.parse(rawActive) : null);
+      }
 
+      if (reopenTabs && savedPaths.length > 0) {
         const resolvedTabIds: string[] = [];
         for (const item of savedPaths) {
           if (!item) continue;
-          if (item === "settings" || item === "luno-ai" || item === "home" || item === "trash" || item === "templates" || item.startsWith("web:")) {
-            resolvedTabIds.push(item);
+          if (item === "settings" || item === "luno-ai" || item === "home" || item === "trash" || item === "templates" || item === "favorites" || item === "tags" || item.startsWith("web:")) {
+            if (!resolvedTabIds.includes(item)) {
+              resolvedTabIds.push(item);
+            }
             continue;
           }
           const matched = notes.find((n) => {
@@ -195,23 +282,22 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
           }
         }
 
-        if (onStartup === "home") {
-          // Ensure "home" is open and set as the active tab
-          if (!resolvedTabIds.includes("home")) {
-            resolvedTabIds.unshift("home");
-          }
-          openTabIdsRef.current = resolvedTabIds;
-          activeTabIdRef.current = "home";
-          setOpenTabIds(resolvedTabIds);
-          setActiveTabId("home");
-          saveTabs(resolvedTabIds, "home", notes);
-          return;
-        }
-
-        // onStartup === "lastNote"
         if (resolvedTabIds.length > 0) {
+          if (onStartup === "home") {
+            if (!resolvedTabIds.includes("home")) {
+              resolvedTabIds.unshift("home");
+            }
+            openTabIdsRef.current = resolvedTabIds;
+            activeTabIdRef.current = "home";
+            setOpenTabIds(resolvedTabIds);
+            setActiveTabId("home");
+            saveTabs(resolvedTabIds, "home", notes);
+            return;
+          }
+
+          // onStartup === "lastNote"
           let resolvedActiveId: string | null = null;
-          if (savedActivePath === "settings" || savedActivePath === "luno-ai" || savedActivePath === "home" || savedActivePath === "trash" || savedActivePath === "templates" || (savedActivePath && savedActivePath.startsWith("web:"))) {
+          if (savedActivePath === "settings" || savedActivePath === "luno-ai" || savedActivePath === "home" || savedActivePath === "trash" || savedActivePath === "templates" || savedActivePath === "favorites" || savedActivePath === "tags" || (savedActivePath && savedActivePath.startsWith("web:"))) {
             resolvedActiveId = savedActivePath;
           } else if (savedActivePath) {
             const matchedActive = notes.find((n) => {
@@ -223,7 +309,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
             }
           }
           if (!resolvedActiveId || !resolvedTabIds.includes(resolvedActiveId)) {
-            resolvedActiveId = resolvedTabIds[0];
+            resolvedActiveId = resolvedTabIds.find((id) => id !== "home") || resolvedTabIds[0];
           }
 
           openTabIdsRef.current = resolvedTabIds;
@@ -257,7 +343,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     }
 
     // Default for blank
-    resetTabs();
+    resetTabs(true);
   }, [resetTabs, saveTabs]);
 
   return {

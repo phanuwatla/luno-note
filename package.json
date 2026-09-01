@@ -1,7 +1,7 @@
 {
   "name": "luno-note",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.1.0",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -36,6 +36,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "multiLanguageInstaller": true,
+      "installerLanguages": [
+        "th_TH",
+        "en_US"
+      ],
       "installerIcon": "electron/icon.ico",
       "uninstallerIcon": "electron/icon.ico",
       "artifactName": "${name}-setup-${version}.${ext}"
