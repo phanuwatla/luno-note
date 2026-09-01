@@ -79,6 +79,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
+import { APP_VERSION } from "@/lib/appVersion";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -1856,7 +1857,7 @@ export default function SettingsTabView({
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Luno Note</h3>
-                    <div className="text-xs text-muted-foreground">Version 2.4.0 (Build 2026.08)</div>
+                    <div className="text-xs text-muted-foreground">Version {APP_VERSION}</div>
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       {t("settings.aboutAppDesc")}
                     </p>

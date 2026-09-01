@@ -513,79 +513,119 @@ function setupIpcHandlers() {
   ipcMain.handle("google-oauth-login", async (event, clientId) => {
     return new Promise((resolve, reject) => {
       let isSettled = false;
-      const server = http.createServer((req, res) => {
+
+      // 1. Generate PKCE code verifier and challenge (RFC 7636)
+      const codeVerifier = crypto.randomBytes(32).toString("base64url");
+      const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+
+      const server = http.createServer(async (req, res) => {
         try {
           const parsedUrl = url.parse(req.url, true);
 
-          if (parsedUrl.pathname === "/") {
-            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(`
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <meta charset="utf-8">
-                <title>Luno Note - Google Sign-In</title>
-                <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-                  .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #334155; }
-                  h2 { margin: 0 0 0.75rem 0; color: #38bdf8; font-size: 1.5rem; }
-                  p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
-                </style>
-              </head>
-              <body>
-                <div class="card">
-                  <h2>เข้าสู่ระบบสำเร็จ!</h2>
-                  <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>คุณสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
-                </div>
-                <script>
-                  const hash = window.location.hash.substring(1);
-                  const params = new URLSearchParams(hash || window.location.search);
-                  const accessToken = params.get('access_token');
-                  const expiresIn = params.get('expires_in');
-                  const error = params.get('error');
-                  
-                  fetch('/callback', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accessToken, expiresIn, error })
-                  }).then(() => {
-                    setTimeout(() => window.close(), 1200);
-                  }).catch(() => {});
-                </script>
-              </body>
-              </html>
-            `);
-            return;
-          }
+          if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
+            const queryCode = parsedUrl.query.code;
+            const queryError = parsedUrl.query.error;
 
-          if (parsedUrl.pathname === "/callback" && req.method === "POST") {
-            let body = "";
-            req.on("data", (chunk) => { body += chunk; });
-            req.on("end", () => {
-              res.writeHead(200, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ ok: true }));
-
-              if (isSettled) return;
-              isSettled = true;
-              try {
-                const data = JSON.parse(body);
+            if (queryError) {
+              res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Luno Note - Google Sign-In Error</title>
+                  <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
+                    .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 420px; border: 1px solid #ef4444; }
+                    h2 { margin: 0 0 0.75rem 0; color: #f87171; font-size: 1.4rem; }
+                    p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+                  </style>
+                </head>
+                <body>
+                  <div class="card">
+                    <h2>การเข้าสู่ระบบถูกยกเลิก</h2>
+                    <p>${queryError}<br>คุณสามารถปิดแท็บนี้และกลับไปที่ Luno Note ได้</p>
+                  </div>
+                  <script>setTimeout(() => window.close(), 2500);</script>
+                </body>
+                </html>
+              `);
+              if (!isSettled) {
+                isSettled = true;
                 server.close();
-                if (data.error) {
-                  reject(new Error(data.error));
-                } else if (data.accessToken) {
-                  resolve({
-                    access_token: data.accessToken,
-                    expires_in: Number(data.expiresIn) || 3600,
-                  });
-                } else {
-                  reject(new Error("No access token received"));
-                }
-              } catch (err) {
-                server.close();
-                reject(err);
+                reject(new Error(String(queryError)));
               }
-            });
-            return;
+              return;
+            }
+
+            if (queryCode) {
+              res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Luno Note - Google Sign-In</title>
+                  <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
+                    .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 420px; border: 1px solid #334155; }
+                    h2 { margin: 0 0 0.75rem 0; color: #38bdf8; font-size: 1.4rem; }
+                    p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+                  </style>
+                </head>
+                <body>
+                  <div class="card">
+                    <h2>เข้าสู่ระบบสำเร็จ!</h2>
+                    <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>คุณสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
+                  </div>
+                  <script>setTimeout(() => window.close(), 1500);</script>
+                </body>
+                </html>
+              `);
+
+              if (!isSettled) {
+                isSettled = true;
+                try {
+                  const port = server.address().port;
+                  const redirectUri = `http://127.0.0.1:${port}`;
+
+                  // Exchange authorization code for tokens via PKCE
+                  const tokenParams = new URLSearchParams({
+                    client_id: clientId,
+                    code: String(queryCode),
+                    code_verifier: codeVerifier,
+                    grant_type: "authorization_code",
+                    redirect_uri: redirectUri,
+                  });
+
+                  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: tokenParams.toString(),
+                  });
+
+                  if (!tokenRes.ok) {
+                    const errText = await tokenRes.text();
+                    server.close();
+                    reject(new Error(`Token exchange failed (${tokenRes.status}): ${errText}`));
+                    return;
+                  }
+
+                  const tokenData = await tokenRes.json();
+                  server.close();
+                  resolve({
+                    access_token: tokenData.access_token,
+                    expires_in: Number(tokenData.expires_in) || 3600,
+                    refresh_token: tokenData.refresh_token,
+                    scope: tokenData.scope,
+                  });
+                } catch (exchangeErr) {
+                  server.close();
+                  reject(exchangeErr);
+                }
+              }
+              return;
+            }
           }
         } catch (err) {
           if (!isSettled) {
@@ -604,7 +644,9 @@ function setupIpcHandlers() {
         );
         const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
           clientId
-        )}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
+        )}&redirect_uri=${encodeURIComponent(
+          redirectUri
+        )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account&access_type=offline`;
 
         shell.openExternal(authUrl);
 

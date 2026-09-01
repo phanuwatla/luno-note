@@ -33,6 +33,7 @@ import {
   Command,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { APP_VERSION } from "@/lib/appVersion";
 
 interface HelpDialogProps {
   open: boolean;
@@ -319,7 +320,7 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({
                 </div>
                 <h3 className="text-sm font-bold text-foreground">Luno Notes</h3>
                 <span className="inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-semibold bg-primary/10 text-primary border border-primary/20">
-                  Version 1.1.0
+                  Version {APP_VERSION}
                 </span>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed pt-1">
                   {t("helpModal.aboutDesc") || "A fast, local-first markdown note-taking app designed for speed, privacy, and seamless organization."}

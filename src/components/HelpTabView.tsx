@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { getToolbarIcon } from "@/lib/iconPacks";
+import { APP_VERSION } from "@/lib/appVersion";
 
 export type HelpCategory =
   | "shortcuts"
@@ -296,7 +297,7 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
               <h2 className="text-sm font-bold text-foreground leading-tight">
                 {t("sidebar.help") || "Help Center"}
               </h2>
-              <p className="text-[11px] text-muted-foreground">Luno Notes v1.1.0</p>
+              <p className="text-[11px] text-muted-foreground">Luno Notes v{APP_VERSION}</p>
             </div>
           </div>
         </div>
@@ -580,7 +581,7 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 </div>
                 <h2 className="text-lg font-bold text-foreground">Luno Notes</h2>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                  <span>Version 1.1.0</span>
+                  <span>Version {APP_VERSION}</span>
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                   <span>Production Ready</span>
                 </div>

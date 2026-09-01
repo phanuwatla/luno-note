@@ -21,6 +21,7 @@ import {
   getAllKnownLocalManifests,
   calculateWorkspaceStatus,
 } from "@/lib/workspaceIdentity";
+import { APP_VERSION } from "@/lib/appVersion";
 
 function formatModifiedDate(timeStr?: string, language: string = "en"): string {
   if (!timeStr) return "";
@@ -240,7 +241,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
             Luno
           </h1>
           <p className="text-xs text-muted-foreground font-medium">
-            Version 1.1.0
+            Version {APP_VERSION}
           </p>
         </div>
 
