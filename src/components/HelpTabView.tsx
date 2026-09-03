@@ -27,6 +27,9 @@ import {
   Quote,
   Lightbulb,
   Zap,
+  Loader2,
+  RefreshCw,
+  Download,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -35,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "@/hooks/use-toast";
 import { getToolbarIcon } from "@/lib/iconPacks";
 import { APP_VERSION } from "@/lib/appVersion";
+import { useAppUpdate } from "@/hooks/useAppUpdate";
 
 export type HelpCategory =
   | "shortcuts"
@@ -58,6 +62,7 @@ interface HelpTabViewProps {
 export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProps) {
   const { t } = useTranslation();
   const { settings, updateSetting } = useAppSettings();
+  const appUpdate = useAppUpdate();
   const [activeCategory, setActiveCategory] = useState<HelpCategory>("shortcuts");
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -582,12 +587,86 @@ export default function HelpTabView({ onClose, onOpenSettings }: HelpTabViewProp
                 <h2 className="text-lg font-bold text-foreground">Luno Notes</h2>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
                   <span>Version {APP_VERSION}</span>
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  <span>Production Ready</span>
                 </div>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed pt-1">
                   {t("helpModal.aboutDesc")}
                 </p>
+
+                {/* Update Section */}
+                <div className="pt-2 max-w-md mx-auto w-full space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-foreground">
+                      {t("settings.checkUpdatesNow") || "Check for Updates"}
+                    </span>
+                    {appUpdate.isAvailable && (
+                      <span className="text-[11px] text-amber-500 font-medium">
+                        {t("settings.newVersion") || "v"}{appUpdate.updateInfo?.version} {t("settings.isReadyToDownload") || "ready"}
+                      </span>
+                    )}
+                    {appUpdate.isNotAvailable && (
+                      <span className="text-[11px] text-emerald-500 font-medium">
+                        {t("settings.updateNotAvailable") || "Latest version"}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {appUpdate.isAvailable && (
+                      <Button
+                        type="button"
+                        onClick={appUpdate.downloadUpdate}
+                        disabled={appUpdate.isDownloading}
+                        className="w-full text-xs h-10 gap-2 rounded-xl cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>{t("settings.downloadUpdate") || "Download Update"}</span>
+                      </Button>
+                    )}
+
+                    {appUpdate.isDownloaded && (
+                      <Button
+                        type="button"
+                        onClick={appUpdate.quitAndInstall}
+                        className="w-full text-xs h-10 gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        <span>{t("settings.installAndRestart") || "Restart & Install"}</span>
+                      </Button>
+                    )}
+
+                    {!appUpdate.isAvailable && !appUpdate.isDownloaded && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => appUpdate.checkForUpdates(true)}
+                        disabled={appUpdate.isChecking || appUpdate.isDownloading}
+                        className="w-full text-xs h-10 gap-2 rounded-xl cursor-pointer border-input"
+                      >
+                        {appUpdate.isChecking ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                        <span>{appUpdate.isChecking ? (t("settings.checkingForUpdates") || "Checking...") : (t("settings.checkUpdatesNow") || "Check for Updates")}</span>
+                      </Button>
+                    )}
+                  </div>
+
+                  {appUpdate.isDownloading && appUpdate.progress && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
+                        <span className="font-mono font-semibold text-foreground">{appUpdate.progress.percent}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-200"
+                          style={{ width: `${appUpdate.progress.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

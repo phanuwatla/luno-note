@@ -40,8 +40,6 @@ import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDe
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
-import { APP_VERSION } from "@/lib/appVersion";
-import { checkForAppUpdate, openExternalUrl } from "@/lib/updateChecker";
 
 export default function Index() {
   const { t } = useTranslation();
@@ -3380,43 +3378,6 @@ export default function Index() {
     }
     removeTabsForDeletedNotes(existingSet);
   }, [notes, removeTabsForDeletedNotes]);
-
-  // Auto-check for updates from GitHub on startup when checkUpdates is enabled
-  useEffect(() => {
-    if (settings.checkUpdates === false) return;
-
-    let isMounted = true;
-    const timer = setTimeout(async () => {
-      try {
-        const result = await checkForAppUpdate(APP_VERSION);
-        if (!isMounted || !result.hasUpdate) return;
-
-        toast({
-          title: t("settings.updateAvailable") || "มีเวอร์ชันใหม่พร้อมใช้งาน",
-          description:
-            t("settings.updateAvailableDesc", {
-              version: result.latestVersion,
-              current: APP_VERSION,
-            }) || `Luno Note v${result.latestVersion} พร้อมให้อัปเดตแล้ว (เวอร์ชันปัจจุบัน v${APP_VERSION})`,
-          action: (
-            <ToastAction
-              altText={t("settings.installUpdate") || "ติดตั้ง"}
-              onClick={() => openExternalUrl(result.downloadUrl || result.releaseUrl)}
-            >
-              {t("settings.installUpdate") || "ติดตั้ง"}
-            </ToastAction>
-          ),
-        });
-      } catch (err) {
-        console.warn("Startup update check failed:", err);
-      }
-    }, 4000);
-
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-    };
-  }, [settings.checkUpdates, t]);
 
   const openTabNotes = useMemo(() => {
     return openTabIds

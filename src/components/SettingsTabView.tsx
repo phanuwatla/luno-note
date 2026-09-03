@@ -78,10 +78,9 @@ import { ICON_PACK_OPTIONS, IconPackId, TOOLBAR_ICON_MAP, getToolbarIcon } from 
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
-import { ToastAction } from "@/components/ui/toast";
 import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
 import { APP_VERSION } from "@/lib/appVersion";
-import { checkForAppUpdate, openExternalUrl } from "@/lib/updateChecker";
+import { useAppUpdate } from "@/hooks/useAppUpdate";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -203,48 +202,9 @@ export default function SettingsTabView({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
-
-  const handleManualCheckUpdate = async () => {
-    if (isCheckingUpdate) return;
-    setIsCheckingUpdate(true);
-    try {
-      const result = await checkForAppUpdate(APP_VERSION);
-      if (result.hasUpdate) {
-        toast({
-          title: t("settings.updateAvailable") || "มีเวอร์ชันใหม่พร้อมใช้งาน",
-          description:
-            t("settings.updateAvailableDesc", {
-              version: result.latestVersion,
-              current: APP_VERSION,
-            }) || `Luno Note v${result.latestVersion} พร้อมให้อัปเดตแล้ว (เวอร์ชันปัจจุบัน v${APP_VERSION})`,
-          action: (
-            <ToastAction
-              altText={t("settings.installUpdate") || "ติดตั้ง"}
-              onClick={() => openExternalUrl(result.downloadUrl || result.releaseUrl)}
-            >
-              {t("settings.installUpdate") || "ติดตั้ง"}
-            </ToastAction>
-          ),
-        });
-      } else {
-        toast({
-          title: t("settings.alreadyLatest", { version: APP_VERSION }) || `คุณกำลังใช้เวอร์ชันล่าสุดแล้ว (v${APP_VERSION})`,
-          description: t("settings.alreadyLatestDesc") || "Luno Note ของคุณเป็นเวอร์ชันล่าสุดเรียบร้อยแล้ว",
-        });
-      }
-    } catch (err) {
-      toast({
-        title: t("settings.updateCheckFailed") || "ไม่สามารถตรวจสอบการอัปเดตได้",
-        description: t("settings.updateCheckFailedDesc") || "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์อัปเดตได้ กรุณาตรวจสอบอินเทอร์เน็ต",
-        variant: "destructive",
-      });
-    } finally {
-      setIsCheckingUpdate(false);
-    }
-  };
 
   const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
+  const appUpdate = useAppUpdate();
 
   // Additional local state matching the design
   const [draggedToolbarIndex, setDraggedToolbarIndex] = useState<number | null>(null);
@@ -377,23 +337,88 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.checkUpdates")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.checkUpdatesDesc")}</p>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={handleManualCheckUpdate}
-                          disabled={isCheckingUpdate}
-                          className="h-8 px-3 rounded-lg border border-border/60 hover:bg-foreground/5 text-xs font-semibold text-foreground transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isCheckingUpdate ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                          ) : (
-                            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                          )}
-                          <span>{isCheckingUpdate ? t("settings.checkingForUpdates") : t("settings.checkForUpdatesNow")}</span>
-                        </button>
-                        <Switch checked={settings.checkUpdates !== false} onCheckedChange={(val) => updateSetting("checkUpdates", val)} className="scale-85 origin-right" />
+                      <Switch checked={settings.checkUpdates !== false} onCheckedChange={(val) => updateSetting("checkUpdates", val)} className="scale-85 origin-right" />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-semibold text-foreground">{t("settings.checkUpdatesNow") || "Check for Updates"}</label>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted border border-border/80 text-muted-foreground font-mono">
+                            v{appUpdate.currentAppVersion}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {appUpdate.isChecking && (t("settings.checkingForUpdates") || "Checking for updates...")}
+                          {appUpdate.isAvailable && `${t("settings.newVersion") || "Version"} ${appUpdate.updateInfo?.version} ${t("settings.isReadyToDownload") || "is ready to download."}`}
+                          {appUpdate.isDownloading && (t("settings.downloadingUpdate") || "Downloading update...")}
+                          {appUpdate.isDownloaded && (t("settings.updateDownloaded") || "Update ready to install.")}
+                          {appUpdate.isNotAvailable && (t("settings.updateNotAvailable") || "You are using the latest version of Luno Note.")}
+                          {appUpdate.status === "error" && (appUpdate.errorMessage || t("settings.updateError") || "Update failed.")}
+                          {appUpdate.status === "idle" && (t("settings.latestVersionInstalled") || "You are using the latest version of Luno Note.")}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {appUpdate.isAvailable && (
+                          <button
+                            type="button"
+                            onClick={appUpdate.downloadUpdate}
+                            disabled={appUpdate.isDownloading}
+                            className="w-48 h-10 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>{t("settings.downloadUpdate") || "Download Update"}</span>
+                          </button>
+                        )}
+
+                        {appUpdate.isDownloaded && (
+                          <button
+                            type="button"
+                            onClick={appUpdate.quitAndInstall}
+                            className="w-48 h-10 px-3 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>{t("settings.installAndRestart") || "Restart & Install"}</span>
+                          </button>
+                        )}
+
+                        {!appUpdate.isAvailable && !appUpdate.isDownloaded && (
+                          <button
+                            type="button"
+                            onClick={() => appUpdate.checkForUpdates(true)}
+                            disabled={appUpdate.isChecking || appUpdate.isDownloading}
+                            className="w-48 h-10 px-3 rounded-xl border border-input bg-card hover:bg-muted text-foreground text-xs font-medium transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          >
+                            {appUpdate.isChecking ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <span>
+                              {appUpdate.isChecking
+                                ? (t("settings.checkingForUpdates") || "Checking...")
+                                : (t("settings.checkUpdatesNow") || "Check for Updates")}
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
+
+                    {appUpdate.isDownloading && appUpdate.progress && (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
+                          <span className="font-mono font-semibold text-foreground">{appUpdate.progress.percent}%</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-200"
+                            style={{ width: `${appUpdate.progress.percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Language Card */}
@@ -1936,31 +1961,82 @@ export default function SettingsTabView({
               {/* 12. ABOUT */}
               {activeCategory === "about" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-1.5">
-                        <h3 className="text-sm font-bold text-foreground">Luno Note</h3>
-                        <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                          <span>Version {APP_VERSION}</span>
+                  <div className="rounded-2xl border border-border/60 bg-card p-6 flex flex-col gap-4 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                      <div className="space-y-1.5 max-w-xl">
+                        <div>
+                          <h3 className="text-sm font-bold text-foreground">Luno Note</h3>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
+                          {t("settings.aboutAppDesc")}
+                        </p>
+                      </div>
+
+                      {/* Vertically Centered Check for Updates in Middle of Card */}
+                      <div className="flex items-center gap-2 shrink-0 sm:self-center">
+                        {appUpdate.isAvailable && (
+                          <button
+                            type="button"
+                            onClick={appUpdate.downloadUpdate}
+                            disabled={appUpdate.isDownloading}
+                            className="w-48 h-10 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>{t("settings.downloadUpdate") || "Download Update"}</span>
+                          </button>
+                        )}
+
+                        {appUpdate.isDownloaded && (
+                          <button
+                            type="button"
+                            onClick={appUpdate.quitAndInstall}
+                            className="w-48 h-10 px-3 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>{t("settings.installAndRestart") || "Restart & Install"}</span>
+                          </button>
+                        )}
+
+                        {!appUpdate.isAvailable && !appUpdate.isDownloaded && (
+                          <button
+                            type="button"
+                            onClick={() => appUpdate.checkForUpdates(true)}
+                            disabled={appUpdate.isChecking || appUpdate.isDownloading}
+                            className="w-48 h-10 px-3 rounded-xl border border-input bg-card hover:bg-muted text-foreground text-xs font-medium transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          >
+                            {appUpdate.isChecking ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <span>
+                              {appUpdate.isChecking
+                                ? (t("settings.checkingForUpdates") || "Checking...")
+                                : (t("settings.checkUpdatesNow") || "Check for Updates")}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Show download progress if downloading */}
+                    {appUpdate.isDownloading && appUpdate.progress && (
+                      <div className="pt-2 border-t border-border/30 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
+                          <span className="font-mono font-semibold text-foreground">{appUpdate.progress.percent}%</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-200"
+                            style={{ width: `${appUpdate.progress.percent}%` }}
+                          />
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleManualCheckUpdate}
-                        disabled={isCheckingUpdate}
-                        className="h-9 px-4 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-                      >
-                        {isCheckingUpdate ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        <span>{isCheckingUpdate ? t("settings.checkingForUpdates") : t("settings.checkForUpdatesNow")}</span>
-                      </button>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed pt-1">
-                      {t("settings.aboutAppDesc")}
-                    </p>
+                    )}
                   </div>
                 </div>
               )}

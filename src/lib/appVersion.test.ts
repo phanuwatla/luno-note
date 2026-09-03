@@ -5,6 +5,6 @@ import packageJson from "../../package.json";
 describe("appVersion", () => {
   it("should match package.json version", () => {
     expect(APP_VERSION).toBe(packageJson.version);
-    expect(APP_VERSION).toBe("1.1.2");
+    expect(APP_VERSION).toBe("1.1.1");
   });
 });

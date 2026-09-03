@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -1240,7 +1241,109 @@ function setupIpcHandlers() {
   ipcMain.handle("get-native-keyboard-language", async () => {
     return currentNativeKeyboardLang;
   });
+
+  ipcMain.handle("get-app-version", () => {
+    return app.getVersion();
+  });
+
+  ipcMain.handle("check-for-updates", async () => {
+    try {
+      if (!app.isPackaged && process.env.NODE_ENV === "development") {
+        try {
+          const result = await autoUpdater.checkForUpdates();
+          return { success: true, isDev: true, updateInfo: result?.updateInfo };
+        } catch (devErr) {
+          return {
+            success: true,
+            isDev: true,
+            message: "Running in development mode",
+            currentVersion: app.getVersion(),
+          };
+        }
+      }
+      const result = await autoUpdater.checkForUpdates();
+      return { success: true, updateInfo: result?.updateInfo, currentVersion: app.getVersion() };
+    } catch (err) {
+      console.warn("checkForUpdates error:", err);
+      return { success: false, error: err?.message || String(err), currentVersion: app.getVersion() };
+    }
+  });
+
+  ipcMain.handle("download-update", async () => {
+    try {
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (err) {
+      console.warn("downloadUpdate error:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle("quit-and-install-update", () => {
+    try {
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (err) {
+      console.warn("quitAndInstall error:", err);
+      return false;
+    }
+  });
 }
+
+// Configure autoUpdater
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function sendUpdateStatusToWindows(channel, payload) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  });
+}
+
+autoUpdater.on("checking-for-update", () => {
+  sendUpdateStatusToWindows("update-checking");
+});
+
+autoUpdater.on("update-available", (info) => {
+  sendUpdateStatusToWindows("update-available", {
+    version: info?.version,
+    releaseDate: info?.releaseDate,
+    releaseNotes: info?.releaseNotes,
+    files: info?.files,
+  });
+});
+
+autoUpdater.on("update-not-available", (info) => {
+  sendUpdateStatusToWindows("update-not-available", {
+    version: info?.version,
+    currentVersion: app.getVersion(),
+  });
+});
+
+autoUpdater.on("error", (err) => {
+  console.warn("autoUpdater error event:", err);
+  sendUpdateStatusToWindows("update-error", {
+    message: err?.message || String(err),
+  });
+});
+
+autoUpdater.on("download-progress", (progressObj) => {
+  sendUpdateStatusToWindows("update-download-progress", {
+    percent: Math.round(progressObj?.percent || 0),
+    bytesPerSecond: progressObj?.bytesPerSecond || 0,
+    transferred: progressObj?.transferred || 0,
+    total: progressObj?.total || 0,
+  });
+});
+
+autoUpdater.on("update-downloaded", (info) => {
+  sendUpdateStatusToWindows("update-downloaded", {
+    version: info?.version,
+    releaseNotes: info?.releaseNotes,
+  });
+});
 
 let currentNativeKeyboardLang = "en";
 let keyboardWatcherProcess = null;
