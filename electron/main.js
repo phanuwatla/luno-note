@@ -1,5 +1,11 @@
 const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen } = require("electron");
-const { autoUpdater } = require("electron-updater");
+let autoUpdater = null;
+try {
+  const updaterModule = require("electron-updater");
+  autoUpdater = updaterModule.autoUpdater;
+} catch (err) {
+  console.warn("electron-updater module not available:", err);
+}
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -1247,6 +1253,9 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("check-for-updates", async () => {
+    if (!autoUpdater) {
+      return { success: false, error: "Auto-updater module not available", currentVersion: app.getVersion() };
+    }
     try {
       if (!app.isPackaged && process.env.NODE_ENV === "development") {
         try {
@@ -1270,6 +1279,9 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("download-update", async () => {
+    if (!autoUpdater) {
+      return { success: false, error: "Auto-updater module not available" };
+    }
     try {
       await autoUpdater.downloadUpdate();
       return { success: true };
@@ -1280,6 +1292,7 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("quit-and-install-update", () => {
+    if (!autoUpdater) return false;
     try {
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -1290,10 +1303,6 @@ function setupIpcHandlers() {
   });
 }
 
-// Configure autoUpdater
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
-
 function sendUpdateStatusToWindows(channel, payload) {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win && !win.isDestroyed()) {
@@ -1302,48 +1311,58 @@ function sendUpdateStatusToWindows(channel, payload) {
   });
 }
 
-autoUpdater.on("checking-for-update", () => {
-  sendUpdateStatusToWindows("update-checking");
-});
+// Configure autoUpdater if available
+if (autoUpdater) {
+  try {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
 
-autoUpdater.on("update-available", (info) => {
-  sendUpdateStatusToWindows("update-available", {
-    version: info?.version,
-    releaseDate: info?.releaseDate,
-    releaseNotes: info?.releaseNotes,
-    files: info?.files,
-  });
-});
+    autoUpdater.on("checking-for-update", () => {
+      sendUpdateStatusToWindows("update-checking");
+    });
 
-autoUpdater.on("update-not-available", (info) => {
-  sendUpdateStatusToWindows("update-not-available", {
-    version: info?.version,
-    currentVersion: app.getVersion(),
-  });
-});
+    autoUpdater.on("update-available", (info) => {
+      sendUpdateStatusToWindows("update-available", {
+        version: info?.version,
+        releaseDate: info?.releaseDate,
+        releaseNotes: info?.releaseNotes,
+        files: info?.files,
+      });
+    });
 
-autoUpdater.on("error", (err) => {
-  console.warn("autoUpdater error event:", err);
-  sendUpdateStatusToWindows("update-error", {
-    message: err?.message || String(err),
-  });
-});
+    autoUpdater.on("update-not-available", (info) => {
+      sendUpdateStatusToWindows("update-not-available", {
+        version: info?.version,
+        currentVersion: app.getVersion(),
+      });
+    });
 
-autoUpdater.on("download-progress", (progressObj) => {
-  sendUpdateStatusToWindows("update-download-progress", {
-    percent: Math.round(progressObj?.percent || 0),
-    bytesPerSecond: progressObj?.bytesPerSecond || 0,
-    transferred: progressObj?.transferred || 0,
-    total: progressObj?.total || 0,
-  });
-});
+    autoUpdater.on("error", (err) => {
+      console.warn("autoUpdater error event:", err);
+      sendUpdateStatusToWindows("update-error", {
+        message: err?.message || String(err),
+      });
+    });
 
-autoUpdater.on("update-downloaded", (info) => {
-  sendUpdateStatusToWindows("update-downloaded", {
-    version: info?.version,
-    releaseNotes: info?.releaseNotes,
-  });
-});
+    autoUpdater.on("download-progress", (progressObj) => {
+      sendUpdateStatusToWindows("update-download-progress", {
+        percent: Math.round(progressObj?.percent || 0),
+        bytesPerSecond: progressObj?.bytesPerSecond || 0,
+        transferred: progressObj?.transferred || 0,
+        total: progressObj?.total || 0,
+      });
+    });
+
+    autoUpdater.on("update-downloaded", (info) => {
+      sendUpdateStatusToWindows("update-downloaded", {
+        version: info?.version,
+        releaseNotes: info?.releaseNotes,
+      });
+    });
+  } catch (updaterErr) {
+    console.warn("Error initializing autoUpdater events:", updaterErr);
+  }
+}
 
 let currentNativeKeyboardLang = "en";
 let keyboardWatcherProcess = null;
