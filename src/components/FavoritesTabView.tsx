@@ -233,7 +233,14 @@ export default function FavoritesTabView({
           </div>
 
           {/* 2. Format Filter Pills (Shaded/Outlined Tint Style) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+          <div
+            className="flex items-center gap-1.5 pill-scrollbar w-full min-w-0 shrink-0 pb-1"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
             {formatCategories.map((cat) => {
               const isSelected = selectedFormat === cat.id;
               const count = categoryCounts[cat.id] ?? 0;

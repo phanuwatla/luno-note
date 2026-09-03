@@ -628,6 +628,25 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             />
           </div>
         </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-wrongLanguageSuggestion`} className="text-sm font-medium text-foreground">
+              {t("settings.wrongLanguageSuggestion") || "Wrong language layout suggestion"}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.wrongLanguageSuggestionDesc") || "Show inline ghost text when typing in the wrong layout"}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.wrongLanguageSuggestion !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-wrongLanguageSuggestion`}
+              checked={settings.wrongLanguageSuggestion !== false}
+              onCheckedChange={(checked) => updateSetting("wrongLanguageSuggestion", checked)}
+            />
+          </div>
+        </div>
       </div>
 
       {/* 5. AI Assistant */}

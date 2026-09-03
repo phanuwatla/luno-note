@@ -146,13 +146,13 @@ export type ExtendedFileSystemHandle = FileSystemFileHandle | FileSystemDirector
 export type OpenFolderPending = {
   kind: "file" | "folder";
   fileName?: string;
-  contentFormat?: "plain" | "markdown" | "html";
+  contentFormat?: "plain" | "markdown" | "html" | "css";
   folderName?: string;
 };
 
 export type CreateNoteOptions = {
   fileName?: string;
-  contentFormat?: "plain" | "markdown" | "html";
+  contentFormat?: "plain" | "markdown" | "html" | "css";
   initialContent?: string;
   icon?: string;
   iconColor?: string;

@@ -7,6 +7,7 @@ interface HtmlCodeEditorProps {
   onCursorChange?: (line: number, col: number) => void;
   spellCheck?: boolean;
   noteId?: string;
+  language?: "html" | "css";
 }
 
 const INDENT = "  "; // 2 spaces
@@ -82,7 +83,62 @@ function highlightHtml(code: string): string {
   return result;
 }
 
-export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId }: HtmlCodeEditorProps) {
+function highlightCss(code: string): string {
+  const CSS_TOKEN_RE = /\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|@[a-zA-Z-]+|#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|rem|em|%|vh|vw|vmin|vmax|s|ms|deg|fr|ch|pt)?\b|--[\w-]+|!important|[{}():;,]|[\w-]+|[^/\s"'{}:;,@()#\d-]+|\s+/g;
+  let result = "";
+  let m: RegExpExecArray | null;
+  let inBlock = false;
+  let inProp = false;
+
+  while ((m = CSS_TOKEN_RE.exec(code)) !== null) {
+    const token = m[0];
+    if (token.startsWith("/*")) {
+      result += `<span style="color:var(--hl-comment)">${escHtml(token)}</span>`;
+    } else if (token.startsWith('"') || token.startsWith("'")) {
+      result += `<span style="color:var(--hl-string)">${escHtml(token)}</span>`;
+    } else if (token.startsWith("@")) {
+      result += `<span style="color:var(--hl-keyword)">${escHtml(token)}</span>`;
+    } else if (token === "{") {
+      inBlock = true;
+      inProp = false;
+      result += `<span style="color:var(--hl-punct)">{</span>`;
+    } else if (token === "}") {
+      inBlock = false;
+      inProp = false;
+      result += `<span style="color:var(--hl-punct)">}</span>`;
+    } else if (token === ":") {
+      if (inBlock) inProp = true;
+      result += `<span style="color:var(--hl-punct)">:</span>`;
+    } else if (token === ";") {
+      if (inBlock) inProp = false;
+      result += `<span style="color:var(--hl-punct)">;</span>`;
+    } else if (token === "!" || token === "!important") {
+      result += `<span style="color:var(--hl-keyword)">${escHtml(token)}</span>`;
+    } else if (token === "(" || token === ")" || token === ",") {
+      result += `<span style="color:var(--hl-punct)">${escHtml(token)}</span>`;
+    } else if (token.startsWith("--")) {
+      result += `<span style="color:var(--hl-attr)">${escHtml(token)}</span>`;
+    } else if (/^#[0-9a-fA-F]{3,8}$/.test(token) || /^\d/.test(token)) {
+      result += `<span style="color:var(--hl-string)">${escHtml(token)}</span>`;
+    } else if (inBlock) {
+      if (!inProp) {
+        result += `<span style="color:var(--hl-attr)">${escHtml(token)}</span>`;
+      } else {
+        const isFuncOrKeyword = /^(var|calc|min|max|clamp|rgb|rgba|hsl|hsla|url|linear-gradient|radial-gradient|inherit|initial|unset|revert|none|auto|block|inline|flex|grid|hidden|absolute|relative|fixed|sticky|bold|normal|italic|center|pointer|cover|contain|border-box|sans-serif|serif|monospace)$/i.test(token);
+        if (isFuncOrKeyword) {
+          result += `<span style="color:var(--hl-keyword)">${escHtml(token)}</span>`;
+        } else {
+          result += `<span style="color:var(--hl-string)">${escHtml(token)}</span>`;
+        }
+      }
+    } else {
+      result += `<span style="color:var(--hl-tag)">${escHtml(token)}</span>`;
+    }
+  }
+  return result;
+}
+
+export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId, language = "html" }: HtmlCodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
@@ -312,7 +368,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
           aria-hidden
           className="no-scrollbar pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-all px-4 py-4"
           style={{ fontSize, lineHeight: computedLineHeight, tabSize: 2 }}
-          dangerouslySetInnerHTML={{ __html: highlightHtml(value) + "\n" }}
+          dangerouslySetInnerHTML={{ __html: (language === "css" ? highlightCss(value) : highlightHtml(value)) + "\n" }}
         />
         <textarea
           ref={textareaRef}

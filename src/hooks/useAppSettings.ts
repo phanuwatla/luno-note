@@ -580,6 +580,7 @@ export interface AppSettings {
   showCodeLineNumbers: boolean;
   highlightInlineCode: boolean;
   spellCheck: boolean;
+  wrongLanguageSuggestion: boolean;
   smartTypography: boolean;
   toolbarItemsOrder: string[];
   hiddenToolbarItems: string[];
@@ -714,6 +715,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showCodeLineNumbers: false,
   highlightInlineCode: false,
   spellCheck: true,
+  wrongLanguageSuggestion: true,
   smartTypography: true,
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
@@ -868,6 +870,7 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     showCodeLineNumbers,
     highlightInlineCode,
     spellCheck: raw?.spellCheck !== undefined ? Boolean(raw.spellCheck) : DEFAULT_SETTINGS.spellCheck,
+    wrongLanguageSuggestion: raw?.wrongLanguageSuggestion !== undefined ? Boolean(raw.wrongLanguageSuggestion) : DEFAULT_SETTINGS.wrongLanguageSuggestion,
     smartTypography: raw?.smartTypography !== undefined ? Boolean(raw.smartTypography) : DEFAULT_SETTINGS.smartTypography,
     toolbarItemsOrder,
     hiddenToolbarItems,

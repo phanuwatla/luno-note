@@ -47,7 +47,7 @@ function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = fa
     const ImgIcon = getToolbarIcon("fileImage", pack);
     return <ImgIcon className={cls} />;
   }
-  if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx")) {
+  if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".css") || name.endsWith(".scss") || name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx")) {
     const CodeIcon = getToolbarIcon("fileCode", pack);
     return <CodeIcon className={cls} />;
   }

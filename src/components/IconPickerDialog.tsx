@@ -216,6 +216,12 @@ export default function IconPickerDialog({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleApply();
+                }
+              }}
               placeholder={t("iconPicker.searchPlaceholder") || "Search icons or emojis..."}
               className="w-full rounded-xl border border-border bg-background pl-9 pr-8 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors min-w-0"
             />

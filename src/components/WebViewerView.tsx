@@ -76,6 +76,8 @@ export default function WebViewerView({
   const isElectron = Boolean(window.electronAPI?.isElectron);
   const webviewRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const initialSrcRef = useRef(initialUrl || "https://www.google.com");
+  const currentUrlRef = useRef(initialUrl || "https://www.google.com");
 
   // Run progress once from left to right on page load
   useEffect(() => {
@@ -110,14 +112,22 @@ export default function WebViewerView({
     };
   }, [isLoading]);
 
-  // Sync initial URL if it changes from props
+  // Sync initial URL if it changes from external props
   useEffect(() => {
-    if (initialUrl && initialUrl !== currentUrl) {
+    if (initialUrl && initialUrl !== currentUrlRef.current) {
+      currentUrlRef.current = initialUrl;
       setCurrentUrl(initialUrl);
       setInputUrl(initialUrl);
       setLoadError(null);
+      if (isElectron && webviewRef.current) {
+        try {
+          webviewRef.current.loadURL(initialUrl);
+        } catch (err) {
+          console.warn("Failed loading URL in webview:", err);
+        }
+      }
     }
-  }, [initialUrl]);
+  }, [initialUrl, isElectron]);
 
   const normalizeUrl = (raw: string): string => {
     const trimmed = raw.trim();
@@ -139,6 +149,7 @@ export default function WebViewerView({
 
   const handleNavigate = (targetUrl: string) => {
     const validUrl = normalizeUrl(targetUrl);
+    currentUrlRef.current = validUrl;
     setCurrentUrl(validUrl);
     setInputUrl(validUrl);
     setLoadError(null);
@@ -243,9 +254,20 @@ export default function WebViewerView({
     const webview = webviewRef.current;
     if (!isElectron || !webview) return;
 
+    const applyZoom = () => {
+      try {
+        if (typeof webview.setZoomFactor === "function") {
+          webview.setZoomFactor(0.9);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
     const onStartLoading = () => {
       setIsLoading(true);
       setLoadError(null);
+      applyZoom();
     };
 
     const onStopLoading = () => {
@@ -256,18 +278,22 @@ export default function WebViewerView({
       } catch {
         /* ignore */
       }
+      applyZoom();
     };
 
     const onDidNavigate = (e: any) => {
       if (e.url) {
+        currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
         setInputUrl(e.url);
         onUrlChange?.(e.url);
+        applyZoom();
       }
     };
 
     const onDidNavigateInPage = (e: any) => {
       if (e.url) {
+        currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
         setInputUrl(e.url);
         onUrlChange?.(e.url);
@@ -304,15 +330,7 @@ export default function WebViewerView({
       }
     };
 
-    const applyZoom = () => {
-      try {
-        if (typeof webview.setZoomFactor === "function") {
-          webview.setZoomFactor(0.9);
-        }
-      } catch {
-        /* ignore */
-      }
-    };
+    applyZoom();
 
     webview.addEventListener("did-start-loading", onStartLoading);
     webview.addEventListener("did-stop-loading", onStopLoading);
@@ -322,6 +340,7 @@ export default function WebViewerView({
     webview.addEventListener("page-favicon-updated", onPageFaviconUpdated);
     webview.addEventListener("did-fail-load", onFailLoad);
     webview.addEventListener("new-window", onNewWindow);
+    webview.addEventListener("load-commit", applyZoom);
     webview.addEventListener("dom-ready", applyZoom);
     webview.addEventListener("did-finish-load", applyZoom);
 
@@ -334,6 +353,7 @@ export default function WebViewerView({
       webview.removeEventListener("page-favicon-updated", onPageFaviconUpdated);
       webview.removeEventListener("did-fail-load", onFailLoad);
       webview.removeEventListener("new-window", onNewWindow);
+      webview.removeEventListener("load-commit", applyZoom);
       webview.removeEventListener("dom-ready", applyZoom);
       webview.removeEventListener("did-finish-load", applyZoom);
     };
@@ -580,7 +600,7 @@ export default function WebViewerView({
             // Native Electron Webview with isolated partition
             <webview
               ref={webviewRef}
-              src={currentUrl}
+              src={initialSrcRef.current}
               partition="persist:luno_webviewer"
               allowpopups="true"
               webpreferences="contextIsolation=yes"

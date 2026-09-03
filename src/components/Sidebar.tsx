@@ -420,13 +420,14 @@ function getPreview(content: string, title: string, noContentLabel: string) {
   return cleanText.length > 85 ? cleanText.slice(0, 85) + "…" : cleanText;
 }
 
-function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
+function getFileType(note: Note): "txt" | "md" | "html" | "css" | "image" | "binary" | "zip" | "unknown" {
   if (note.fileType === "image") return "image";
   if (note.fileType === "binary") return "binary";
   const name = note.fileName?.toLowerCase() || "";
   if (name.endsWith(".txt")) return "txt";
   if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
   if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
+  if (name.endsWith(".css") || note.contentFormat === "css") return "css";
   if (name.endsWith(".zip")) return "zip";
   return "unknown";
 }
@@ -452,7 +453,7 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
     const ZipIcon = getToolbarIcon("fileZip", pack);
     return <ZipIcon className={cls} />;
   }
-  if (type === "md" || type === "html") {
+  if (type === "md" || type === "html" || type === "css") {
     const CodeIcon = getToolbarIcon("fileCode", pack);
     return <CodeIcon className={cls} />;
   }
@@ -573,7 +574,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
   };
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
-  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
+  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css"; folderName?: string }>(null);
 
   const openFolderBeforeCreation = () => {
     if (!openedFolderName && onOpenFolder) {
@@ -969,7 +970,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
   const handleCreateFromDialog = async () => {
     const baseName = newFileName.trim();
     const ext = newFileExt || settings.defaultExtension;
-    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : "plain";
+    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : ext === "css" ? "css" : "plain";
 
     const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
     let defaultBaseName = "Untitled";
@@ -2279,6 +2280,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                 type="text"
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateFromDialog();
+                  }
+                }}
                 placeholder={
                   settings.newFilePattern === "date"
                     ? `Note_${formatDateForFileName(new Date(), settings.dateFormat)}`
@@ -2294,7 +2301,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               <label htmlFor="new-file-ext" className="mb-2 block text-sm font-medium text-foreground">
                 {t("sidebar.fileTypeLabel")}
               </label>
-              <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v === "md" ? "md" : v === "html" ? "html" : "txt")}>
+              <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v as "txt" | "md" | "html" | "css")}>
                 <SelectTrigger id="new-file-ext" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -2302,6 +2309,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                   <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
                   <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
                   <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
+                  <SelectItem value="css">{t("sidebar.fileTypeCss") || "CSS (.css)"}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2372,6 +2380,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               type="text"
               value={renameFileName}
               onChange={(e) => setRenameFileName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleRenameFileFromDialog();
+                }
+              }}
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>
@@ -2403,6 +2417,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               type="text"
               value={renameFolderName}
               onChange={(e) => setRenameFolderName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleRenameFolderFromDialog();
+                }
+              }}
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
             />
           </div>

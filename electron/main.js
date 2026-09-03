@@ -333,7 +333,7 @@ function scanWorkspaceTree(rootDir) {
         if (IMAGE_EXTS.has(ext)) {
           fileType = "image";
         } else if (TEXT_EXTS.has(ext) || ext === "") {
-          contentFormat = ext === ".md" || ext === ".markdown" || ext === "" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : "plain";
+          contentFormat = ext === ".md" || ext === ".markdown" || ext === "" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : "plain";
           // Only read content for files <= 2MB to prevent renderer/main process blocking
           if (size <= 2 * 1024 * 1024) {
             try {
@@ -954,6 +954,14 @@ function setupIpcHandlers() {
           ".bmp": "image/bmp",
           ".ico": "image/x-icon",
           ".avif": "image/avif",
+          ".css": "text/css",
+          ".js": "text/javascript",
+          ".json": "application/json",
+          ".txt": "text/plain",
+          ".woff": "font/woff",
+          ".woff2": "font/woff2",
+          ".ttf": "font/ttf",
+          ".otf": "font/otf",
         };
         const mimeType = mimeMap[ext] || "application/octet-stream";
         const buffer = fs.readFileSync(fullPath);
@@ -1301,6 +1309,34 @@ app.whenReady().then(() => {
     }
 
     if (contents.getType() === "webview") {
+      try {
+        contents.setZoomFactor(0.9);
+      } catch {}
+
+      contents.on("did-start-navigation", () => {
+        try {
+          contents.setZoomFactor(0.9);
+        } catch {}
+      });
+
+      contents.on("did-navigate", () => {
+        try {
+          contents.setZoomFactor(0.9);
+        } catch {}
+      });
+
+      contents.on("did-frame-finish-load", () => {
+        try {
+          contents.setZoomFactor(0.9);
+        } catch {}
+      });
+
+      contents.on("dom-ready", () => {
+        try {
+          contents.setZoomFactor(0.9);
+        } catch {}
+      });
+
       contents.setWindowOpenHandler(({ url }) => {
         try {
           if (url && (url.startsWith("http://") || url.startsWith("https://"))) {

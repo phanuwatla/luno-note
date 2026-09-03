@@ -143,6 +143,8 @@ import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare 
 import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
+import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
+import { getWrongLanguageCandidate } from "@/lib/wrongLanguageDetector";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
 export type { AiActionType };
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
@@ -434,6 +436,368 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
   }
 
   return resultLines.join("\n");
+}
+
+export const EDITOR_CLASSES =
+  "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+  " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
+  " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
+  " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+export const toTaskItemHtml = (isChecked: boolean, text: string) =>
+  `<li data-type="taskItem" data-checked="${isChecked}">` +
+  `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
+  `<div><p>${text}</p></div>` +
+  `</li>`;
+
+export const migrateDomTaskLists = (root: HTMLElement) => {
+  root.querySelectorAll("li.task-list-item").forEach((li) => {
+    const checkbox = li.querySelector('input[type="checkbox"]');
+    const isChecked = checkbox ? (checkbox as HTMLInputElement).checked : false;
+    checkbox?.remove();
+    const contentSpan = li.querySelector(".task-list-item-content");
+    const inner = contentSpan
+      ? ((contentSpan as HTMLElement).innerHTML || "").trim()
+      : ((li as HTMLElement).innerHTML || "").trim();
+    const tpl = document.createElement("template");
+    tpl.innerHTML = toTaskItemHtml(isChecked, inner);
+    li.replaceWith(tpl.content.firstChild!);
+  });
+
+  root.querySelectorAll("li").forEach((li) => {
+    const checkbox = li.querySelector('input[type="checkbox"]');
+    if (!checkbox || li.getAttribute("data-type") === "taskItem") return;
+    const isChecked = (checkbox as HTMLInputElement).checked;
+    checkbox.remove();
+    const inner = ((li as HTMLElement).innerHTML || "").trim();
+    const tpl = document.createElement("template");
+    tpl.innerHTML = toTaskItemHtml(isChecked, inner || "<p></p>");
+    li.replaceWith(tpl.content.firstChild!);
+  });
+
+  root.querySelectorAll("ul").forEach((ul) => {
+    if (ul.querySelector('li[data-type="taskItem"]')) {
+      ul.setAttribute("data-type", "taskList");
+      ul.removeAttribute("class");
+    }
+  });
+};
+
+export const prepareDomForEditor = (
+  root: HTMLElement,
+  options?: {
+    assetBlobUrlMap?: Map<string, string>;
+    theme?: string;
+    tagColorStyle?: string;
+  }
+) => {
+  migrateDomTaskLists(root);
+
+  // Clean up extra leading/trailing newlines in code blocks from marked output and ensure no double HTML entity encoding
+  root.querySelectorAll("pre code, pre").forEach((el) => {
+    if (el.tagName === "CODE" || (el.tagName === "PRE" && !el.querySelector("code"))) {
+      const rawText = (el.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+      el.innerHTML = escapeHtml(rawText);
+    }
+  });
+
+  // Wrap tables in tableWrapper matching Tiptap Table structure
+  root.querySelectorAll("table").forEach((table) => {
+    if (!table.parentElement?.classList.contains("tableWrapper")) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "tableWrapper";
+      table.parentNode?.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    }
+  });
+
+  // Unwrap paragraphs containing audio elements or image elements
+  root.querySelectorAll("p").forEach((p) => {
+    if (p.closest("table, td, th")) return;
+    const audio = p.querySelector("audio");
+    if (audio) {
+      if (p.children.length === 1 && !p.textContent?.trim()) {
+        p.replaceWith(audio);
+      } else {
+        p.parentElement?.insertBefore(audio, p);
+        if (!p.textContent?.trim() && !p.children.length) {
+          p.remove();
+        }
+      }
+    }
+    const img = p.querySelector("img");
+    if (img) {
+      if (p.children.length === 1 && !p.textContent?.trim()) {
+        p.replaceWith(img);
+      } else {
+        p.querySelectorAll("br").forEach((br) => {
+          if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
+            br.remove();
+          }
+        });
+        if (p.contains(img)) {
+          p.after(img);
+        }
+        if (!p.textContent?.trim() && !p.children.length) {
+          p.remove();
+        }
+      }
+    }
+  });
+
+  // Preserve and resolve relative image sources
+  root.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
+      let encodedRel = src;
+      try {
+        encodedRel = encodeURI(decodeURI(src));
+      } catch {
+        encodedRel = src.replace(/ /g, "%20");
+      }
+      let decodedRel = src;
+      try {
+        decodedRel = decodeURIComponent(src);
+      } catch {}
+      img.setAttribute("data-relative-src", encodedRel);
+      if (options?.assetBlobUrlMap) {
+        const cachedBlobUrl =
+          options.assetBlobUrlMap.get(encodedRel) ||
+          options.assetBlobUrlMap.get(decodedRel) ||
+          options.assetBlobUrlMap.get(src);
+        if (cachedBlobUrl) {
+          img.setAttribute("src", cachedBlobUrl);
+        }
+      }
+    }
+  });
+
+  // Clean up empty paragraph before an image or audio
+  root.querySelectorAll("p").forEach((p) => {
+    if (p.closest("table, td, th")) return;
+    if (!p.textContent?.trim() && !p.querySelector("img, audio, input, label")) {
+      const next = p.nextElementSibling;
+      if (next && (next.tagName === "IMG" || next.tagName === "AUDIO")) {
+        p.remove();
+      }
+    }
+  });
+
+  // Preserve spaces between inline code tags
+  root.querySelectorAll("code").forEach((code) => {
+    if (code.closest("pre")) return;
+    const next = code.nextSibling;
+    if (next && next.nodeType === Node.TEXT_NODE && next.nodeValue) {
+      if (/^\s+/.test(next.nodeValue)) {
+        next.nodeValue = next.nodeValue.replace(/^ +/, (spaces) => "\u00A0".repeat(spaces.length));
+      }
+    }
+  });
+
+  // Preserve first-line Em-Space indentation (\u2003\u2003) for text paragraphs matching Obsidian
+  root.querySelectorAll("p").forEach((p) => {
+    if (p.childNodes.length > 0 && p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
+      const text = p.firstChild.nodeValue || "";
+      const match = text.match(/^([\u00A0\u2003]{2,})/);
+      if (match) {
+        p.firstChild.nodeValue = text.replace(/^[\u00A0\u2003]+/, "\u2003\u2003");
+      }
+    }
+  });
+
+  // Convert inline hashtags (#tag)
+  const inlineTagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+  const formatHashtagsInNode = (element: Node) => {
+    const children = Array.from(element.childNodes);
+    for (const child of children) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = (child as HTMLElement).tagName.toLowerCase();
+        if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
+          continue;
+        }
+        formatHashtagsInNode(child);
+      } else if (child.nodeType === Node.TEXT_NODE) {
+        const text = child.nodeValue || "";
+        inlineTagRegex.lastIndex = 0;
+        if (inlineTagRegex.test(text)) {
+          const frag = document.createDocumentFragment();
+          inlineTagRegex.lastIndex = 0;
+          let lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = inlineTagRegex.exec(text)) !== null) {
+            const rawTag = match[1];
+            if (/^\d+$/.test(rawTag)) continue;
+            const hashIndex = match[0].indexOf("#");
+            const matchStart = match.index + hashIndex;
+            const matchEnd = matchStart + 1 + rawTag.length;
+
+            if (matchStart > lastIndex) {
+              frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+            }
+
+            const badge = document.createElement("span");
+            const colorClass = getTagColorClass(rawTag, options?.theme, undefined, options?.tagColorStyle);
+            badge.className = `inline-tag-badge border ${colorClass}`;
+            badge.textContent = `#${rawTag}`;
+            frag.appendChild(badge);
+
+            lastIndex = matchEnd;
+          }
+          if (lastIndex < text.length) {
+            frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+          }
+          child.replaceWith(frag);
+        }
+      }
+    }
+  };
+  formatHashtagsInNode(root);
+
+  // Convert inline Wikilinks [[Target|Alias]]
+  const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
+  const formatWikilinksInNode = (element: Node) => {
+    const children = Array.from(element.childNodes);
+    for (const child of children) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = (child as HTMLElement).tagName.toLowerCase();
+        if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
+          continue;
+        }
+        formatWikilinksInNode(child);
+      } else if (child.nodeType === Node.TEXT_NODE) {
+        const text = child.nodeValue || "";
+        wikilinkRegex.lastIndex = 0;
+        if (wikilinkRegex.test(text)) {
+          const frag = document.createDocumentFragment();
+          wikilinkRegex.lastIndex = 0;
+          let lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = wikilinkRegex.exec(text)) !== null) {
+            const fullMatch = match[0];
+            const target = (match[1] || "").trim();
+            const alias = (match[2] || "").trim();
+            const matchStart = match.index;
+            const matchEnd = matchStart + fullMatch.length;
+
+            if (matchStart > lastIndex) {
+              frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+            }
+
+            const link = document.createElement("a");
+            link.href = `wikilink:${encodeURIComponent(target)}`;
+            link.setAttribute("data-wikilink", target);
+            link.className = "internal-wikilink text-primary underline underline-offset-4 cursor-pointer hover:opacity-80";
+            link.textContent = alias || target;
+            frag.appendChild(link);
+
+            lastIndex = matchEnd;
+          }
+          if (lastIndex < text.length) {
+            frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+          }
+          child.replaceWith(frag);
+        }
+      }
+    }
+  };
+  formatWikilinksInNode(root);
+
+  root.querySelectorAll("details").forEach((details) => {
+    const summary = details.querySelector("summary");
+    const title = summary?.textContent?.trim() || "";
+    summary?.remove();
+
+    let div = details.querySelector(":scope > div");
+    if (!div) {
+      div = document.createElement("div");
+      while (details.firstChild) {
+        div.appendChild(details.firstChild);
+      }
+      details.appendChild(div);
+    }
+
+    const newSummary = document.createElement("summary");
+    newSummary.textContent = title;
+    details.insertBefore(newSummary, details.firstChild);
+  });
+
+  // Ensure all empty paragraphs have <br> so static HTML previews render real blank lines with full line-height matching the Editor
+  root.querySelectorAll("p").forEach((p) => {
+    if (!p.textContent?.trim() && p.children.length === 0) {
+      p.innerHTML = "<br>";
+    }
+  });
+};
+
+export function renderMarkdownToEditorHtml(
+  markdown: string,
+  options?: {
+    isReadingMode?: boolean;
+    theme?: string;
+    tagColorStyle?: string;
+    assetBlobUrlMap?: Map<string, string>;
+    contentFormat?: "markdown" | "html" | "plain";
+  }
+): string {
+  if (!markdown) return "<p></p>";
+
+  const format = options?.contentFormat ?? "markdown";
+  if (format === "html") {
+    if (typeof document !== "undefined") {
+      const root = document.createElement("div");
+      root.innerHTML = markdown;
+      prepareDomForEditor(root, options);
+      return root.innerHTML;
+    }
+    return markdown;
+  }
+  if (format === "plain") {
+    const lines = markdown.split("\n");
+    return lines.map((l) => `<p>${l ? escapeHtml(l) : "<br>"}</p>`).join("");
+  }
+
+  // 1. Strip Frontmatter block if present
+  const parsedFm = parseFrontmatterAndTags(markdown);
+  let cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : markdown;
+  cleanText = cleanText.replace(/^\r?\n/, "");
+
+  // 2. Normalize standalone `[ ]` or `[x]` lines to `- [ ]`
+  const normalizedText = cleanText.replace(/^([ \t]*)\[([ xX])\]\s*(.*)$/gm, "$1- [$2] $3");
+
+  // 3. Mark tables with attribute so marked preserves original HTML table structure
+  const textWithTableAttr = normalizedText.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
+
+  // 4. Preprocess markdown using Editor's exact preprocessor
+  const preprocessed = preprocessMarkdownForEditor(textWithTableAttr, options?.isReadingMode ?? false);
+
+  // 5. Parse with marked
+  let rawHtml = "";
+  try {
+    const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true });
+    rawHtml = typeof parsed === "string" ? parsed : cleanText;
+  } catch {
+    rawHtml = cleanText;
+  }
+
+  // 6. Complete DOM transformations matching Editor 100%
+  if (typeof document !== "undefined") {
+    const root = document.createElement("div");
+    root.innerHTML = rawHtml;
+
+    prepareDomForEditor(root, options);
+
+    const cleanHtml = root.innerHTML
+      .replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "")
+      .replace(/>\s+</g, "><");
+
+    return cleanHtml;
+  }
+
+  return rawHtml;
 }
 
 function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
@@ -860,6 +1224,131 @@ export const SmartTypography = Extension.create<SmartTypographyOptions>({
   },
 });
 
+export const wrongLanguageSuggestionPluginKey = new PluginKey("wrongLanguageSuggestion");
+
+export interface WrongLanguageSuggestionOptions {
+  enabled: boolean;
+}
+
+export interface WrongLangPluginState {
+  suggestion: {
+    from: number;
+    to: number;
+    original: string;
+    replacement: string;
+    targetLang: "th" | "en";
+  } | null;
+  dismissedPos: number | null;
+}
+
+export const WrongLanguageSuggestion = Extension.create<WrongLanguageSuggestionOptions>({
+  name: "wrongLanguageSuggestion",
+
+  addOptions() {
+    return {
+      enabled: true,
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const extension = this;
+
+    return [
+      new Plugin({
+        key: wrongLanguageSuggestionPluginKey,
+        state: {
+          init() {
+            return { suggestion: null, dismissedPos: null } as WrongLangPluginState;
+          },
+          apply(tr, oldState: WrongLangPluginState, _oldEditorState, newEditorState) {
+            if (!extension.options.enabled) {
+              return { suggestion: null, dismissedPos: null };
+            }
+
+            const meta = tr.getMeta(wrongLanguageSuggestionPluginKey);
+            if (meta?.dismiss) {
+              return { suggestion: null, dismissedPos: newEditorState.selection.head };
+            }
+
+            const sel = newEditorState.selection;
+            if (!sel.empty) {
+              return { suggestion: null, dismissedPos: null };
+            }
+
+            const head = sel.head;
+            if (oldState.dismissedPos === head && !tr.docChanged) {
+              return oldState;
+            }
+
+            const $head = sel.$head;
+            const parent = $head.parent;
+            if (!parent.isTextblock || parent.type.name === "codeBlock" || parent.type.name === "codeBlockLowlight") {
+              return { suggestion: null, dismissedPos: null };
+            }
+
+            const startOfBlock = $head.start();
+            const textBefore = newEditorState.doc.textBetween(startOfBlock, head, "\n", "\n");
+            const candidate = getWrongLanguageCandidate(textBefore);
+
+            if (!candidate) {
+              return { suggestion: null, dismissedPos: null };
+            }
+
+            const from = head - candidate.fromOffset;
+            const to = head;
+
+            return {
+              suggestion: {
+                from,
+                to,
+                original: candidate.original,
+                replacement: candidate.replacement,
+                targetLang: candidate.targetLang,
+              },
+              dismissedPos: null,
+            };
+          },
+        },
+        props: {
+          decorations(state) {
+            if (!extension.options.enabled) return DecorationSet.empty;
+            const pluginState = wrongLanguageSuggestionPluginKey.getState(state) as WrongLangPluginState | undefined;
+            if (!pluginState || !pluginState.suggestion) return DecorationSet.empty;
+
+            const { to, replacement } = pluginState.suggestion;
+            const widget = Decoration.widget(
+              to,
+              () => {
+                const span = document.createElement("span");
+                span.className =
+                  "luno-ghost-suggestion select-none pointer-events-none opacity-50 dark:opacity-60 italic text-muted-foreground font-normal inline-flex items-center align-middle gap-1.5 ml-1";
+                span.dataset.ghostReplacement = replacement;
+
+                const textSpan = document.createElement("span");
+                textSpan.className = "inline-flex items-center leading-none";
+                textSpan.textContent = replacement;
+                span.appendChild(textSpan);
+
+                const kbd = document.createElement("kbd");
+                kbd.className =
+                  "not-italic text-[0.8em] leading-none px-1.5 py-1 rounded-md bg-muted border border-border/80 text-muted-foreground font-mono font-medium shadow-2xs inline-flex items-center justify-center align-middle";
+                kbd.textContent = "Tab ⇥";
+                span.appendChild(kbd);
+
+                return span;
+              },
+              { side: 1, key: "luno-ghost-suggestion" }
+            );
+
+            return DecorationSet.create(state.doc, [widget]);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
 import { WorkspaceImagePickerDialog } from "@/components/editor/WorkspaceImagePickerDialog";
@@ -918,113 +1407,6 @@ const EMOJI_LIST = [
   "🔓", "🔑", "📦", "✉️", "📧", "💼", "📱", "💻", "⌨️", "🖥️",
   "📷", "🎥", "🎬", "🎨", "🚀", "🛸", "⏰", "⏱️", "☕", "🍺"
 ];
-
-const EN_TO_TH_KEYMAP: Record<string, string> = {
-  "`": "_",
-  "1": "ๅ",
-  "2": "/",
-  "3": "-",
-  "4": "ภ",
-  "5": "ถ",
-  "6": "ุ",
-  "7": "ึ",
-  "8": "ค",
-  "9": "ต",
-  "0": "จ",
-  "-": "ข",
-  "=": "ช",
-  "q": "ๆ",
-  "w": "ไ",
-  "e": "ำ",
-  "r": "พ",
-  "t": "ะ",
-  "y": "ั",
-  "u": "ี",
-  "i": "ร",
-  "o": "น",
-  "p": "ย",
-  "[": "บ",
-  "]": "ล",
-  "\\": "ฃ",
-  "a": "ฟ",
-  "s": "ห",
-  "d": "ก",
-  "f": "ด",
-  "g": "เ",
-  "h": "้",
-  "j": "่",
-  "k": "า",
-  "l": "ส",
-  ";": "ว",
-  "'": "ง",
-  "z": "ผ",
-  "x": "ป",
-  "c": "แ",
-  "v": "อ",
-  "b": "ิ",
-  "n": "ื",
-  "m": "ท",
-  ",": "ม",
-  ".": "ใ",
-  "/": "ฝ",
-  "~": "%",
-  "!": "+",
-  "@": "\"",
-  "#": "/",
-  "$": ",",
-  "%": "?",
-  "^": "ู",
-  "&": "_",
-  "*": ".",
-  "(": "(",
-  ")": ")",
-  "_": "-",
-  "+": "ภ",
-  "Q": "๐",
-  "W": "\"",
-  "E": "ฎ",
-  "R": "ฑ",
-  "T": "ธ",
-  "Y": "ํ",
-  "U": "๊",
-  "I": "ณ",
-  "O": "ฯ",
-  "P": "ญ",
-  "{": "ฐ",
-  "}": ",",
-  "|": "ฅ",
-  "A": "ฤ",
-  "S": "ฆ",
-  "D": "ฏ",
-  "F": "โ",
-  "G": "ฌ",
-  "H": "็",
-  "J": "๋",
-  "K": "ษ",
-  "L": "ศ",
-  ":": "ซ",
-  "\"": ".",
-  "Z": "(",
-  "X": ")",
-  "C": "ฉ",
-  "V": "ฮ",
-  "B": "ฺ",
-  "N": "์",
-  "M": "?",
-  "<": "ฒ",
-  ">": "ฬ",
-  "?": "ฦ",
-};
-
-const TH_TO_EN_KEYMAP: Record<string, string> = Object.entries(EN_TO_TH_KEYMAP).reduce(
-  (acc, [en, th]) => {
-    if (!(th in acc)) {
-      acc[th] = en;
-    }
-    return acc;
-  },
-  {} as Record<string, string>,
-);
 
 export function getToggleButtonMode(selection: { empty: boolean }): "wrap" | "insert" {
   return selection.empty ? "insert" : "wrap";
@@ -1701,6 +2083,13 @@ const IndentKeymap = Extension.create({
   addKeyboardShortcuts() {
     return {
       Tab: ({ editor }) => {
+        const ghostState = wrongLanguageSuggestionPluginKey.getState(editor.state) as WrongLangPluginState | undefined;
+        if (ghostState?.suggestion) {
+          const { from, to, replacement } = ghostState.suggestion;
+          editor.chain().focus().insertContentAt({ from, to }, replacement).setTextSelection(from + replacement.length).run();
+          return true;
+        }
+
         if (editor.can().sinkListItem("listItem") && editor.chain().focus().sinkListItem("listItem").run()) {
           return true;
         }
@@ -1773,10 +2162,16 @@ const IndentKeymap = Extension.create({
         }
         return false;
       },
-      Escape: () => {
+      Escape: ({ editor }) => {
         if (slashMenuStateRef.current.open) {
           slashMenuStateRef.current.open = false;
           slashMenuStateRef.current.notify?.();
+          return true;
+        }
+        const ghostState = wrongLanguageSuggestionPluginKey.getState(editor.state) as WrongLangPluginState | undefined;
+        if (ghostState?.suggestion) {
+          const tr = editor.state.tr.setMeta(wrongLanguageSuggestionPluginKey, { dismiss: true });
+          editor.view.dispatch(tr);
           return true;
         }
         return false;
@@ -3396,6 +3791,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return false;
   }, []);
 
+  const isCssFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.contentFormat === "css") return true;
+    const fileName = targetNote.fileName?.toLowerCase() ?? "";
+    if (fileName.endsWith(".css")) return true;
+    return false;
+  }, []);
+
   const getBaseTitle = useCallback((targetNote: Note | null): string => {
     if (!targetNote || isTxtFile(targetNote)) return "";
     
@@ -3535,305 +3938,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return editorHtml.replace(/>\s+</g, "><");
   };
 
-  /** Convert one task-list line/element to a Tiptap taskItem <li> string */
-  const toTaskItemHtml = (isChecked: boolean, text: string) =>
-    `<li data-type="taskItem" data-checked="${isChecked}">` +
-    `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
-    `<div><p>${text}</p></div>` +
-    `</li>`;
-
-  /** Convert a DOM tree's GFM / legacy task list items to Tiptap's native format */
-  const migrateDomTaskLists = (root: HTMLElement) => {
-    // Handle legacy HTML saved before this fix (<li class="task-list-item">)
-    root.querySelectorAll("li.task-list-item").forEach((li) => {
-      const checkbox = li.querySelector('input[type="checkbox"]');
-      const isChecked = checkbox ? (checkbox as HTMLInputElement).checked : false;
-      checkbox?.remove();
-      const contentSpan = li.querySelector(".task-list-item-content");
-      const inner = contentSpan
-        ? ((contentSpan as HTMLElement).innerHTML || "").trim()
-        : ((li as HTMLElement).innerHTML || "").trim();
-      const tpl = document.createElement("template");
-      tpl.innerHTML = toTaskItemHtml(isChecked, inner);
-      li.replaceWith(tpl.content.firstChild!);
-    });
-
-    // Handle marked GFM output (<li> with <input type="checkbox"> child)
-    root.querySelectorAll("li").forEach((li) => {
-      const checkbox = li.querySelector('input[type="checkbox"]');
-      if (!checkbox || li.getAttribute("data-type") === "taskItem") return;
-      const isChecked = (checkbox as HTMLInputElement).checked;
-      checkbox.remove();
-      const inner = ((li as HTMLElement).innerHTML || "").trim();
-      const tpl = document.createElement("template");
-      tpl.innerHTML = toTaskItemHtml(isChecked, inner || "<p></p>");
-      li.replaceWith(tpl.content.firstChild!);
-    });
-
-    // Re-tag any <ul> that now contains taskItems
-    root.querySelectorAll("ul").forEach((ul) => {
-      if (ul.querySelector('li[data-type="taskItem"]')) {
-        ul.setAttribute("data-type", "taskList");
-        ul.removeAttribute("class");
-      }
-    });
-  };
-
-  const prepareDomForEditor = (root: HTMLElement) => {
-    migrateDomTaskLists(root);
-
-    // Clean up extra leading/trailing newlines in code blocks from marked output and ensure no double HTML entity encoding
-    root.querySelectorAll("pre code, pre").forEach((el) => {
-      if (el.tagName === "CODE" || (el.tagName === "PRE" && !el.querySelector("code"))) {
-        const rawText = (el.textContent || "").replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-        // Cleanly set innerHTML to escHtml so DOM Parser reads exact unescaped characters with zero double-escaping
-        el.innerHTML = escHtml(rawText);
-      }
-    });
-
-    // Unwrap paragraphs containing audio elements or image elements to ensure they are parsed as top-level block nodes
-    root.querySelectorAll("p").forEach((p) => {
-      if (p.closest("table, td, th")) return;
-      const audio = p.querySelector("audio");
-      if (audio) {
-        if (p.children.length === 1 && !p.textContent?.trim()) {
-          p.replaceWith(audio);
-        } else {
-          p.parentElement?.insertBefore(audio, p);
-          if (!p.textContent?.trim() && !p.children.length) {
-            p.remove();
-          }
-        }
-      }
-      const img = p.querySelector("img");
-      if (img) {
-        if (p.children.length === 1 && !p.textContent?.trim()) {
-          p.replaceWith(img);
-        } else {
-          p.querySelectorAll("br").forEach((br) => {
-            if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
-              br.remove();
-            }
-          });
-          if (p.contains(img)) {
-            p.after(img);
-          }
-          if (!p.textContent?.trim() && !p.children.length) {
-            p.remove();
-          }
-        }
-      }
-    });
-
-    // Preserve and resolve relative image sources
-    root.querySelectorAll("img").forEach((img) => {
-      const src = img.getAttribute("src") || "";
-      if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
-        let encodedRel = src;
-        try {
-          encodedRel = encodeURI(decodeURI(src));
-        } catch {
-          encodedRel = src.replace(/ /g, "%20");
-        }
-        let decodedRel = src;
-        try {
-          decodedRel = decodeURIComponent(src);
-        } catch {}
-        img.setAttribute("data-relative-src", encodedRel);
-        const cachedBlobUrl =
-          assetBlobUrlMap.current.get(encodedRel) ||
-          assetBlobUrlMap.current.get(decodedRel) ||
-          assetBlobUrlMap.current.get(src);
-        if (cachedBlobUrl) {
-          img.setAttribute("src", cachedBlobUrl);
-        }
-      }
-    });
-
-    // Clean up empty paragraph before an image or audio if it was created by Markdown block splitting
-    root.querySelectorAll("p").forEach((p) => {
-      if (p.closest("table, td, th")) return;
-      if (!p.textContent?.trim() && !p.querySelector("img, audio, input, label")) {
-        const next = p.nextElementSibling;
-        if (next && (next.tagName === "IMG" || next.tagName === "AUDIO")) {
-          p.remove();
-        }
-      }
-    });
-
-    // Preserve spaces between inline code tags so ProseMirror DOMParser does not collapse the space and merge adjacent code marks
-    root.querySelectorAll("code").forEach((code) => {
-      if (code.closest("pre")) return;
-      const next = code.nextSibling;
-      if (next && next.nodeType === Node.TEXT_NODE && next.nodeValue) {
-        if (/^\s+/.test(next.nodeValue)) {
-          next.nodeValue = next.nodeValue.replace(/^ +/, (spaces) => "\u00A0".repeat(spaces.length));
-        }
-      }
-    });
-
-    // Preserve first-line Em-Space indentation (\u2003\u2003) for text paragraphs matching Obsidian
-    root.querySelectorAll("p").forEach((p) => {
-      if (p.childNodes.length > 0 && p.firstChild && p.firstChild.nodeType === Node.TEXT_NODE) {
-        const text = p.firstChild.nodeValue || "";
-        const match = text.match(/^([\u00A0\u2003]{2,})/);
-        if (match) {
-          p.firstChild.nodeValue = text.replace(/^[\u00A0\u2003]+/, "\u2003\u2003");
-        }
-      }
-    });
-
-    // Convert inline hashtags (#tag) outside code blocks, headings, links into pill badges
-    const inlineTagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
-    const formatHashtagsInNode = (element: Node) => {
-      const children = Array.from(element.childNodes);
-      for (const child of children) {
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          const tag = (child as HTMLElement).tagName.toLowerCase();
-          if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
-            continue;
-          }
-          formatHashtagsInNode(child);
-        } else if (child.nodeType === Node.TEXT_NODE) {
-          const text = child.nodeValue || "";
-          inlineTagRegex.lastIndex = 0;
-          if (inlineTagRegex.test(text)) {
-            const frag = document.createDocumentFragment();
-            inlineTagRegex.lastIndex = 0;
-            let lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = inlineTagRegex.exec(text)) !== null) {
-              const rawTag = match[1];
-              if (/^\d+$/.test(rawTag)) continue;
-              const hashIndex = match[0].indexOf("#");
-              const matchStart = match.index + hashIndex;
-              const matchEnd = matchStart + 1 + rawTag.length;
-
-              if (matchStart > lastIndex) {
-                frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
-              }
-
-              const badge = document.createElement("span");
-              const colorClass = getTagColorClass(rawTag, settingsRef.current?.theme, undefined, settingsRef.current?.tagColorStyle);
-              badge.className = `inline-tag-badge border ${colorClass}`;
-              badge.textContent = `#${rawTag}`;
-              frag.appendChild(badge);
-
-              lastIndex = matchEnd;
-            }
-            if (lastIndex < text.length) {
-              frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-            }
-            child.replaceWith(frag);
-          }
-        }
-      }
-    };
-    formatHashtagsInNode(root);
-
-    // Convert inline Wikilinks [[Target]] or [[Target|Alias]] outside code blocks / pre into internal links
-    const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
-    const formatWikilinksInNode = (element: Node) => {
-      const children = Array.from(element.childNodes);
-      for (const child of children) {
-        if (child.nodeType === Node.ELEMENT_NODE) {
-          const tag = (child as HTMLElement).tagName.toLowerCase();
-          if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
-            continue;
-          }
-          formatWikilinksInNode(child);
-        } else if (child.nodeType === Node.TEXT_NODE) {
-          const text = child.nodeValue || "";
-          wikilinkRegex.lastIndex = 0;
-          if (wikilinkRegex.test(text)) {
-            const frag = document.createDocumentFragment();
-            wikilinkRegex.lastIndex = 0;
-            let lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = wikilinkRegex.exec(text)) !== null) {
-              const fullMatch = match[0];
-              const target = (match[1] || "").trim();
-              const alias = (match[2] || "").trim();
-              const matchStart = match.index;
-              const matchEnd = matchStart + fullMatch.length;
-
-              if (matchStart > lastIndex) {
-                frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
-              }
-
-              const link = document.createElement("a");
-              link.href = `wikilink:${encodeURIComponent(target)}`;
-              link.setAttribute("data-wikilink", target);
-              link.className = "internal-wikilink text-primary underline underline-offset-4 cursor-pointer hover:opacity-80";
-              link.textContent = alias || target;
-              frag.appendChild(link);
-
-              lastIndex = matchEnd;
-            }
-            if (lastIndex < text.length) {
-              frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-            }
-            child.replaceWith(frag);
-          }
-        }
-      }
-    };
-    formatWikilinksInNode(root);
-
-    root.querySelectorAll("details").forEach((details) => {
-      const summary = details.querySelector("summary");
-      const title = summary?.textContent?.trim() || "";
-      summary?.remove();
-
-      let div = details.querySelector(":scope > div");
-      if (!div) {
-        div = document.createElement("div");
-        while (details.firstChild) {
-          div.appendChild(details.firstChild);
-        }
-        details.appendChild(div);
-      }
-
-      const newSummary = document.createElement("summary");
-      newSummary.textContent = title;
-      details.insertBefore(newSummary, details.firstChild);
-    });
-  };
-
   const toEditorHtml = (text: string, isTxt: boolean = false, readingMode: boolean = isReadingMode): string => {
-    if (!text) return isTxt ? "<p></p>" : "<p></p>";
-
-    const temp = document.createElement("div");
-    const format = isTxt ? "plain" : (note?.contentFormat ?? "markdown");
-
-    if (format === "html") {
-      temp.innerHTML = text;
-    } else if (format === "plain") {
-      const lines = text.split("\n");
-      temp.innerHTML = lines.map((l) => `<p>${l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") : "<br>"}</p>`).join("");
-    } else {
-      try {
-        const textWithTableAttr = text.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
-        const preprocessed = preprocessMarkdownForEditor(textWithTableAttr, readingMode);
-        const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true });
-        temp.innerHTML = typeof parsed === "string" ? parsed : text;
-      } catch {
-        temp.innerHTML = text;
-      }
-    }
-
-    prepareDomForEditor(temp);
-    const cleanHtml = temp.innerHTML
-      .replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "")
-      .replace(/>\s+</g, "><");
-    return cleanHtml;
+    return renderMarkdownToEditorHtml(text, {
+      isReadingMode: readingMode,
+      theme: settingsRef.current?.theme || settings.theme,
+      tagColorStyle: settingsRef.current?.tagColorStyle || settings.tagColorStyle,
+      assetBlobUrlMap: assetBlobUrlMap.current,
+      contentFormat: isTxt ? "plain" : (note?.contentFormat ?? "markdown"),
+    });
   };
-
-  const EDITOR_CLASSES =
-    "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
-    " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
-    " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
-    " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
 
   const scheduleAutoSaveDiskRef = useRef<(() => void) | null>(null);
 
@@ -4236,6 +4349,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       SpellCheckDecoration.configure({
         enabled: settings.spellCheck !== false,
       }),
+      WrongLanguageSuggestion.configure({
+        enabled: settings.wrongLanguageSuggestion !== false,
+      }),
       InlineCodeHighlight.configure({
         enabled: settings.highlightInlineCode === true,
       }),
@@ -4634,7 +4750,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (loadingNoteIdRef.current === note.id) return;
       userEditedRef.current = true;
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
-      if (note.fileType === "image" || note.fileType === "binary" || isHtmlFile(note) || isTxtFile(note)) return;
+      if (note.fileType === "image" || note.fileType === "binary" || isHtmlFile(note) || isCssFile(note) || isTxtFile(note)) return;
 
       const doc = instance.state.doc;
       const firstChild = doc.firstChild;
@@ -4943,7 +5059,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const editorStats = useMemo(() => {
     let syntaxLabel = t("editor.formatMarkdown") || "Markdown";
     const fileName = note?.fileName?.toLowerCase() ?? "";
-    if (fileName.endsWith(".html") || note?.contentFormat === "html") {
+    if (fileName.endsWith(".css") || note?.contentFormat === "css") {
+      syntaxLabel = "CSS";
+    } else if (fileName.endsWith(".html") || note?.contentFormat === "html") {
       syntaxLabel = "HTML";
     } else if (fileName.endsWith(".txt")) {
       syntaxLabel = t("editor.formatText") || "Plain Text";
@@ -4952,7 +5070,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const currentFontSize = settings.editorFontSize || editorFontSize || 15;
     const zoom = Math.round((currentFontSize / 15) * 100);
 
-    if (note?.contentFormat === "html") {
+    if (note?.contentFormat === "html" || note?.contentFormat === "css" || isCssFile(note) || isHtmlFile(note)) {
       const textContent = note?.content || "";
       const charCount = countCharacters(textContent);
       const wordCount = countWords(textContent);
@@ -4963,7 +5081,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         charCount,
         wordCount,
         readingTime,
-        syntaxLabel: "HTML",
+        syntaxLabel: (note?.contentFormat === "css" || isCssFile(note)) ? "CSS" : "HTML",
         zoom,
       };
     }
@@ -5043,7 +5161,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [rootDirHandle]);
 
   const saveLinkedFileToDisk = useCallback(async () => {
-    if (!note || !editor || !settings.autoSave) return;
+    if (!note || (!editor && !isHtmlFile(note) && !isCssFile(note)) || !settings.autoSave) return;
     if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
     if (deletedNoteIdsRef.current.has(note.id) || isNoteDeleted(note.id)) return;
@@ -5061,7 +5179,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     try {
-      const ext = getPreferredExtension() as "md" | "txt" | "html";
+      const ext = getPreferredExtension() as "md" | "txt" | "html" | "css";
       const content = getContentToSave(ext);
       await performSave(content, ext, true);
     } catch {
@@ -5069,7 +5187,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         setSaveStatus("failed");
       }
     }
-  }, [note, editor, settings.autoSave, notes]);
+  }, [note, editor, isHtmlFile, isCssFile, settings.autoSave, notes]);
 
   const scheduleAutoSaveDisk = useCallback(() => {
     if (autoSaveDiskTimeoutRef.current) {
@@ -5292,7 +5410,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       pendingRenameRef.current = null;
     }
 
-    if (isHtmlFile(note)) {
+    if (isHtmlFile(note) || isCssFile(note)) {
       if (debounceRenameTimeoutRef.current) {
         clearTimeout(debounceRenameTimeoutRef.current);
         debounceRenameTimeoutRef.current = null;
@@ -5487,9 +5605,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (ext.name === "spellCheckDecoration") {
         ext.options.enabled = spellCheckEnabled;
       }
+      if (ext.name === "wrongLanguageSuggestion") {
+        ext.options.enabled = settings.wrongLanguageSuggestion !== false;
+      }
     });
     editor.view.dispatch(editor.state.tr);
-  }, [editor, spellCheckEnabled]);
+  }, [editor, spellCheckEnabled, settings.wrongLanguageSuggestion]);
 
 
   useEffect(() => {
@@ -5730,9 +5851,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [note, editor, bringCalculatorToFront, bringClockToFront, handleSaveFile]);
   const showUiAlert = (message: string) => setAlertMessage(message);
-  const countMappable = (text: string, map: Record<string, string>) => [...text].reduce((count, ch) => count + (map[ch] ? 1 : 0), 0);
-  const convertWithMap = (text: string, map: Record<string, string>) => [...text].map((ch) => map[ch] ?? ch).join("");
-
   const rememberSelection = () => {
     if (!editor) return;
     const { from, to } = editor.state.selection;
@@ -5776,10 +5894,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    const enToThScore = countMappable(selectedText, EN_TO_TH_KEYMAP);
-    const thToEnScore = countMappable(selectedText, TH_TO_EN_KEYMAP);
-    const map = enToThScore >= thToEnScore ? EN_TO_TH_KEYMAP : TH_TO_EN_KEYMAP;
-    const convertedText = convertWithMap(selectedText, map);
+    const convertedText = swapKeyboardLayout(selectedText);
 
     if (convertedText === selectedText) return;
 
@@ -6317,11 +6432,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const canUseNativeFs = canUseNativeFileSystem;
 
-  const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | null>(null);
+  const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | "css" | null>(null);
 
   const getPreferredExtension = () => {
     if (selectedExtension) return selectedExtension;
     const currentFileName = note?.fileName?.toLowerCase() ?? "";
+    if (currentFileName.endsWith(".css") || note?.contentFormat === "css") return "css";
     if (currentFileName.endsWith(".txt")) return "txt";
     if (currentFileName.endsWith(".md") || currentFileName.endsWith(".markdown")) return "md";
     if (currentFileName.endsWith(".html") || currentFileName.endsWith(".htm")) return "html";
@@ -6604,6 +6720,54 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
+  const resolveCssContent = async (assetPath: string): Promise<string | null> => {
+    if (!note) return null;
+    const resolvedRelPath = resolveAssetPath(note.folderPath || "", assetPath);
+    if (!resolvedRelPath) return null;
+
+    // 1. Check in-memory notes array first (live preview while editing CSS!)
+    const normRel = resolvedRelPath.replace(/\\/g, "/").toLowerCase();
+    const matchedNote = (notes || []).find((n) => {
+      const nRel = (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName || "").replace(/\\/g, "/").toLowerCase();
+      const nFile = (n.fileName || "").toLowerCase();
+      return nRel === normRel || nFile === normRel;
+    });
+
+    if (matchedNote && typeof matchedNote.content === "string") {
+      return matchedNote.content;
+    }
+
+    // 2. Electron Desktop direct file read
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const fullPath = `${saved.folderPath}/${resolvedRelPath}`;
+          const content = await electronAPI.readFileContent(fullPath);
+          if (typeof content === "string") return content;
+        }
+      } catch (err) {
+        console.warn("Electron CSS asset read failed:", assetPath, err);
+      }
+    }
+
+    // 3. Web File System Access API
+    if (rootDirHandle) {
+      try {
+        const handle = await resolveAssetHandle(assetPath);
+        if (handle && typeof handle.getFile === "function") {
+          const file = await handle.getFile();
+          return await file.text();
+        }
+      } catch (err) {
+        console.warn("Web CSS asset read failed:", assetPath, err);
+      }
+    }
+
+    return null;
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -6613,9 +6777,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return;
       }
 
-      const rewritten = await rewriteHtmlForPreview(note.content, async (assetPath) => {
-        return await resolveAssetDataUrl(assetPath);
-      });
+      const rewritten = await rewriteHtmlForPreview(
+        note.content,
+        async (assetPath) => {
+          return await resolveAssetDataUrl(assetPath);
+        },
+        async (assetPath) => {
+          return await resolveCssContent(assetPath);
+        }
+      );
 
       if (!cancelled) setPreviewHtml(rewritten);
     };
@@ -6624,7 +6794,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return () => {
       cancelled = true;
     };
-  }, [note?.id, note?.content, note?.contentFormat, note?.folderPath, rootDirHandle]);
+  }, [note?.id, note?.content, note?.contentFormat, note?.folderPath, rootDirHandle, notes]);
 
   const openHtmlPreviewInNewTab = () => {
     if (!note) return;
@@ -6658,12 +6828,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
   };
 
-  const getContentToSave = (targetExt?: "md" | "txt" | "html"): string => {
+  const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css"): string => {
     if (!note) return "";
-    if (isHtmlFile(note)) {
+    if (isHtmlFile(note) || isCssFile(note) || targetExt === "css") {
       return note.content || "";
     }
-    const format = targetExt === "html" ? "html" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
+    const format = targetExt === "html" ? "html" : targetExt === "css" ? "css" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
 
     let rawHtml = "";
     if (editor && !editor.isDestroyed) {
@@ -6778,7 +6948,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSavedSnapshot(note.id, ext, normalizedContent);
   };
 
-  const performSave = async (content: string, ext: "md" | "txt" | "html", isSilent = false) => {
+  const performSave = async (content: string, ext: "md" | "txt" | "html" | "css", isSilent = false) => {
     if (!note || isNoteDeleted(note.id) || deletedNoteIdsRef.current.has(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
@@ -6893,16 +7063,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
-  const performSaveAs = async (customContent?: string, customExt?: "md" | "txt" | "html") => {
+  const performSaveAs = async (customContent?: string, customExt?: "md" | "txt" | "html" | "css") => {
     if (!note || isNoteDeleted(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const preferredExt = customExt || (getPreferredExtension() as "md" | "txt" | "html");
+    const preferredExt = customExt || (getPreferredExtension() as "md" | "txt" | "html" | "css");
     const rawContent = customContent ?? getContentToSave(preferredExt);
     const content = lineEnding === "CRLF"
       ? rawContent.replace(/\r?\n/g, "\r\n")
       : rawContent.replace(/\r\n/g, "\n");
-    const baseName = getSuggestedFileName().replace(/\.(md|txt|html)$/i, "");
+    const baseName = getSuggestedFileName().replace(/\.(md|txt|html|css)$/i, "");
     const defaultFileName = `${baseName}.${preferredExt}`;
 
     const currentOpId = ++saveOpIdRef.current;
@@ -6919,6 +7089,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             { name: "Markdown Document (*.md)", extensions: ["md", "markdown"] },
             { name: "Plain Text Document (*.txt)", extensions: ["txt"] },
             { name: "HTML Document (*.html)", extensions: ["html", "htm"] },
+            { name: "CSS Stylesheet (*.css)", extensions: ["css"] },
             { name: "All Files (*.*)", extensions: ["*"] },
           ],
         });
@@ -6928,8 +7099,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return;
         }
 
-        const selectedExt = (filePath.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html";
-        const finalContent = getContentToSave(selectedExt === "html" || selectedExt === "txt" ? selectedExt : "md");
+        const selectedExt = (filePath.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css";
+        const finalContent = getContentToSave(selectedExt === "html" || selectedExt === "txt" || selectedExt === "css" ? selectedExt : "md");
         const ok = await electronAPI.writeFileContent({ fullPath: filePath, content: finalContent });
         if (ok) {
           setSavedSnapshot(note.id, selectedExt, finalContent);
@@ -6965,12 +7136,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               description: "HTML Document (*.html)",
               accept: { "text/html": [".html", ".htm"] },
             },
+            {
+              description: "CSS Stylesheet (*.css)",
+              accept: { "text/css": [".css"] },
+            },
           ],
         });
 
         const file = await handle.getFile();
-        const chosenExt = (file.name.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html";
-        const finalContent = getContentToSave(chosenExt === "html" || chosenExt === "txt" ? chosenExt : "md");
+        const chosenExt = (file.name.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css";
+        const finalContent = getContentToSave(chosenExt === "html" || chosenExt === "txt" || chosenExt === "css" ? chosenExt : "md");
 
         const writable = await handle.createWritable();
         await writable.write(finalContent);
@@ -7178,7 +7353,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const ext = getPreferredExtension() as "md" | "txt" | "html";
+    const ext = getPreferredExtension() as "md" | "txt" | "html" | "css";
     const content = getContentToSave(ext);
 
     // 1. Electron Desktop Native Direct Save to Disk
@@ -7221,7 +7396,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     await performSave(content, ext, false);
   }
 
-  async function handleExtensionSelected(ext: "md" | "txt" | "html") {
+  async function handleExtensionSelected(ext: "md" | "txt" | "html" | "css") {
     if (!note) return;
     setSelectedExtension(ext);
     const content = getContentToSave(ext);
@@ -7442,7 +7617,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             )}
           </div>
         )}
-        {note?.contentFormat !== "html" && (
+        {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -7795,7 +7970,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={note.contentFormat === "html" && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+          <div className={(note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note)) && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
           {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
@@ -9132,7 +9307,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }}
           className={`flex flex-col cursor-text ${
-            note.contentFormat === "html" ? "flex-1 min-h-0" : "flex-1 overflow-y-auto overflow-x-hidden"
+            note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) ? "flex-1 min-h-0" : "flex-1 overflow-y-auto overflow-x-hidden"
           } w-full`}
         >
           {comparingVersion ? (
@@ -9201,6 +9376,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <p className="text-sm">{note.fileName}</p>
               <p className="text-xs opacity-60">{t("editor.previewNotSupported")}</p>
             </div>
+          ) : note.contentFormat === "css" || isCssFile(note) ? (
+            <HtmlCodeEditor
+              key={note.id}
+              value={note.content}
+              onChange={(val) => onUpdate(note.id, { content: val })}
+              fontSize={editorFontSize}
+              onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+              spellCheck={spellCheckEnabled}
+              noteId={note.id}
+              language="css"
+            />
           ) : note.contentFormat === "html" ? (
             htmlPreviewOpen ? (
               <div className="flex-1 w-full h-full overflow-hidden flex flex-col bg-muted/20">
@@ -9513,7 +9699,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </TooltipContent>
               </Tooltip>
 
-              {note?.contentFormat !== "html" && (
+              {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
                 <>
                   <div className="h-3 w-[1px] bg-border/60" />
 
@@ -9669,7 +9855,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </TooltipContent>
               </Tooltip>
 
-              {note?.contentFormat !== "html" && (
+              {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
                 <>
                   <div className="h-3 w-[1px] bg-border/60" />
 
@@ -9829,7 +10015,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <DialogTitle>{t("editor.selectFileFormat")}</DialogTitle>
             <DialogDescription>{t("editor.selectFileFormatDesc")}</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 py-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="grid gap-3 py-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
             <button
               type="button"
               onClick={() => void handleExtensionSelected("txt")}
@@ -9856,6 +10042,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <FileCode className="h-8 w-8 text-primary" />
               <span className="text-sm font-semibold">.html</span>
               <span className="text-xs text-muted-foreground">HTML</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExtensionSelected("css")}
+              className="flex flex-col items-center gap-2.5 rounded-2xl border-2 border-border bg-secondary p-5 hover:border-primary hover:bg-primary/5 transition-colors"
+            >
+              <FileCode className="h-8 w-8 text-primary" />
+              <span className="text-sm font-semibold">.css</span>
+              <span className="text-xs text-muted-foreground">CSS</span>
             </button>
           </div>
         </DialogContent>
@@ -9908,6 +10103,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     type="text"
                     value={workspaceSearchQuery}
                     onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleApplyLink();
+                      }
+                    }}
                     placeholder={t("editor.searchNotes")}
                     className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
                   />
@@ -9965,6 +10166,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   type="text"
                   value={linkDisplayText}
                   onChange={(e) => setLinkDisplayText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyLink();
+                    }
+                  }}
                   placeholder={selectedWorkspaceNote ? (selectedWorkspaceNote.fileName || selectedWorkspaceNote.title || "").replace(/\.[^/.]+$/, "") : "Display text..."}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
                 />
@@ -9981,6 +10188,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   type="url"
                   value={linkUrl}
                   onChange={(event) => setLinkUrl(event.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyLink();
+                    }
+                  }}
                   placeholder={t("editor.linkUrlPlaceholder")}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
                 />
@@ -9993,6 +10206,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   type="text"
                   value={linkDisplayText}
                   onChange={(e) => setLinkDisplayText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyLink();
+                    }
+                  }}
                   placeholder="Display text..."
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
                 />

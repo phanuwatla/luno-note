@@ -478,6 +478,13 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                 placeholder={t("editor.searchImagesPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const target = displayedItems.find((i) => i.id === selectedItemId) || displayedItems[0];
+                    if (target) handleSelectAndInsert(target);
+                  }
+                }}
                 className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors min-w-0"
               />
             </div>

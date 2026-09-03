@@ -34,13 +34,14 @@ function TabBarComponent({
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  function getFileType(note: Note): "txt" | "md" | "html" | "image" | "binary" | "zip" | "unknown" {
+  function getFileType(note: Note): "txt" | "md" | "html" | "css" | "image" | "binary" | "zip" | "unknown" {
     if (note.fileType === "image") return "image";
     if (note.fileType === "binary") return "binary";
     const name = note.fileName?.toLowerCase() || "";
     if (name.endsWith(".txt")) return "txt";
     if (name.endsWith(".md") || name.endsWith(".markdown")) return "md";
     if (name.endsWith(".html") || name.endsWith(".htm")) return "html";
+    if (name.endsWith(".css") || note.contentFormat === "css") return "css";
     if (name.endsWith(".zip")) return "zip";
     return "unknown";
   }
@@ -124,7 +125,7 @@ function TabBarComponent({
       const ImgIcon = getToolbarIcon("fileImage", pack);
       return <ImgIcon className={cls} />;
     }
-    if (type === "html" || type === "md") {
+    if (type === "html" || type === "md" || type === "css") {
       const CodeIcon = getToolbarIcon("fileCode", pack);
       return <CodeIcon className={cls} />;
     }

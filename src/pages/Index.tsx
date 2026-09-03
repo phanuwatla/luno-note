@@ -40,6 +40,8 @@ import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDe
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
+import { APP_VERSION } from "@/lib/appVersion";
+import { checkForAppUpdate, openExternalUrl } from "@/lib/updateChecker";
 
 export default function Index() {
   const { t } = useTranslation();
@@ -757,12 +759,12 @@ export default function Index() {
     return unlockedSessionPinsRef.current.get(noteId);
   }, []);
 
-  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }) => {
+  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" }) => {
     const raw = (options?.fileName ?? "").trim();
     const safe = raw.replace(/[\\/:*?"<>|]/g, "_");
 
     const defaultExt = settings.defaultExtension || "md";
-    const defaultFormat = defaultExt === "html" ? ("html" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
+    const defaultFormat = defaultExt === "html" ? ("html" as const) : defaultExt === "css" ? ("css" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
 
     if (!safe) {
       const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
@@ -789,12 +791,18 @@ export default function Index() {
     if (extFromName === "html" || extFromName === "htm") {
       return { fileName: `${base}.${extFromName}`, contentFormat: "html" as const };
     }
+    if (extFromName === "css") {
+      return { fileName: `${base}.css`, contentFormat: "css" as const };
+    }
 
     if (desiredFormat === "markdown") {
       return { fileName: `${base}.md`, contentFormat: "markdown" as const };
     }
     if (desiredFormat === "html") {
       return { fileName: `${base}.html`, contentFormat: "html" as const };
+    }
+    if (desiredFormat === "css") {
+      return { fileName: `${base}.css`, contentFormat: "css" as const };
     }
     return { fileName: `${base}.${defaultExt}`, contentFormat: defaultFormat };
   };
@@ -1033,7 +1041,7 @@ export default function Index() {
 
     const entries: Array<{
       fileName: string;
-      contentFormat: "plain" | "markdown" | "html";
+      contentFormat: "plain" | "markdown" | "html" | "css";
       fileType?: "image" | "binary";
       handle: FileSystemFileHandle;
       folderPath: string;
@@ -1100,12 +1108,12 @@ export default function Index() {
             const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
 
             let fileType: "image" | "binary" | undefined;
-            let contentFormat: "plain" | "markdown" | "html" = "plain";
+            let contentFormat: "plain" | "markdown" | "html" | "css" = "plain";
 
             if (IMAGE_EXTS.has(ext)) {
               fileType = "image";
             } else if (TEXT_EXTS.has(ext)) {
-              contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : "plain";
+              contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : "plain";
             } else {
               fileType = "binary";
             }
@@ -3372,6 +3380,43 @@ export default function Index() {
     }
     removeTabsForDeletedNotes(existingSet);
   }, [notes, removeTabsForDeletedNotes]);
+
+  // Auto-check for updates from GitHub on startup when checkUpdates is enabled
+  useEffect(() => {
+    if (settings.checkUpdates === false) return;
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await checkForAppUpdate(APP_VERSION);
+        if (!isMounted || !result.hasUpdate) return;
+
+        toast({
+          title: t("settings.updateAvailable") || "มีเวอร์ชันใหม่พร้อมใช้งาน",
+          description:
+            t("settings.updateAvailableDesc", {
+              version: result.latestVersion,
+              current: APP_VERSION,
+            }) || `Luno Note v${result.latestVersion} พร้อมให้อัปเดตแล้ว (เวอร์ชันปัจจุบัน v${APP_VERSION})`,
+          action: (
+            <ToastAction
+              altText={t("settings.installUpdate") || "ติดตั้ง"}
+              onClick={() => openExternalUrl(result.downloadUrl || result.releaseUrl)}
+            >
+              {t("settings.installUpdate") || "ติดตั้ง"}
+            </ToastAction>
+          ),
+        });
+      } catch (err) {
+        console.warn("Startup update check failed:", err);
+      }
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [settings.checkUpdates, t]);
 
   const openTabNotes = useMemo(() => {
     return openTabIds

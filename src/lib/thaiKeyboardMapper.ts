@@ -28,6 +28,28 @@ export const TH_TO_EN_MAP: Record<string, string> = {
   "(": "Z", ")": "X", "ฉ": "C", "ฮ": "V", "ฺ": "B", "์": "N", "?": "M", "ฒ": "<", "ฬ": ">", "ฦ": "?",
 };
 
+export function swapKeyboardLayout(text: string): string {
+  if (!text) return text;
+
+  let result = "";
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    // Thai character (Unicode block 0x0E01 - 0x0E5B) -> Convert to English QWERTY
+    if (code >= 0x0e01 && code <= 0x0e5b && TH_TO_EN_MAP[ch] !== undefined) {
+      result += TH_TO_EN_MAP[ch];
+    }
+    // English/ASCII printable character -> Convert to Thai Kedmanee
+    else if (EN_TO_TH_MAP[ch] !== undefined) {
+      result += EN_TO_TH_MAP[ch];
+    }
+    // Whitespace, newline, unmapped characters, emojis remain as-is
+    else {
+      result += ch;
+    }
+  }
+  return result;
+}
+
 export function mapTextToLanguage(text: string, targetLang: "th" | "en" | "system"): string {
   if (targetLang === "system" || !text) return text;
 

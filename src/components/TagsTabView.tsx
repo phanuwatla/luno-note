@@ -281,7 +281,14 @@ export default function TagsTabView({
           </div>
 
           {/* 2. Tag Filter Pills (Shaded / Outlined Tint Style) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0 py-0.5">
+          <div
+            className="flex items-center gap-1.5 pill-scrollbar w-full min-w-0 shrink-0 pb-1 pt-0.5"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
             <button
               type="button"
               onClick={() => setSelectedTag("all")}

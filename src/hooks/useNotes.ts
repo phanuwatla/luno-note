@@ -20,7 +20,7 @@ export interface Note {
   updatedAt: number;
   fileName?: string;
   isLinkedFile?: boolean;
-  contentFormat?: "plain" | "markdown" | "html";
+  contentFormat?: "plain" | "markdown" | "html" | "css";
   folderPath?: string;
   fileType?: "image" | "binary" | "settings" | "luno-ai" | "web-viewer";
   url?: string;

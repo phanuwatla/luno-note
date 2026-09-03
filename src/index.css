@@ -731,6 +731,29 @@ aside [role="button"]:focus-visible {
   display: none;
 }
 
+/* Horizontal Pill Bar Scrollbar */
+.pill-scrollbar {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+.pill-scrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+.pill-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pill-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+  transition: background-color 0.15s ease;
+}
+.pill-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--primary) / 0.5);
+}
+
 /* Text selection follows accent color */
 ::selection {
   background: hsl(var(--accent) / 0.20);
@@ -1846,6 +1869,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   margin-top: 0.3em;
   margin-bottom: 0.3em;
   line-height: inherit;
+  min-height: 1.5em;
 }
 
 .ProseMirror li > p,

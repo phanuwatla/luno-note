@@ -16,7 +16,7 @@ import { toast } from "@/hooks/use-toast";
 import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X, LayoutTemplate } from "lucide-react";
 import { marked } from "marked";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
-import { preprocessMarkdownForEditor } from "@/components/Editor";
+import { renderMarkdownToEditorHtml, EDITOR_CLASSES } from "@/components/Editor";
 
 export interface TemplateItemDef {
   type: NoteTemplateType;
@@ -26,13 +26,13 @@ export interface TemplateItemDef {
   descTh: string;
   format: "markdown" | "html" | "plain";
   formatExt: "md" | "html" | "txt";
-  category: "work" | "daily" | "web" | "general";
+  category: "work" | "daily" | "web" | "study" | "dev" | "general";
   icon: string;
   color?: string;
 }
 
 const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
-  // 1. Markdown (.md) - 8 items
+  // 1. Markdown (.md)
   {
     type: "daily",
     titleEn: "Daily Note",
@@ -113,9 +113,45 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     descTh: "สรุปใจความสำคัญ คำคม และบทเรียนจากหนังสือ",
     format: "markdown",
     formatExt: "md",
-    category: "daily",
+    category: "study",
     icon: "lucide:Bookmark",
     color: "#a855f7",
+  },
+  {
+    type: "cornell-notes",
+    titleEn: "Cornell Notes",
+    titleTh: "โน้ตแบบคอร์เนลล์",
+    descEn: "Structured note-taking with cues, notes and summary",
+    descTh: "จดบันทึกแบ่งคำถาม คีย์เวิร์ด และสรุปใจความ",
+    format: "markdown",
+    formatExt: "md",
+    category: "study",
+    icon: "lucide:GraduationCap",
+    color: "#6366f1",
+  },
+  {
+    type: "content-planner",
+    titleEn: "Content & Video Planner",
+    titleTh: "วางแผนคอนเทนต์และสคริปต์",
+    descEn: "Hook, storyline, CTA and production checklist",
+    descTh: "วางโครงเรื่อง สคริปต์วิดีโอ และเช็กลิสต์ผลิตสื่อ",
+    format: "markdown",
+    formatExt: "md",
+    category: "work",
+    icon: "lucide:Video",
+    color: "#ef4444",
+  },
+  {
+    type: "api-doc",
+    titleEn: "API Specification",
+    titleTh: "เอกสารสเปก API",
+    descEn: "REST endpoint schema, parameters & response codes",
+    descTh: "สเปก Endpoint, Request body, Response และ Error",
+    format: "markdown",
+    formatExt: "md",
+    category: "dev",
+    icon: "lucide:Code2",
+    color: "#0ea5e9",
   },
   {
     type: "bug",
@@ -125,12 +161,48 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     descTh: "บันทึกขั้นตอนการจำลองและแก้ปัญหา",
     format: "markdown",
     formatExt: "md",
-    category: "work",
+    category: "dev",
     icon: "lucide:Bug",
     color: "#ef4444",
   },
+  {
+    type: "habit-tracker",
+    titleEn: "Habit & Wellness Tracker",
+    titleTh: "ติดตามนิสัยและสุขภาพ",
+    descEn: "Weekly habit grid, hydration, sleep & energy log",
+    descTh: "ตารางเช็กนิสัย ดื่มน้ำ ออกกำลังกาย และการนอน",
+    format: "markdown",
+    formatExt: "md",
+    category: "daily",
+    icon: "lucide:Activity",
+    color: "#10b981",
+  },
+  {
+    type: "monthly-budget",
+    titleEn: "Monthly Budget Planner",
+    titleTh: "วางแผนการเงินประจำเดือน",
+    descEn: "Income, fixed expenses, savings & net balance",
+    descTh: "คำนวณรายรับ รายจ่ายคงที่ เงินออม และยอดคงเหลือ",
+    format: "markdown",
+    formatExt: "md",
+    category: "daily",
+    icon: "lucide:Wallet",
+    color: "#14b8a6",
+  },
+  {
+    type: "travel-itinerary",
+    titleEn: "Travel Itinerary",
+    titleTh: "แผนการท่องเที่ยว",
+    descEn: "Flights, hotel, daily schedule & packing list",
+    descTh: "ตารางเที่ยวรายวัน ที่พัก การเดินทาง และกระเป๋า",
+    format: "markdown",
+    formatExt: "md",
+    category: "daily",
+    icon: "lucide:Compass",
+    color: "#06b6d4",
+  },
 
-  // 2. HTML (.html) - 7 items
+  // 2. HTML (.html)
   {
     type: "basic-website",
     titleEn: "Basic Website",
@@ -215,8 +287,68 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     icon: "lucide:Share2",
     color: "#ec4899",
   },
+  {
+    type: "invoice",
+    titleEn: "Invoice & Receipt",
+    titleTh: "ใบแจ้งหนี้และใบเสร็จ",
+    descEn: "Professional invoice layout ready to print or PDF",
+    descTh: "ใบแจ้งหนี้พร้อมตารางคำนวณภาษีและสั่งพิมพ์",
+    format: "html",
+    formatExt: "html",
+    category: "work",
+    icon: "lucide:Receipt",
+    color: "#059669",
+  },
+  {
+    type: "pricing-table",
+    titleEn: "Pricing Plans Table",
+    titleTh: "ตารางแพ็กเกจราคา",
+    descEn: "Compare subscription tiers and feature list",
+    descTh: "ตารางเปรียบเทียบระดับแพ็กเกจและฟีเจอร์",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:BadgePercent",
+    color: "#3b82f6",
+  },
+  {
+    type: "event-invite",
+    titleEn: "Event Invitation & RSVP",
+    titleTh: "การ์ดเชิญและลงทะเบียน",
+    descEn: "Event landing with schedule and RSVP form",
+    descTh: "หน้าการ์ดเชิญงานสัมมนา ตารางเวลา และฟอร์มลงทะเบียน",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:Ticket",
+    color: "#ec4899",
+  },
+  {
+    type: "restaurant-menu",
+    titleEn: "Restaurant & Cafe Menu",
+    titleTh: "เมนูร้านอาหารและคาเฟ่",
+    descEn: "Digital menu with prices, food items & specials",
+    descTh: "เมนูอาหารและเครื่องดื่มดิจิทัลพร้อมราคาและแท็ก",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:Coffee",
+    color: "#d97706",
+  },
+  {
+    type: "faq-page",
+    titleEn: "Help Center & FAQ",
+    titleTh: "ศูนย์ช่วยเหลือและ FAQ",
+    descEn: "Accordion-style questions and support answers",
+    descTh: "หน้ารวมคำถามที่พบบ่อยและช่องทางติดต่อช่วยเหลือ",
+    format: "html",
+    formatExt: "html",
+    category: "web",
+    icon: "lucide:HelpCircle",
+    color: "#6366f1",
+  },
 
-  // 3. Plain Text (.txt) - 7 items
+  // 3. Plain Text (.txt)
   {
     type: "notes",
     titleEn: "Quick Notes",
@@ -285,7 +417,7 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     descTh: "อธิบายโปรเจกต์ / ไฟล์ / วิธีใช้งาน",
     format: "plain",
     formatExt: "txt",
-    category: "work",
+    category: "dev",
     icon: "lucide:BookOpen",
     color: "#6366f1",
   },
@@ -297,9 +429,69 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
     descTh: "ประวัติเวอร์ชันและการปรับปรุง",
     format: "plain",
     formatExt: "txt",
-    category: "work",
+    category: "dev",
     icon: "lucide:History",
     color: "#f97316",
+  },
+  {
+    type: "lecture-notes",
+    titleEn: "Lecture Notes",
+    titleTh: "บันทึกเลกเชอร์",
+    descEn: "Quick lecture takeaways and homework checklist",
+    descTh: "บันทึกเลกเชอร์ คอนเซปต์หลัก และการบ้าน",
+    format: "plain",
+    formatExt: "txt",
+    category: "study",
+    icon: "lucide:GraduationCap",
+    color: "#6366f1",
+  },
+  {
+    type: "server-config",
+    titleEn: "Server Config",
+    titleTh: "การตั้งค่าเซิร์ฟเวอร์",
+    descEn: "Server specs, environment variables & commands",
+    descTh: "สเปกเซิร์ฟเวอร์ ตัวแปรสภาพแวดล้อม และคำสั่งระบบ",
+    format: "plain",
+    formatExt: "txt",
+    category: "dev",
+    icon: "lucide:Server",
+    color: "#0ea5e9",
+  },
+  {
+    type: "incident-report",
+    titleEn: "Incident Postmortem",
+    titleTh: "รายงานวิเคราะห์เหตุขัดข้อง",
+    descEn: "Incident timeline, impact and root cause analysis",
+    descTh: "ลำดับเหตุการณ์ ผลกระทบ และการป้องกัน RCA",
+    format: "plain",
+    formatExt: "txt",
+    category: "dev",
+    icon: "lucide:AlertTriangle",
+    color: "#ef4444",
+  },
+  {
+    type: "shopping-list",
+    titleEn: "Shopping List",
+    titleTh: "รายการซื้อของ",
+    descEn: "Groceries and household essentials checklist",
+    descTh: "เช็กลิสต์ซื้อของกินและของใช้ในบ้าน",
+    format: "plain",
+    formatExt: "txt",
+    category: "daily",
+    icon: "lucide:ShoppingCart",
+    color: "#10b981",
+  },
+  {
+    type: "recipe-txt",
+    titleEn: "Recipe",
+    titleTh: "สูตรอาหาร",
+    descEn: "Plain text recipe and cooking steps",
+    descTh: "สูตรอาหารและขั้นตอนการปรุงแบบเรียบง่าย",
+    format: "plain",
+    formatExt: "txt",
+    category: "daily",
+    icon: "lucide:Utensils",
+    color: "#f59e0b",
   },
 ];
 
@@ -422,9 +614,11 @@ export default function TemplatesView({
       { id: "md", label: "Markdown" },
       { id: "html", label: "HTML" },
       { id: "txt", label: isTh ? "ข้อความ" : "Text" },
-      { id: "work", label: isTh ? "งานและโครงการ" : "Work & Projects" },
-      { id: "daily", label: isTh ? "ประจำวันและส่วนตัว" : "Daily & Personal" },
-      { id: "web", label: isTh ? "เว็บไซต์และโค้ด" : "Web & Code" },
+      { id: "study", label: isTh ? "การเรียน & วิจัย" : "Study & Research" },
+      { id: "dev", label: isTh ? "พัฒนาโปรแกรม & IT" : "Dev & Tech" },
+      { id: "work", label: isTh ? "งาน & ธุรกิจ" : "Work & Business" },
+      { id: "daily", label: isTh ? "สุขภาพ & ส่วนตัว" : "Daily & Wellness" },
+      { id: "web", label: isTh ? "เว็บไซต์ & โค้ด" : "Web & UI" },
     ],
     [isTh]
   );
@@ -435,6 +629,8 @@ export default function TemplatesView({
       md: 0,
       html: 0,
       txt: 0,
+      study: 0,
+      dev: 0,
       work: 0,
       daily: 0,
       web: 0,
@@ -444,6 +640,8 @@ export default function TemplatesView({
       if (item.formatExt === "md") counts.md++;
       if (item.formatExt === "html") counts.html++;
       if (item.formatExt === "txt") counts.txt++;
+      if (item.category === "study") counts.study++;
+      if (item.category === "dev") counts.dev++;
       if (item.category === "work") counts.work++;
       if (item.category === "daily") counts.daily++;
       if (item.category === "web") counts.web++;
@@ -456,6 +654,8 @@ export default function TemplatesView({
     if (selectedCategory === "md" && item.formatExt !== "md") return false;
     if (selectedCategory === "html" && item.formatExt !== "html") return false;
     if (selectedCategory === "txt" && item.formatExt !== "txt") return false;
+    if (selectedCategory === "study" && item.category !== "study") return false;
+    if (selectedCategory === "dev" && item.category !== "dev") return false;
     if (selectedCategory === "work" && item.category !== "work") return false;
     if (selectedCategory === "daily" && item.category !== "daily") return false;
     if (selectedCategory === "web" && item.category !== "web") return false;
@@ -490,64 +690,12 @@ export default function TemplatesView({
 
   const renderedMarkdownHtml = useMemo(() => {
     if (!previewItem || previewItem.format !== "markdown" || !previewContent) return "";
-    try {
-      // 1. Strip YAML frontmatter block (icon, iconColor, tags, etc.) so it matches the editor 100%
-      const parsed = parseFrontmatterAndTags(previewContent);
-      const markdownBody = parsed.bodyContent || previewContent;
-
-      // 2. Normalize standalone `[ ]` or `[x]` lines to `- [ ]` so marked parses them into standard task lists
-      const normalizedBody = markdownBody.replace(/^([ \t]*)\[([ xX])\]\s*(.*)$/gm, "$1- [$2] $3");
-
-      // 3. Preprocess custom features & wikilinks using Editor's exact preprocessor
-      const textWithTableAttr = normalizedBody.replace(/<table([\s>])/gi, '<table data-original-html-table="true"$1');
-      const preprocessed = preprocessMarkdownForEditor(textWithTableAttr, false);
-
-      const rawHtml = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
-
-      // 4. Transform HTML tasklists into Editor's native taskList structure (removes bullet dots and aligns checkbox 100% like Editor!)
-      if (typeof document !== "undefined") {
-        const root = document.createElement("div");
-        root.innerHTML = rawHtml;
-
-        root.querySelectorAll("li").forEach((li) => {
-          const checkbox = li.querySelector('input[type="checkbox"]');
-          if (!checkbox) return;
-          const isChecked = (checkbox as HTMLInputElement).checked;
-          checkbox.remove();
-          const inner = (li.innerHTML || "").trim();
-          const tpl = document.createElement("template");
-          tpl.innerHTML =
-            `<li data-type="taskItem" data-checked="${isChecked}">` +
-            `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
-            `<div><p>${inner || ""}</p></div>` +
-            `</li>`;
-          li.replaceWith(tpl.content.firstChild!);
-        });
-
-        root.querySelectorAll("ul").forEach((ul) => {
-          if (ul.querySelector('li[data-type="taskItem"]')) {
-            ul.setAttribute("data-type", "taskList");
-            ul.removeAttribute("class");
-          }
-        });
-
-        // Clean up redundant empty paragraphs and extra break spacing between headings and lists
-        root.querySelectorAll("p").forEach((p) => {
-          const text = p.textContent?.trim();
-          const hasMediaOrInput = p.querySelector("img, input, iframe, a, svg");
-          if (!text && !hasMediaOrInput) {
-            p.remove();
-          }
-        });
-
-        return root.innerHTML;
-      }
-
-      return rawHtml;
-    } catch {
-      return "";
-    }
-  }, [previewItem, previewContent]);
+    return renderMarkdownToEditorHtml(previewContent, {
+      isReadingMode: false,
+      theme: settings.theme,
+      tagColorStyle: settings.tagColorStyle,
+    });
+  }, [previewItem, previewContent, settings.theme, settings.tagColorStyle]);
 
   const handleCopyPreview = () => {
     if (!previewContent) return;
@@ -666,7 +814,14 @@ export default function TemplatesView({
           </div>
 
           {/* 2. Filter Pills (Shaded / Outlined Tint Style) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+          <div
+            className="flex items-center gap-1.5 pill-scrollbar w-full min-w-0 shrink-0 pb-1"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
             {categories.map((cat) => {
               const isSelected = selectedCategory === cat.id;
               const count = categoryCounts[cat.id] ?? 0;
@@ -876,7 +1031,7 @@ export default function TemplatesView({
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
-                        {previewItem.format === "html" ? <Monitor className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        <Eye className="h-3.5 w-3.5" />
                         <span>
                           {previewItem.format === "html"
                             ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
@@ -997,36 +1152,22 @@ export default function TemplatesView({
                   </div>
                 ) : previewItem?.format === "markdown" ? (
                   // 100% Editor-Matching Realistic Markdown Preview (Scrollbar on the far right edge)
-                  <div className="flex-1 h-full overflow-y-auto w-full">
-                    <div
-                      className="max-w-2xl mx-auto px-6 py-5 text-foreground leading-relaxed break-words [overflow-wrap:anywhere] outline-none select-text
-                        [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
-                        [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-foreground [&_h1]:my-0 [&_h1]:mb-3 [&_h1]:leading-tight [&_h1]:border-0
-                        [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h2]:my-0 [&_h2]:mt-4 [&_h2]:mb-1
-                        [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-foreground [&_h3]:my-0 [&_h3]:mt-3 [&_h3]:mb-1
-                        [&_h4]:text-base [&_h4]:font-semibold [&_h4]:text-foreground [&_h4]:my-0 [&_h4]:mt-2 [&_h4]:mb-0.5
-                        [&_p]:my-0 [&_p]:leading-relaxed
-                        [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6
-                        [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6
-                        [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']]:my-0 [&_ul[data-type='taskList']]:space-y-0
-                        [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0
-                        [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center
-                        [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary
-                        [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0
-                        [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_table]:rounded-lg [&_table]:overflow-hidden
-                        [&_th]:border [&_th]:border-border/80 [&_th]:bg-muted/60 [&_th]:px-3.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-xs [&_th]:text-foreground
-                        [&_td]:border [&_td]:border-border/80 [&_td]:px-3.5 [&_td]:py-1.5 [&_td]:text-xs [&_td]:text-foreground/90
-                        [&_blockquote]:border-l-4 [&_blockquote]:border-primary/60 [&_blockquote]:bg-primary/5 [&_blockquote]:px-4 [&_blockquote]:py-2 [&_blockquote]:my-3 [&_blockquote]:rounded-r-lg [&_blockquote]:text-foreground/90
-                        [&_code]:bg-muted/70 [&_code]:text-primary [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:font-mono [&_code]:text-xs
-                        [&_pre]:bg-muted/60 [&_pre]:p-3.5 [&_pre]:rounded-xl [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:border [&_pre]:border-border/50
-                        [&_hr]:my-4 [&_hr]:border-border/50"
-                      style={{
-                        fontFamily: settings?.fontFamily || undefined,
-                        fontSize: settings?.fontSize ? `${settings.fontSize}px` : undefined,
-                        lineHeight: settings?.lineHeight || undefined,
-                      }}
-                      dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
-                    />
+                  <div className="flex-1 h-full overflow-y-auto w-full select-text">
+                    <div className="editor-content-area flex w-full min-w-0 flex-col max-w-2xl sm:max-w-3xl mx-auto min-h-full px-6 py-5">
+                      <div
+                        className={`tiptap ProseMirror ${EDITOR_CLASSES} ${
+                          settings.accentHeadings
+                            ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
+                            : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
+                        }`}
+                        style={{
+                          fontFamily: settings?.fontFamily || "var(--editor-font-family, var(--app-font-family))",
+                          fontSize: settings?.fontSize ? `${settings.fontSize}px` : undefined,
+                          lineHeight: settings?.lineHeight || undefined,
+                        }}
+                        dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
+                      />
+                    </div>
                   </div>
                 ) : (
                   // Plain Text Formatting (Matching Plain Text Editor with scrollbar on the far right edge)

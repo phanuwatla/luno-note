@@ -553,6 +553,14 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   setWorkspaceName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"));
                   if (pathError) setPathError("");
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!isCreating && workspaceName.trim() && parentPath.trim()) {
+                      handleConfirmCreate();
+                    }
+                  }
+                }}
                 placeholder="My Notes"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
                 autoFocus
@@ -571,6 +579,14 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   onChange={(e) => {
                     setParentPath(e.target.value);
                     if (pathError) setPathError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (!isCreating && workspaceName.trim() && parentPath.trim()) {
+                        handleConfirmCreate();
+                      }
+                    }
                   }}
                   placeholder={t("launcher.locationPlaceholder")}
                   className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors truncate"
@@ -638,6 +654,14 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                 onChange={(e) => {
                   setCloudWorkspaceName(e.target.value.replace(/[\\/:*?"<>|]/g, "_"));
                   if (cloudNameError) setCloudNameError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!isCreating && cloudWorkspaceName.trim()) {
+                      handleConfirmCreateCloudWorkspace(e);
+                    }
+                  }
                 }}
                 placeholder="My Notes"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
