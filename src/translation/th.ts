@@ -570,6 +570,8 @@ const th = {
     restartToInstallDesc: "รีสตาร์ต Luno Note เพื่อติดตั้งและใช้งานเวอร์ชันล่าสุด",
     installAndRestart: "รีสตาร์ตและติดตั้ง",
     updateError: "การตรวจสอบอัปเดตล้มเหลว",
+    updateNotFoundDesc: "ไม่พบ Release ที่เผยแพร่บน GitHub (404) กรุณาตรวจสอบว่ามี Release เผยแพร่แล้วและ Repo เป็น Public",
+    updateNetworkErrorDesc: "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์อัปเดตได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต",
     updateNotSupported: "ใช้ได้เฉพาะบนเดสก์ท็อป",
     updateDesktopOnlyDesc: "ระบบอัปเดตอัตโนมัติทำงานบนแอปพลิเคชันเดสก์ท็อป",
     devModeTitle: "โหมดนักพัฒนา",

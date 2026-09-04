@@ -12,6 +12,31 @@ export type UpdateStatus =
   | "downloaded"
   | "error";
 
+function formatUpdateError(rawMsg: string | undefined | null, t: (key: string) => string): string {
+  if (!rawMsg) return t("settings.updateError") || "Update Check Failed";
+  const str = String(rawMsg);
+  if (str.includes("404") || str.includes("latest.yml") || str.includes("releases/latest")) {
+    return t("settings.updateNotFoundDesc") || "No published release found on GitHub (404). Please ensure a Release is published and the repository is public.";
+  }
+  if (
+    str.includes("ERR_INTERNET_DISCONNECTED") ||
+    str.includes("ENOTFOUND") ||
+    str.includes("ECONNREFUSED") ||
+    str.includes("ETIMEDOUT") ||
+    str.includes("fetch failed")
+  ) {
+    return t("settings.updateNetworkErrorDesc") || "Could not connect to the update server. Please check your internet connection.";
+  }
+  if (str.includes("403") || str.includes("rate limit")) {
+    return "GitHub API rate limit exceeded or access forbidden.";
+  }
+  // Trim very long HTML / JSON strings if any
+  if (str.length > 120) {
+    return str.slice(0, 120) + "...";
+  }
+  return str;
+}
+
 export function useAppUpdate() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<UpdateStatus>("idle");
@@ -90,13 +115,14 @@ export function useAppUpdate() {
 
     if (window.electronAPI.onUpdateError) {
       const unsub = window.electronAPI.onUpdateError((err) => {
+        const friendlyMsg = formatUpdateError(err?.message, t);
         setStatus("error");
-        setErrorMessage(err.message || "Update check failed");
+        setErrorMessage(friendlyMsg);
         if (manualCheckRef.current) {
           toast({
             variant: "destructive",
             title: t("settings.updateError") || "Update Error",
-            description: err.message || "Failed to check for updates.",
+            description: friendlyMsg,
           });
         }
       });
@@ -125,13 +151,14 @@ export function useAppUpdate() {
     try {
       const res = await window.electronAPI.checkForUpdates();
       if (!res.success) {
+        const friendlyMsg = formatUpdateError(res.error, t);
         setStatus("error");
-        setErrorMessage(res.error || "Failed to check for updates");
+        setErrorMessage(friendlyMsg);
         if (isManual) {
           toast({
             variant: "destructive",
             title: t("settings.updateError") || "Update Error",
-            description: res.error || "Failed to check for updates.",
+            description: friendlyMsg,
           });
         }
       } else if (res.isDev) {
@@ -144,13 +171,14 @@ export function useAppUpdate() {
         }
       }
     } catch (err: any) {
+      const friendlyMsg = formatUpdateError(err?.message, t);
       setStatus("error");
-      setErrorMessage(err?.message || "Unexpected error");
+      setErrorMessage(friendlyMsg);
       if (isManual) {
         toast({
           variant: "destructive",
           title: t("settings.updateError") || "Update Error",
-          description: err?.message || "Could not reach update server.",
+          description: friendlyMsg,
         });
       }
     }

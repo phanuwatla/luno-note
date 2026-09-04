@@ -570,6 +570,8 @@ const en = {
     restartToInstallDesc: "Restart Luno Note to install the latest version.",
     installAndRestart: "Restart & Install",
     updateError: "Update Check Failed",
+    updateNotFoundDesc: "No published release found on GitHub (404). Please ensure a Release is published and the repository is public.",
+    updateNetworkErrorDesc: "Could not connect to the update server. Please check your internet connection.",
     updateNotSupported: "Desktop App Only",
     updateDesktopOnlyDesc: "Auto-updater is active in the desktop application.",
     devModeTitle: "Development Mode",
