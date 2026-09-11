@@ -21,6 +21,7 @@ import { parseFrontmatterAndTags, isMarkdownNote } from "@/lib/frontmatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import type { Note } from "@/hooks/useNotes";
 
 interface FavoritesTabViewProps {
@@ -324,13 +325,11 @@ export default function FavoritesTabView({
                                 <span className="shrink-0 flex items-center justify-center">
                                   {renderCustomIcon(note.icon, "h-4 w-4", { color: note.iconColor })}
                                 </span>
-                              ) : formatExt === "HTML" ? (
-                                <FileCode className="h-4 w-4 shrink-0 text-blue-500" />
-                              ) : formatExt === "IMG" ? (
-                                <FileImage className="h-4 w-4 shrink-0 text-emerald-500" />
-                              ) : (
-                                <FileText className="h-4 w-4 shrink-0 text-primary" />
-                              )}
+                              ) : (() => {
+                                const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType, note.contentFormat);
+                                const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
+                                return <IconComp className="h-4 w-4 shrink-0 text-primary" />;
+                              })()}
                               <span className="font-semibold text-xs text-foreground group-hover:text-primary transition-colors truncate">
                                 {note.fileName || note.title || t("editor.untitled")}
                               </span>

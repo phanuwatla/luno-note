@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import type { Note } from "@/hooks/useNotes";
 
 interface TagsTabViewProps {
@@ -336,11 +337,10 @@ export default function TagsTabView({
                           <MoreVertical className="h-3 w-3 shrink-0" />
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-48 rounded-xl p-1.5 shadow-lg border border-border">
+                      <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-48">
                         {onRenameTagGlobally && (
                           <DropdownMenuItem
                             onClick={() => handleStartRename(tag)}
-                            className="gap-2.5 cursor-pointer py-2 px-3 rounded-lg text-sm"
                           >
                             <Edit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                             <span>{isTh ? "เปลี่ยนชื่อแท็ก" : "Rename Tag"}</span>
@@ -349,7 +349,7 @@ export default function TagsTabView({
                         {onDeleteTagGlobally && (
                           <DropdownMenuItem
                             onClick={() => setTagToDelete(tag)}
-                            className="gap-2.5 text-destructive focus:text-destructive cursor-pointer py-2 px-3 rounded-lg text-sm"
+                            className="text-destructive focus:text-destructive"
                           >
                             <Trash2 className="h-4 w-4 shrink-0" />
                             <span>{isTh ? "ลบแท็กนี้" : "Delete Tag"}</span>
@@ -426,13 +426,11 @@ export default function TagsTabView({
                                 <span className="shrink-0 flex items-center justify-center">
                                   {renderCustomIcon(note.icon, "h-4 w-4", { color: note.iconColor })}
                                 </span>
-                              ) : formatExt === "HTML" ? (
-                                <FileCode className="h-4 w-4 shrink-0 text-blue-500" />
-                              ) : formatExt === "IMG" ? (
-                                <FileImage className="h-4 w-4 shrink-0 text-emerald-500" />
-                              ) : (
-                                <FileText className="h-4 w-4 shrink-0 text-primary" />
-                              )}
+                              ) : (() => {
+                                const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType, note.contentFormat);
+                                const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
+                                return <IconComp className="h-4 w-4 shrink-0 text-primary" />;
+                              })()}
                               <span className="font-semibold text-xs text-foreground group-hover:text-primary transition-colors truncate">
                                 {note.fileName || note.title || t("editor.untitled")}
                               </span>

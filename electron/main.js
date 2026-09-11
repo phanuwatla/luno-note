@@ -14,6 +14,21 @@ const http = require("http");
 const url = require("url");
 const { getSpellingSuggestions } = require("./spellDictionary");
 
+// Prevent multiple Electron instances from locking user data cache and freezing
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      const mainWin = wins[0];
+      if (mainWin.isMinimized()) mainWin.restore();
+      mainWin.focus();
+    }
+  });
+}
+
 const configPath = path.join(app.getPath("userData"), "workspace-config.json");
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
@@ -45,6 +60,37 @@ const IGNORED_SCAN_FOLDERS = new Set([
   "assets",
   ".luno",
 ]);
+
+const DANGEROUS_EXTENSIONS = new Set([
+  ".exe", ".bat", ".cmd", ".com", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
+  ".ps1", ".ps1xml", ".ps2", ".psc1", ".psc2", ".msh", ".msh1", ".msh2",
+  ".reg", ".hta", ".cpl", ".jar", ".scr", ".pif", ".msi", ".msp", ".mst",
+  ".appx", ".appxbundle", ".msix", ".msixbundle", ".sh", ".bash"
+]);
+
+function isCriticalSystemPath(targetPath) {
+  if (!targetPath || typeof targetPath !== "string") return true;
+  if (targetPath.includes("\0")) return true;
+  try {
+    const resolved = path.resolve(targetPath);
+    const root = path.parse(resolved).root;
+    if (resolved === root || resolved === path.dirname(root)) return true;
+
+    const homedir = os.homedir();
+    if (resolved === path.resolve(homedir)) return true;
+
+    const winDir = process.env.WINDIR || process.env.SYSTEMROOT;
+    if (winDir && resolved.toLowerCase().startsWith(path.resolve(winDir).toLowerCase())) return true;
+    const progFiles = process.env.ProgramFiles;
+    if (progFiles && resolved.toLowerCase().startsWith(path.resolve(progFiles).toLowerCase())) return true;
+    const progFilesX86 = process.env["ProgramFiles(x86)"];
+    if (progFilesX86 && resolved.toLowerCase().startsWith(path.resolve(progFilesX86).toLowerCase())) return true;
+
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 function detectSystemLanguage() {
   try {
@@ -129,6 +175,10 @@ function ensureDefaultWorkspaceFolders(folderPath) {
         updatedAt: Date.now(),
       };
       fs.writeFileSync(workspaceFile, JSON.stringify(wsData, null, 2), "utf8");
+    }
+    const lunoGitignore = path.join(lunoDir, ".gitignore");
+    if (!fs.existsSync(lunoGitignore)) {
+      fs.writeFileSync(lunoGitignore, "# Ignore local workspace configuration and session\nsettings.json\nsession.json\n*.local\n", "utf8");
     }
   } catch (err) {
     console.warn("Failed ensuring default workspace folders:", err);
@@ -230,24 +280,24 @@ function startWorkspaceWatcher(folderPath, targetWindow) {
   try {
     let debounceTimer = null;
     const watcher = fs.watch(folderPath, { recursive: true }, (eventType, filename) => {
-      if (filename) {
-        const norm = filename.replace(/\\/g, "/").toLowerCase();
-        const baseName = path.basename(norm);
-        if (
-          baseName.startsWith(".") ||
-          baseName.startsWith("~$") ||
-          baseName.endsWith(".tmp") ||
-          baseName.endsWith(".swp") ||
-          baseName.endsWith(".crdownload") ||
-          baseName === "thumbs.db" ||
-          baseName === "desktop.ini"
-        ) {
-          return;
-        }
-        const parts = norm.split("/");
-        if (parts.some((p) => p.startsWith(".") || IGNORED_SCAN_FOLDERS.has(p))) {
-          return;
-        }
+      if (!filename) return;
+      const norm = filename.replace(/\\/g, "/").toLowerCase();
+      const baseName = path.basename(norm);
+      if (
+        baseName.startsWith(".") ||
+        baseName.startsWith("~$") ||
+        baseName.endsWith(".tmp") ||
+        baseName.endsWith(".swp") ||
+        baseName.endsWith(".crdownload") ||
+        baseName === "thumbs.db" ||
+        baseName === "desktop.ini" ||
+        baseName === "session.json"
+      ) {
+        return;
+      }
+      const parts = norm.split("/");
+      if (parts.some((p) => p.startsWith(".") || IGNORED_SCAN_FOLDERS.has(p) || p === ".luno" || p === ".obsidian")) {
+        return;
       }
 
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -259,7 +309,7 @@ function startWorkspaceWatcher(folderPath, targetWindow) {
             ...tree,
           });
         }
-      }, 400);
+      }, 600);
     });
 
     windowWatchers.set(windowId, { watcher, debounceTimer });
@@ -361,6 +411,7 @@ function scanWorkspaceTree(rootDir) {
           content,
           contentFormat,
           fileType,
+          fileSize: size,
           createdAt,
           updatedAt,
         });
@@ -484,33 +535,69 @@ function createWindow(initialWorkspacePath = null) {
   const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
   if (isDev) {
-    win.loadURL("http://localhost:8080");
+    const loadDevServer = () => {
+      win.loadURL("http://localhost:8080").catch((err) => {
+        console.warn("Dev server not ready yet, retrying...", err?.message || err);
+        setTimeout(() => {
+          if (!win.isDestroyed()) {
+            loadDevServer();
+          }
+        }, 1000);
+      });
+    };
+    loadDevServer();
   } else {
     win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
   // Open external links in user's default browser, but allow Google OAuth login popup
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.includes("accounts.google.com") || url.includes("google.com/gsi/")) {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          width: 520,
-          height: 650,
-          autoHideMenuBar: true,
-          icon: getAppIconPath(),
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
+    try {
+      const parsedUrl = new URL(url);
+      if (
+        (parsedUrl.hostname === "accounts.google.com" || parsedUrl.hostname.endsWith(".google.com")) &&
+        (parsedUrl.pathname.includes("/o/oauth2/") || parsedUrl.pathname.includes("/gsi/"))
+      ) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 520,
+            height: 650,
+            autoHideMenuBar: true,
+            icon: getAppIconPath(),
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+            },
           },
-        },
-      };
+        };
+      }
+      if (["http:", "https:", "mailto:", "tel:"].includes(parsedUrl.protocol)) {
+        shell.openExternal(url);
+      }
+    } catch {
+      /* ignore invalid URLs */
     }
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      shell.openExternal(url);
-      return { action: "deny" };
+    return { action: "deny" };
+  });
+
+  // Guard against in-window navigations to external or unverified origins
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    try {
+      const parsed = new URL(targetUrl);
+      if (isDev && parsed.origin === "http://localhost:8080") {
+        return;
+      }
+      if (!isDev && parsed.protocol === "file:") {
+        return;
+      }
+      event.preventDefault();
+      if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+        shell.openExternal(targetUrl);
+      }
+    } catch {
+      event.preventDefault();
     }
-    return { action: "allow" };
   });
 
   return win;
@@ -519,7 +606,7 @@ function createWindow(initialWorkspacePath = null) {
 function setupIpcHandlers() {
   ipcMain.handle("google-oauth-login", async (event, payload) => {
     const clientId = typeof payload === "string" ? payload : (payload?.clientId || "843941002582-fseklvkec1fqn2ir08oasqh4cmllomli.apps.googleusercontent.com");
-    const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "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");
+    const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "");
 
     return new Promise((resolve, reject) => {
       let isSettled = false;
@@ -658,12 +745,44 @@ function setupIpcHandlers() {
 
   ipcMain.handle("open-external", async (event, url) => {
     try {
-      if (url && (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("mailto:") || url.startsWith("tel:"))) {
-        await shell.openExternal(url);
-        return true;
+      if (url && typeof url === "string") {
+        const parsed = new URL(url);
+        if (["http:", "https:", "mailto:", "tel:"].includes(parsed.protocol)) {
+          await shell.openExternal(url);
+          return true;
+        }
       }
     } catch (err) {
       console.warn("Failed opening external URL:", url, err);
+    }
+    return false;
+  });
+
+  ipcMain.handle("open-path", async (_event, fullPath) => {
+    try {
+      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+        const ext = path.extname(fullPath).toLowerCase();
+        if (DANGEROUS_EXTENSIONS.has(ext)) {
+          shell.showItemInFolder(fullPath);
+          return false;
+        }
+        await shell.openPath(fullPath);
+        return true;
+      }
+    } catch (err) {
+      console.warn("Failed opening path:", fullPath, err);
+    }
+    return false;
+  });
+
+  ipcMain.handle("show-item-in-folder", async (_event, fullPath) => {
+    try {
+      if (fullPath && fs.existsSync(fullPath)) {
+        shell.showItemInFolder(fullPath);
+        return true;
+      }
+    } catch (err) {
+      console.warn("Failed showing item in folder:", fullPath, err);
     }
     return false;
   });
@@ -760,7 +879,7 @@ function setupIpcHandlers() {
       const userInfo = os.userInfo();
       return {
         username: userInfo.username || process.env.USERNAME || process.env.USER || "",
-        homedir: userInfo.homedir || "",
+        homedir: "",
       };
     } catch {
       return {
@@ -982,6 +1101,10 @@ function setupIpcHandlers() {
 
   ipcMain.handle("write-file-content", (event, { fullPath, content }) => {
     try {
+      if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
+        console.warn("Blocked writing to protected or invalid path:", fullPath);
+        return false;
+      }
       const parentDir = path.dirname(fullPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
@@ -996,6 +1119,10 @@ function setupIpcHandlers() {
 
   ipcMain.handle("write-file-base64", (event, { fullPath, base64 }) => {
     try {
+      if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
+        console.warn("Blocked writing base64 to protected or invalid path:", fullPath);
+        return false;
+      }
       const parentDir = path.dirname(fullPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
@@ -1012,9 +1139,13 @@ function setupIpcHandlers() {
 
   ipcMain.handle("delete-file-or-folder", (event, fullPath) => {
     try {
-      if (fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && !isCriticalSystemPath(fullPath) && fs.existsSync(fullPath)) {
         fs.rmSync(fullPath, { recursive: true, force: true });
         return true;
+      }
+      if (isCriticalSystemPath(fullPath)) {
+        console.warn("Blocked deleting protected critical system path:", fullPath);
+        return false;
       }
     } catch (err) {
       console.warn("Failed deleting file/folder:", fullPath, err);
@@ -1195,6 +1326,120 @@ function setupIpcHandlers() {
       return result.filePath;
     }
     return null;
+  });
+
+  ipcMain.handle("print-content", async (event, { html, title }) => {
+    const callerWin = BrowserWindow.fromWebContents(event.sender);
+    const tempFilePath = path.join(
+      app.getPath("temp"),
+      `luno_print_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.html`
+    );
+
+    let printWin = new BrowserWindow({
+      show: false,
+      title: title || "Print",
+      parent: callerWin || undefined,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    try {
+      await fs.promises.writeFile(tempFilePath, html, "utf-8");
+      await printWin.loadFile(tempFilePath);
+
+      // Brief delay to allow fonts and images to settle
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      return await new Promise((resolve) => {
+        printWin.webContents.print(
+          {
+            silent: false,
+            printBackground: true,
+          },
+          (success, failureReason) => {
+            try {
+              printWin.close();
+            } catch {}
+            printWin = null;
+            fs.promises.unlink(tempFilePath).catch(() => {});
+            resolve({ success, failureReason });
+          }
+        );
+      });
+    } catch (err) {
+      if (printWin) {
+        try {
+          printWin.close();
+        } catch {}
+      }
+      fs.promises.unlink(tempFilePath).catch(() => {});
+      return { success: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle("export-pdf", async (event, { html, title, defaultPath }) => {
+    const callerWin = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showSaveDialog(callerWin || undefined, {
+      title: "Export as PDF",
+      defaultPath: defaultPath || "Untitled.pdf",
+      filters: [
+        { name: "PDF Document (*.pdf)", extensions: ["pdf"] },
+        { name: "All Files (*.*)", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+
+    const targetPath = result.filePath;
+    const tempFilePath = path.join(
+      app.getPath("temp"),
+      `luno_pdf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.html`
+    );
+
+    let printWin = new BrowserWindow({
+      show: false,
+      title: title || "Export PDF",
+      parent: callerWin || undefined,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    try {
+      await fs.promises.writeFile(tempFilePath, html, "utf-8");
+      await printWin.loadFile(tempFilePath);
+
+      // Brief delay to allow fonts and images to settle
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      const pdfBuffer = await printWin.webContents.printToPDF({
+        printBackground: true,
+        pageSize: "A4",
+        margins: {
+          top: 0.4,
+          bottom: 0.4,
+          left: 0.4,
+          right: 0.4,
+        },
+      });
+
+      await fs.promises.writeFile(targetPath, pdfBuffer);
+      return { success: true, filePath: targetPath };
+    } catch (err) {
+      return { success: false, error: err?.message || String(err) };
+    } finally {
+      if (printWin) {
+        try {
+          printWin.close();
+        } catch {}
+      }
+      fs.promises.unlink(tempFilePath).catch(() => {});
+    }
   });
 
   ipcMain.handle("create-new-workspace", async (event, { parentPath, workspaceName }) => {
@@ -1429,6 +1674,17 @@ app.whenReady().then(() => {
     } catch {
       /* ignore */
     }
+
+    contents.on("will-attach-webview", (_waEvent, webPreferences) => {
+      delete webPreferences.preload;
+      delete webPreferences.preloadURL;
+      webPreferences.nodeIntegration = false;
+      webPreferences.nodeIntegrationInWorker = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.allowRunningInsecureContent = false;
+      webPreferences.plugins = false;
+    });
 
     if (contents.getType() === "webview") {
       try {

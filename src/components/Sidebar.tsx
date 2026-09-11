@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { Note } from "@/hooks/useNotes";
 import { isEncryptedNote } from "@/lib/noteCrypto";
+import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
 import {
   Plus,
   Search,
@@ -46,7 +47,6 @@ import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import lunoLogo from "@/assets/luno-logo.png";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -99,6 +99,7 @@ interface SidebarProps {
   onOpenSidebar?: () => void;
   onClose?: () => void;
   onOpenSettings?: () => void;
+  onOpenHelp?: () => void;
   onRenameTagGlobally?: (oldTag: string, newTag: string) => void;
   onDeleteTagGlobally?: (tagToDelete: string) => void;
   onToggleFavorite?: (noteId: string) => void;
@@ -447,26 +448,9 @@ function NoteIcon({ note, active }: { note: Note; active: boolean }) {
     const LockIcon = getToolbarIcon("lock", pack);
     return <LockIcon className={cls} />;
   }
-  const type = getFileType(note);
-  const name = note.fileName?.toLowerCase() || "";
-  if (name.endsWith(".zip") || type === "zip") {
-    const ZipIcon = getToolbarIcon("fileZip", pack);
-    return <ZipIcon className={cls} />;
-  }
-  if (type === "md" || type === "html" || type === "css") {
-    const CodeIcon = getToolbarIcon("fileCode", pack);
-    return <CodeIcon className={cls} />;
-  }
-  if (type === "image") {
-    const ImgIcon = getToolbarIcon("fileImage", pack);
-    return <ImgIcon className={cls} />;
-  }
-  if (type === "binary") {
-    const FileIcon = getToolbarIcon("file", pack);
-    return <FileIcon className={cls} />;
-  }
-  const TextIcon = getToolbarIcon("fileText", pack);
-  return <TextIcon className={cls} />;
+  const defaultKey = getNoteDefaultIconKey(note);
+  const IconComp = getToolbarIcon(defaultKey, pack);
+  return <IconComp className={cls} />;
 }
 
 function MarkdownIndicator({ active, className = "" }: { active: boolean; className?: string }) {
@@ -490,7 +474,7 @@ function MarkdownIndicator({ active, className = "" }: { active: boolean; classN
   );
 }
 
-function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onUpdateNote, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, onCloseWorkspace, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onRenameTagGlobally, onDeleteTagGlobally, onToggleFavorite, onOpenPinModal, isCloudWorkspace = false, isLoadingWorkspace = false, onOpenWebTab, trashCount = 0 }: SidebarProps) {
+function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onUpdateNote, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, onCloseWorkspace, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onOpenHelp, onRenameTagGlobally, onDeleteTagGlobally, onToggleFavorite, onOpenPinModal, isCloudWorkspace = false, isLoadingWorkspace = false, onOpenWebTab, trashCount = 0 }: SidebarProps) {
   const { settings, updateSetting, setFolderIcon, removeFolderIcon, moveFolderIcons, setFileIcon, removeFileIcon } = useAppSettings();
   const [iconPickerTarget, setIconPickerTarget] = useState<{ type: "folder"; path: string } | { type: "note"; note: Note } | null>(null);
   const [query, setQuery] = useState("");
@@ -1132,13 +1116,20 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               onContextMenu={() => {
                 if (!selectedNoteIds.has(note.id)) setSingleSelectedNote(note.id);
               }}
-              className={`flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"} text-left transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none ${
+              className={`relative flex w-full items-center gap-1.5 px-3 ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"} text-left transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none ${
                 activeNoteId === note.id || selectedNoteIds.has(note.id)
                   ? "bg-sidebar-accent text-foreground font-semibold"
                   : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
               }`}
               style={{ paddingLeft: `${12 + depth * 14}px` }}
             >
+              {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
+                <span
+                  key={i}
+                  className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+                  style={{ left: `${18 + i * 14}px` }}
+                />
+              ))}
               <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <NoteIcon note={note} active={activeNoteId === note.id} />
               <span className={`truncate ${activeNoteId === note.id ? "font-semibold text-primary" : "font-normal"}`}>{noteLabel}</span>
@@ -1148,7 +1139,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               </div>
             </button>
           </ContextMenuTrigger>
-          <ContextMenuContent className="w-48 rounded-xl">
+          <ContextMenuContent className="w-52 rounded-xl">
             {!isMultiSelected && (
               <>
                 <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
@@ -1253,11 +1244,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
     return (
       <ContextMenu key={note.id}>
         <ContextMenuTrigger asChild>
-          <motion.button
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
+          <button
             onClick={(event) => {
               if (event.shiftKey || event.ctrlKey || event.metaKey) {
                 return;
@@ -1311,9 +1298,9 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                 ? highlightMatchText(getSearchPreviewSnippet(note.content, note.title, query, t("sidebar.noContent")), query, settings.theme)
                 : getPreview(note.content, note.title, t("sidebar.noContent"))}
             </p>
-          </motion.button>
+          </button>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-48 rounded-xl">
+        <ContextMenuContent className="w-52 rounded-xl">
           {!isMultiSelected && (
             <>
               <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
@@ -1473,6 +1460,13 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                 paddingLeft: `${12 + depth * 14}px`,
               }}
             >
+              {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
+                <span
+                  key={i}
+                  className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+                  style={{ left: `${18 + i * 14}px` }}
+                />
+              ))}
               {isOpen ? (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
@@ -1496,12 +1490,6 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             </button>
             {isOpen && (
               <div className="relative w-full">
-                {settings.showGuideLines && (
-                  <div
-                    className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
-                    style={{ left: `${18 + depth * 14}px` }}
-                  />
-                )}
                 <div
                   onDragOver={(event) => {
                     event.preventDefault();
@@ -1525,7 +1513,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             )}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-48 rounded-xl">
+        <ContextMenuContent className="w-52 rounded-xl">
           <ContextMenuItem onClick={() => setIconPickerTarget({ type: "folder", path: node.path })} className="gap-2">
             {settings.folderIcons?.[node.path] ? (
               renderCustomIcon(settings.folderIcons[node.path].icon, "h-4 w-4 shrink-0 text-primary", { color: settings.folderIcons[node.path].color })
@@ -1856,12 +1844,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                     {t("sidebar.newNote") || (isTh ? "สร้างโน้ตใหม่" : "New Note")}
                   </TooltipContent>
                 </Tooltip>
-                <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-48 rounded-xl px-0 py-2">
-                  <DropdownMenuItem onClick={openCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-52">
+                  <DropdownMenuItem onClick={openCreateFileDialog}>
                     {renderIcon("fileText", "h-4 w-4")}
                     <span>{t("sidebar.createFileAction")}</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openCreateFolderDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+                  <DropdownMenuItem onClick={openCreateFolderDialog}>
                     {renderIcon("folderPlus", "h-4 w-4")}
                     <span>{t("sidebar.createFolderAction")}</span>
                   </DropdownMenuItem>
@@ -1872,7 +1860,6 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                       }
                       if (isMobile) onClose?.();
                     }}
-                    className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg"
                   >
                     <Globe className="h-4 w-4" />
                     <span>{t("sidebar.newWebPage") || "Web Page"}</span>
@@ -1881,14 +1868,28 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               </DropdownMenu>
             </div>
 
-            {/* Bottom Nav Item: Settings */}
-            <div className="flex flex-col items-center w-full px-1.5 shrink-0">
+            {/* Bottom Nav Items: Help & Settings */}
+            <div className="flex flex-col items-center w-full px-1.5 shrink-0 gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onOpenHelp}
+                    className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                  >
+                    {renderIcon("helpCircle", "h-4 w-4")}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>
+                  {t("sidebar.help") || "Help"}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={onOpenSettings}
-                    className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
                   >
                     {renderIcon("settings", "h-4 w-4")}
                   </button>
@@ -2058,83 +2059,83 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               </TooltipTrigger>
               <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="w-56 rounded-xl px-1 py-1.5 shadow-md">
+            <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
               <DropdownMenuItem
                 onClick={() => handleSortChange("name-asc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "name-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <ArrowDownAZ className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2.5">
+                  <ArrowDownAZ className="h-4 w-4" />
                   <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
                 </div>
-                {sortBy === "name-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => handleSortChange("name-desc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "name-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <ArrowUpAZ className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2.5">
+                  <ArrowUpAZ className="h-4 w-4" />
                   <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
                 </div>
-                {sortBy === "name-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => handleSortChange("modified-desc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "modified-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Clock className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2.5">
+                  <Clock className="h-4 w-4" />
                   <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
                 </div>
-                {sortBy === "modified-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => handleSortChange("modified-asc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "modified-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Clock className="h-3.5 w-3.5 opacity-60" />
+                <div className="flex items-center gap-2.5">
+                  <Clock className="h-4 w-4 opacity-60" />
                   <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
                 </div>
-                {sortBy === "modified-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => handleSortChange("created-desc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "created-desc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="h-4 w-4" />
                   <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
                 </div>
-                {sortBy === "created-desc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => handleSortChange("created-asc")}
-                className={`gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs flex items-center justify-between ${
-                  sortBy === "created-asc" ? "bg-sidebar-accent text-primary font-semibold" : ""
+                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                  sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-3.5 w-3.5 opacity-60" />
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="h-4 w-4 opacity-60" />
                   <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
                 </div>
-                {sortBy === "created-asc" && <Check className="h-3.5 w-3.5 stroke-[2.5]" />}
+                {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -2171,12 +2172,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               </TooltipTrigger>
               <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
-              <DropdownMenuItem onClick={openCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={openCreateFileDialog}>
                 {renderIcon("fileText", "h-4 w-4")}
                 <span>{t("sidebar.createFileAction")}</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={openCreateFolderDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <DropdownMenuItem onClick={openCreateFolderDialog}>
                 {renderIcon("folderPlus", "h-4 w-4")}
                 <span>{t("sidebar.createFolderAction")}</span>
               </DropdownMenuItem>
@@ -2187,7 +2188,6 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                   }
                   if (isMobile) onClose?.();
                 }}
-                className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg"
               >
                 <Globe className="h-4 w-4" />
                 <span>{t("sidebar.newWebPage") || "Web Page"}</span>
@@ -2200,18 +2200,16 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
 
       {/* Tree Content */}
       <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
-        <AnimatePresence initial={false}>
-          {filtered.length === 0 && (query || !hasTreeView) ? (
-            <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
-              <FileText size={24} className="mb-3 opacity-40" />
-              <p className="text-sm">{query ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
-            </div>
-          ) : hasTreeView && !query ? (
-            renderFolderNode(folderTree)
-          ) : (
-            filtered.map((note) => renderNote(note))
-          )}
-        </AnimatePresence>
+        {filtered.length === 0 && (query || !hasTreeView) ? (
+          <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
+            <FileText size={24} className="mb-3 opacity-40" />
+            <p className="text-sm">{query ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
+          </div>
+        ) : hasTreeView && !query ? (
+          renderFolderNode(folderTree)
+        ) : (
+          filtered.map((note) => renderNote(note))
+        )}
       </div>
 
       {/* Sidebar Footer */}
@@ -2237,9 +2235,10 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                onClick={onOpenHelp}
               >
-                <HelpCircle className="h-4 w-4" />
+                {renderIcon("helpCircle", "h-4 w-4")}
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("sidebar.help")}</TooltipContent>

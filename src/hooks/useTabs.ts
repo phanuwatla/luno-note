@@ -97,8 +97,22 @@ export async function loadWorkspaceSession(
   return null;
 }
 
+export function isSystemOrWebTab(id: string): boolean {
+  return (
+    id === "settings" || id.startsWith("settings:") ||
+    id === "luno-ai" || id.startsWith("luno-ai:") ||
+    id === "home" || id.startsWith("home:") ||
+    id === "help" || id.startsWith("help:") ||
+    id === "trash" || id.startsWith("trash:") ||
+    id === "templates" || id.startsWith("templates:") ||
+    id === "favorites" || id.startsWith("favorites:") ||
+    id === "tags" || id.startsWith("tags:") ||
+    id.startsWith("web:")
+  );
+}
+
 function getTabPath(id: string, notes?: Note[]): string {
-  if (id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id === "favorites" || id === "tags" || id.startsWith("web:")) return id;
+  if (isSystemOrWebTab(id)) return id;
   if (!notes) return id;
   const found = notes.find((n) => n.id === id);
   if (found) {
@@ -129,6 +143,44 @@ function loadSavedTabs(): { openTabIds: string[]; activeTabId: string | null } {
   }
 }
 
+let debouncedSaveSessionTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSessionSave: { rootDirHandle: FileSystemDirectoryHandle | null; paths: string[]; activePath: string | null } | null = null;
+
+export function flushWorkspaceSession() {
+  if (debouncedSaveSessionTimer) {
+    clearTimeout(debouncedSaveSessionTimer);
+    debouncedSaveSessionTimer = null;
+  }
+  if (pendingSessionSave) {
+    const { rootDirHandle, paths, activePath } = pendingSessionSave;
+    pendingSessionSave = null;
+    void saveWorkspaceSession(rootDirHandle, paths, activePath);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", flushWorkspaceSession);
+}
+
+function scheduleSaveWorkspaceSession(
+  rootDirHandle: FileSystemDirectoryHandle | null,
+  paths: string[],
+  activePath: string | null
+) {
+  pendingSessionSave = { rootDirHandle, paths, activePath };
+  if (debouncedSaveSessionTimer) {
+    clearTimeout(debouncedSaveSessionTimer);
+  }
+  debouncedSaveSessionTimer = setTimeout(() => {
+    debouncedSaveSessionTimer = null;
+    if (pendingSessionSave) {
+      const { rootDirHandle: handle, paths: p, activePath: a } = pendingSessionSave;
+      pendingSessionSave = null;
+      void saveWorkspaceSession(handle, p, a);
+    }
+  }, 400);
+}
+
 function saveTabs(openTabIds: string[], activeTabId: string | null, notes?: Note[]) {
   try {
     localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(openTabIds));
@@ -139,7 +191,7 @@ function saveTabs(openTabIds: string[], activeTabId: string | null, notes?: Note
       const activePath = activeTabId ? getTabPath(activeTabId, notes) : null;
       localStorage.setItem(TAB_PATHS_STORAGE_KEY, JSON.stringify(paths));
       localStorage.setItem(ACTIVE_TAB_PATH_STORAGE_KEY, JSON.stringify(activePath));
-      void saveWorkspaceSession(null, paths, activePath);
+      scheduleSaveWorkspaceSession(null, paths, activePath);
     }
   } catch {
     /* ignore storage errors */
@@ -156,6 +208,9 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
   const syncedSetOpenTabIds = useCallback((updater: (prev: string[]) => string[]) => {
     setOpenTabIds((prev) => {
       const next = updater(prev);
+      if (next.length === prev.length && next.every((val, i) => val === prev[i])) {
+        return prev;
+      }
       openTabIdsRef.current = next;
       saveTabs(next, activeTabIdRef.current, notesRef?.current);
       return next;
@@ -163,13 +218,16 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
   }, [notesRef]);
 
   const syncedSetActiveTabId = useCallback((id: string | null) => {
+    if (activeTabIdRef.current === id) return;
     activeTabIdRef.current = id;
     setActiveTabId(id);
     saveTabs(openTabIdsRef.current, id, notesRef?.current);
   }, [notesRef]);
 
   const openTab = useCallback((id: string) => {
-    syncedSetOpenTabIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    if (!openTabIdsRef.current.includes(id)) {
+      syncedSetOpenTabIds((prev) => [...prev, id]);
+    }
     syncedSetActiveTabId(id);
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
@@ -188,10 +246,37 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
 
-  const removeTabsForDeletedNotes = useCallback((existingIds: Set<string>) => {
-    const next = openTabIdsRef.current.filter((id) => id === "settings" || id === "luno-ai" || id === "home" || id === "trash" || id === "templates" || id === "favorites" || id === "tags" || id.startsWith("web:") || existingIds.has(id));
+  const closeOtherTabs = useCallback((keepId: string) => {
+    const currentTabs = openTabIdsRef.current;
+    if (!currentTabs.includes(keepId)) return;
+    const next = [keepId];
     syncedSetOpenTabIds(() => next);
-    if (activeTabIdRef.current && activeTabIdRef.current !== "settings" && activeTabIdRef.current !== "luno-ai" && activeTabIdRef.current !== "home" && activeTabIdRef.current !== "trash" && activeTabIdRef.current !== "templates" && !activeTabIdRef.current.startsWith("web:") && !existingIds.has(activeTabIdRef.current)) {
+    syncedSetActiveTabId(keepId);
+  }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
+
+  const closeAllTabs = useCallback(() => {
+    syncedSetOpenTabIds(() => []);
+    syncedSetActiveTabId(null);
+  }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
+
+  const closeTabsToRight = useCallback((targetId: string) => {
+    const currentTabs = openTabIdsRef.current;
+    const idx = currentTabs.indexOf(targetId);
+    if (idx === -1) return;
+    const next = currentTabs.slice(0, idx + 1);
+    syncedSetOpenTabIds(() => next);
+    if (activeTabIdRef.current && !next.includes(activeTabIdRef.current)) {
+      syncedSetActiveTabId(targetId);
+    }
+  }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
+
+  const removeTabsForDeletedNotes = useCallback((existingIds: Set<string>) => {
+    const currentTabs = openTabIdsRef.current;
+    const next = currentTabs.filter((id) => isSystemOrWebTab(id) || existingIds.has(id));
+    if (next.length !== currentTabs.length) {
+      syncedSetOpenTabIds(() => next);
+    }
+    if (activeTabIdRef.current && !isSystemOrWebTab(activeTabIdRef.current) && !existingIds.has(activeTabIdRef.current)) {
       syncedSetActiveTabId(next[0] ?? null);
     }
   }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
@@ -267,7 +352,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
         const resolvedTabIds: string[] = [];
         for (const item of savedPaths) {
           if (!item) continue;
-          if (item === "settings" || item === "luno-ai" || item === "home" || item === "trash" || item === "templates" || item === "favorites" || item === "tags" || item.startsWith("web:")) {
+          if (isSystemOrWebTab(item)) {
             if (!resolvedTabIds.includes(item)) {
               resolvedTabIds.push(item);
             }
@@ -297,7 +382,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
 
           // onStartup === "lastNote"
           let resolvedActiveId: string | null = null;
-          if (savedActivePath === "settings" || savedActivePath === "luno-ai" || savedActivePath === "home" || savedActivePath === "trash" || savedActivePath === "templates" || savedActivePath === "favorites" || savedActivePath === "tags" || (savedActivePath && savedActivePath.startsWith("web:"))) {
+          if (savedActivePath && isSystemOrWebTab(savedActivePath)) {
             resolvedActiveId = savedActivePath;
           } else if (savedActivePath) {
             const matchedActive = notes.find((n) => {
@@ -351,6 +436,9 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     activeTabId,
     openTab,
     closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
     removeTabsForDeletedNotes,
     reorderTabs,
     resetTabs,

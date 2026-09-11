@@ -45,6 +45,7 @@ import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon as Wand2 } from "@/components/icons/WandSparklesIcon";
 import { PencilIcon as Pencil } from "@/components/icons/PencilIcon";
 import { marked } from "marked";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
@@ -93,9 +94,10 @@ const renderMarkdownHtml = (markdownText: string): string => {
   if (!markdownText) return "";
   try {
     const rawHtml = marked.parse(markdownText, { gfm: true, breaks: true });
-    return typeof rawHtml === "string" ? rawHtml : markdownText;
+    const htmlString = typeof rawHtml === "string" ? rawHtml : markdownText;
+    return sanitizeHtml(htmlString);
   } catch (_) {
-    return markdownText;
+    return sanitizeHtml(markdownText);
   }
 };
 
@@ -375,12 +377,12 @@ function WorkspaceFolderTree({
 
 const renderModelIcon = (mKey: "smart" | "fast" | "creative") => {
   if (mKey === "smart") {
-    return <Brain className="h-3.5 w-3.5 text-primary shrink-0" />;
+    return <Brain className="h-4 w-4 text-primary shrink-0" />;
   }
   if (mKey === "fast") {
-    return <Zap className="h-3.5 w-3.5 text-primary shrink-0" />;
+    return <Zap className="h-4 w-4 text-primary shrink-0" />;
   }
-  return <Palette className="h-3.5 w-3.5 text-primary shrink-0" />;
+  return <Palette className="h-4 w-4 text-primary shrink-0" />;
 };
 
 interface AiToolItem {
@@ -395,7 +397,7 @@ interface AiToolItem {
 const AI_TOOLS: AiToolItem[] = [
   {
     id: "improve",
-    icon: <Wand2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Wand2 className="h-4 w-4 shrink-0" />,
     labelEn: "Improve Writing",
     labelTh: "ปรับแต่งงานเขียน",
     prefixEn: "Improve writing: ",
@@ -403,7 +405,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "fix_grammar",
-    icon: <CheckCheck className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <CheckCheck className="h-4 w-4 shrink-0" />,
     labelEn: "Fix Grammar",
     labelTh: "แก้ไขไวยากรณ์และคำผิด",
     prefixEn: "Fix spelling and grammar: ",
@@ -411,7 +413,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "make_shorter",
-    icon: <Minimize2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Minimize2 className="h-4 w-4 shrink-0" />,
     labelEn: "Make Shorter",
     labelTh: "สรุปให้กระชับขึ้น",
     prefixEn: "Make shorter and concise: ",
@@ -419,7 +421,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "make_longer",
-    icon: <Maximize2 className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Maximize2 className="h-4 w-4 shrink-0" />,
     labelEn: "Make Longer",
     labelTh: "ขยายความเนื้อหา",
     prefixEn: "Make longer and elaborate: ",
@@ -427,7 +429,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "simplify",
-    icon: <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <BookOpen className="h-4 w-4 shrink-0" />,
     labelEn: "Simplify",
     labelTh: "ปรับให้อ่านง่ายขึ้น",
     prefixEn: "Simplify and make easy to read: ",
@@ -435,7 +437,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "formalize",
-    icon: <Briefcase className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Briefcase className="h-4 w-4 shrink-0" />,
     labelEn: "Formalize",
     labelTh: "ปรับโทนให้เป็นทางการ",
     prefixEn: "Make tone formal and professional: ",
@@ -443,7 +445,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "make_casual",
-    icon: <MessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <MessageSquare className="h-4 w-4 shrink-0" />,
     labelEn: "Make Casual",
     labelTh: "ปรับโทนให้เป็นกันเอง",
     prefixEn: "Make tone casual and friendly: ",
@@ -451,7 +453,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "translate",
-    icon: <Languages className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Languages className="h-4 w-4 shrink-0" />,
     labelEn: "Translate",
     labelTh: "แปลภาษา",
     prefixEn: "Translate to English: ",
@@ -459,7 +461,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "continue_writing",
-    icon: <ArrowRight className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <ArrowRight className="h-4 w-4 shrink-0" />,
     labelEn: "Continue Writing",
     labelTh: "เขียนเนื้อหาต่อ",
     prefixEn: "Continue writing: ",
@@ -467,7 +469,7 @@ const AI_TOOLS: AiToolItem[] = [
   },
   {
     id: "rewrite",
-    icon: <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />,
+    icon: <Pencil className="h-4 w-4 shrink-0" />,
     labelEn: "Rewrite",
     labelTh: "เรียบเรียงสำนวนใหม่",
     prefixEn: "Rewrite with fresh phrasing: ",
@@ -1521,18 +1523,18 @@ export default function LunoAiView({
                         </TooltipTrigger>
                         <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
                       </Tooltip>
-                        <DropdownMenuContent align="start" className="w-auto min-w-[245px] rounded-xl">
+                        <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
                           <DropdownMenuItem
                             onClick={() => {
                               setSearchWorkspaceQuery("");
                               setIsWorkspacePickerOpen(true);
                             }}
-                            className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap"
+                            className="whitespace-nowrap"
                           >
                             <Folder className="h-4 w-4 text-primary shrink-0" />
                             <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap">
+                          <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
                             <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
                             <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
                           </DropdownMenuItem>
@@ -1574,24 +1576,24 @@ export default function LunoAiView({
                             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                        <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
                           {(["smart", "fast", "creative"] as const).map((mKey) => {
                             const isSelected = model === mKey;
                             return (
                               <DropdownMenuItem
                                 key={mKey}
                                 onClick={() => setModel(mKey)}
-                                className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
                                   isSelected
-                                    ? "bg-primary/10 text-primary font-semibold"
-                                    : "text-foreground hover:bg-muted focus:bg-muted"
+                                    ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                    : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                                 }`}
                               >
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2.5">
                                   {renderModelIcon(mKey)}
                                   <span>{modelLabels[mKey]}</span>
                                 </div>
-                                {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-1.5" />}
+                                {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
                               </DropdownMenuItem>
                             );
                           })}
@@ -1948,18 +1950,18 @@ export default function LunoAiView({
                   </TooltipTrigger>
                   <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
                 </Tooltip>
-                  <DropdownMenuContent align="start" className="w-auto min-w-[245px] rounded-xl">
+                  <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
                     <DropdownMenuItem
                       onClick={() => {
                         setSearchWorkspaceQuery("");
                         setIsWorkspacePickerOpen(true);
                       }}
-                      className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap"
+                      className="whitespace-nowrap"
                     >
                       <Folder className="h-4 w-4 text-primary shrink-0" />
                       <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2.5 text-xs py-2 cursor-pointer whitespace-nowrap">
+                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
                       <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
                       <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
                     </DropdownMenuItem>
@@ -2064,24 +2066,24 @@ export default function LunoAiView({
                         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40 rounded-xl p-1 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                    <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
                       {(["smart", "fast", "creative"] as const).map((mKey) => {
                         const isSelected = model === mKey;
                         return (
                           <DropdownMenuItem
                             key={mKey}
                             onClick={() => setModel(mKey)}
-                            className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                            className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
                               isSelected
-                                ? "bg-primary/10 text-primary font-semibold"
-                                : "text-foreground hover:bg-muted focus:bg-muted"
+                                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                             }`}
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2.5">
                               {renderModelIcon(mKey)}
                               <span>{modelLabels[mKey]}</span>
                             </div>
-                            {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-1.5" />}
+                            {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
                           </DropdownMenuItem>
                         );
                       })}
@@ -2470,14 +2472,14 @@ export default function LunoAiView({
         <div
           role="menu"
           data-slash-menu="true"
-          className="fixed z-[9999] w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
+          className="fixed z-[9999] w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
           style={{
             ...(menuCoords.bottom !== undefined ? { bottom: `${menuCoords.bottom}px` } : { top: `${menuCoords.top}px` }),
             left: `${menuCoords.left}px`,
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
             {t("editor.slashMenuTitle") || (lang === "th" ? "คำสั่ง" : "Commands")}
           </div>
 
@@ -2510,10 +2512,10 @@ export default function LunoAiView({
                   data-selected={isSelected ? "true" : undefined}
                   onClick={() => applySlashTool(tool)}
                   onMouseEnter={() => setSelectedSlashIndex(idx)}
-                  className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-xs sm:text-sm transition-all select-none gap-2.5 ${
+                  className={`flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none gap-2.5 [&>span>svg]:h-4 [&>span>svg]:w-4 [&>span>svg]:shrink-0 [&>span>svg]:text-muted-foreground ${
                     isSelected
-                      ? "bg-primary/10 text-primary font-semibold shadow-2xs"
-                      : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
+                      ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                      : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
                   }`}
                 >
                   <span className="shrink-0">{tool.icon}</span>

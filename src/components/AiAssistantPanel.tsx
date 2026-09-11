@@ -21,14 +21,16 @@ import { PenLineIcon } from "@/components/icons/PenLineIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AiActionType } from "@/components/Editor";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 const renderMarkdownHtml = (markdownText: string): string => {
   if (!markdownText) return "";
   try {
     const rawHtml = marked.parse(markdownText, { gfm: true, breaks: true });
-    return typeof rawHtml === "string" ? rawHtml : markdownText;
+    const htmlString = typeof rawHtml === "string" ? rawHtml : markdownText;
+    return sanitizeHtml(htmlString);
   } catch (_) {
-    return markdownText;
+    return sanitizeHtml(markdownText);
   }
 };
 

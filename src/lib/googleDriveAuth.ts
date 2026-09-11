@@ -20,7 +20,7 @@ export const DEFAULT_CLIENT_ID =
   "843941002582-fseklvkec1fqn2ir08oasqh4cmllomli.apps.googleusercontent.com";
 
 export const DEFAULT_CLIENT_SECRET =
-  import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "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";
+  import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "";
 
 export function getStoredClientId(): string {
   try {
@@ -163,7 +163,7 @@ export async function requestGoogleDriveAuth(customClientId?: string): Promise<{
   if (electronAPI?.googleOAuthLogin) {
     const result = await electronAPI.googleOAuthLogin({
       clientId,
-      clientSecret: DEFAULT_CLIENT_SECRET,
+      clientSecret: DEFAULT_CLIENT_SECRET || undefined,
     });
     if (result?.access_token) {
       const expiresIn = Number(result.expires_in) || 3600;

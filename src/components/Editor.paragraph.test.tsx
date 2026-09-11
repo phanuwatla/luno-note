@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { marked } from "marked";
-import { createTurndownService, preprocessMarkdownForEditor, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap } from "@/components/Editor";
+import { Editor as CoreEditor, Editor } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import Image from "@tiptap/extension-image";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES } from "@/components/Editor";
+import { Kbd, Highlight, Underline, Superscript, Subscript } from "@/lib/tiptapCustomMarks";
+import fs from "fs";
 
 describe("Markdown empty paragraphs and blank lines semantics and roundtrip", () => {
   const td = createTurndownService();
   const normalizeSaved = (markdown: string) => {
-    let clean = markdown.replace(/\r\n?/g, "\n");
-    clean = clean.replace(/<!--luno:blank-->/g, "");
-    return clean.replace(/^[\r\n]+|[\r\n]+$/g, "");
+    return normalizeSerializedMarkdown(markdown);
   };
 
   const runCycle = (inputMarkdown: string): string => {
@@ -24,33 +33,32 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     div.innerHTML = inputHtml;
 
     const saved = normalizeSaved(td.turndown(div.innerHTML));
-    expect(saved).toBe("ข้อความ A\nข้อความ B");
+    expect(saved).toBe("ข้อความ A\n\nข้อความ B");
 
     const cycleSaved = runCycle(saved);
-    expect(cycleSaved.split("\n").filter((l) => !l.trim()).length).toBe(0);
+    expect(cycleSaved).toBe("ข้อความ A\n\nข้อความ B");
   });
 
-  it("Test 1 — Normal blank line: parses blank line into editable empty paragraph matching Obsidian", () => {
+  it("Test 1 — 1 blank line: renders exactly 1 editable empty paragraph (have 1 show 1) and roundtrips cleanly", () => {
     const input = "ข้อความ A\n\nข้อความ B";
     const preprocessed = preprocessMarkdownForEditor(input);
-    expect(preprocessed).toBe("ข้อความ A\n\n<p></p>\n\nข้อความ B");
+    expect(preprocessed).toContain("<p></p>");
     const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
     const div = document.createElement("div");
     div.innerHTML = parsed;
 
     const pElements = Array.from(div.querySelectorAll("p"));
-    // Obsidian compatibility: parses 3 paragraphs (including editable empty line in between)
+    // 1 blank line in file -> exactly 1 editable empty paragraph in editor (total 3 paragraphs)
     expect(pElements.length).toBe(3);
     expect(pElements[0].textContent).toBe("ข้อความ A");
     expect(pElements[1].textContent).toBe("");
     expect(pElements[2].textContent).toBe("ข้อความ B");
 
     const saved = normalizeSaved(td.turndown(div.innerHTML));
-    expect(saved).not.toContain("<p></p>");
     expect(saved).toBe("ข้อความ A\n\nข้อความ B");
   });
 
-  it("Test 1b — 2 blank lines: preserves 2 explicit empty paragraphs and roundtrips cleanly", () => {
+  it("Test 1b — 2 blank lines: renders exactly 2 editable empty paragraphs (have 2 show 2) and roundtrips cleanly", () => {
     const input = "ข้อความ A\n\n\nข้อความ B";
     const preprocessed = preprocessMarkdownForEditor(input);
     expect(preprocessed).toBe("ข้อความ A\n\n<p></p>\n<p></p>\n\nข้อความ B");
@@ -59,6 +67,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     div.innerHTML = parsed;
 
     const pElements = Array.from(div.querySelectorAll("p"));
+    // 2 blank lines in file -> exactly 2 editable empty paragraphs in editor (total 4 paragraphs)
     expect(pElements.length).toBe(4);
     expect(pElements[0].textContent).toBe("ข้อความ A");
     expect(pElements[1].textContent).toBe("");
@@ -69,7 +78,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(saved).toBe("ข้อความ A\n\n\nข้อความ B");
   });
 
-  it("Test 1d — 3 blank lines: preserves 3 explicit empty paragraphs and roundtrips cleanly", () => {
+  it("Test 1d — 3 blank lines: renders exactly 3 editable empty paragraphs (have 3 show 3) and roundtrips cleanly", () => {
     const input = "ข้อความ A\n\n\n\nข้อความ B";
     const preprocessed = preprocessMarkdownForEditor(input);
     expect(preprocessed).toBe("ข้อความ A\n\n<p></p>\n<p></p>\n<p></p>\n\nข้อความ B");
@@ -176,8 +185,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("serializes Tiptap's parsed empty paragraph without adding blank lines", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
     const markdown = "Paragraph A\n\nParagraph B";
     const parsed = (marked.parse(preprocessMarkdownForEditor(markdown), { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
     const editor = new CoreEditor({
@@ -190,8 +197,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("keeps one blank line when the document also has the generated title heading", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
     const markdown = "Paragraph A\n\nParagraph B";
     const parsed = (marked.parse(
       "<h1>Repro</h1>" + preprocessMarkdownForEditor(markdown),
@@ -272,7 +277,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(pElements.some((p) => p.textContent?.trim() === "ข้อความหลังเส้นคั่น")).toBe(true);
   });
 
-  it("Test 7 — User screenshot note: parses formatting lines with blank lines into editable empty paragraphs and roundtrips cleanly", () => {
+  it("Test 7 — User screenshot note: parses formatting lines with 1 blank line as standard block separators without spurious empty paragraphs", () => {
     const screenshotMd = [
       "## Getting Started",
       "",
@@ -298,10 +303,10 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     const div = document.createElement("div");
     div.innerHTML = parsedHtml;
 
-    // Check that empty <p></p> nodes exist between formatting blocks for cursor placement
+    // 1 blank line between blocks creates 1 editable empty paragraph node (have 1 show 1)
     const pElements = Array.from(div.querySelectorAll("p"));
     const emptyParagraphs = pElements.filter((p) => !p.textContent?.trim());
-    expect(emptyParagraphs.length).toBeGreaterThanOrEqual(6);
+    expect(emptyParagraphs.length).toBe(8);
 
     // Verify roundtrip idempotency
     const saved = normalizeSaved(td.turndown(div.innerHTML));
@@ -315,9 +320,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 8 — Session reopening & setContent stability: repeated setContent on tab restore does not multiply blank lines", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
-
     const markdown = "Paragraph A\n\nParagraph B";
     const cleanHtml = (marked.parse(preprocessMarkdownForEditor(markdown), { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
 
@@ -341,9 +343,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 9 — 10-cycle Tab Switch Simulation with Live TipTap instance: preserves blank line count across tab switching", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
-
     let currentMarkdown = "Paragraph A\n\nParagraph B";
     const editor = new CoreEditor({
       extensions: [StarterKit],
@@ -357,7 +356,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
       const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
       const cleanHtml = parsed.replace(/>\s+</g, "><");
 
-      // 2. Load into editor via setContent
+      // 2. Load into editor via setContent (Paragraph A, 1 empty paragraph, Paragraph B = 3 nodes)
       editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
       expect(editor.state.doc.childCount).toBe(3);
 
@@ -369,9 +368,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 10 — Headings, Lists, Code, Blockquotes roundtrip across multiple edit & tab switch cycles", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
-
     const testCases = [
       {
         name: "Headings + Blank Line + Paragraph",
@@ -413,9 +409,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 11 — Welcome Note: Blockquote followed by paragraphs does not swallow paragraphs across tab switches", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
-
     const welcomeMd = [
       "# Welcome to Luno",
       "",
@@ -460,9 +453,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 12 — Per-Tab Undo/Redo Isolation and Persistence across Tab Switching until Tab Close", () => {
-    const { Editor: CoreEditor } = require("@tiptap/core");
-    const StarterKit = require("@tiptap/starter-kit").default;
-
     // Clean up any test state
     clearNoteEditorHistory("note-1");
     clearNoteEditorHistory("note-2");
@@ -603,9 +593,6 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
   });
 
   it("Test 15 — Multiple consecutive inline code spans separated by space do not merge", () => {
-    const StarterKit = require("@tiptap/starter-kit").default;
-    const { Editor } = require("@tiptap/core");
-
     const inputMd = "`#Programming` `#University` `#Projects` `#Ideas`";
     const preprocessed = preprocessMarkdownForEditor(inputMd);
     const html = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
@@ -741,4 +728,597 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(saved).not.toContain("เวทมนตร์  ");
     expect(saved).toContain("![part1_1.jpg|636](../../attachments/part1_1.jpg)");
   });
+
+  it("Test 17 — File size formatter and file format identification", () => {
+    function formatFileSize(bytes: number | null | undefined): string {
+      if (bytes == null || isNaN(bytes) || bytes < 0) return "";
+      if (bytes === 0) return "0 B";
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
+    expect(formatFileSize(null)).toBe("");
+    expect(formatFileSize(0)).toBe("0 B");
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(1024)).toBe("1.0 KB");
+    expect(formatFileSize(2.4 * 1024 * 1024)).toBe("2.4 MB");
+    expect(formatFileSize(1.5 * 1024 * 1024 * 1024)).toBe("1.50 GB");
+  });
+
+  it("Test 18 — 1:1 blank lines mapping: 1 blank yields 1 empty paragraph, 2 blanks yield 2, 3 blanks yield 3", () => {
+    // 1 blank line (i.e. \n\n between paragraphs) -> 1 empty paragraph
+    const md1 = "Paragraph 1\n\nParagraph 2";
+    const pre1 = preprocessMarkdownForEditor(md1);
+    const parsed1 = (marked.parse(pre1, { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
+    
+    const editor1 = new CoreEditor({
+      extensions: [StarterKit],
+      content: parsed1,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    // doc children: Paragraph 1, empty paragraph, Paragraph 2 = 3 nodes
+    expect(editor1.state.doc.childCount).toBe(3);
+    expect(editor1.state.doc.child(0).textContent).toBe("Paragraph 1");
+    expect(editor1.state.doc.child(1).textContent).toBe("");
+    expect(editor1.state.doc.child(2).textContent).toBe("Paragraph 2");
+
+    const saved1 = normalizeSaved(td.turndown(editor1.getHTML()));
+    expect(saved1).toBe(md1);
+
+    // 2 blank lines (i.e. \n\n\n between paragraphs) -> 2 empty paragraphs
+    const md2 = "Paragraph 1\n\n\nParagraph 2";
+    const pre2 = preprocessMarkdownForEditor(md2);
+    const parsed2 = (marked.parse(pre2, { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
+
+    const editor2 = new CoreEditor({
+      extensions: [StarterKit],
+      content: parsed2,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    // doc children: Paragraph 1, empty paragraph, empty paragraph, Paragraph 2 = 4 nodes
+    expect(editor2.state.doc.childCount).toBe(4);
+    expect(editor2.state.doc.child(0).textContent).toBe("Paragraph 1");
+    expect(editor2.state.doc.child(1).textContent).toBe("");
+    expect(editor2.state.doc.child(2).textContent).toBe("");
+    expect(editor2.state.doc.child(3).textContent).toBe("Paragraph 2");
+
+    const saved2 = normalizeSaved(td.turndown(editor2.getHTML()));
+    expect(saved2).toBe(md2);
+
+    // 3 blank lines (i.e. \n\n\n\n between paragraphs) -> 3 empty paragraphs
+    const md3 = "Paragraph 1\n\n\n\nParagraph 2";
+    const pre3 = preprocessMarkdownForEditor(md3);
+    const parsed3 = (marked.parse(pre3, { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
+
+    const editor3 = new CoreEditor({
+      extensions: [StarterKit],
+      content: parsed3,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    expect(editor3.state.doc.childCount).toBe(5);
+    const saved3 = normalizeSaved(td.turndown(editor3.getHTML()));
+    expect(saved3).toBe(md3);
+
+    editor1.destroy();
+    editor2.destroy();
+    editor3.destroy();
+  });
+
+  it("Test 19 — Welcome to Luno note maintains 1:1 blank lines between blocks and roundtrips cleanly", () => {
+    const welcomeSnippet = [
+      "## Getting Started",
+      "",
+      "### Create a Note",
+      "",
+      "Create a new note and start writing.",
+      "",
+      "Luno supports Markdown, allowing you to format your notes naturally.",
+      "",
+      "**Bold text**",
+      "",
+      "_Italic text_",
+      "",
+      "Strikethrough",
+      "",
+      "`Inline code`",
+      "",
+      "[Links](https://example.com)",
+    ].join("\n");
+
+    const preprocessed = preprocessMarkdownForEditor(welcomeSnippet);
+    const parsed = (marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string).replace(/>\s+</g, "><");
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit],
+      content: parsed,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    // Exactly 8 blank lines in snippet -> exactly 8 empty paragraph nodes
+    const emptyChildNodes: number[] = [];
+    editor.state.doc.forEach((node, offset, index) => {
+      if (node.type.name === "paragraph" && !node.textContent.trim()) {
+        emptyChildNodes.push(index);
+      }
+    });
+
+    expect(emptyChildNodes.length).toBe(8);
+
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    expect(saved).toBe(welcomeSnippet);
+
+    editor.destroy();
+  });
+
+  it("Test 20 — Heading blank lines: 0, 1, and 2 blank lines under headings preserve exact 1:1 count without escalating across multiple cycles", () => {
+    // 1. Heading followed by List with 0 blank lines (user's exact issue)
+    const md0List = "## ⚠️ Fix List\n- บรรทัดว่างใต้ Heading";
+    let cur0List = md0List;
+    for (let i = 0; i < 10; i++) {
+      cur0List = runCycle(cur0List);
+    }
+    expect(cur0List).toBe("## ⚠️ Fix List\n- บรรทัดว่างใต้ Heading");
+
+    // 2. Heading followed by List with 1 blank line
+    const md1List = "## ⚠️ Fix List\n\n- บรรทัดว่างใต้ Heading";
+    let cur1List = md1List;
+    for (let i = 0; i < 10; i++) {
+      cur1List = runCycle(cur1List);
+    }
+    expect(cur1List).toBe("## ⚠️ Fix List\n\n- บรรทัดว่างใต้ Heading");
+
+    // 3. Heading followed by List with 2 blank lines
+    const md2List = "## ⚠️ Fix List\n\n\n- บรรทัดว่างใต้ Heading";
+    let cur2List = md2List;
+    for (let i = 0; i < 10; i++) {
+      cur2List = runCycle(cur2List);
+    }
+    expect(cur2List).toBe("## ⚠️ Fix List\n\n\n- บรรทัดว่างใต้ Heading");
+
+    // 4. Heading followed by Paragraph with 0 blank lines
+    const md0Para = "## Heading\nParagraph text";
+    let cur0Para = md0Para;
+    for (let i = 0; i < 10; i++) {
+      cur0Para = runCycle(cur0Para);
+    }
+    expect(cur0Para).toBe("## Heading\nParagraph text");
+
+    // 5. Heading followed by Paragraph with 1 blank line
+    const md1Para = "## Heading\n\nParagraph text";
+    let cur1Para = md1Para;
+    for (let i = 0; i < 10; i++) {
+      cur1Para = runCycle(cur1Para);
+    }
+    expect(cur1Para).toBe("## Heading\n\nParagraph text");
+
+    // 6. Heading followed by Heading with 0 blank lines
+    const md0H = "# Heading 1\n## Heading 2";
+    let cur0H = md0H;
+    for (let i = 0; i < 10; i++) {
+      cur0H = runCycle(cur0H);
+    }
+    expect(cur0H).toBe("# Heading 1\n## Heading 2");
+
+    // 7. Heading followed by Heading with 1 blank line
+    const md1H = "# Heading 1\n\n## Heading 2";
+    let cur1H = md1H;
+    for (let i = 0; i < 10; i++) {
+      cur1H = runCycle(cur1H);
+    }
+    expect(cur1H).toBe("# Heading 1\n\n## Heading 2");
+
+    // 8. Heading followed by Blockquote with 0 blank lines
+    const md0Bq = "## Heading\n> Quote text";
+    let cur0Bq = md0Bq;
+    for (let i = 0; i < 10; i++) {
+      cur0Bq = runCycle(cur0Bq);
+    }
+    expect(cur0Bq).toBe("## Heading\n> Quote text");
+
+    // 9. Heading followed by Blockquote with 1 blank line
+    const md1Bq = "## Heading\n\n> Quote text";
+    let cur1Bq = md1Bq;
+    for (let i = 0; i < 10; i++) {
+      cur1Bq = runCycle(cur1Bq);
+    }
+    expect(cur1Bq).toBe("## Heading\n\n> Quote text");
+
+    // 10. Heading followed by Code block with 0 blank lines
+    const md0Code = "## Heading\n```\nconst x = 1;\n```";
+    let cur0Code = md0Code;
+    for (let i = 0; i < 10; i++) {
+      cur0Code = runCycle(cur0Code);
+    }
+    expect(cur0Code).toBe("## Heading\n```\nconst x = 1;\n```");
+
+    // 11. Heading followed by Code block with 1 blank line
+    const md1Code = "## Heading\n\n```\nconst x = 1;\n```";
+    let cur1Code = md1Code;
+    for (let i = 0; i < 10; i++) {
+      cur1Code = runCycle(cur1Code);
+    }
+    expect(cur1Code).toBe("## Heading\n\n```\nconst x = 1;\n```");
+
+    // 12. TipTap CoreEditor roundtrip verification with renderMarkdownToEditorHtml
+    const editor0 = new CoreEditor({
+      extensions: [StarterKit],
+      content: renderMarkdownToEditorHtml("## ⚠️ Fix List\n- บรรทัดว่างใต้ Heading"),
+      parseOptions: { preserveWhitespace: "full" },
+    });
+    const savedLive0 = normalizeSaved(td.turndown(editor0.getHTML()));
+    expect(savedLive0).toBe("## ⚠️ Fix List\n- บรรทัดว่างใต้ Heading");
+    editor0.destroy();
+
+    const editor1 = new CoreEditor({
+      extensions: [StarterKit],
+      content: renderMarkdownToEditorHtml("## ⚠️ Fix List\n\n- บรรทัดว่างใต้ Heading"),
+      parseOptions: { preserveWhitespace: "full" },
+    });
+    const savedLive1 = normalizeSaved(td.turndown(editor1.getHTML()));
+    expect(savedLive1).toBe("## ⚠️ Fix List\n\n- บรรทัดว่างใต้ Heading");
+    editor1.destroy();
+  });
+
+  it("Test 13 — Preserves standalone image after table without swallowing into table, and preserves column alignment", () => {
+    const input = `| Feature    | Supported |
+| ---------- | :-------: |
+| Headings   |     ✅     |
+| Formatting |     ✅     |
+| Lists      |     ✅     |
+| Tables     |     ✅     |
+| Code       |     ✅     |
+| Images     |     ✅     |
+| HTML       |     ⚠️    |
+
+![Luno](https://picsum.photos/600/300)
+
+> End of test.`;
+
+    const tableHeaderExtension = TableHeader.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          align: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("align") || element.style.textAlign || null,
+            renderHTML: (attributes) => {
+              if (!attributes.align) return {};
+              return {
+                align: attributes.align,
+                style: `text-align: ${attributes.align};`,
+              };
+            },
+          },
+        };
+      },
+    });
+
+    const tableCellExtension = TableCell.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          align: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("align") || element.style.textAlign || null,
+            renderHTML: (attributes) => {
+              if (!attributes.align) return {};
+              return {
+                align: attributes.align,
+                style: `text-align: ${attributes.align};`,
+              };
+            },
+          },
+        };
+      },
+    });
+
+    const runEditorCycle = (md: string): string => {
+      const html = renderMarkdownToEditorHtml(md);
+      const editor = new CoreEditor({
+        extensions: [
+          StarterKit,
+          Table.configure({ resizable: true }),
+          TableRow,
+          tableHeaderExtension,
+          tableCellExtension,
+          Image,
+        ],
+        content: html,
+      });
+      const editorHtml = editor.getHTML();
+      const saved = normalizeSaved(td.turndown(editorHtml));
+      editor.destroy();
+      return saved;
+    };
+
+    const cycle1 = runEditorCycle(input);
+    // Image must NOT be swallowed into table row
+    expect(cycle1).not.toContain("| ![Luno]");
+    expect(cycle1).toContain("![Luno](https://picsum.photos/600/300)");
+    // Center column alignment must be preserved
+    expect(cycle1).toContain(":---:");
+    // Blank lines separating table, image, and blockquote must be preserved
+    expect(cycle1).toMatch(/\| HTML \| ⚠️ \|\n\n!\[Luno\]/);
+    expect(cycle1).toMatch(/!\[Luno\][^\n]+\n\n> End of test\./);
+
+    const cycle2 = runEditorCycle(cycle1);
+    expect(cycle2).not.toContain("| ![Luno]");
+    expect(cycle2).toBe(cycle1);
+  });
+
+  it("Test 14 — Preserves multiple standalone images and their blank lines without collapsing onto one line", () => {
+    const input = `## 6. Images
+
+![Example Image](https://picsum.photos/800/400)
+
+![Luno Logo](https://via.placeholder.com/400x200.png?text=Luno)
+
+---`;
+
+    const html = renderMarkdownToEditorHtml(input);
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit,
+        Image,
+      ],
+      content: html,
+    });
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    expect(saved).not.toContain("![Example Image](https://picsum.photos/800/400)![Luno Logo]");
+    expect(saved).toContain("## 6. Images\n\n![Example Image]");
+    expect(saved).toContain("![Example Image](https://picsum.photos/800/400)\n\n![Luno Logo]");
+  });
+
+  it("Test 15 — Preserves fenced code block separation inside blockquotes (Section 27)", () => {
+    const input = `* Main item
+
+  > Quote inside a list item
+  >
+  > * Another item
+  >
+  > \`\`\`javascript
+  > console.log("Nested code");
+  > \`\`\``;
+
+    const res = runCycle(input);
+    expect(res).toContain("console.log(\"Nested code\");");
+    // Ensure the code fence is preceded by a quote boundary line rather than glued to the list item
+    expect(res).toMatch(/>\s+- Another item\s*\n\s*>\s*\n\s*>\s*```javascript/);
+  });
+
+  it("Test 16 — Preserves details and summary element without extra div wrapper (Section 18)", () => {
+    const input = `<details>
+<summary>Click to expand</summary>
+
+This content is inside a native HTML details element.
+
+* Item 1
+* Item 2
+* Item 3
+
+</details>`;
+
+    const div = document.createElement("div");
+    div.innerHTML = input;
+    const res = td.turndown(div.innerHTML);
+    expect(res).not.toContain("<div>");
+    expect(res).toContain("<details>\n<summary>Click to expand</summary>");
+    expect(res).toContain("Item 1");
+    expect(res).toContain("</details>");
+  });
+
+  it("Test 17 — Preserves raw HTML div, styled paragraph, and kbd tags without losing lines (Section 18 & 19)", () => {
+    const input = `<div>
+    <strong>HTML Bold Text</strong>
+</div>
+
+<p style="color: red;">
+This is HTML with inline styling.
+</p>
+
+<kbd>Ctrl</kbd> + <kbd>S</kbd>`;
+
+    const html = renderMarkdownToEditorHtml(input);
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ codeBlock: false, paragraph: false }),
+        CustomParagraph,
+        Kbd,
+      ],
+      content: html,
+    });
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    expect(saved).toContain("<div>\n    <strong>HTML Bold Text</strong>\n</div>");
+    expect(saved).toContain('<p style="color: red;">\nThis is HTML with inline styling.\n</p>');
+    expect(saved).toContain("<kbd>Ctrl</kbd> + <kbd>S</kbd>");
+    expect(saved.trim().split("\n").length).toBe(input.trim().split("\n").length);
+  });
+
+  it("Test 18 — Roundtrip of Section 18 and 19 preserves line count exactly", () => {
+    const section = `## 18. HTML
+
+<div>
+    <strong>HTML Bold Text</strong>
+</div>
+
+<p>This is an HTML paragraph.</p>
+
+<details>
+<summary>Click to expand</summary>
+
+This content is inside a native HTML details element.
+
+* Item 1
+* Item 2
+* Item 3
+
+</details>
+
+---
+
+## 19. HTML Formatting
+
+<p style="color: red;">
+This is HTML with inline styling.
+</p>
+
+<mark>Highlighted text</mark>
+
+<kbd>Ctrl</kbd> + <kbd>S</kbd>`;
+
+    const html = renderMarkdownToEditorHtml(section);
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ codeBlock: false, paragraph: false }),
+        CustomParagraph,
+        Kbd,
+        Highlight,
+        Toggle,
+      ],
+      content: html,
+    });
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    expect(saved.split("\n").length).toBe(section.split("\n").length);
+  });
+
+  it("Test 19 — Full roundtrip of Markdown Rendering Test file preserves 594 lines exactly", () => {
+    const filePath = "C:/Users/LENOVO/Documents/Luno Notes/Markdown Rendering Test.md";
+    const backupPath = "C:/Users/LENOVO/.gemini/antigravity/brain/a9d98c8c-12ca-4a99-8bdc-76e15bb11e73/scratch/orig_594.md";
+    const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : fs.readFileSync(backupPath, "utf8");
+    const origLines = content.split("\n").length;
+    expect(origLines).toBe(594);
+
+    const html = renderMarkdownToEditorHtml(content);
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableHeader,
+        TableCell,
+        Image,
+        TaskList,
+        TaskItem,
+        Underline,
+        Highlight,
+        Superscript,
+        Subscript,
+        Kbd,
+        Toggle,
+      ],
+      content: html,
+    });
+
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    const savedLines = saved.split("\n").length;
+    expect(savedLines).toBe(594);
+  });
+
+  it("Test 20 — Spacing between note Title (H1) and content: EDITOR_CLASSES includes [&>h1:first-child]:mb-6", () => {
+    expect(EDITOR_CLASSES).toContain("[&>h1:first-child]:mb-6");
+  });
+
+  it("Test 21 — Freshly opened note has undo disabled (can().undo() === false) and sync does not leak undo", () => {
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+      ],
+      content: "<h1>My Title</h1><p>First paragraph</p>",
+    });
+
+    // Reset clean state as done on loading a new note
+    const cleanState = editor.state.constructor.create({
+      doc: editor.state.doc,
+      plugins: editor.state.plugins,
+    });
+    editor.view.updateState(cleanState);
+
+    // Initial state after opening a note: undo must be false!
+    expect(editor.can().undo()).toBe(false);
+
+    // External title sync transaction with addToHistory: false
+    const firstChild = editor.state.doc.firstChild;
+    expect(firstChild?.type.name).toBe("heading");
+    const tr = editor.state.tr;
+    tr.setMeta("addToHistory", false);
+    tr.setMeta("isSync", true);
+    tr.replaceWith(1, 1 + (firstChild?.nodeSize ?? 2) - 2, editor.schema.text("Renamed Title"));
+    editor.view.dispatch(tr);
+
+    expect(editor.getText()).toContain("Renamed Title");
+    // Undo must STILL be false because transaction was not added to history
+    expect(editor.can().undo()).toBe(false);
+
+    // When the user actually types/edits:
+    editor.commands.focus("end");
+    editor.commands.insertContent(" user typed something");
+    expect(editor.can().undo()).toBe(true);
+
+    // Undoing reverts only the user edit
+    editor.commands.undo();
+    expect(editor.getText()).not.toContain("user typed something");
+    expect(editor.can().undo()).toBe(false);
+
+    editor.destroy();
+  });
+
+  it("Test 22 — First line of content can be a blank line: preserved as <p></p> and roundtrips without disappearing", () => {
+    const inputMd = "\nFirst line of content";
+    const editorHtml = renderMarkdownToEditorHtml(inputMd);
+    expect(editorHtml).toBe("<p></p><p>First line of content</p>");
+
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+      ],
+      content: editorHtml,
+    });
+
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    expect(saved).toBe("\nFirst line of content");
+  });
+
+  it("Test 23 — Two blank lines at start of content: preserved as 2 empty paragraphs and roundtrips cleanly", () => {
+    const inputMd = "\n\nFirst line of content";
+    const editorHtml = renderMarkdownToEditorHtml(inputMd);
+    expect(editorHtml).toBe("<p></p><p></p><p>First line of content</p>");
+
+    const editor = new CoreEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+      ],
+      content: editorHtml,
+    });
+
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+
+    expect(saved).toBe("\n\nFirst line of content");
+  });
+
+  it("Test 24 — Frontmatter followed by blank line preserves leading blank line in content", () => {
+    const md = "---\ntags:\n  - test\n---\n\nFirst line of content";
+    const editorHtml = renderMarkdownToEditorHtml(md);
+    expect(editorHtml).toBe("<p></p><p>First line of content</p>");
+  });
 });
+

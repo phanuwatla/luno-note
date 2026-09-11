@@ -36,3 +36,14 @@ src-tauri/target
 *.asar
 *.blockmap
 
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Luno workspace configs
+.luno/settings.json
+.luno/session.json
+
+

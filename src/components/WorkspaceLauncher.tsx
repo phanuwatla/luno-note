@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { Folder, FolderPlus, FolderOpen, FolderSearch, Loader2, ArrowLeft, RefreshCw, AlertTriangle, ShieldAlert, Cloud, CloudOff, Link2, Unlink2, LayoutGrid, List } from "lucide-react";
+import { Folder, FolderPlus, FolderOpen, FolderSearch, Loader2, ArrowLeft, RefreshCw, AlertTriangle, ShieldAlert, Cloud, CloudOff, Link2, Unlink2, LayoutGrid, List, ExternalLink } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import lunoLogo from "@/assets/luno-logo.png";
 import { Button } from "./ui/button";
@@ -14,7 +14,7 @@ import {
 } from "./ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./ui/tooltip";
 import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo } from "@/lib/googleDriveAuth";
-import { listCloudWorkspaces, createCloudWorkspace } from "@/lib/googleDriveApi";
+import { listCloudWorkspaces, createCloudWorkspace, ensureWorkspacesRootOnly } from "@/lib/googleDriveApi";
 import {
   CloudWorkspaceInfo,
   getLocalWorkspaceManifest,
@@ -46,6 +46,7 @@ interface WorkspaceLauncherProps {
   onOpenCloudWorkspace?: (cloudWs: CloudWorkspaceInfo) => void | Promise<void>;
   onCreateCloudWorkspace?: (workspaceName: string) => void | Promise<void>;
   isCreating?: boolean;
+  onOpenWebTab?: (url: string, initialTitle?: string) => void;
 }
 
 export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
@@ -55,6 +56,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   onOpenCloudWorkspace,
   onCreateCloudWorkspace,
   isCreating = false,
+  onOpenWebTab,
 }) => {
   const { t, language } = useTranslation();
 
@@ -67,6 +69,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   // Cloud Workspaces View State
   const [showCloudView, setShowCloudView] = useState(false);
   const [cloudWorkspaces, setCloudWorkspaces] = useState<CloudWorkspaceInfo[]>([]);
+  const [workspacesFolderId, setWorkspacesFolderId] = useState<string | null>(null);
   const [isLoadingCloudWorkspaces, setIsLoadingCloudWorkspaces] = useState(false);
   const [createCloudDialogOpen, setCreateCloudDialogOpen] = useState(false);
   const [cloudWorkspaceName, setCloudWorkspaceName] = useState("My Notes");
@@ -86,10 +89,15 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       const tokenInfo = getStoredTokenInfo();
       if (!tokenInfo?.access_token) return;
 
-      const [cloudList, localManifests] = await Promise.all([
+      const [cloudList, localManifests, wsFolderId] = await Promise.all([
         listCloudWorkspaces(tokenInfo.access_token),
         getAllKnownLocalManifests(),
+        ensureWorkspacesRootOnly(tokenInfo.access_token).catch(() => null),
       ]);
+
+      if (wsFolderId) {
+        setWorkspacesFolderId(wsFolderId);
+      }
 
       const evaluatedList: CloudWorkspaceInfo[] = cloudList.map((cw) => {
         const status = calculateWorkspaceStatus(cw, localManifests);
@@ -315,6 +323,39 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">{t("launcher.refresh") || "Refresh"}</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        let targetFolderId = workspacesFolderId;
+                        if (!targetFolderId) {
+                          try {
+                            const tokenInfo = getStoredTokenInfo();
+                            if (tokenInfo?.access_token) {
+                              targetFolderId = await ensureWorkspacesRootOnly(tokenInfo.access_token);
+                              setWorkspacesFolderId(targetFolderId);
+                            }
+                          } catch {}
+                        }
+                        const driveUrl = targetFolderId
+                          ? `https://drive.google.com/drive/folders/${targetFolderId}`
+                          : "https://drive.google.com";
+                        if (onOpenWebTab) {
+                          onOpenWebTab(driveUrl, "Google Drive - Workspaces");
+                        } else {
+                          window.open(driveUrl, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                      className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer shrink-0"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span className="sr-only">{t("settings.openFolder") || "Open Folder"}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("settings.openFolder") || "Open Folder in Google Drive"}</TooltipContent>
                 </Tooltip>
               </div>
             </div>

@@ -292,6 +292,16 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconSparkles,
     phosphor: PhosphorIcons.Sparkle,
   },
+  tools: {
+    lucide: LucideIcons.Wrench,
+    tabler: TablerIcons.IconTool || TablerIcons.IconTools,
+    phosphor: PhosphorIcons.Wrench,
+  },
+  features: {
+    lucide: LucideIcons.Wrench,
+    tabler: TablerIcons.IconTool || TablerIcons.IconTools,
+    phosphor: PhosphorIcons.Wrench,
+  },
   plus: {
     lucide: LucideIcons.Plus,
     tabler: TablerIcons.IconPlus,
@@ -337,10 +347,30 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconPhoto,
     phosphor: PhosphorIcons.Image,
   },
+  fileVideo: {
+    lucide: LucideIcons.FileVideo,
+    tabler: TablerIcons.IconVideo,
+    phosphor: PhosphorIcons.Video,
+  },
+  fileAudio: {
+    lucide: LucideIcons.FileAudio,
+    tabler: TablerIcons.IconMusic,
+    phosphor: PhosphorIcons.MusicNote,
+  },
   fileZip: {
     lucide: LucideIcons.FolderArchive,
     tabler: TablerIcons.IconFileZip,
     phosphor: PhosphorIcons.Archive,
+  },
+  fileSpreadsheet: {
+    lucide: LucideIcons.FileSpreadsheet,
+    tabler: TablerIcons.IconFileSpreadsheet,
+    phosphor: PhosphorIcons.Table || PhosphorIcons.FileXls,
+  },
+  filePdf: {
+    lucide: LucideIcons.FileText,
+    tabler: TablerIcons.IconFileTypePdf || TablerIcons.IconFileText,
+    phosphor: PhosphorIcons.FilePdf || PhosphorIcons.FileText,
   },
   file: {
     lucide: LucideIcons.File,
@@ -411,6 +441,26 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     lucide: LucideIcons.ChevronLeft,
     tabler: TablerIcons.IconChevronLeft,
     phosphor: PhosphorIcons.CaretLeft,
+  },
+  arrowLeft: {
+    lucide: LucideIcons.ArrowLeft,
+    tabler: TablerIcons.IconArrowLeft,
+    phosphor: PhosphorIcons.ArrowLeft,
+  },
+  eye: {
+    lucide: LucideIcons.Eye,
+    tabler: TablerIcons.IconEye,
+    phosphor: PhosphorIcons.Eye,
+  },
+  tablet: {
+    lucide: LucideIcons.Tablet,
+    tabler: TablerIcons.IconDeviceTablet,
+    phosphor: PhosphorIcons.DeviceTablet,
+  },
+  smartphone: {
+    lucide: LucideIcons.Smartphone,
+    tabler: TablerIcons.IconDeviceMobile,
+    phosphor: PhosphorIcons.DeviceMobile,
   },
   panelLeft: {
     lucide: LucideIcons.PanelLeft,

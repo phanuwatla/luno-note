@@ -31,6 +31,8 @@ export interface ElectronAPI {
   onUpdateError?: (callback: (err: { message: string }) => void) => () => void;
   onUpdateDownloadProgress?: (callback: (progress: UpdateProgress) => void) => () => void;
   onUpdateDownloaded?: (callback: (info: { version?: string; releaseNotes?: any }) => void) => () => void;
+  printContent?: (options: { html: string; title?: string }) => Promise<{ success: boolean; failureReason?: string; error?: string }>;
+  exportPdf?: (options: { html: string; title?: string; defaultPath?: string }) => Promise<{ success?: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   [key: string]: any;
 }
 

@@ -136,6 +136,25 @@ export type SettingsCategory =
   | "privacy"
   | "about";
 
+export const SETTINGS_CATEGORIES: SettingsCategory[] = [
+  "general",
+  "appearance",
+  "editor",
+  "files",
+  "markdown",
+  "templates",
+  "ai",
+  "shortcuts",
+  "storage",
+  "backup",
+  "privacy",
+  "about",
+];
+
+export function isValidSettingsCategory(cat: unknown): cat is SettingsCategory {
+  return typeof cat === "string" && (SETTINGS_CATEGORIES as string[]).includes(cat);
+}
+
 interface CategoryMeta {
   id: SettingsCategory;
   label: string;
@@ -156,7 +175,7 @@ interface SettingsTabViewProps {
   folderPaths?: string[];
   isCloudWorkspace?: boolean;
   onCloseWorkspace?: () => void;
-  onOpenWebTab?: (url: string) => void;
+  onOpenWebTab?: (url: string, initialTitle?: string) => void;
 }
 
 export default function SettingsTabView({
@@ -174,16 +193,16 @@ export default function SettingsTabView({
   const { settings, updateSetting, applyAppearanceStyle, resetSettings } = useAppSettings();
   const { t } = useTranslation();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(() => {
-    if (initialCategory && initialCategory !== "general") return initialCategory;
+    if (isValidSettingsCategory(initialCategory) && initialCategory !== "general") return initialCategory;
     try {
-      const saved = localStorage.getItem("luno_last_settings_category") as SettingsCategory;
-      if (saved) return saved;
+      const saved = localStorage.getItem("luno_last_settings_category");
+      if (isValidSettingsCategory(saved)) return saved;
     } catch {}
-    return initialCategory || "general";
+    return isValidSettingsCategory(initialCategory) ? initialCategory : "general";
   });
 
   useEffect(() => {
-    if (initialCategory) {
+    if (isValidSettingsCategory(initialCategory)) {
       setActiveCategory(initialCategory);
       try {
         localStorage.setItem("luno_last_settings_category", initialCategory);
@@ -192,6 +211,7 @@ export default function SettingsTabView({
   }, [initialCategory]);
 
   const handleSelectCategory = (catId: SettingsCategory) => {
+    if (!isValidSettingsCategory(catId)) return;
     setActiveCategory(catId);
     try {
       localStorage.setItem("luno_last_settings_category", catId);
@@ -228,7 +248,13 @@ export default function SettingsTabView({
     { id: "about" as SettingsCategory, iconKey: "about", label: t("settings.catAboutTitle"), desc: t("settings.catAboutDesc") },
   ];
 
-  const currentCategory = categories.find((c) => c.id === activeCategory) || categories[0];
+  const safeActiveCategory: SettingsCategory = isValidSettingsCategory(activeCategory)
+    ? activeCategory
+    : isValidSettingsCategory(initialCategory)
+    ? initialCategory
+    : "general";
+
+  const currentCategory = categories.find((c) => c.id === safeActiveCategory) || categories[0];
 
   const handleSave = () => {
     setSavedSuccess(true);
@@ -261,7 +287,7 @@ export default function SettingsTabView({
             <div className="flex-1 overflow-y-auto p-2.5 space-y-1 no-scrollbar">
               {categories.map((cat) => {
                 const Icon = getToolbarIcon(cat.iconKey, pack);
-                const isActive = activeCategory === cat.id;
+                const isActive = safeActiveCategory === cat.id;
 
                 return (
                   <button
@@ -297,7 +323,7 @@ export default function SettingsTabView({
             {/* Scrollable Category Options Body */}
             <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar w-full">
               {/* 1. GENERAL */}
-              {activeCategory === "general" && (
+              {safeActiveCategory === "general" && (
                 <div className="space-y-6">
                   {/* Startup Card */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
@@ -444,7 +470,7 @@ export default function SettingsTabView({
               )}
 
               {/* 2. APPEARANCE */}
-              {activeCategory === "appearance" && (
+              {safeActiveCategory === "appearance" && (
                 <div className="space-y-6">
                   {/* Theme & Colors */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-2xs">
@@ -884,7 +910,7 @@ export default function SettingsTabView({
               )}
 
               {/* 3. EDITOR */}
-              {activeCategory === "editor" && (
+              {safeActiveCategory === "editor" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.writingBehaviorGroup")}</h3>
@@ -1233,7 +1259,7 @@ export default function SettingsTabView({
                   </div>
                 </div>
               )}
-              {activeCategory === "files" && (
+              {safeActiveCategory === "files" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.fileCreationGroup")}</h3>
@@ -1336,7 +1362,7 @@ export default function SettingsTabView({
               )}
 
               {/* 5. MARKDOWN */}
-              {activeCategory === "markdown" && (
+              {safeActiveCategory === "markdown" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.syntaxGroup")}</h3>
@@ -1365,7 +1391,7 @@ export default function SettingsTabView({
               )}
 
               {/* 6. TEMPLATES */}
-              {activeCategory === "templates" && (
+              {safeActiveCategory === "templates" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.templatesGroup")}</h3>
@@ -1472,7 +1498,7 @@ export default function SettingsTabView({
               )}
 
               {/* 7. AI ASSISTANT */}
-              {activeCategory === "ai" && (
+              {safeActiveCategory === "ai" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <div className="flex items-center justify-between">
@@ -1539,7 +1565,7 @@ export default function SettingsTabView({
               )}
 
               {/* 8. SHORTCUTS */}
-              {activeCategory === "shortcuts" && (
+              {safeActiveCategory === "shortcuts" && (
                 <div className="space-y-6">
                   {/* Group 1: General & Navigation */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
@@ -1599,7 +1625,7 @@ export default function SettingsTabView({
               )}
 
               {/* 9. STORAGE */}
-              {activeCategory === "storage" && (
+              {safeActiveCategory === "storage" && (
                 <div className="space-y-6">
                   {/* Local Storage Card */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
@@ -1700,7 +1726,24 @@ export default function SettingsTabView({
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
-                            <span className="font-semibold text-foreground block mt-0.5">Google Drive / Luno / Workspaces</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetId = folderStructure?.workspacesId || folderStructure?.projectId || folderStructure?.rootId;
+                                const driveUrl = targetId
+                                  ? `https://drive.google.com/drive/folders/${targetId}`
+                                  : "https://drive.google.com";
+                                if (onOpenWebTab) {
+                                  onOpenWebTab(driveUrl, "Google Drive - Workspaces");
+                                } else {
+                                  window.open(driveUrl, "_blank", "noopener,noreferrer");
+                                }
+                              }}
+                              className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-0.5 group cursor-pointer text-left"
+                            >
+                              <span>Google Drive / Luno / Workspaces</span>
+                              <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 shrink-0" />
+                            </button>
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced") || "Last Synced"}</span>
@@ -1747,19 +1790,24 @@ export default function SettingsTabView({
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border/30">
-                          <a
-                            href={
-                              folderStructure
-                                ? `https://drive.google.com/drive/folders/${folderStructure.workspacesId || folderStructure.projectId || folderStructure.rootId}`
-                                : "https://drive.google.com"
-                            }
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetId = folderStructure?.workspacesId || folderStructure?.projectId || folderStructure?.rootId;
+                              const driveUrl = targetId
+                                ? `https://drive.google.com/drive/folders/${targetId}`
+                                : "https://drive.google.com";
+                              if (onOpenWebTab) {
+                                onOpenWebTab(driveUrl, "Google Drive - Workspaces");
+                              } else {
+                                window.open(driveUrl, "_blank", "noopener,noreferrer");
+                              }
+                            }}
                             className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
                             {t("settings.openFolder") || "Open Folder"}
-                          </a>
+                          </button>
                           <button
                             type="button"
                             disabled={syncStatus === "syncing"}
@@ -1840,7 +1888,7 @@ export default function SettingsTabView({
               </Dialog>
 
               {/* 10. BACKUP */}
-              {activeCategory === "backup" && (
+              {safeActiveCategory === "backup" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.backupGroup")}</h3>
@@ -1863,7 +1911,7 @@ export default function SettingsTabView({
               )}
 
               {/* 11. PRIVACY */}
-              {activeCategory === "privacy" && (
+              {safeActiveCategory === "privacy" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.privacyGroup")}</h3>
@@ -1879,7 +1927,7 @@ export default function SettingsTabView({
               )}
 
               {/* 12. ABOUT */}
-              {activeCategory === "about" && (
+              {safeActiveCategory === "about" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-border/60 bg-card p-6 flex flex-col gap-4 shadow-2xs">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">

@@ -8,7 +8,8 @@ import Editor, { clearNoteEditorHistory } from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
-import SettingsTabView, { type SettingsCategory } from "@/components/SettingsTabView";
+import SettingsTabView, { type SettingsCategory, isValidSettingsCategory } from "@/components/SettingsTabView";
+import HelpTabView, { type HelpCategory, isValidHelpCategory } from "@/components/HelpTabView";
 import LunoAiView from "@/components/LunoAiView";
 import WebViewerView from "@/components/WebViewerView";
 import HomeView from "@/components/HomeView";
@@ -22,7 +23,7 @@ import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName }
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
 import { useTrash, type TrashedNote } from "@/hooks/useTrash";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useTabs } from "@/hooks/useTabs";
+import { useTabs, isSystemOrWebTab } from "@/hooks/useTabs";
 import type { CreateNoteOptions } from "@/lib/fileHandles";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
 import { updateFrontmatterIcon, updateFrontmatterTags, updateFrontmatterFavorite, isMarkdownNote, isMarkdownFileName, isTiptapJson, parseFrontmatterAndTags } from "@/lib/frontmatter";
@@ -52,7 +53,20 @@ export default function Index() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
-  const { openTabIds, activeTabId, openTab, closeTab, removeTabsForDeletedNotes, reorderTabs, resetTabs, restoreTabsFromSession, setActiveTabId } = useTabs(notesRef);
+  const {
+    openTabIds,
+    activeTabId,
+    openTab,
+    closeTab,
+    closeOtherTabs,
+    closeAllTabs,
+    closeTabsToRight,
+    removeTabsForDeletedNotes,
+    reorderTabs,
+    resetTabs,
+    restoreTabsFromSession,
+    setActiveTabId,
+  } = useTabs(notesRef);
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
   const workspaceFavoritesRef = useRef<Set<string>>(new Set());
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
@@ -80,6 +94,19 @@ export default function Index() {
       fileType: "settings",
     }),
     [t]
+  );
+
+  const HELP_NOTE: Note = useMemo(
+    () => ({
+      id: "help",
+      title: t("sidebar.help") || (settings.language === "th" ? "ความช่วยเหลือ" : "Help"),
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: t("sidebar.help") || (settings.language === "th" ? "ความช่วยเหลือ" : "Help"),
+      fileType: "help",
+    }),
+    [t, settings.language]
   );
 
   const LUNO_AI_NOTE: Note = useMemo(
@@ -209,27 +236,29 @@ export default function Index() {
   );
 
   const activeTabNote =
-    activeTabId === "home"
+    activeTabId === "home" || activeTabId?.startsWith("home:")
       ? HOME_NOTE
-      : activeTabId === "trash"
+      : activeTabId === "trash" || activeTabId?.startsWith("trash:")
       ? TRASH_NOTE
-      : activeTabId === "settings"
+      : activeTabId === "settings" || activeTabId?.startsWith("settings:")
       ? SETTINGS_NOTE
-      : activeTabId === "luno-ai"
+      : activeTabId === "help" || activeTabId?.startsWith("help:")
+      ? HELP_NOTE
+      : activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")
       ? LUNO_AI_NOTE
-      : activeTabId === "templates"
+      : activeTabId === "templates" || activeTabId?.startsWith("templates:")
       ? TEMPLATES_NOTE
-      : activeTabId === "favorites"
+      : activeTabId === "favorites" || activeTabId?.startsWith("favorites:")
       ? FAVORITES_NOTE
-      : activeTabId === "tags"
+      : activeTabId === "tags" || activeTabId?.startsWith("tags:")
       ? TAGS_NOTE
       : activeTabId?.startsWith("web:")
       ? getWebTabNote(activeTabId)
       : (notes.find((n) => n.id === activeTabId) ?? null);
 
   const activeEditorNote =
-    activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:")
-      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "home" && id !== "trash" && id !== "settings" && id !== "luno-ai" && id !== "templates" && id !== "favorites" && id !== "tags" && !id.startsWith("web:"))) ?? notes[0] ?? null)
+    isSystemOrWebTab(activeTabId || "")
+      ? (notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id))) ?? notes[0] ?? null)
       : (notes.find((n) => n.id === activeTabId) ?? null);
 
   const isMobile = useIsMobile();
@@ -241,34 +270,36 @@ export default function Index() {
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
   const [splitTabId, setSplitTabId] = useState<string | null>(null);
   const splitTabNote =
-    splitTabId === "home"
+    splitTabId === "home" || splitTabId?.startsWith("home:")
       ? HOME_NOTE
-      : splitTabId === "trash"
+      : splitTabId === "trash" || splitTabId?.startsWith("trash:")
       ? TRASH_NOTE
-      : splitTabId === "settings"
+      : splitTabId === "settings" || splitTabId?.startsWith("settings:")
       ? SETTINGS_NOTE
-      : splitTabId === "luno-ai"
+      : splitTabId === "help" || splitTabId?.startsWith("help:")
+      ? HELP_NOTE
+      : splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")
       ? LUNO_AI_NOTE
-      : splitTabId === "templates"
+      : splitTabId === "templates" || splitTabId?.startsWith("templates:")
       ? TEMPLATES_NOTE
-      : splitTabId === "favorites"
+      : splitTabId === "favorites" || splitTabId?.startsWith("favorites:")
       ? FAVORITES_NOTE
-      : splitTabId === "tags"
+      : splitTabId === "tags" || splitTabId?.startsWith("tags:")
       ? TAGS_NOTE
       : splitTabId?.startsWith("web:")
       ? getWebTabNote(splitTabId)
       : (notes.find((n) => n.id === splitTabId) ?? null);
 
   const splitEditorNote =
-    splitTabId === "home" || splitTabId === "trash" || splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId === "templates" || splitTabId === "favorites" || splitTabId === "tags" || splitTabId?.startsWith("web:")
-      ? (notes.find((n) => n.id === openTabIds.find((id) => id !== "home" && id !== "trash" && id !== "settings" && id !== "luno-ai" && id !== "templates" && id !== "favorites" && id !== "tags" && !id.startsWith("web:") && id !== activeTabId)) ?? notes[0] ?? null)
+    isSystemOrWebTab(splitTabId || "")
+      ? (notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id) && id !== activeTabId)) ?? notes[0] ?? null)
       : (notes.find((n) => n.id === splitTabId) ?? null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>(() => {
     try {
-      const saved = localStorage.getItem("luno_last_settings_category") as SettingsCategory;
-      if (saved) return saved;
+      const saved = localStorage.getItem("luno_last_settings_category");
+      if (isValidSettingsCategory(saved)) return saved;
     } catch {}
     return "general";
   });
@@ -284,14 +315,54 @@ export default function Index() {
     setElectronWorkspacePath(electronWorkspacePathRef.current);
   }, [openedFolderName, openedRootDirHandle, setRootFolderName, setRootDirHandle, setElectronWorkspacePath]);
 
-  const handleOpenSettings = useCallback((category?: SettingsCategory) => {
-    if (category) {
+  const handleOpenSettings = useCallback((category?: unknown) => {
+    if (isValidSettingsCategory(category)) {
       setSettingsCategory(category);
       try {
         localStorage.setItem("luno_last_settings_category", category);
       } catch {}
+    } else {
+      try {
+        const saved = localStorage.getItem("luno_last_settings_category");
+        if (isValidSettingsCategory(saved)) {
+          setSettingsCategory(saved);
+        } else {
+          setSettingsCategory((prev) => (isValidSettingsCategory(prev) ? prev : "general"));
+        }
+      } catch {
+        setSettingsCategory((prev) => (isValidSettingsCategory(prev) ? prev : "general"));
+      }
     }
     openTab("settings");
+  }, [openTab]);
+
+  const [helpCategory, setHelpCategory] = useState<HelpCategory>(() => {
+    try {
+      const saved = localStorage.getItem("luno_last_help_category");
+      if (isValidHelpCategory(saved)) return saved;
+    } catch {}
+    return "features";
+  });
+
+  const handleOpenHelp = useCallback((category?: unknown) => {
+    if (isValidHelpCategory(category)) {
+      setHelpCategory(category);
+      try {
+        localStorage.setItem("luno_last_help_category", category);
+      } catch {}
+    } else {
+      try {
+        const saved = localStorage.getItem("luno_last_help_category");
+        if (isValidHelpCategory(saved)) {
+          setHelpCategory(saved);
+        } else {
+          setHelpCategory((prev) => (isValidHelpCategory(prev) ? prev : "features"));
+        }
+      } catch {
+        setHelpCategory((prev) => (isValidHelpCategory(prev) ? prev : "features"));
+      }
+    }
+    openTab("help");
   }, [openTab]);
 
   const handleOpenWebTab = useCallback(
@@ -1021,6 +1092,7 @@ export default function Index() {
       updatedAt: e.updatedAt || existing?.updatedAt || Date.now(),
       driveFileId: overrideDriveFileId ?? existing?.driveFileId,
       driveSyncedAt: existing?.driveSyncedAt,
+      fileSize: (e as any).fileSize || (existing as any)?.fileSize,
       fullPath: e.fullPath || (existing as any)?.fullPath,
     } as any;
   };
@@ -1159,6 +1231,7 @@ export default function Index() {
         contentFormat?: "plain" | "markdown" | "html";
         folderPath?: string;
         fileType?: "image" | "binary";
+        fileSize?: number;
         createdAt?: number;
         updatedAt?: number;
       }> = [];
@@ -1169,9 +1242,11 @@ export default function Index() {
         );
 
         let fileModified = 0;
+        let diskFileSize = 0;
         try {
           const file = await entry.handle.getFile();
           fileModified = file.lastModified || 0;
+          diskFileSize = file.size || 0;
         } catch {
           // ignore
         }
@@ -1185,6 +1260,7 @@ export default function Index() {
             isLinkedFile: true,
             folderPath: entry.folderPath,
             fileType: entry.fileType,
+            fileSize: (existing as any).fileSize || diskFileSize || undefined,
             createdAt: existing.createdAt || fileModified || Date.now(),
             updatedAt: fileModified || existing.updatedAt || Date.now(),
           });
@@ -1199,6 +1275,7 @@ export default function Index() {
             isLinkedFile: true,
             folderPath: entry.folderPath,
             fileType: entry.fileType,
+            fileSize: diskFileSize || undefined,
             createdAt: fileModified || Date.now(),
             updatedAt: fileModified || Date.now(),
           });
@@ -1215,6 +1292,7 @@ export default function Index() {
             contentFormat: entry.contentFormat,
             isLinkedFile: true,
             folderPath: entry.folderPath,
+            fileSize: diskFileSize || file.size || undefined,
             createdAt: mtime,
             updatedAt: mtime,
           });
@@ -3382,18 +3460,19 @@ export default function Index() {
   const openTabNotes = useMemo(() => {
     return openTabIds
       .map((id) => {
-        if (id === "home") return HOME_NOTE;
-        if (id === "trash") return TRASH_NOTE;
-        if (id === "settings") return SETTINGS_NOTE;
-        if (id === "luno-ai") return LUNO_AI_NOTE;
-        if (id === "templates") return TEMPLATES_NOTE;
-        if (id === "favorites") return FAVORITES_NOTE;
-        if (id === "tags") return TAGS_NOTE;
+        if (id === "home" || id.startsWith("home:")) return { ...HOME_NOTE, id };
+        if (id === "trash" || id.startsWith("trash:")) return { ...TRASH_NOTE, id };
+        if (id === "settings" || id.startsWith("settings:")) return { ...SETTINGS_NOTE, id };
+        if (id === "help" || id.startsWith("help:")) return { ...HELP_NOTE, id };
+        if (id === "luno-ai" || id.startsWith("luno-ai:")) return { ...LUNO_AI_NOTE, id };
+        if (id === "templates" || id.startsWith("templates:")) return { ...TEMPLATES_NOTE, id };
+        if (id === "favorites" || id.startsWith("favorites:")) return { ...FAVORITES_NOTE, id };
+        if (id === "tags" || id.startsWith("tags:")) return { ...TAGS_NOTE, id };
         if (id.startsWith("web:")) return getWebTabNote(id);
         return notes.find((n) => n.id === id);
       })
       .filter((n): n is Note => Boolean(n));
-  }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
+  }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, HELP_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
 
   // Cycle open tabs with Ctrl+Tab / Ctrl+Shift+Tab
   const cycleActiveTab = useCallback((direction: 1 | -1) => {
@@ -3416,6 +3495,13 @@ export default function Index() {
         if (isMobile && sidebarOpen) {
           setSidebarOpen(false);
         }
+        return;
+      }
+
+      if (e.key === "F1") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleOpenHelp();
         return;
       }
 
@@ -3601,7 +3687,7 @@ export default function Index() {
 
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
-  }, [createNoteInFolder, handleOpenFolder, activeTabId, closeTab, notes, setSidebarOpen, openTab, isMobile, sidebarOpen, cycleActiveTab]);
+  }, [createNoteInFolder, handleOpenFolder, activeTabId, closeTab, notes, setSidebarOpen, openTab, isMobile, sidebarOpen, cycleActiveTab, handleOpenHelp]);
 
   const handleCloseTab = useCallback(
     (id: string) => {
@@ -3616,6 +3702,148 @@ export default function Index() {
       }
     },
     [closeTab, notes]
+  );
+
+  const handleCloseOtherTabs = useCallback(
+    (keepId: string) => {
+      const tabsToClose = openTabIds.filter((id) => id !== keepId);
+      tabsToClose.forEach((id) => {
+        clearNoteEditorHistory(id);
+      });
+      closeOtherTabs(keepId);
+      if (tabsToClose.some((id) => id.startsWith("web:"))) {
+        setWebTabs((prev) => {
+          const next = { ...prev };
+          tabsToClose.forEach((id) => {
+            if (id.startsWith("web:")) delete next[id];
+          });
+          return next;
+        });
+      }
+    },
+    [openTabIds, closeOtherTabs]
+  );
+
+  const handleCloseAllTabs = useCallback(() => {
+    openTabIds.forEach((id) => {
+      clearNoteEditorHistory(id);
+    });
+    closeAllTabs();
+    setWebTabs({});
+  }, [openTabIds, closeAllTabs]);
+
+  const handleCloseTabsToRight = useCallback(
+    (targetId: string) => {
+      const idx = openTabIds.indexOf(targetId);
+      if (idx === -1) return;
+      const tabsToClose = openTabIds.slice(idx + 1);
+      tabsToClose.forEach((id) => {
+        clearNoteEditorHistory(id);
+      });
+      closeTabsToRight(targetId);
+      if (tabsToClose.some((id) => id.startsWith("web:"))) {
+        setWebTabs((prev) => {
+          const next = { ...prev };
+          tabsToClose.forEach((id) => {
+            if (id.startsWith("web:")) delete next[id];
+          });
+          return next;
+        });
+      }
+    },
+    [openTabIds, closeTabsToRight]
+  );
+
+  const handleDuplicateTab = useCallback(
+    async (note: Note) => {
+      // 1. Web tab
+      if (note.fileType === "web-viewer" || note.id.startsWith("web:")) {
+        const webUrl = note.url || (note.id.startsWith("web:") ? note.id.replace(/^web:/, "") : "");
+        if (webUrl) {
+          handleOpenWebTab(webUrl, note.title);
+          toast({
+            title: t("editor.duplicateTab") || "Duplicate",
+            description: note.title || webUrl,
+          });
+        }
+        return;
+      }
+
+      // 2. System tabs (home, settings, help, luno-ai, templates, favorites, tags, trash) are not duplicable
+      if (isSystemOrWebTab(note.id)) {
+        return;
+      }
+
+      // 3. Regular Note file or memory note
+      const dotIndex = (note.fileName || "").lastIndexOf(".");
+      const base = dotIndex > 0 ? note.fileName!.slice(0, dotIndex) : (note.fileName || note.title || "Note");
+      const ext = dotIndex > 0 ? note.fileName!.slice(dotIndex) : ".md";
+      const duplicateName = `${base}-copy${ext}`;
+
+      const newNote = await createNoteInFolder(note.folderPath, {
+        fileName: duplicateName,
+        initialContent: note.content || "",
+        contentFormat: note.contentFormat,
+        icon: note.icon,
+        iconColor: note.iconColor,
+      });
+
+      if (newNote) {
+        openTab(newNote.id);
+        toast({
+          title: t("editor.duplicateTab") || "Duplicate",
+          description: newNote.fileName || newNote.title,
+        });
+      }
+    },
+    [handleOpenWebTab, openTab, createNoteInFolder, t]
+  );
+
+  const handleReloadTab = useCallback((tabId: string) => {
+    window.dispatchEvent(new CustomEvent("luno:reload-web-tab", { detail: { tabId } }));
+  }, []);
+
+  const handleNewTab = useCallback(() => {
+    void createNoteInFolder();
+  }, [createNoteInFolder]);
+
+  const handleSplitTab = useCallback((id: string) => {
+    setSplitTabId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleCloseSplitTab = useCallback(
+    (id: string) => {
+      if (id === splitTabId) {
+        clearNoteEditorHistory(id);
+        setSplitTabId(null);
+      } else {
+        handleCloseTab(id);
+      }
+    },
+    [splitTabId, handleCloseTab]
+  );
+
+  const handleOpenSidebar = useCallback(() => {
+    setSidebarOpen(true);
+  }, []);
+
+  const handleCloseSidebar = useCallback(() => {
+    setSidebarOpen(false);
+  }, []);
+
+  const handleCreateNoteFromSidebar = useCallback(
+    (fp?: string, opt?: CreateNoteOptions) => {
+      void createNoteInFolder(fp, opt);
+    },
+    [createNoteInFolder]
+  );
+
+  const handleToggleFavoriteSidebar = useCallback(
+    (id: string) => {
+      const n = notesRef.current.find((item) => item.id === id);
+      if (n) handleUpdateNote(id, { isFavorite: !n.isFavorite });
+    },
+    [handleUpdateNote]
   );
 
   const handleRestoreFromTrash = useCallback((ids: string[]) => {
@@ -4037,7 +4265,7 @@ export default function Index() {
       <div className={isMobile ? (sidebarOpen ? "block" : "hidden") : "block"}>
         <Sidebar
           sidebarOpen={sidebarOpen}
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onOpenSidebar={handleOpenSidebar}
           notes={notes}
           folderPaths={openedFolderPaths}
           activeNoteId={activeTabId}
@@ -4046,7 +4274,7 @@ export default function Index() {
           onReconnectFolder={handleReconnectFolder}
           onSelect={openTab}
           onUpdateNote={handleUpdateNote}
-          onCreate={(fp, opt) => { void createNoteInFolder(fp, opt); }}
+          onCreate={handleCreateNoteFromSidebar}
           onCreateFolder={createFolderInFolder}
           onDeleteFile={deleteFileInFolder}
           onDeleteFolder={deleteFolderInFolder}
@@ -4067,16 +4295,14 @@ export default function Index() {
           onCloseWorkspace={handleCloseWorkspace}
           sidebarWidth={settings.sidebarWidth}
           isMobile={isMobile}
-          onClose={() => setSidebarOpen(false)}
+          onClose={handleCloseSidebar}
           confirmBeforeDelete={settings.confirmBeforeDelete}
           onRenameTagGlobally={renameTagGlobally}
           onDeleteTagGlobally={deleteTagGlobally}
-          onToggleFavorite={(id) => {
-            const n = notes.find((item) => item.id === id);
-            if (n) handleUpdateNote(id, { isFavorite: !n.isFavorite });
-          }}
+          onToggleFavorite={handleToggleFavoriteSidebar}
           onOpenPinModal={handleOpenPinModal}
-          onOpenSettings={() => handleOpenSettings()}
+          onOpenSettings={handleOpenSettings}
+          onOpenHelp={handleOpenHelp}
           isCloudWorkspace={isCloudWorkspace}
           isLoadingWorkspace={isWorkspaceLoading || (settings.storageMode === "gdrive" && syncStatus === "syncing")}
           onOpenWebTab={handleOpenWebTab}
@@ -4098,13 +4324,16 @@ export default function Index() {
                 activeTabId={activeTabId}
                 onSelectTab={setActiveTabId}
                 onCloseTab={handleCloseTab}
-                onSplitTab={(id) => {
-                  setSplitTabId(prev => prev === id ? null : id);
-                }}
-                onNewTab={() => void createNoteInFolder()}
+                onCloseOtherTabs={handleCloseOtherTabs}
+                onCloseAllTabs={handleCloseAllTabs}
+                onCloseTabsToRight={handleCloseTabsToRight}
+                onDuplicateTab={handleDuplicateTab}
+                onReloadTab={handleReloadTab}
+                onSplitTab={handleSplitTab}
+                onNewTab={handleNewTab}
                 onReorderTabs={reorderTabs}
               />
-              {openedFolderName && activeTabNote && activeTabId !== "home" && activeTabId !== "trash" && activeTabId !== "settings" && activeTabId !== "luno-ai" && activeTabId !== "templates" && activeTabId !== "favorites" && activeTabId !== "tags" && !activeTabId?.startsWith("web:") && (
+              {openedFolderName && activeTabNote && !isSystemOrWebTab(activeTabId || "") && (
                 <Breadcrumb
                   note={activeTabNote}
                   rootFolderName={openedFolderName}
@@ -4116,19 +4345,22 @@ export default function Index() {
                 />
               )}
               <div className="flex-1 min-h-0 flex flex-col overflow-auto">
-                {!openedFolderName ? (
+                {!openedFolderName && !activeTabId?.startsWith("web:") && !activeTabId?.startsWith("settings") && !activeTabId?.startsWith("help") ? (
                   <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
                     <WorkspaceLauncher
                       onOpenFolder={handleOpenFolder}
                       onCreateWorkspace={handleCreateWorkspace}
                       onConnectGoogleDrive={handleConnectGoogleDriveDirect}
+                      onOpenCloudWorkspace={handleOpenCloudWorkspace}
+                      onCreateCloudWorkspace={handleCreateCloudWorkspace}
                       isCreating={isCreatingWorkspace}
+                      onOpenWebTab={handleOpenWebTab}
                     />
                   </div>
                 ) : (
                   <>
-                    <div className={activeTabId === "home" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                      {openTabIds.includes("home") && (
+                    <div className={(activeTabId === "home" || activeTabId?.startsWith("home:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                      {openTabIds.some((id) => id === "home" || id.startsWith("home:")) && (
                         <HomeView
                           notes={notes}
                           onOpenNote={(id) => openTab(id)}
@@ -4152,15 +4384,15 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.includes("templates") && (
+                    <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
                         <TemplatesView
                           onCreateWithTemplate={handleCreateFromHomeTemplate}
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.includes("favorites") && (
+                    <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
                         <FavoritesTabView
                           notes={notes}
                           onOpenNote={(id) => openTab(id)}
@@ -4174,8 +4406,8 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.includes("tags") && (
+                    <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
                         <TagsTabView
                           notes={notes}
                           onOpenNote={(id) => openTab(id)}
@@ -4191,8 +4423,8 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.includes("trash") && (
+                    <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
                         <TrashView
                           trashedNotes={trashedNotes}
                           onRestore={handleRestoreFromTrash}
@@ -4202,12 +4434,12 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                      {openTabIds.includes("settings") && (
+                    <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                      {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
                         <SettingsTabView
                           initialCategory={settingsCategory}
                           onCategoryChange={setSettingsCategory}
-                          onClose={() => closeTab("settings", notes.map((n) => n.id))}
+                          onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
                           notes={notes}
                           onNotesUpdated={replaceNotes}
                           openedFolderName={openedFolderName}
@@ -4218,8 +4450,18 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={activeTabId === "luno-ai" ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
-                      {openTabIds.includes("luno-ai") && (
+                    <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                      {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
+                        <HelpTabView
+                          initialCategory={helpCategory}
+                          onCategoryChange={setHelpCategory}
+                          onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
+                          onOpenSettings={handleOpenSettings}
+                        />
+                      )}
+                    </div>
+                    <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                      {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                         <LunoAiView
                           notes={notes}
                           activeNote={splitTabNote ?? (notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null)}
@@ -4248,7 +4490,7 @@ export default function Index() {
                             }
                           }}
                           onCreateNewNote={(fileName, content, folderPath) => {
-                            let targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                            const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
                             void createNoteInFolder(folderPath || "", {
                               fileName: targetName,
                               initialContent: content,
@@ -4269,6 +4511,7 @@ export default function Index() {
                         className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
                       >
                         <WebViewerView
+                          tabId={webId}
                           initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
                           onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
                           onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
@@ -4280,7 +4523,7 @@ export default function Index() {
                         />
                       </div>
                     ))}
-                    <div className={(activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                    <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
                       <Editor
                         key="editor-pane-left"
                         note={activeEditorNote}
@@ -4338,20 +4581,18 @@ export default function Index() {
               <TabBar
                 tabs={openTabNotes.filter(n => n.id === splitTabId)}
                 activeTabId={splitTabId}
-                onSelectTab={(id) => setSplitTabId(id)}
-                onCloseTab={(id) => {
-                  if (id === splitTabId) {
-                    clearNoteEditorHistory(id);
-                    setSplitTabId(null);
-                  } else {
-                    handleCloseTab(id);
-                  }
-                }}
-                onSplitTab={(id) => setSplitTabId(null)}
-                onNewTab={() => void createNoteInFolder()}
+                onSelectTab={setSplitTabId}
+                onCloseTab={handleCloseSplitTab}
+                onCloseOtherTabs={handleCloseOtherTabs}
+                onCloseAllTabs={handleCloseAllTabs}
+                onCloseTabsToRight={handleCloseTabsToRight}
+                onDuplicateTab={handleDuplicateTab}
+                onReloadTab={handleReloadTab}
+                onSplitTab={handleSplitTab}
+                onNewTab={handleNewTab}
                 onReorderTabs={reorderTabs}
               />
-              {splitTabNote && splitTabNote.id !== "home" && splitTabNote.id !== "trash" && splitTabNote.id !== "settings" && splitTabNote.id !== "luno-ai" && splitTabNote.id !== "templates" && splitTabNote.id !== "favorites" && splitTabNote.id !== "tags" && !splitTabId?.startsWith("web:") && (
+              {splitTabNote && !isSystemOrWebTab(splitTabNote.id) && splitTabNote.fileType !== "web-viewer" && (
                 <Breadcrumb
                   note={splitTabNote}
                   rootFolderName={openedFolderName}
@@ -4363,15 +4604,15 @@ export default function Index() {
                 />
               )}
               <div className="flex-1 min-h-0 flex flex-col overflow-auto">
-                <div className={splitTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {splitTabId === "templates" && (
+                <div className={(splitTabId === "templates" || splitTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {(splitTabId === "templates" || splitTabId?.startsWith("templates:")) && (
                     <TemplatesView
                       onCreateWithTemplate={handleCreateFromHomeTemplate}
                     />
                   )}
                 </div>
-                <div className={splitTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {splitTabId === "favorites" && (
+                <div className={(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) && (
                     <FavoritesTabView
                       notes={notes}
                       onOpenNote={(id) => setSplitTabId(id)}
@@ -4385,8 +4626,8 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={splitTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {splitTabId === "tags" && (
+                <div className={(splitTabId === "tags" || splitTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {(splitTabId === "tags" || splitTabId?.startsWith("tags:")) && (
                     <TagsTabView
                       notes={notes}
                       onOpenNote={(id) => setSplitTabId(id)}
@@ -4402,8 +4643,8 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={splitTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {splitTabId === "trash" && (
+                <div className={(splitTabId === "trash" || splitTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {(splitTabId === "trash" || splitTabId?.startsWith("trash:")) && (
                     <TrashView
                       trashedNotes={trashedNotes}
                       onRestore={handleRestoreFromTrash}
@@ -4413,8 +4654,8 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={splitTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                  {splitTabId === "settings" && (
+                <div className={(splitTabId === "settings" || splitTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                  {(splitTabId === "settings" || splitTabId?.startsWith("settings:")) && (
                     <SettingsTabView
                       initialCategory={settingsCategory}
                       onCategoryChange={setSettingsCategory}
@@ -4429,8 +4670,18 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={splitTabId === "luno-ai" ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
-                  {splitTabId === "luno-ai" && (
+                <div className={(splitTabId === "help" || splitTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                  {(splitTabId === "help" || splitTabId?.startsWith("help:")) && (
+                    <HelpTabView
+                      initialCategory={helpCategory}
+                      onCategoryChange={setHelpCategory}
+                      onClose={() => setSplitTabId(null)}
+                      onOpenSettings={handleOpenSettings}
+                    />
+                  )}
+                </div>
+                <div className={(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                  {(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) && (
                     <LunoAiView
                       notes={notes}
                       activeNote={splitTabNote}
@@ -4450,7 +4701,7 @@ export default function Index() {
                         }
                       }}
                       onCreateNewNote={(fileName, content, folderPath) => {
-                        let targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                        const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
                         void createNoteInFolder(folderPath || "", { fileName: targetName, initialContent: content });
                       }}
                       onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
@@ -4461,6 +4712,7 @@ export default function Index() {
                 {splitTabId?.startsWith("web:") && (
                   <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
                     <WebViewerView
+                      tabId={splitTabId}
                       initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
                       onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
                       onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
@@ -4472,7 +4724,7 @@ export default function Index() {
                     />
                   </div>
                 )}
-                <div className={(splitTabId === "home" || splitTabId === "trash" || splitTabId === "settings" || splitTabId === "luno-ai" || splitTabId === "templates" || splitTabId === "favorites" || splitTabId === "tags" || splitTabId?.startsWith("web:")) ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                <div className={(isSystemOrWebTab(splitTabId || "") || splitTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
                   <Editor
                     key="editor-pane-right"
                     note={splitEditorNote}
@@ -4514,13 +4766,18 @@ export default function Index() {
             <TabBar
               tabs={openTabNotes}
               activeTabId={activeTabId}
-              onSelectTab={(id) => openTab(id)}
+              onSelectTab={setActiveTabId}
               onCloseTab={handleCloseTab}
-              onSplitTab={(id) => setSplitTabId(id)}
-              onNewTab={() => void createNoteInFolder()}
+              onCloseOtherTabs={handleCloseOtherTabs}
+              onCloseAllTabs={handleCloseAllTabs}
+              onCloseTabsToRight={handleCloseTabsToRight}
+              onDuplicateTab={handleDuplicateTab}
+              onReloadTab={handleReloadTab}
+              onSplitTab={handleSplitTab}
+              onNewTab={handleNewTab}
               onReorderTabs={reorderTabs}
             />
-            {activeTabNote && activeTabNote.id !== "home" && activeTabNote.id !== "trash" && activeTabNote.id !== "settings" && activeTabNote.id !== "luno-ai" && activeTabNote.id !== "templates" && activeTabNote.id !== "favorites" && activeTabNote.id !== "tags" && !activeTabId?.startsWith("web:") && (
+            {activeTabNote && !isSystemOrWebTab(activeTabNote.id) && activeTabNote.fileType !== "web-viewer" && (
               <Breadcrumb
                 note={activeTabNote}
                 rootFolderName={openedFolderName}
@@ -4530,8 +4787,8 @@ export default function Index() {
                 isCloudWorkspace={isCloudWorkspace}
               />
             )}
-            <div className="flex-1 flex flex-col md:flex-row min-h-0">
-              {!openedFolderName ? (
+            <div className="flex-1 flex flex-col min-h-0">
+              {!openedFolderName && !isSystemOrWebTab(activeTabId || "") ? (
                 <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
                   <WorkspaceLauncher
                     onOpenFolder={handleOpenFolder}
@@ -4540,12 +4797,13 @@ export default function Index() {
                     onOpenCloudWorkspace={handleOpenCloudWorkspace}
                     onCreateCloudWorkspace={handleCreateCloudWorkspace}
                     isCreating={isCreatingWorkspace}
+                    onOpenWebTab={handleOpenWebTab}
                   />
                 </div>
               ) : (
                 <>
-                  <div className={activeTabId === "home" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                    {openTabIds.includes("home") && (
+                  <div className={(activeTabId === "home" || activeTabId?.startsWith("home:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    {openTabIds.some((id) => id === "home" || id.startsWith("home:")) && (
                       <HomeView
                         notes={notes}
                         onOpenNote={(id) => openTab(id)}
@@ -4569,15 +4827,15 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "templates" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.includes("templates") && (
+                  <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
                       <TemplatesView
                         onCreateWithTemplate={handleCreateFromHomeTemplate}
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "favorites" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.includes("favorites") && (
+                  <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
                       <FavoritesTabView
                         notes={notes}
                         onOpenNote={(id) => openTab(id)}
@@ -4591,8 +4849,8 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "tags" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.includes("tags") && (
+                  <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
                       <TagsTabView
                         notes={notes}
                         onOpenNote={(id) => openTab(id)}
@@ -4608,8 +4866,8 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "trash" ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.includes("trash") && (
+                  <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
                       <TrashView
                         trashedNotes={trashedNotes}
                         onRestore={handleRestoreFromTrash}
@@ -4619,12 +4877,12 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "settings" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                    {openTabIds.includes("settings") && (
+                  <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
                       <SettingsTabView
                         initialCategory={settingsCategory}
                         onCategoryChange={setSettingsCategory}
-                        onClose={() => closeTab("settings", notes.map((n) => n.id))}
+                        onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
                         notes={notes}
                         onNotesUpdated={replaceNotes}
                         openedFolderName={openedFolderName}
@@ -4635,8 +4893,18 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={activeTabId === "luno-ai" ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
-                    {openTabIds.includes("luno-ai") && (
+                  <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
+                      <HelpTabView
+                        initialCategory={helpCategory}
+                        onCategoryChange={setHelpCategory}
+                        onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
+                        onOpenSettings={handleOpenSettings}
+                      />
+                    )}
+                  </div>
+                  <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                    {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                       <LunoAiView
                         notes={notes}
                         activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null}
@@ -4693,6 +4961,7 @@ export default function Index() {
                       className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
                     >
                       <WebViewerView
+                        tabId={webId}
                         initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
                         onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
                         onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
@@ -4704,7 +4973,7 @@ export default function Index() {
                       />
                     </div>
                   ))}
-                  <div className={(activeTabId === "home" || activeTabId === "trash" || activeTabId === "settings" || activeTabId === "luno-ai" || activeTabId === "templates" || activeTabId === "favorites" || activeTabId === "tags" || activeTabId?.startsWith("web:") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 flex flex-col"}>
+                  <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
                     <Editor
                       key="editor-pane-main"
                       note={activeEditorNote}

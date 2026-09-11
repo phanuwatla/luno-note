@@ -33,6 +33,7 @@ export interface Note {
   iconColor?: string;
   driveFileId?: string;
   driveSyncedAt?: number;
+  fileSize?: number;
 }
 
 const STORAGE_KEY = "notes-app-data";

@@ -10,10 +10,9 @@ import {
 } from "@/lib/templates";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
-import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X, LayoutTemplate } from "lucide-react";
+import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X, LayoutTemplate, ArrowLeft, ChevronRight } from "lucide-react";
 import { marked } from "marked";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import { renderMarkdownToEditorHtml, EDITOR_CLASSES } from "@/components/Editor";
@@ -515,6 +514,7 @@ export default function TemplatesView({
   const [copied, setCopied] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const mainScrollRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(0);
 
@@ -709,18 +709,74 @@ export default function TemplatesView({
     });
   };
 
+  // Escape key to exit in-tab preview
+  useEffect(() => {
+    if (!previewItem) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPreviewItem(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewItem]);
+
+  const relatedTemplates = useMemo(() => {
+    if (!previewItem) return [];
+
+    // Filter STRICTLY to templates that are genuinely related:
+    // - Based on functional category (e.g. "work", "dev", "study", "daily", "web") — NOT file extension (.md, .html, .txt)
+    // - OR same template type in an alternative format (e.g. Markdown Todo vs Text Todo)
+    // - OR shared functional non-extension tags
+    const filtered = TEMPLATE_DEFINITIONS.filter((item) => {
+      // Exclude the currently opened template
+      if (item.type === previewItem.type && item.formatExt === previewItem.formatExt) {
+        return false;
+      }
+
+      // 1. Same template type in another format (e.g. Markdown Todo vs Plain Text Todo)
+      if (item.type === previewItem.type) return true;
+
+      // 2. Same functional category tag (Work, Dev, Study, Daily, Web)
+      if (item.category === previewItem.category) return true;
+
+      // 3. Shared functional tags (excluding file extensions)
+      if (item.tags && previewItem.tags) {
+        const shared = item.tags.filter(
+          (t) => previewItem.tags?.includes(t) && t !== item.formatExt && t !== previewItem.formatExt
+        );
+        if (shared.length > 0) return true;
+      }
+
+      return false;
+    });
+
+    // Sort: Same template type first (alternative format), then same category
+    return filtered
+      .sort((a, b) => {
+        const aSameType = a.type === previewItem.type ? 20 : 0;
+        const bSameType = b.type === previewItem.type ? 20 : 0;
+        const aSameCategory = a.category === previewItem.category ? 10 : 0;
+        const bSameCategory = b.category === previewItem.category ? 10 : 0;
+        return (bSameType + bSameCategory) - (aSameType + aSameCategory);
+      })
+      .slice(0, 12); // Maximum 12 items (not forced to reach 12)
+  }, [previewItem]);
+
   const handleSelectTemplate = (tmpl: TemplateItemDef) => {
     setPreviewItem(tmpl);
     setPreviewTab("rendered");
     setDeviceMode("desktop");
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const renderTemplateCard = (tmpl: TemplateItemDef) => {
+  const renderTemplateCard = (tmpl: TemplateItemDef, compact = false, extraClassName = "") => {
     const meta = NOTE_TEMPLATE_METADATA[tmpl.type];
     const iconStr = getTemplateIcon(tmpl.type, pack) || meta?.icon || tmpl.icon;
     const colorStr = meta?.iconColor || tmpl.color;
     const title = isTh ? tmpl.titleTh : tmpl.titleEn;
     const desc = isTh ? tmpl.descTh : tmpl.descEn;
+    const isCurrentPreview = previewItem?.type === tmpl.type && previewItem?.formatExt === tmpl.formatExt;
 
     return (
       <motion.div
@@ -735,7 +791,11 @@ export default function TemplatesView({
             handleSelectTemplate(tmpl);
           }
         }}
-        className="flex flex-col text-left p-3.5 rounded-xl bg-card border-[1.5px] border-border/70 hover:border-primary/60 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none relative"
+        className={`flex flex-col text-left p-3.5 rounded-xl bg-card border-[1.5px] transition-all group shadow-2xs cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none relative ${
+          isCurrentPreview
+            ? "border-primary bg-primary/10"
+            : "border-border/70 hover:border-primary/60 hover:bg-muted/50"
+        } ${compact ? "w-48 sm:w-56 shrink-0" : ""} ${extraClassName}`}
       >
         <div className="flex items-center justify-between w-full">
           {renderCustomIcon(
@@ -749,7 +809,7 @@ export default function TemplatesView({
           </span>
         </div>
 
-        <span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+        <span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors truncate">
           {title}
         </span>
         <span className="text-[10.5px] text-muted-foreground leading-relaxed mt-0.5 line-clamp-2">
@@ -761,324 +821,233 @@ export default function TemplatesView({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex-1 h-full min-h-0 overflow-y-auto bg-background text-foreground select-none flex flex-col">
-        <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5">
-          {/* 1. Header Section (Matching HomeView Style) */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <LayoutTemplate className="h-6 w-6 text-primary shrink-0" />
-                <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                  {isTh ? "เทมเพลตทั้งหมด" : "All Templates"}
-                </h1>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {isTh
-                  ? "เลือกเทมเพลตสำเร็จรูปเพื่อเริ่มต้นเขียนโน้ต ออกแบบหน้าเว็บ หรือจัดระเบียบงานได้ทันที"
-                  : "Choose pre-built templates to start writing notes, building web pages, or organizing tasks."}
-              </p>
-            </div>
-
-            {/* Functional Search Input Box */}
-            <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3.5 py-2 border border-sidebar-border/40 hover:border-primary/60 focus-within:border-primary w-full md:w-64 transition-all shadow-none group">
-              {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground group-focus-within:text-primary transition-colors")}
-              <input
-                ref={searchInputRef}
-                data-templates-search="true"
-                type="text"
-                placeholder={isTh ? "ค้นหาเทมเพลต..." : "Search templates..."}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setSearchQuery("");
-                    searchInputRef.current?.blur();
-                  }
-                }}
-                className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
-              />
-              {searchQuery && (
+      <div
+        ref={mainScrollRef}
+        className="flex-1 h-full min-h-0 overflow-y-auto bg-background text-foreground select-none flex flex-col"
+      >
+        {previewItem ? (
+          // ==================== IN-TAB TEMPLATE PREVIEW VIEW ====================
+          <div className="flex-1 flex flex-col min-h-0 w-full">
+            {/* Top Breadcrumb Toolbar (Matching Editor's Top Bar Style) */}
+            <div className="sticky top-0 z-30 flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
+              {/* Left: ArrowLeft (replaces home icon) + Templates > Template Name */}
+              <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
                 <button
                   type="button"
                   onClick={() => {
-                    setSearchQuery("");
-                    searchInputRef.current?.focus();
+                    setPreviewItem(null);
+                    mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
                   }}
-                  className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                  aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                  className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
+                  title={isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
                 >
-                  {renderIcon("x", "h-3 w-3")}
+                  {(() => {
+                    const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
+                    return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
+                  })()}
+                  <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
                 </button>
-              )}
-            </div>
-          </div>
+                {(() => {
+                  const ChevRightIcon = getToolbarIcon("chevronRight", pack);
+                  return <ChevRightIcon className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;
+                })()}
+                <span className="flex items-center gap-1.5 min-w-[40px] px-0.5 leading-none shrink truncate font-semibold text-foreground">
+                  {renderCustomIcon(
+                    getTemplateIcon(previewItem.type, pack) || NOTE_TEMPLATE_METADATA[previewItem.type]?.icon || previewItem.icon,
+                    "h-3.5 w-3.5 shrink-0",
+                    { color: NOTE_TEMPLATE_METADATA[previewItem.type]?.iconColor || previewItem.color }
+                  )}
+                  <span className="truncate">{isTh ? previewItem.titleTh : previewItem.titleEn}</span>
+                </span>
+              </div>
 
-          {/* 2. Filter Pills (Shaded / Outlined Tint Style) */}
-          <div
-            className="flex items-center gap-1.5 pill-scrollbar w-full min-w-0 shrink-0 pb-1"
-            onWheel={(e) => {
-              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
-                e.currentTarget.scrollLeft += e.deltaY;
-              }
-            }}
-          >
-            {categories.map((cat) => {
-              const isSelected = selectedCategory === cat.id;
-              const count = categoryCounts[cat.id] ?? 0;
-              return (
-                <button
-                  key={cat.id}
+              {/* Right: Action and view buttons (100% matched with Editor controls) */}
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 text-[11.5px] pl-1">
+                {/* View Mode Toggle: Live / Formatted vs Source Code */}
+                <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab("rendered")}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                      previewTab === "rendered"
+                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {(() => {
+                      const EyeIcon = getToolbarIcon("eye", pack);
+                      return <EyeIcon className="h-3.5 w-3.5" />;
+                    })()}
+                    <span className="hidden sm:inline">
+                      {previewItem.format === "html"
+                        ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
+                        : previewItem.format === "markdown"
+                        ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
+                        : isTh ? "ข้อความ" : "Text"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab("code")}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                      previewTab === "code"
+                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {(() => {
+                      const CodeIcon = getToolbarIcon("code", pack);
+                      return <CodeIcon className="h-3.5 w-3.5" />;
+                    })()}
+                    <span className="hidden sm:inline">{isTh ? "โค้ดต้นฉบับ" : "Source Code"}</span>
+                  </button>
+                </div>
+
+                {/* HTML device switcher if HTML & rendered (placed after view mode toggle, exactly like HTML Editor) */}
+                {previewItem.format === "html" && previewTab === "rendered" && (
+                  <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setDeviceMode("desktop")}
+                          className={`p-1 rounded-md transition-all cursor-pointer ${
+                            deviceMode === "desktop"
+                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                          aria-label="Desktop (100%)"
+                        >
+                          {(() => {
+                            const MonitorIcon = getToolbarIcon("monitor", pack);
+                            return <MonitorIcon className="h-3.5 w-3.5" />;
+                          })()}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" sideOffset={4}>
+                        {isTh ? "เดสก์ท็อป (100%)" : "Desktop (100%)"}
+                      </TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setDeviceMode("tablet")}
+                          className={`p-1 rounded-md transition-all cursor-pointer ${
+                            deviceMode === "tablet"
+                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                          aria-label="Tablet (768px)"
+                        >
+                          {(() => {
+                            const TabletIcon = getToolbarIcon("tablet", pack);
+                            return <TabletIcon className="h-3.5 w-3.5" />;
+                          })()}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" sideOffset={4}>
+                        {isTh ? "แท็บเล็ต (768px)" : "Tablet (768px)"}
+                      </TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setDeviceMode("mobile")}
+                          className={`p-1 rounded-md transition-all cursor-pointer ${
+                            deviceMode === "mobile"
+                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                          aria-label="Mobile (375px)"
+                        >
+                          {(() => {
+                            const SmartphoneIcon = getToolbarIcon("smartphone", pack);
+                            return <SmartphoneIcon className="h-3.5 w-3.5" />;
+                          })()}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" sideOffset={4}>
+                        {isTh ? "มือถือ (375px)" : "Mobile (375px)"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
+
+                {/* Copy button - rounded-[10px] and matching editor toolbar icon */}
+                <Button
                   type="button"
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
-                    isSelected
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
-                      : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
-                  }`}
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyPreview}
+                  className="h-7 px-2.5 rounded-[10px] text-[11.5px] font-medium gap-1.5 cursor-pointer border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {cat.label} ({count})
-                </button>
-              );
-            })}
-          </div>
+                  {copied ? (
+                    (() => {
+                      const CheckIcon = getToolbarIcon("check", pack);
+                      return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
+                    })()
+                  ) : (
+                    (() => {
+                      const CopyIcon = getToolbarIcon("copy", pack);
+                      return <CopyIcon className="h-3.5 w-3.5" />;
+                    })()
+                  )}
+                  <span className="hidden sm:inline">
+                    {copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}
+                  </span>
+                </Button>
 
-          {/* 3. Main Templates Showcase */}
-          <div className={`space-y-5 ${allFiltered.length === 0 ? "flex-1 flex flex-col items-center justify-center min-h-[360px]" : ""}`}>
-            {allFiltered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center space-y-3">
-                <div className="h-12 w-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground">
-                  {renderIcon("search", "h-6 w-6 opacity-40")}
+                {/* Use this template primary button - rounded-[10px] and matching editor toolbar icon */}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    onCreateWithTemplate(previewItem.type, previewItem.format);
+                  }}
+                  className="h-7 px-3 rounded-[10px] text-[11.5px] font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs cursor-pointer transition-colors shrink-0"
+                >
+                  {(() => {
+                    const PlusIcon = getToolbarIcon("plus", pack);
+                    return <PlusIcon className="h-3.5 w-3.5" />;
+                  })()}
+                  <span>{isTh ? "ใช้เทมเพลตนี้" : "Use this template"}</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Scrollable Content Container */}
+            <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-4">
+              {/* Template Info Section: Icon, Title, Format badge, Category badge & Description */}
+              <div className="space-y-1.5 shrink-0 pb-1">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {renderCustomIcon(
+                    getTemplateIcon(previewItem.type, pack) || NOTE_TEMPLATE_METADATA[previewItem.type]?.icon || previewItem.icon,
+                    "h-6 w-6 shrink-0",
+                    { color: NOTE_TEMPLATE_METADATA[previewItem.type]?.iconColor || previewItem.color }
+                  )}
+                  <h1 className="text-lg sm:text-xl font-bold text-foreground truncate">
+                    {isTh ? previewItem.titleTh : previewItem.titleEn}
+                  </h1>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border border-border/40 bg-sidebar-accent/60 text-muted-foreground uppercase shrink-0">
+                    .{previewItem.formatExt}
+                  </span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md border border-border/40 bg-muted/50 text-muted-foreground capitalize shrink-0">
+                    {previewItem.category}
+                  </span>
                 </div>
-                <p className="text-sm font-semibold text-foreground">
-                  {isTh ? "ไม่พบเทมเพลตที่ตรงกับการค้นหา" : "No templates found"}
+                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                  {isTh ? previewItem.descTh : previewItem.descEn}
                 </p>
-                <p className="text-xs text-muted-foreground max-w-sm">
-                  {isTh
-                    ? "ลองเปลี่ยนคำค้นหาหรือเลือกหมวดหมู่อื่นเพื่อดูเทมเพลตทั้งหมด"
-                    : "Try changing your search keywords or switch category filter to see all templates."}
-                </p>
               </div>
-            ) : selectedCategory === "all" && !searchQuery ? (
-              // Grouped Sections (Markdown, HTML, Text)
-              <>
-                {/* Markdown (.md) Section */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-semibold text-foreground">
-                      <span>{isTh ? "เอกสารมาร์กดาวน์ (Markdown .md)" : "Markdown Documents (.md)"}</span>
-                    </h2>
-                    <span className="text-[11px] text-muted-foreground font-medium">
-                      {mdGroup.length} {isTh ? "เทมเพลต" : "templates"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    {mdGroup.map(renderTemplateCard)}
-                  </div>
-                </div>
 
-                {/* HTML (.html) Section */}
-                <div className="space-y-3 pt-1">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-semibold text-foreground">
-                      <span>{isTh ? "เทมเพลตหน้าเว็บ (HTML .html)" : "Web Page Templates (.html)"}</span>
-                    </h2>
-                    <span className="text-[11px] text-muted-foreground font-medium">
-                      {htmlGroup.length} {isTh ? "เทมเพลต" : "templates"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    {htmlGroup.map(renderTemplateCard)}
-                  </div>
-                </div>
-
-                {/* Plain Text (.txt) Section */}
-                <div className="space-y-3 pt-1">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-semibold text-foreground">
-                      <span>{isTh ? "ไฟล์ข้อความธรรมดา (Plain Text .txt)" : "Plain Text Documents (.txt)"}</span>
-                    </h2>
-                    <span className="text-[11px] text-muted-foreground font-medium">
-                      {txtGroup.length} {isTh ? "เทมเพลต" : "templates"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    {txtGroup.map(renderTemplateCard)}
-                  </div>
-                </div>
-              </>
-            ) : (
-              // Filtered unified grid
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-semibold text-foreground">
-                    <span>
-                      {searchQuery
-                        ? isTh ? `ผลการค้นหา (${allFiltered.length})` : `Search Results (${allFiltered.length})`
-                        : isTh ? `เทมเพลตที่เลือก (${allFiltered.length})` : `Selected Templates (${allFiltered.length})`}
-                    </span>
-                  </h2>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {allFiltered.map(renderTemplateCard)}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* High-Fidelity Full-Featured Preview Dialog */}
-        <Dialog open={Boolean(previewItem)} onOpenChange={(open) => !open && setPreviewItem(null)}>
-          <DialogContent
-            className="w-[94vw] max-w-4xl h-[78vh] max-h-[680px] rounded-2xl flex flex-col p-4 sm:p-5 overflow-hidden bg-card border border-border shadow-2xl transition-all duration-200 [&>button:last-child]:hidden"
-          >
-            {/* Header with Title & Preview Controls (Clean horizontal alignment) */}
-            <DialogHeader className="shrink-0">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border/40">
-                <div className="flex items-center gap-2.5">
-                  {previewItem && (
-                    <div className="shrink-0 flex items-center justify-center">
-                      {renderCustomIcon(previewItem.icon, "h-5 w-5 shrink-0", { color: previewItem.color })}
-                    </div>
-                  )}
-                  <div>
-                    <DialogTitle className="text-base font-bold flex items-center gap-2">
-                      <span>{previewItem ? (isTh ? previewItem.titleTh : previewItem.titleEn) : ""}</span>
-                      {previewItem && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border border-border/40 bg-sidebar-accent/60 text-muted-foreground uppercase">
-                          .{previewItem.formatExt}
-                        </span>
-                      )}
-                    </DialogTitle>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {previewItem ? (isTh ? previewItem.descTh : previewItem.descEn) : ""}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Right Controls (Device Switcher, Mode Switcher, and Aligned Close Button) */}
-                <div className="flex items-center gap-2 self-start md:self-auto overflow-x-auto">
-                  {/* Device Switcher for HTML */}
-                  {previewItem?.format === "html" && previewTab === "rendered" && (
-                    <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/40">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => setDeviceMode("desktop")}
-                            className={`p-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              deviceMode === "desktop"
-                                ? "bg-background text-foreground shadow-2xs"
-                                : "text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <Monitor className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={4}>
-                          {isTh ? "เดสก์ท็อป (100%)" : "Desktop (100%)"}
-                        </TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => setDeviceMode("tablet")}
-                            className={`p-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              deviceMode === "tablet"
-                                ? "bg-background text-foreground shadow-2xs"
-                                : "text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <Tablet className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={4}>
-                          {isTh ? "แท็บเล็ต (768px)" : "Tablet (768px)"}
-                        </TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => setDeviceMode("mobile")}
-                            className={`p-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              deviceMode === "mobile"
-                                ? "bg-background text-foreground shadow-2xs"
-                                : "text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <Smartphone className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={4}>
-                          {isTh ? "มือถือ (375px)" : "Mobile (375px)"}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  )}
-
-                  {/* Mode Switcher (Rendered / Raw Code) */}
-                  {previewItem && (
-                    <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/40">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewTab("rendered")}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                          previewTab === "rendered"
-                            ? "bg-background text-foreground shadow-2xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>
-                          {previewItem.format === "html"
-                            ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
-                            : previewItem.format === "markdown"
-                            ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
-                            : isTh ? "ข้อความ" : "Text"}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewTab("code")}
-                        className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                          previewTab === "code"
-                            ? "bg-background text-foreground shadow-2xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <Code className="h-3.5 w-3.5" />
-                        <span>{isTh ? "โค้ดต้นฉบับ" : "Source Code"}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Aligned Close Button (✕) */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewItem(null)}
-                        className="p-1.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0 ml-1"
-                        aria-label={isTh ? "ปิด" : "Close"}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" sideOffset={4}>
-                      {isTh ? "ปิด (Esc)" : "Close (Esc)"}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-            </DialogHeader>
-
-            {/* High-Fidelity 100% Editor-Matching Preview Content Body */}
-            <div className="flex-1 min-h-0 my-2 rounded-xl border border-border/70 bg-background overflow-hidden flex flex-col relative shadow-inner">
+            {/* Main Preview Container */}
+            <div className="h-[480px] lg:h-[540px] rounded-xl border border-border/70 bg-background overflow-hidden flex flex-col relative shadow-inner shrink-0">
               {previewTab === "rendered" ? (
-                previewItem?.format === "html" ? (
+                previewItem.format === "html" ? (
                   // Live HTML Webpage Preview with Simulated Browser Bar & Device Viewport
                   <div className="w-full h-full flex flex-col bg-muted/20 overflow-hidden">
                     {/* Simulated Browser Bar */}
@@ -1150,7 +1119,7 @@ export default function TemplatesView({
                       )}
                     </div>
                   </div>
-                ) : previewItem?.format === "markdown" ? (
+                ) : previewItem.format === "markdown" ? (
                   // 100% Editor-Matching Realistic Markdown Preview (Scrollbar on the far right edge)
                   <div className="flex-1 h-full overflow-y-auto w-full select-text">
                     <div className="editor-content-area flex w-full min-w-0 flex-col max-w-2xl sm:max-w-3xl mx-auto min-h-full px-6 py-5">
@@ -1171,7 +1140,7 @@ export default function TemplatesView({
                   </div>
                 ) : (
                   // Plain Text Formatting (Matching Plain Text Editor with scrollbar on the far right edge)
-                  <div className="flex-1 h-full overflow-y-auto w-full">
+                  <div className="flex-1 h-full overflow-y-auto w-full select-text">
                     <div
                       className="max-w-2xl mx-auto px-6 py-5 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed selection:bg-primary/20"
                       style={{
@@ -1184,53 +1153,198 @@ export default function TemplatesView({
                 )
               ) : (
                 // Raw Source Code
-                <div className="flex-1 h-full overflow-auto p-4 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed bg-muted/40 selection:bg-primary/20">
+                <div className="flex-1 h-full overflow-auto p-4 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed bg-muted/40 selection:bg-primary/20 select-text">
                   {previewContent}
                 </div>
               )}
             </div>
 
-            {/* Footer with Actions */}
-            <DialogFooter className="shrink-0 flex flex-row items-center justify-between gap-2 sm:justify-between pt-2 border-t border-border/40">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleCopyPreview}
-                className="rounded-xl text-xs gap-1.5 cursor-pointer"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                <span>{copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}</span>
-              </Button>
+            {/* Related Templates Grid (No horizontal scroll, clean heading without icon, genuinely related, max 12 items) */}
+            {relatedTemplates.length > 0 && (
+              <div className="space-y-3 pt-2 pb-8 shrink-0">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {isTh ? "เทมเพลตที่เกี่ยวข้อง" : "Related Templates"}
+                  </h2>
+                  <span className="text-[11px] text-muted-foreground font-medium">
+                    {relatedTemplates.length} {isTh ? "เทมเพลต" : "templates"}
+                  </span>
+                </div>
 
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPreviewItem(null)}
-                  className="rounded-xl text-xs cursor-pointer"
-                >
-                  {isTh ? "ปิด" : "Close"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    if (previewItem) {
-                      onCreateWithTemplate(previewItem.type, previewItem.format);
-                      setPreviewItem(null);
+                {/* Grid matching main catalog layout, max 12 items (at most 2 rows on desktop) */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {relatedTemplates.map((item) => renderTemplateCard(item))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+          // ==================== CATALOG VIEW (ALL TEMPLATES) ====================
+          <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5">
+            {/* 1. Header Section (Matching HomeView Style) */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <LayoutTemplate className="h-6 w-6 text-primary shrink-0" />
+                  <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                    {isTh ? "เทมเพลตทั้งหมด" : "All Templates"}
+                  </h1>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {isTh
+                    ? "เลือกเทมเพลตสำเร็จรูปเพื่อเริ่มต้นเขียนโน้ต ออกแบบหน้าเว็บ หรือจัดระเบียบงานได้ทันที"
+                    : "Choose pre-built templates to start writing notes, building web pages, or organizing tasks."}
+                </p>
+              </div>
+
+              {/* Functional Search Input Box */}
+              <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3.5 py-2 border border-sidebar-border/40 hover:border-primary/60 focus-within:border-primary w-full md:w-64 transition-all shadow-none group">
+                {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground group-focus-within:text-primary transition-colors")}
+                <input
+                  ref={searchInputRef}
+                  data-templates-search="true"
+                  type="text"
+                  placeholder={isTh ? "ค้นหาเทมเพลต..." : "Search templates..."}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setSearchQuery("");
+                      searchInputRef.current?.blur();
                     }
                   }}
-                  className="rounded-xl text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>{isTh ? "ใช้เทมเพลตนี้" : "Use this template"}</span>
-                </Button>
+                  className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                    aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                  >
+                    {renderIcon("x", "h-3 w-3")}
+                  </button>
+                )}
               </div>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </div>
+
+            {/* 2. Filter Pills (Shaded / Outlined Tint Style) */}
+            <div
+              className="flex items-center gap-1.5 pill-scrollbar w-full min-w-0 shrink-0 pb-1"
+              onWheel={(e) => {
+                if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                }
+              }}
+            >
+              {categories.map((cat) => {
+                const isSelected = selectedCategory === cat.id;
+                const count = categoryCounts[cat.id] ?? 0;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
+                        : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
+                    }`}
+                  >
+                    {cat.label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 3. Main Templates Showcase */}
+            <div className={`space-y-5 ${allFiltered.length === 0 ? "flex-1 flex flex-col items-center justify-center min-h-[360px]" : ""}`}>
+              {allFiltered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="h-12 w-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground">
+                    {renderIcon("search", "h-6 w-6 opacity-40")}
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {isTh ? "ไม่พบเทมเพลตที่ตรงกับการค้นหา" : "No templates found"}
+                  </p>
+                  <p className="text-xs text-muted-foreground max-w-sm">
+                    {isTh
+                      ? "ลองเปลี่ยนคำค้นหาหรือเลือกหมวดหมู่อื่นเพื่อดูเทมเพลตทั้งหมด"
+                      : "Try changing your search keywords or switch category filter to see all templates."}
+                  </p>
+                </div>
+              ) : selectedCategory === "all" && !searchQuery ? (
+                // Grouped Sections (Markdown, HTML, Text)
+                <>
+                  {/* Markdown (.md) Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-semibold text-foreground">
+                        <span>{isTh ? "เอกสารมาร์กดาวน์ (Markdown .md)" : "Markdown Documents (.md)"}</span>
+                      </h2>
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        {mdGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {mdGroup.map((item) => renderTemplateCard(item))}
+                    </div>
+                  </div>
+
+                  {/* HTML (.html) Section */}
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-semibold text-foreground">
+                        <span>{isTh ? "เทมเพลตหน้าเว็บ (HTML .html)" : "Web Page Templates (.html)"}</span>
+                      </h2>
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        {htmlGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {htmlGroup.map((item) => renderTemplateCard(item))}
+                    </div>
+                  </div>
+
+                  {/* Plain Text (.txt) Section */}
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-semibold text-foreground">
+                        <span>{isTh ? "ไฟล์ข้อความธรรมดา (Plain Text .txt)" : "Plain Text Documents (.txt)"}</span>
+                      </h2>
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        {txtGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {txtGroup.map((item) => renderTemplateCard(item))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Filtered unified grid
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-semibold text-foreground">
+                      <span>
+                        {searchQuery
+                          ? isTh ? `ผลการค้นหา (${allFiltered.length})` : `Search Results (${allFiltered.length})`
+                          : isTh ? `เทมเพลตที่เลือก (${allFiltered.length})` : `Selected Templates (${allFiltered.length})`}
+                      </span>
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {allFiltered.map((item) => renderTemplateCard(item))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );

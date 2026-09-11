@@ -41,6 +41,7 @@ declare global {
 }
 
 interface WebViewerViewProps {
+  tabId?: string;
   initialUrl: string;
   onUrlChange?: (url: string) => void;
   onTitleChange?: (title: string) => void;
@@ -52,6 +53,7 @@ interface WebViewerViewProps {
 }
 
 export default function WebViewerView({
+  tabId,
   initialUrl,
   onUrlChange,
   onTitleChange,
@@ -188,6 +190,20 @@ export default function WebViewerView({
       }
     }
   };
+
+  useEffect(() => {
+    const handleReloadEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ tabId?: string }>;
+      const targetId = customEvent.detail?.tabId;
+      if (!targetId || targetId === tabId) {
+        handleReloadOrStop();
+      }
+    };
+    window.addEventListener("luno:reload-web-tab", handleReloadEvent);
+    return () => {
+      window.removeEventListener("luno:reload-web-tab", handleReloadEvent);
+    };
+  }, [tabId, isLoading, currentUrl]);
 
   const handleGoBack = () => {
     if (isElectron && webviewRef.current) {

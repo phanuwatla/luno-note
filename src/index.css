@@ -1490,11 +1490,15 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"] {
   border-radius: 0.125rem !important;
 }
-.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"][data-selected="true"],
-.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"]:hover {
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"][data-selected="true"] {
   background-color: hsl(var(--primary) / 0.25) !important;
   color: hsl(var(--primary)) !important;
   box-shadow: 0 0 8px hsl(var(--primary) / 0.5);
+}
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] [role="menuitem"]:hover {
+  background-color: hsl(var(--primary) / 0.12) !important;
+  color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 6px hsl(var(--primary) / 0.35);
 }
 
 /* Catppuccin: Ultra-soft bubbly pastel marshmallow box */
@@ -1876,6 +1880,17 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .ProseMirror li p {
   margin-top: 0 !important;
   margin-bottom: 0 !important;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6,
+.ProseMirror table,
+.ProseMirror .tableWrapper {
+  scroll-margin-top: 2rem;
 }
 
 .ProseMirror h1 {
@@ -2400,11 +2415,8 @@ mark,
 }
 .luno-reading-view p:empty,
 .luno-reading-view p.is-empty {
-  height: 0.1rem !important;
-  min-height: 0.1rem !important;
-  margin-top: 0 !important;
-  margin-bottom: 0 !important;
-  line-height: 0 !important;
+  min-height: 1.5em;
+  margin: 0;
 }
 .luno-reading-view h1 {
   margin-top: 0.18rem !important;
@@ -2520,5 +2532,57 @@ html:not([data-animations="false"]) .animate-in {
 [data-app-theme="lime"] .luno-app-logo { filter: hue-rotate(270deg) saturate(1.2); }
 [data-app-theme="slate"] .luno-app-logo { filter: grayscale(0.85) brightness(1.1); }
 
+/* ==========================================================================
+   System-Wide Menu, Popover, Floating Menu & Context Menu Hover/Focus Styling
+   Hover: Lighter accent background (hsl(var(--primary) / 0.08)), accent text & icons
+   Focus: Standard accent background (hsl(var(--primary) / 0.15)), accent text & icons
+   ========================================================================== */
 
+/* Focus state (keyboard / highlighted without hover) */
+[role="menuitem"][data-highlighted]:not(:hover):not(.text-destructive),
+[role="menuitem"]:focus-visible:not(:hover):not(.text-destructive),
+[role="menuitemcheckbox"][data-highlighted]:not(:hover),
+[role="menuitemradio"][data-highlighted]:not(:hover),
+[role="option"][data-highlighted]:not(:hover),
+[cmdk-item][data-selected="true"]:not(:hover),
+[data-slash-item][data-selected="true"]:not(:hover),
+[data-flat-index][data-selected="true"]:not(:hover):not(.text-destructive) {
+  background-color: hsl(var(--primary) / 0.15) !important;
+  color: hsl(var(--primary)) !important;
+}
 
+/* Hover state (noticeably lighter accent than focus) */
+[role="menuitem"]:hover:not(.text-destructive):not([data-disabled="true"]),
+[role="menuitem"][data-highlighted]:hover:not(.text-destructive):not([data-disabled="true"]),
+[role="menuitemcheckbox"]:hover:not([data-disabled="true"]),
+[role="menuitemcheckbox"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitemradio"]:hover:not([data-disabled="true"]),
+[role="menuitemradio"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="option"]:hover:not([data-disabled="true"]),
+[role="option"][data-highlighted]:hover:not([data-disabled="true"]),
+[cmdk-item]:hover:not([data-disabled="true"]),
+[cmdk-item][data-selected="true"]:hover:not([data-disabled="true"]),
+[data-slash-item]:hover,
+[data-slash-item][data-selected="true"]:hover,
+[data-flat-index]:hover:not(.text-destructive) {
+  background-color: hsl(var(--primary) / 0.08) !important;
+  color: hsl(var(--primary)) !important;
+}
+
+/* Icons turn to accent color on both hover and focus */
+[role="menuitem"]:hover:not(.text-destructive) svg,
+[role="menuitem"][data-highlighted] svg,
+[role="menuitemcheckbox"]:hover svg,
+[role="menuitemcheckbox"][data-highlighted] svg,
+[role="menuitemradio"]:hover svg,
+[role="menuitemradio"][data-highlighted] svg,
+[role="option"]:hover svg,
+[role="option"][data-highlighted] svg,
+[cmdk-item]:hover svg,
+[cmdk-item][data-selected="true"] svg,
+[data-slash-item]:hover svg,
+[data-slash-item][data-selected="true"] svg,
+[data-flat-index]:hover:not(.text-destructive) svg,
+[data-flat-index][data-selected="true"]:not(.text-destructive) svg {
+  color: hsl(var(--primary)) !important;
+}

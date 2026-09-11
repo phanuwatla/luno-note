@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -18,6 +18,9 @@ import {
   Wand,
   FileCode,
   ChevronRight,
+  Maximize2,
+  HardDrive,
+  AlignJustify,
 } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import type { Editor } from "@tiptap/react";
@@ -36,6 +39,7 @@ import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson, isMarkdownN
 import { getTagColorClass } from "@/lib/tagColors";
 import { countWords, countCharacters, calculateReadingTime } from "@/lib/wordCount";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
+import { getFileCategory, formatFileSize, getFileFormatLabel } from "@/lib/fileIconUtils";
 
 interface RightPanelProps {
   isOpen: boolean;
@@ -51,6 +55,8 @@ interface RightPanelProps {
   onExportPdf?: () => void;
   onExportWord?: () => void;
   onSelectNote?: (id: string) => void;
+  imageDimensions?: { width: number; height: number } | null;
+  fileSize?: number | null;
 }
 
 interface OutlineItem {
@@ -74,6 +80,8 @@ function RightPanelComponent({
   onExportPdf,
   onExportWord,
   onSelectNote,
+  imageDimensions,
+  fileSize,
 }: RightPanelProps) {
   const { t } = useTranslation();
   const { settings, setFileIcon, removeFileIcon } = useAppSettings();
@@ -81,9 +89,76 @@ function RightPanelComponent({
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
+  const [editorDocVersion, setEditorDocVersion] = useState(0);
+
+  const fileCategory = useMemo(
+    () => getFileCategory(note),
+    [note?.fileName, note?.fileType, note?.contentFormat, note?.content]
+  );
+  const isNonTextMedia =
+    fileCategory === "image" ||
+    fileCategory === "audio" ||
+    fileCategory === "video" ||
+    fileCategory === "binary";
+
+  const [localDimensions, setLocalDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (imageDimensions) {
+      setLocalDimensions(imageDimensions);
+      return;
+    }
+    if (fileCategory === "image" && note?.content?.startsWith("data:image/")) {
+      const img = new Image();
+      img.onload = () => {
+        setLocalDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.src = note.content;
+    } else {
+      setLocalDimensions(null);
+    }
+  }, [imageDimensions, fileCategory, note?.content]);
+
+  const activeDimensions = imageDimensions || localDimensions;
+  const resolvedFileSize = useMemo(() => {
+    if (fileSize != null && fileSize > 0) return fileSize;
+    if (note?.fileSize != null && note.fileSize > 0) return note.fileSize;
+    if (note?.content) {
+      if (note.content.startsWith("data:")) {
+        const base64Part = note.content.split(",")[1] || "";
+        const padding = (base64Part.match(/=/g) || []).length;
+        return Math.max(0, Math.floor((base64Part.length * 3) / 4 - padding));
+      }
+      try {
+        return new Blob([note.content]).size;
+      } catch {
+        return new TextEncoder().encode(note.content).length;
+      }
+    }
+    if (fileSize === 0 || note?.fileSize === 0) return 0;
+    return null;
+  }, [fileSize, note?.fileSize, note?.content]);
+
+  // Auto-switch away from outline tab if opening a non-text file
+  useEffect(() => {
+    if (isNonTextMedia && activeTab === "outline") {
+      setActiveTab("properties");
+    }
+  }, [isNonTextMedia, activeTab]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const handleEditorUpdate = () => {
+      setEditorDocVersion((v) => v + 1);
+    };
+    editor.on("update", handleEditorUpdate);
+    return () => {
+      editor.off("update", handleEditorUpdate);
+    };
+  }, [editor]);
 
   const outlineItems = useMemo(() => {
-    if (!note) return [];
+    if (!note || isNonTextMedia) return [];
     const isTxtFile = note.fileName?.toLowerCase().endsWith(".txt") || note.contentFormat === "plain";
     if (isTxtFile) return [];
     const items: OutlineItem[] = [];
@@ -123,7 +198,7 @@ function RightPanelComponent({
     }
 
     return items;
-  }, [editor, note]);
+  }, [editor, note, editorDocVersion, isNonTextMedia]);
 
   // Backlinks (notes that link to or mention the current note title via Wikilinks or Markdown links)
   const backlinks = useMemo(() => {
@@ -167,22 +242,42 @@ function RightPanelComponent({
     });
   }, [note, notes]);
 
-  // Compute Word & Character Stats accurately for Thai and all languages (Microsoft Word standard)
+  // Compute Word, Line & Character Stats accurately
   const stats = useMemo(() => {
-    const rawText = editor
+    if (isNonTextMedia) {
+      return {
+        words: 0,
+        chars: 0,
+        readTime: "",
+        lines: 0,
+      };
+    }
+
+    const isCode =
+      fileCategory === "code" ||
+      note?.contentFormat === "html" ||
+      note?.contentFormat === "css";
+
+    // For code files or when TipTap doc is empty, use note.content
+    const textContent = (!isCode && editor && editor.state.doc.textContent.length > 0)
       ? editor.state.doc.textContent
       : (note?.content || "");
 
-    const words = countWords(rawText);
-    const chars = countCharacters(rawText);
+    // Line counting: note.content has literal \n line breaks
+    const rawLinesSource = note?.content || (editor ? editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n", "\n") : "");
+    const lines = rawLinesSource ? rawLinesSource.split("\n").length : (textContent ? 1 : 0);
+
+    const words = countWords(textContent);
+    const chars = countCharacters(textContent);
     const readTime = calculateReadingTime(words, chars, settings.language === "th" ? "th" : "en");
 
     return {
       words,
       chars,
       readTime,
+      lines,
     };
-  }, [editor?.state.doc, note?.content, settings.language]);
+  }, [isNonTextMedia, fileCategory, note?.contentFormat, note?.content, editor?.state.doc, settings.language]);
 
   // Format Dates with localization & user settings
   const formattedDates = useMemo(() => {
@@ -198,9 +293,145 @@ function RightPanelComponent({
   }, [note?.createdAt, note?.updatedAt, settings.dateFormat, settings.timeFormat, settings.language]);
 
   const handleScrollToItem = (item: OutlineItem) => {
-    if (editor && item.pos !== undefined) {
-      editor.commands.setTextSelection(item.pos);
-      editor.commands.scrollIntoView();
+    // 1. Resolve freshest node position from editor state to avoid stale memoized pos
+    let targetPos = item.pos;
+
+    if (editor) {
+      const cleanItemText = item.text.trim().toLowerCase();
+      editor.state.doc.descendants((node, pos) => {
+        if (item.level === "table" && node.type.name === "table") {
+          if (item.pos === undefined || Math.abs(pos - (item.pos || 0)) < 100) {
+            targetPos = pos;
+          }
+        } else if (node.type.name === "heading") {
+          const lvl = `h${node.attrs.level || 1}`;
+          const text = (node.textContent || "").trim().toLowerCase();
+          if (lvl === item.level && text === cleanItemText) {
+            if (targetPos === undefined || Math.abs(pos - (item.pos ?? 0)) < 100 || item.id === `heading-${pos}`) {
+              targetPos = pos;
+            }
+          }
+        }
+      });
+
+      // Update cursor / selection to the item in TipTap editor
+      if (targetPos !== undefined) {
+        try {
+          editor.commands.setTextSelection(targetPos);
+        } catch {
+          // ignore
+        }
+      }
+
+      // Safely focus editor without triggering browser native focus-scroll (preventScroll: true)
+      // which would otherwise cancel/abort the smooth scroll animation on the first click
+      if (!editor.view.hasFocus()) {
+        try {
+          editor.view.dom.focus({ preventScroll: true });
+        } catch {
+          // fallback
+        }
+      }
+    }
+
+    // 2. Locate the DOM element corresponding to the outline item
+    let targetEl: HTMLElement | null = null;
+
+    if (editor && targetPos !== undefined) {
+      try {
+        const dom = editor.view.nodeDOM(targetPos);
+        if (dom instanceof HTMLElement) {
+          targetEl = dom;
+        }
+      } catch {
+        // ignore
+      }
+
+      if (!targetEl) {
+        try {
+          const atPos = editor.view.domAtPos(targetPos);
+          const candidate = atPos.node instanceof HTMLElement ? atPos.node : atPos.node.parentElement;
+          targetEl = (candidate?.closest("h1, h2, h3, h4, h5, h6, table, .tableWrapper, [data-node-view-wrapper]") as HTMLElement) || candidate || null;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (!targetEl && editor?.view?.dom) {
+      const cleanItemText = item.text.trim().toLowerCase();
+      if (item.level === "table") {
+        targetEl = (editor.view.dom.querySelector("table, .tableWrapper") as HTMLElement) || null;
+      } else {
+        const headings = Array.from(editor.view.dom.querySelectorAll(item.level)) as HTMLElement[];
+        targetEl = headings.find((h) => (h.textContent || "").trim().toLowerCase() === cleanItemText) || null;
+        if (!targetEl && cleanItemText && headings.length > 0) {
+          targetEl = headings.find((h) => (h.textContent || "").trim().toLowerCase().includes(cleanItemText)) || null;
+        }
+      }
+    }
+
+    // Fallback: document query selector
+    if (!targetEl) {
+      targetEl = (document.getElementById(item.id) as HTMLElement) || null;
+    }
+
+    // 3. If inside a collapsed toggle/details, expand it
+    if (targetEl) {
+      const details = targetEl.closest("details");
+      if (details && !details.open) {
+        details.open = true;
+      }
+    }
+
+    // 4. Find the scrollable container and paper container
+    const scrollContainer =
+      (editor?.view?.dom ? (editor.view.dom.closest(".overflow-y-auto") as HTMLElement | null) : null) ||
+      (targetEl ? (targetEl.closest(".overflow-y-auto") as HTMLElement | null) : null) ||
+      (document.querySelector(".luno-editor-container") as HTMLElement | null) ||
+      document.documentElement;
+
+    const paperContainer =
+      (editor?.view?.dom?.closest(".min-h-full") as HTMLElement | null) ||
+      (scrollContainer ? (scrollContainer.querySelector(".min-h-full") as HTMLElement | null) : null);
+
+    // Padding top of the document/paper layout
+    const paperPaddingTop = paperContainer ? (parseFloat(window.getComputedStyle(paperContainer).paddingTop) || 0) : 32;
+
+    // 5. Scroll so the item is positioned exactly at the top of the paper (หัวกระดาษ)
+    // If it's the very first heading/title (pos 0 or 1), scroll to the very top of the paper (top: 0)
+    const isFirstHeading = targetPos === 0 || targetPos === 1;
+
+    if (scrollContainer) {
+      if (isFirstHeading) {
+        scrollContainer.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+      } else if (targetEl) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const targetRect = targetEl.getBoundingClientRect();
+
+        // Calculate distance relative to current scroll viewport
+        const currentRelativeTop = targetRect.top - containerRect.top;
+
+        // Position targetEl exactly at paperPaddingTop below the top of the scroll container
+        const targetScrollTop = scrollContainer.scrollTop + currentRelativeTop - paperPaddingTop;
+        const finalScrollTop = Math.max(0, targetScrollTop);
+
+        scrollContainer.scrollTo({
+          top: finalScrollTop,
+          behavior: "smooth",
+        });
+      }
+    }
+
+    // 6. Provide brief subtle visual focus feedback on target element
+    if (targetEl) {
+      targetEl.classList.add("bg-primary/20", "transition-colors", "duration-500", "rounded");
+      setTimeout(() => {
+        targetEl?.classList.remove("bg-primary/20");
+      }, 1200);
     }
   };
 
@@ -248,18 +479,20 @@ function RightPanelComponent({
       {/* Header Tabs (Outline / Properties / Backlinks) */}
       <div className="flex h-11 items-center justify-between border-b border-border/50 px-4 pt-2 shrink-0">
         <div className="flex items-center gap-4 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setActiveTab("outline")}
-            className={`relative pb-2.5 transition-colors ${
-              activeTab === "outline" ? "text-foreground font-bold" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t("rightPanel.outline")}
-            {activeTab === "outline" && (
-              <motion.div layoutId="rightPanelTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
-            )}
-          </button>
+          {!isNonTextMedia && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("outline")}
+              className={`relative pb-2.5 transition-colors ${
+                activeTab === "outline" ? "text-foreground font-bold" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t("rightPanel.outline")}
+              {activeTab === "outline" && (
+                <motion.div layoutId="rightPanelTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+              )}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveTab("properties")}
@@ -320,6 +553,9 @@ function RightPanelComponent({
                         <button
                           key={item.id}
                           type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                          }}
                           onClick={() => handleScrollToItem(item)}
                           className={`flex w-full items-center gap-2 py-1.5 text-left rounded-md hover:bg-muted/60 transition-colors ${levelPadding}`}
                         >
@@ -339,33 +575,37 @@ function RightPanelComponent({
 
               {/* TAB 2: PROPERTIES */}
               {activeTab === "properties" && (
-                <div className="space-y-3 text-xs">
-                  <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between py-0.5">
                     <span className="text-muted-foreground">{t("rightPanel.fileName")}</span>
                     <span className="font-medium text-foreground">{note.fileName || t("editor.untitled")}</span>
                   </div>
-                  <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+                  <div className="flex items-center justify-between py-0.5">
                     <span className="text-muted-foreground">{t("rightPanel.fileType")}</span>
-                    <span className="font-medium text-foreground uppercase">{note.fileType || note.contentFormat || "MD"}</span>
+                    <span className="font-medium text-foreground uppercase">{getFileFormatLabel(note, settings.language) || note.fileType || note.contentFormat || "MD"}</span>
                   </div>
-                  <div className="flex items-center justify-between py-1.5 border-b border-border/40">
+                  <div className="flex items-center justify-between py-0.5">
                     <span className="text-muted-foreground">{t("rightPanel.folder")}</span>
                     <span className="font-medium text-foreground">{note.folderPath || t("rightPanel.root")}</span>
                   </div>
-                  <div className="flex items-center justify-between py-1.5 border-b border-border/40">
-                    <span className="text-muted-foreground">{t("sidebar.changeNoteIcon") || "Icon"}</span>
-                    <button
-                      type="button"
-                      onClick={() => setIconPickerOpen(true)}
-                      className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-muted/70 text-foreground transition-colors cursor-pointer border border-border/40 text-xs"
-                    >
-                      {currentIcon ? (
-                        renderCustomIcon(currentIcon, "h-3.5 w-3.5", { color: currentColor })
-                      ) : (
-                        <span className="text-muted-foreground text-[11px]">{t("iconPicker.title") || "Change..."}</span>
-                      )}
-                    </button>
-                  </div>
+                  {resolvedFileSize != null && (
+                    <div className="flex items-center justify-between py-0.5">
+                      <span className="text-muted-foreground">{t("rightPanel.fileSize") || "File size"}</span>
+                      <span className="font-medium text-foreground">{formatFileSize(resolvedFileSize)}</span>
+                    </div>
+                  )}
+                  {Boolean(currentIcon) && (
+                    <div className="flex items-center justify-between py-0.5">
+                      <span className="text-muted-foreground">{t("sidebar.changeNoteIcon") || "Icon"}</span>
+                      <button
+                        type="button"
+                        onClick={() => setIconPickerOpen(true)}
+                        className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-muted/70 text-foreground transition-colors cursor-pointer border border-border/40 text-xs"
+                      >
+                        {renderCustomIcon(currentIcon, "h-3.5 w-3.5", { color: currentColor })}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -454,6 +694,7 @@ function RightPanelComponent({
               <div className="space-y-2.5">
                 <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t("rightPanel.infoSection")}</h4>
                 <div className="space-y-2 text-xs">
+                  {/* Created date - Always shown */}
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
                       {renderIcon("clock", "h-3.5 w-3.5 shrink-0")}
@@ -462,6 +703,7 @@ function RightPanelComponent({
                     <span className="font-medium text-foreground/80">{formattedDates.created}</span>
                   </div>
 
+                  {/* Updated date - Always shown */}
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span className="flex items-center gap-2">
                       {renderIcon("pencil", "h-3.5 w-3.5 shrink-0")}
@@ -470,29 +712,62 @@ function RightPanelComponent({
                     <span className="font-medium text-foreground/80">{formattedDates.updated}</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span className="flex items-center gap-2">
-                      {renderIcon("fileText", "h-3.5 w-3.5 shrink-0")}
-                      <span>{t("rightPanel.wordCount")}</span>
-                    </span>
-                    <span className="font-medium text-foreground/80">{stats.words.toLocaleString()}</span>
-                  </div>
+                  {/* Image Dimensions - Shown only for images when known */}
+                  {fileCategory === "image" && activeDimensions && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="flex items-center gap-2">
+                        <Maximize2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>{t("rightPanel.imageDimensions") || "Dimensions"}</span>
+                      </span>
+                      <span className="font-medium text-foreground/80">
+                        {activeDimensions.width} × {activeDimensions.height} px
+                      </span>
+                    </div>
+                  )}
 
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span className="flex items-center gap-2">
-                      {renderIcon("fileText", "h-3.5 w-3.5 shrink-0")}
-                      <span>{t("rightPanel.characterCount")}</span>
-                    </span>
-                    <span className="font-medium text-foreground/80">{stats.chars.toLocaleString()}</span>
-                  </div>
+                  {/* Lines - Shown for code files */}
+                  {fileCategory === "code" && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="flex items-center gap-2">
+                        <AlignJustify className="h-3.5 w-3.5 shrink-0" />
+                        <span>{t("rightPanel.lines") || "Lines"}</span>
+                      </span>
+                      <span className="font-medium text-foreground/80">{stats.lines.toLocaleString()}</span>
+                    </div>
+                  )}
 
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span className="flex items-center gap-2">
-                      {renderIcon("clock", "h-3.5 w-3.5 shrink-0")}
-                      <span>{t("rightPanel.readingTime")}</span>
-                    </span>
-                    <span className="font-medium text-foreground/80">{stats.readTime}</span>
-                  </div>
+                  {/* Words - Shown for markdown and plain text files only */}
+                  {(fileCategory === "markdown" || fileCategory === "text") && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="flex items-center gap-2">
+                        {renderIcon("fileText", "h-3.5 w-3.5 shrink-0")}
+                        <span>{t("rightPanel.wordCount")}</span>
+                      </span>
+                      <span className="font-medium text-foreground/80">{stats.words.toLocaleString()}</span>
+                    </div>
+                  )}
+
+                  {/* Characters - Shown for markdown, plain text, and code files */}
+                  {(fileCategory === "markdown" || fileCategory === "text" || fileCategory === "code") && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="flex items-center gap-2">
+                        <Type className="h-3.5 w-3.5 shrink-0" />
+                        <span>{t("rightPanel.characterCount")}</span>
+                      </span>
+                      <span className="font-medium text-foreground/80">{stats.chars.toLocaleString()}</span>
+                    </div>
+                  )}
+
+                  {/* Reading time - Shown for markdown and plain text files only */}
+                  {(fileCategory === "markdown" || fileCategory === "text") && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span className="flex items-center gap-2">
+                        {renderIcon("clock", "h-3.5 w-3.5 shrink-0")}
+                        <span>{t("rightPanel.readingTime")}</span>
+                      </span>
+                      <span className="font-medium text-foreground/80">{stats.readTime}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -520,30 +795,32 @@ function RightPanelComponent({
                   <span>{t("sidebar.duplicateAction")}</span>
                 </button>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {renderIcon("download", "h-4 w-4 text-muted-foreground shrink-0")}
-                        <span>{t("rightPanel.export")}</span>
-                      </div>
-                      {renderIcon("chevronRight", "h-3.5 w-3.5 text-muted-foreground/60")}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" side="top" className="w-52 rounded-xl px-0 py-2 shadow-lg">
-                    <DropdownMenuItem disabled={!note} onClick={onExportPdf} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                      {renderIcon("fileText", "h-4 w-4")}
-                      <span>{t("editor.exportPdf")}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem disabled={!note} onClick={onExportWord} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
-                      {renderIcon("fileCode", "h-4 w-4")}
-                      <span>{t("editor.exportWord")}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {!isNonTextMedia && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {renderIcon("download", "h-4 w-4 text-muted-foreground shrink-0")}
+                          <span>{t("rightPanel.export")}</span>
+                        </div>
+                        {renderIcon("chevronRight", "h-3.5 w-3.5 text-muted-foreground/60")}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" side="top" className="w-52">
+                      <DropdownMenuItem disabled={!note} onClick={onExportPdf}>
+                        {renderIcon("fileText", "h-4 w-4")}
+                        <span>{t("editor.exportPdf")}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!note} onClick={onExportWord}>
+                        {renderIcon("fileCode", "h-4 w-4")}
+                        <span>{t("editor.exportWord")}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
                 <button
                   type="button"

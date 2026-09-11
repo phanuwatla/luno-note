@@ -4,6 +4,7 @@ import VersionHistoryPanel from "@/components/VersionHistoryPanel";
 import VersionHistorySplitDiffView from "@/components/VersionHistorySplitDiffView";
 import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHistoryStorage";
 import { AnimatePresence } from "framer-motion";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
@@ -90,8 +91,12 @@ import {
   Globe,
   Search,
   GlobeOff,
+  ZoomIn,
+  ZoomOut,
+  Image as ImageIcon,
   Lock,
   Unlock,
+  Printer,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
@@ -107,6 +112,7 @@ import FloatingTranslator from "@/components/FloatingTranslator";
 import FloatingClock from "@/components/FloatingClock";
 import FloatingAudioRecorder from "@/components/FloatingAudioRecorder";
 import AudioExtension from "@/components/editor/AudioExtension";
+import AudioPlayer from "@/components/editor/AudioPlayer";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -136,6 +142,7 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
 import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
+import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
 import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
 import { parseFrontmatterAndTags, updateFrontmatterTags, updateFrontmatterIcon, updateFrontmatterFavorite, isMarkdownNote } from "@/lib/frontmatter";
@@ -172,7 +179,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import { countWords, countCharacters } from "@/lib/wordCount";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
-import { Underline, Highlight, Superscript, Subscript } from "@/lib/tiptapCustomMarks";
+import { Underline, Highlight, Superscript, Subscript, Kbd } from "@/lib/tiptapCustomMarks";
 
 /** Preserves full ProseMirror undo/redo history and document state per note across tab switching */
 export const noteEditorStateMap = new Map<string, EditorState>();
@@ -215,6 +222,46 @@ export function clearNoteEditorHistory(noteId: string) {
 }
 
 export const clearNoteEditorState = clearNoteEditorHistory;
+
+export function normalizeSerializedMarkdown(markdown: string): string {
+  let clean = markdown.replace(/\r\n?/g, "\n");
+
+  // 1. Extract leading blank tokens
+  let leadingCount = 0;
+  const leadMatch = clean.match(/^(?:[\r\n]*<!--luno:blank-->[\r\n]*)+/);
+  if (leadMatch) {
+    leadingCount = (leadMatch[0].match(/<!--luno:blank-->/g) || []).length;
+    clean = clean.slice(leadMatch[0].length);
+  }
+
+  // 2. Extract trailing blank tokens
+  let trailingCount = 0;
+  const trailMatch = clean.match(/(?:[\r\n]*<!--luno:blank-->[\r\n]*)+$/);
+  if (trailMatch) {
+    trailingCount = (trailMatch[0].match(/<!--luno:blank-->/g) || []).length;
+    clean = clean.slice(0, clean.length - trailMatch[0].length);
+  }
+
+  // 3. Internal blanks between blocks: k empty paragraphs -> k blank lines (k + 1 newlines)
+  clean = clean.replace(/\n+(?:[ \t]*<!--luno:blank-->[ \t]*\n*)+/g, (match) => {
+    const k = (match.match(/<!--luno:blank-->/g) || []).length;
+    return "\n".repeat(k + 1);
+  });
+
+  clean = clean.replace(/<!--luno:blank-->/g, "");
+  clean = clean.replace(/\n[ \t]*\|[ \t|]*\n/g, "\n\n");
+  clean = clean.replace(/[ \t]+(?=\n)/g, "");
+  clean = clean.replace(/^\n+|\n+$/g, "");
+
+  if (leadingCount > 0) {
+    clean = "\n".repeat(leadingCount) + clean;
+  }
+  if (trailingCount > 0) {
+    clean = clean + "\n".repeat(trailingCount);
+  }
+
+  return clean;
+}
 
 /** Preprocess Markdown to preserve paragraph first-line indentation and empty paragraphs while preserving code blocks and syntax */
 export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boolean = false): string {
@@ -325,10 +372,10 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
       }
 
       blankCount = Math.min(blankCount, 50);
+
       if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
         resultLines.push("");
       }
-      // In Markdown, 1 blank line separates blocks. Extra blank lines (blankCount > 1) represent intentional empty paragraphs.
       for (let b = 0; b < blankCount; b++) {
         resultLines.push("<p></p>");
       }
@@ -439,7 +486,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
 }
 
 export const EDITOR_CLASSES =
-  "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+  "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&>h1:first-child]:mb-6 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
   " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
   " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
   " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
@@ -572,17 +619,6 @@ export const prepareDomForEditor = (
         if (cachedBlobUrl) {
           img.setAttribute("src", cachedBlobUrl);
         }
-      }
-    }
-  });
-
-  // Clean up empty paragraph before an image or audio
-  root.querySelectorAll("p").forEach((p) => {
-    if (p.closest("table, td, th")) return;
-    if (!p.textContent?.trim() && !p.querySelector("img, audio, input, label")) {
-      const next = p.nextElementSibling;
-      if (next && (next.tagName === "IMG" || next.tagName === "AUDIO")) {
-        p.remove();
       }
     }
   });
@@ -725,13 +761,19 @@ export const prepareDomForEditor = (
     details.insertBefore(newSummary, details.firstChild);
   });
 
-  // Ensure all empty paragraphs have <br> so static HTML previews render real blank lines with full line-height matching the Editor
-  root.querySelectorAll("p").forEach((p) => {
-    if (!p.textContent?.trim() && p.children.length === 0) {
-      p.innerHTML = "<br>";
-    }
-  });
+  // Only inject <br> into empty paragraphs for external static HTML previews, NEVER for TipTap Editor
+  // TipTap/ProseMirror natively handles empty <p></p> by adding its single trailing break. Adding <br> causes doubled breaks.
+  if (options && (options as Record<string, unknown>).forStaticHtmlPreview === true) {
+    root.querySelectorAll("p").forEach((p) => {
+      if (!p.textContent?.trim() && p.children.length === 0) {
+        p.innerHTML = "<br>";
+      }
+    });
+  }
 };
+
+const markdownRenderCache = new Map<string, string>();
+const MAX_MARKDOWN_CACHE_SIZE = 100;
 
 export function renderMarkdownToEditorHtml(
   markdown: string,
@@ -760,10 +802,19 @@ export function renderMarkdownToEditorHtml(
     return lines.map((l) => `<p>${l ? escapeHtml(l) : "<br>"}</p>`).join("");
   }
 
+  const isReading = Boolean(options?.isReadingMode);
+  const theme = options?.theme || "";
+  const tagStyle = options?.tagColorStyle || "";
+  // Check cache for identical markdown content and display options
+  const cacheKey = `${isReading}:${theme}:${tagStyle}:${markdown.length}:${markdown}`;
+  const cached = markdownRenderCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   // 1. Strip Frontmatter block if present
   const parsedFm = parseFrontmatterAndTags(markdown);
-  let cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : markdown;
-  cleanText = cleanText.replace(/^\r?\n/, "");
+  const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : markdown;
 
   // 2. Normalize standalone `[ ]` or `[x]` lines to `- [ ]`
   const normalizedText = cleanText.replace(/^([ \t]*)\[([ xX])\]\s*(.*)$/gm, "$1- [$2] $3");
@@ -783,6 +834,7 @@ export function renderMarkdownToEditorHtml(
     rawHtml = cleanText;
   }
 
+  let finalHtml = "";
   // 6. Complete DOM transformations matching Editor 100%
   if (typeof document !== "undefined") {
     const root = document.createElement("div");
@@ -792,12 +844,21 @@ export function renderMarkdownToEditorHtml(
 
     const cleanHtml = root.innerHTML
       .replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "")
-      .replace(/>\s+</g, "><");
+      .replace(/>\s+</g, "><")
+      .trim();
 
-    return cleanHtml;
+    finalHtml = sanitizeHtml(cleanHtml);
+  } else {
+    finalHtml = sanitizeHtml(rawHtml.trim());
   }
 
-  return rawHtml;
+  if (markdownRenderCache.size >= MAX_MARKDOWN_CACHE_SIZE) {
+    const oldestKey = markdownRenderCache.keys().next().value;
+    if (oldestKey) markdownRenderCache.delete(oldestKey);
+  }
+  markdownRenderCache.set(cacheKey, finalHtml);
+
+  return finalHtml;
 }
 
 function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
@@ -1357,8 +1418,9 @@ import { encryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { compressImageFile } from "@/lib/imageCompressor";
-import { saveImageToIndexedDb } from "@/lib/imageStore";
+import { saveImageToIndexedDb, getImageFromIndexedDb } from "@/lib/imageStore";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -2203,7 +2265,7 @@ export interface EditorProps {
   rightPanelOpen?: boolean;
   onCloseRightPanel?: () => void;
   onSelectNote?: (id: string) => void;
-  onOpenWebTab?: (url: string) => void;
+  onOpenWebTab?: (url: string, initialTitle?: string) => void;
   onUnlockNote?: (noteId: string, pin: string) => Promise<boolean>;
   onRelockNote?: (noteId: string) => void;
   onGetActivePin?: (noteId: string) => string | undefined;
@@ -2216,7 +2278,6 @@ interface SaveSnapshot {
 }
 
 function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
-  if (!editor || !editor.isEditable) return null;
   const { t } = useTranslation();
   const [tableRect, setTableRect] = useState<DOMRect | null>(null);
   const [cellRect, setCellRect] = useState<DOMRect | null>(null);
@@ -2401,13 +2462,13 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       {
         id: "toggleHeaderRow",
         label: t("editor.toggleHeaderRow"),
-        icon: <TableIcon className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <TableIcon className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().toggleHeaderRow().run(),
       },
       {
         id: "toggleHeaderColumn",
         label: t("editor.toggleHeaderColumn"),
-        icon: <Columns className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <Columns className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().toggleHeaderColumn().run(),
       },
       ...(isMultiSelection || canMerge
@@ -2415,7 +2476,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
             {
               id: "mergeCells",
               label: t("editor.mergeCells"),
-              icon: <Layers className="mr-2 h-4 w-4 shrink-0" />,
+              icon: <Layers className="h-4 w-4 shrink-0" />,
               action: () => editor.chain().focus().mergeCells().run(),
             },
           ]
@@ -2425,7 +2486,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
             {
               id: "splitCell",
               label: t("editor.splitCell"),
-              icon: <Layers className="mr-2 h-4 w-4 shrink-0" />,
+              icon: <Layers className="h-4 w-4 shrink-0" />,
               action: () => editor.chain().focus().splitCell().run(),
             },
           ]
@@ -2433,51 +2494,51 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       {
         id: "addColumnBefore",
         label: t("editor.addColumnLeft"),
-        icon: <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <ArrowLeft className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().addColumnBefore().run(),
       },
       {
         id: "addColumnAfter",
         label: t("editor.addColumnRight"),
-        icon: <ArrowRight className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <ArrowRight className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().addColumnAfter().run(),
       },
       {
         id: "addRowBefore",
         label: t("editor.addRowAbove"),
-        icon: <ArrowUp className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <ArrowUp className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().addRowBefore().run(),
       },
       {
         id: "addRowAfter",
         label: t("editor.addRowBelow"),
-        icon: <ArrowDown className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <ArrowDown className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().addRowAfter().run(),
       },
       {
         id: "clearContents",
         label: t("editor.clearContents"),
-        icon: <Eraser className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <Eraser className="h-4 w-4 shrink-0" />,
         action: () => editor.chain().focus().deleteSelection().run(),
       },
       {
         id: "deleteRow",
         label: t("editor.deleteRow"),
-        icon: <DeleteRowIcon className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <DeleteRowIcon className="h-4 w-4 shrink-0" />,
         danger: true,
         action: () => editor.chain().focus().deleteRow().run(),
       },
       {
         id: "deleteColumn",
         label: t("editor.deleteColumn"),
-        icon: <DeleteColumnIcon className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <DeleteColumnIcon className="h-4 w-4 shrink-0" />,
         danger: true,
         action: () => editor.chain().focus().deleteColumn().run(),
       },
       {
         id: "deleteTable",
         label: t("editor.deleteTable"),
-        icon: <DeleteTableIcon className="mr-2 h-4 w-4 shrink-0" />,
+        icon: <DeleteTableIcon className="h-4 w-4 shrink-0" />,
         danger: true,
         action: () => editor.chain().focus().deleteTable().run(),
       },
@@ -2493,14 +2554,14 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
     list.push({
       id: "duplicate",
       label: t("editor.duplicate"),
-      icon: <Copy className="mr-2 h-4 w-4 shrink-0" />,
+      icon: <Copy className="h-4 w-4 shrink-0" />,
       action: () => setDuplicateSubmenuOpen((v) => !v),
     });
     if (duplicateSubmenuOpen) {
       list.push({
         id: "duplicateRow",
         label: t("editor.duplicateRow"),
-        icon: <DeleteRowIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />,
+        icon: <DeleteRowIcon className="h-4 w-4 shrink-0 opacity-70" />,
         action: () => {
           editor.chain().focus().addRowAfter().run();
           setMenuOpen(false);
@@ -2510,7 +2571,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       list.push({
         id: "duplicateColumn",
         label: t("editor.duplicateColumn"),
-        icon: <DeleteColumnIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />,
+        icon: <DeleteColumnIcon className="h-4 w-4 shrink-0 opacity-70" />,
         action: () => {
           editor.chain().focus().addColumnAfter().run();
           setMenuOpen(false);
@@ -2568,7 +2629,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
     }
   }, [selectedIndex, menuOpen]);
 
-  if (!editor || editor.isDestroyed || !editor.isActive("table") || !tableRect || !cellRect) {
+  if (!editor || !editor.isEditable || editor.isDestroyed || !editor.isActive("table") || !tableRect || !cellRect) {
     return null;
   }
 
@@ -2656,14 +2717,14 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       {menuOpen && (
         <div
           ref={popoverRef}
-          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
+          className="fixed z-50 w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
           style={{
             top: `${Math.min(menuPos.top, window.innerHeight - 360)}px`,
             left: `${Math.min(menuPos.left, window.innerWidth - 240)}px`,
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
             {t("editor.tableOptions")}
           </div>
 
@@ -2683,7 +2744,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
           <div
             ref={scrollContainerRef}
             onScroll={checkScroll}
-            className="overflow-y-auto no-scrollbar flex-1 py-1 pb-3"
+            className="overflow-y-auto no-scrollbar flex-1 py-1"
           >
             {normalItems.map((item) => {
               const flatIndex = currentFlatIndex++;
@@ -2694,10 +2755,10 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                   data-flat-index={flatIndex}
                   role="button"
                   tabIndex={0}
-                  className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground ${
                     isSelected
-                      ? "bg-accent/5 text-primary font-semibold"
-                      : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                      ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
+                      : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
                   }`}
                   onMouseEnter={() => setSelectedIndex(flatIndex)}
                   onClick={() => {
@@ -2721,15 +2782,15 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                     data-flat-index={duplicateFlatIndex}
                     role="button"
                     tabIndex={0}
-                    className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground ${
                       isDuplicateSelected
-                        ? "bg-accent/5 text-primary font-semibold"
-                        : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                        ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
+                        : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
                     }`}
                     onMouseEnter={() => setSelectedIndex(duplicateFlatIndex)}
                     onClick={() => setDuplicateSubmenuOpen((v) => !v)}
                   >
-                    <Copy className="mr-2 h-4 w-4 shrink-0" />
+                    <Copy className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="truncate flex-1">{t("editor.duplicate")}</span>
                     <ChevronRight
                       className={`ml-auto h-4 w-4 shrink-0 opacity-60 transition-transform ${
@@ -2748,10 +2809,10 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                             data-flat-index={dupRowIndex}
                             role="button"
                             tabIndex={0}
-                            className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
+                            className={`ml-4 flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:text-muted-foreground ${
                               isDupRowSelected
-                                ? "bg-accent/5 text-primary font-semibold"
-                                : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                                ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
+                                : "text-foreground/90 font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
                             }`}
                             onMouseEnter={() => setSelectedIndex(dupRowIndex)}
                             onClick={() => {
@@ -2760,7 +2821,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                               setDuplicateSubmenuOpen(false);
                             }}
                           >
-                            <DeleteRowIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <DeleteRowIcon className="h-4 w-4 shrink-0 opacity-70" />
                             <span className="truncate flex-1">{t("editor.duplicateRow")}</span>
                           </div>
                         );
@@ -2773,10 +2834,10 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                             data-flat-index={dupColIndex}
                             role="button"
                             tabIndex={0}
-                            className={`mx-1 ml-6 flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-xs transition-colors select-none ${
+                            className={`ml-4 flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:text-muted-foreground ${
                               isDupColSelected
-                                ? "bg-accent/5 text-primary font-semibold"
-                                : "text-foreground/90 font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                                ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
+                                : "text-foreground/90 font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
                             }`}
                             onMouseEnter={() => setSelectedIndex(dupColIndex)}
                             onClick={() => {
@@ -2785,7 +2846,7 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                               setDuplicateSubmenuOpen(false);
                             }}
                           >
-                            <DeleteColumnIcon className="mr-2 h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <DeleteColumnIcon className="h-4 w-4 shrink-0 opacity-70" />
                             <span className="truncate flex-1">{t("editor.duplicateColumn")}</span>
                           </div>
                         );
@@ -2798,8 +2859,8 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
 
             {dangerItems.length > 0 && (
               <>
-                <div className="my-1 border-t border-border/40" />
-                <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider shrink-0">
+                <div className="-mx-1 my-1 h-px bg-border/60" />
+                <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider shrink-0">
                   {t("editor.deleteActions")}
                 </div>
                 {dangerItems.map((item) => {
@@ -2811,10 +2872,10 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
                       data-flat-index={flatIndex}
                       role="button"
                       tabIndex={0}
-                      className={`mx-1 flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm transition-colors select-none ${
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${
                         isSelected
-                          ? "bg-accent/5 text-primary font-semibold"
-                          : "text-foreground font-normal hover:bg-accent/5 hover:text-primary hover:font-semibold"
+                          ? "bg-destructive/10 text-destructive font-medium"
+                          : "text-destructive font-normal hover:bg-destructive/10 hover:text-destructive"
                       }`}
                       onMouseEnter={() => setSelectedIndex(flatIndex)}
                       onClick={() => {
@@ -2849,6 +2910,66 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
   );
 }
 
+export const CustomParagraph = Paragraph.extend({
+  parseHTML() {
+    return [
+      { tag: "p" },
+      {
+        tag: "div",
+        getAttrs: (element: HTMLElement) => {
+          if (
+            element.classList?.contains("code-block-wrapper") ||
+            element.classList?.contains("tableWrapper") ||
+            element.closest("details, table, [data-type='taskItem']")
+          ) {
+            return false;
+          }
+          return { rawTag: "div" };
+        },
+      },
+    ];
+  },
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      id: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("id"),
+        renderHTML: (attributes) => {
+          if (!attributes.id) return {};
+          return { id: attributes.id };
+        },
+      },
+      "data-footnote-def": {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-footnote-def"),
+        renderHTML: (attributes) => {
+          if (!attributes["data-footnote-def"]) return {};
+          return { "data-footnote-def": attributes["data-footnote-def"] };
+        },
+      },
+      rawTag: {
+        default: null,
+        parseHTML: (element) =>
+          element.getAttribute("data-raw-tag") ||
+          (element.tagName?.toLowerCase() === "div" ? "div" : null),
+        renderHTML: (attributes) => {
+          if (!attributes.rawTag) return {};
+          return { "data-raw-tag": attributes.rawTag };
+        },
+      },
+      style: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("style"),
+        renderHTML: (attributes) => {
+          if (!attributes.style) return {};
+          return { style: attributes.style };
+        },
+      },
+    };
+  },
+});
+
 export function createTurndownService(assetBlobUrlMap?: Map<string, string>): TurndownService {
   const td = new TurndownService({
     headingStyle: "atx",
@@ -2871,7 +2992,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         !el.closest("table, li, blockquote, [data-type='taskItem']")
       );
     },
-    replacement: () => "\n<!--luno:blank-->",
+    replacement: () => "\n<!--luno:blank-->\n",
   });
 
   // Serialize headings matching Obsidian line structure
@@ -2881,7 +3002,10 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const h = node as HTMLElement;
       const level = Number(h.nodeName.charAt(1)) || 1;
       const prefix = "#".repeat(level);
-      return `\n${prefix} ${content}\n`;
+      const prev = h.previousElementSibling;
+      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
+      const leadingNl = isAfterHeading ? "\n" : "\n\n";
+      return `${leadingNl}${prefix} ${content}\n`;
     },
   });
 
@@ -2895,7 +3019,21 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         !el.closest("table, li, blockquote, [data-type='taskItem']")
       );
     },
-    replacement: (content) => `\n${content}\n`,
+    replacement: (content, node) => {
+      const el = node as HTMLElement;
+      const prev = el.previousElementSibling;
+      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
+      const leadingNl = isAfterHeading ? "\n" : "\n\n";
+      const rawTag = el.getAttribute("data-raw-tag");
+      if (rawTag === "div") {
+        return `${leadingNl}<div>\n    ${el.innerHTML}\n</div>\n\n`;
+      }
+      const style = el.getAttribute("style");
+      if (style) {
+        return `${leadingNl}<p style="${style}">\n${content}\n</p>\n\n`;
+      }
+      return `${leadingNl}${content}\n\n`;
+    },
   });
 
   // Serialize lists matching CommonMark block boundaries
@@ -2932,40 +3070,22 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     replacement: () => `\n---\n`,
   });
 
-  // Override Turndown built-in fencedCodeBlock, codeBlock, and code rules in-place so td.rules.array uses them
-  if (td.rules.fencedCodeBlock) {
-    td.rules.fencedCodeBlock.filter = (node, options) => {
-      return options.codeBlockStyle === "fenced" && node.nodeName === "PRE";
-    };
-    td.rules.fencedCodeBlock.replacement = (_content, node, options) => {
-      const codeEl = ((node as HTMLElement).querySelector("code") || node) as HTMLElement;
-      const className = codeEl?.getAttribute("class") || "";
-      const language = (className.match(/language-(\S+)/) || [null, ""])[1];
-      const rawCode = codeEl?.textContent || "";
-      const cleanCode = rawCode.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-      const fence = options.fence || "```";
-      return `\n${fence}${language}\n${cleanCode}\n${fence}\n`;
-    };
-  }
+  // Register custom inline code rule via td.addRule
 
-  if (td.rules.codeBlock) {
-    td.rules.codeBlock.filter = () => false;
-  }
-
-  if (td.rules.code) {
-    td.rules.code.filter = (node) => {
+  td.addRule("code", {
+    filter: (node) => {
       const hasSiblings = node.previousSibling || node.nextSibling;
       const isCodeBlock = node.parentNode && node.parentNode.nodeName === "PRE" && !hasSiblings;
       return node.nodeName === "CODE" && !isCodeBlock;
-    };
-    td.rules.code.replacement = (content) => {
+    },
+    replacement: (content) => {
       if (!content.trim()) return "";
       let delimiter = "`";
       const matches = content.match(/`+/gm) || [];
       while (matches.indexOf(delimiter) !== -1) delimiter = delimiter + "`";
       return delimiter + content + delimiter;
-    };
-  }
+    },
+  });
 
   const defaultBlankReplacement = td.rules.blankRule.replacement;
   td.rules.blankRule.replacement = (content, node, options) => {
@@ -2975,9 +3095,9 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       !el.textContent?.trim() &&
       !el.closest("table, li, blockquote, [data-type='taskItem']")
     ) {
-      return "\n<!--luno:blank-->";
+      return "\n<!--luno:blank-->\n";
     }
-    return defaultBlankReplacement ? defaultBlankReplacement.call(td.rules.blankRule, content, node, options) : "\n<!--luno:blank-->";
+    return defaultBlankReplacement ? defaultBlankReplacement.call(td.rules.blankRule, content, node, options) : "\n<!--luno:blank-->\n";
   };
 
   // Convert <u> to <u>text</u> in markdown
@@ -2992,6 +3112,12 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       node.nodeName === "MARK" ||
       (node.nodeName === "SPAN" && (node as HTMLElement).classList?.contains("luno-highlight")),
     replacement: (content) => `==${content}==`,
+  });
+
+  // Preserve <kbd> in markdown
+  td.addRule("kbd", {
+    filter: "kbd",
+    replacement: (content) => `<kbd>${content}</kbd>`,
   });
 
   // Convert footnote reference HTML <sup><a href="#fn-1" data-footnote-ref="1">[1]</a></sup> back into [^1]
@@ -3036,7 +3162,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       clone.querySelectorAll(".footnote-backref, [data-footnote-backref]").forEach((a) => a.remove());
       const rawContent = td.turndown(clone.innerHTML).trim();
       const cleanContent = rawContent.replace(/^\[\^[^\]]+\]:\s*/, "").trim();
-      return `\n[^${fnId}]: ${cleanContent}\n`;
+      return `\n\n[^${fnId}]: ${cleanContent}\n\n`;
     },
   });
 
@@ -3103,10 +3229,19 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         }
       }
       const titleAttr = title ? ` "${title}"` : "";
-      if (width) {
-        return `![${alt}|${width}](${relSrc}${titleAttr})`;
+      const md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
+      const parent = img.parentElement;
+      const isStandaloneBlock =
+        !parent ||
+        parent.nodeName === "DIV" ||
+        parent.nodeName === "BODY" ||
+        parent.classList?.contains("ProseMirror") ||
+        (parent.nodeName === "P" && parent.children.length === 1 && !parent.textContent?.trim());
+
+      if (isStandaloneBlock && parent?.nodeName !== "P") {
+        return `\n\n${md}\n\n`;
       }
-      return `![${alt}](${relSrc}${titleAttr})`;
+      return md;
     },
   });
 
@@ -3213,7 +3348,10 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const lang = langMatch ? langMatch[1] : "";
       const rawText = codeEl.textContent || "";
       const codeText = rawText.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-      return `\n\`\`\`${lang}\n${codeText}\n\`\`\`\n`;
+      const prev = el.previousElementSibling;
+      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
+      const leadingNl = isAfterHeading ? "\n" : "\n\n";
+      return `${leadingNl}\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
     },
   });
 
@@ -3259,7 +3397,32 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const header = matrix[0];
       while (header.length < maxCols) header.push("");
       const headerLine = `| ${header.join(" | ")} |`;
-      const separatorLine = `| ${Array(maxCols).fill("---").join(" | ")} |`;
+
+      // Determine column alignments from table header and cells
+      const colAlignments: string[] = [];
+      for (let c = 0; c < maxCols; c++) {
+        let align = "";
+        for (const row of rows) {
+          const cell = row.querySelectorAll("th, td")[c];
+          if (cell) {
+            const a = cell.getAttribute("align") || (cell as HTMLElement).style?.textAlign;
+            if (a) {
+              align = a.toLowerCase();
+              break;
+            }
+          }
+        }
+        if (align === "center") {
+          colAlignments.push(":---:");
+        } else if (align === "right") {
+          colAlignments.push("---:");
+        } else if (align === "left") {
+          colAlignments.push(":---");
+        } else {
+          colAlignments.push("---");
+        }
+      }
+      const separatorLine = `| ${colAlignments.join(" | ")} |`;
 
       const bodyLines = matrix.slice(1).map((row) => {
         while (row.length < maxCols) row.push("");
@@ -3267,7 +3430,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       });
 
       const lines = [headerLine, separatorLine, ...bodyLines];
-      return `\n${lines.join("\n")}\n`;
+      return `\n\n${lines.join("\n")}\n\n`;
     },
   });
 
@@ -3316,7 +3479,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const innerMarkdown = td.turndown(innerHtml).replace(/^[\r\n]+|[\r\n]+$/g, "");
       const bodyContent = innerMarkdown || "<p></p>";
 
-      return `\n<details${isOpen ? " open" : ""}><summary>${title}</summary><div>\n\n${bodyContent}\n\n</div></details>\n`;
+      return `\n\n<details${isOpen ? " open" : ""}>\n<summary>${title}</summary>\n\n${bodyContent}\n\n</details>\n\n`;
     },
   });
 
@@ -3693,8 +3856,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
   const [isImageZoomed, setIsImageZoomed] = useState(false);
   const [canZoomImage, setCanZoomImage] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [activeFileSize, setActiveFileSize] = useState<number | null>(null);
+  const [imageZoomMode, setImageZoomMode] = useState<"fit" | "custom">("fit");
+  const [imageCustomZoom, setImageCustomZoom] = useState<number>(100);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const [htmlDeviceMode, setHtmlDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
@@ -3707,6 +3875,45 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [translatorInitialText, setTranslatorInitialText] = useState("");
   const [translatorZIndex, setTranslatorZIndex] = useState<number>(50);
   const nextWindowZIndexRef = useRef<number>(51);
+
+  const imageElementRef = useRef<HTMLImageElement | null>(null);
+
+  const getEffectiveImageZoom = useCallback(() => {
+    if (imageZoomMode === "custom") return imageCustomZoom;
+    if (imageElementRef.current && imageDimensions && imageDimensions.width > 0) {
+      const renderedWidth = imageElementRef.current.clientWidth;
+      if (renderedWidth > 0) {
+        const calculated = Math.round((renderedWidth / imageDimensions.width) * 100);
+        if (calculated > 0) return calculated;
+      }
+    }
+    return 100;
+  }, [imageZoomMode, imageCustomZoom, imageDimensions]);
+
+  const handleZoomInImage = useCallback(() => {
+    const current = getEffectiveImageZoom();
+    setImageZoomMode("custom");
+    const steps = [10, 15, 20, 25, 33, 50, 67, 75, 90, 100, 125, 150, 175, 200, 250, 300, 400, 500];
+    const next = steps.find((s) => s > current);
+    setImageCustomZoom(next ?? Math.min(500, current + 25));
+  }, [getEffectiveImageZoom]);
+
+  const handleZoomOutImage = useCallback(() => {
+    const current = getEffectiveImageZoom();
+    setImageZoomMode("custom");
+    const steps = [10, 15, 20, 25, 33, 50, 67, 75, 90, 100, 125, 150, 175, 200, 250, 300, 400, 500];
+    const next = [...steps].reverse().find((s) => s < current);
+    setImageCustomZoom(next ?? Math.max(10, current - 25));
+  }, [getEffectiveImageZoom]);
+
+  const handleToggleZoomFit = useCallback(() => {
+    if (imageZoomMode === "fit") {
+      setImageZoomMode("custom");
+      setImageCustomZoom(100);
+    } else {
+      setImageZoomMode("fit");
+    }
+  }, [imageZoomMode]);
 
   const bringCalculatorToFront = useCallback(() => {
     setCalculatorZIndex(nextWindowZIndexRef.current++);
@@ -3799,6 +4006,184 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return false;
   }, []);
 
+  const isImageFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.fileType === "image") return true;
+    const name = targetNote.fileName?.toLowerCase() ?? "";
+    return /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|tiff?)$/i.test(name);
+  }, []);
+
+  const isBinaryFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.fileType === "binary") return true;
+    const name = targetNote.fileName?.toLowerCase() ?? "";
+    return /\.(zip|rar|7z|tar|gz|bz2|pdf|docx?|xlsx?|pptx?|mp3|wav|ogg|m4a|flac|aac|mp4|webm|mov|avi|mkv|exe|bin|iso|dmg|apk)$/i.test(name);
+  }, []);
+
+  const isAudioFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    const name = targetNote.fileName?.toLowerCase() ?? "";
+    if (/\.(mp3|wav|ogg|m4a|flac|aac|opus|wma|aiff)$/i.test(name)) return true;
+    if (targetNote.content?.startsWith("data:audio/")) return true;
+    return false;
+  }, []);
+
+  const isCodeFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.contentFormat === "css" || isCssFile(targetNote)) return true;
+    if (targetNote.contentFormat === "html" || isHtmlFile(targetNote)) return false;
+    const name = targetNote.fileName?.toLowerCase() ?? "";
+    return /\.(js|jsx|ts|tsx|json|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|swift|kt|scss|less|yaml|yml|toml|xml|sql|sh|bash|zsh|vue|svelte)$/i.test(name);
+  }, [isCssFile, isHtmlFile]);
+
+  const formatFileSize = useCallback((bytes: number | null | undefined): string => {
+    if (bytes == null || isNaN(bytes) || bytes < 0) return "";
+    if (bytes === 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }, []);
+
+  const getFileFormatLabel = useCallback((targetNote: Note | null): string => {
+    if (!targetNote) return "";
+    const name = targetNote.fileName?.toLowerCase() ?? "";
+    const isTh = settings.language === "th";
+
+    if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "JPEG Image";
+    if (name.endsWith(".png")) return "PNG Image";
+    if (name.endsWith(".webp")) return "WebP Image";
+    if (name.endsWith(".svg")) return "SVG Vector";
+    if (name.endsWith(".gif")) return "GIF Animation";
+    if (name.endsWith(".bmp")) return "BMP Image";
+    if (name.endsWith(".ico")) return "ICO Icon";
+    if (name.endsWith(".avif")) return "AVIF Image";
+    if (targetNote.fileType === "image") return isTh ? "รูปภาพ" : "Image";
+
+    if (name.endsWith(".zip")) return "ZIP Archive";
+    if (name.endsWith(".rar")) return "RAR Archive";
+    if (name.endsWith(".7z")) return "7-Zip Archive";
+    if (name.endsWith(".tar") || name.endsWith(".gz") || name.endsWith(".bz2")) return "Archive";
+    if (name.endsWith(".pdf")) return "PDF Document";
+    if (name.endsWith(".doc") || name.endsWith(".docx")) return "Word Document";
+    if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "Excel Spreadsheet";
+    if (name.endsWith(".ppt") || name.endsWith(".pptx")) return "PowerPoint Presentation";
+    if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac")) return "Audio File";
+    if (name.endsWith(".mp4") || name.endsWith(".webm") || name.endsWith(".mov") || name.endsWith(".avi")) return "Video File";
+    if (targetNote.fileType === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
+
+    if (targetNote.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
+    if (targetNote.contentFormat === "css" || name.endsWith(".css")) return "CSS";
+    if (name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs")) return "JavaScript";
+    if (name.endsWith(".jsx")) return "React JSX";
+    if (name.endsWith(".ts")) return "TypeScript";
+    if (name.endsWith(".tsx")) return "React TSX";
+    if (name.endsWith(".json")) return "JSON";
+    if (name.endsWith(".py")) return "Python";
+    if (name.endsWith(".rs")) return "Rust";
+    if (name.endsWith(".go")) return "Go";
+    if (name.endsWith(".java")) return "Java";
+    if (name.endsWith(".c") || name.endsWith(".h")) return "C";
+    if (name.endsWith(".cpp") || name.endsWith(".hpp")) return "C++";
+    if (name.endsWith(".cs")) return "C#";
+    if (name.endsWith(".php")) return "PHP";
+    if (name.endsWith(".swift")) return "Swift";
+    if (name.endsWith(".kt")) return "Kotlin";
+    if (name.endsWith(".sql")) return "SQL";
+    if (name.endsWith(".yaml") || name.endsWith(".yml")) return "YAML";
+    if (name.endsWith(".xml")) return "XML";
+    if (name.endsWith(".sh") || name.endsWith(".bash") || name.endsWith(".zsh")) return "Shell";
+
+    if (name.endsWith(".txt") || targetNote.contentFormat === "plain") return t("editor.formatText") || "Plain Text";
+    return t("editor.formatMarkdown") || "Markdown";
+  }, [settings.language, t]);
+
+  const handleCopyImage = useCallback(async () => {
+    if (!note) return;
+    try {
+      const src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
+      if (!src) return;
+      const res = await fetch(src);
+      const blob = await res.blob();
+      let pngBlob = blob;
+      if (blob.type !== "image/png") {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        pngBlob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b || blob), "image/png"));
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": pngBlob })
+      ]);
+      toast({
+        title: t("editor.copyImage") || "Copy Image",
+        description: t("editor.imageCopied") || "Image copied to clipboard",
+      });
+    } catch (err) {
+      console.warn("Copy image failed:", err);
+      toast({
+        title: t("editor.copyImage") || "Copy Image",
+        description: t("editor.copyImageFailed") || "Failed to copy image",
+        variant: "destructive",
+      });
+    }
+  }, [note, imageBlobUrl, t, toast]);
+
+  const handleOpenInSystemApp = useCallback(async () => {
+    if (!note) return;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && (electronAPI?.openPath || electronAPI?.openExternal)) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath && note.fileName) {
+          const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+          const fullPath = `${saved.folderPath}/${relPath}`;
+          if (electronAPI.openPath) {
+            await electronAPI.openPath(fullPath);
+            return;
+          }
+          if (electronAPI.openExternal) {
+            await electronAPI.openExternal(`file://${fullPath}`);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Open in system app failed:", err);
+      }
+    }
+    const src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
+    if (src) {
+      window.open(src, "_blank");
+    }
+  }, [note, imageBlobUrl]);
+
+  const handleRevealInFileExplorer = useCallback(async () => {
+    if (!note) return;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.showItemInFolder) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath && note.fileName) {
+          const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+          const fullPath = `${saved.folderPath}/${relPath}`;
+          await electronAPI.showItemInFolder(fullPath);
+        }
+      } catch (err) {
+        console.warn("Reveal in explorer failed:", err);
+      }
+    }
+  }, [note]);
+
   const getBaseTitle = useCallback((targetNote: Note | null): string => {
     if (!targetNote || isTxtFile(targetNote)) return "";
     
@@ -3866,9 +4251,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (isHtml) {
       return typeof text === "string" ? text : "";
     }
-    if (typeof text !== "string" || !text.trim()) {
-      if (isTxt) return "<p></p>";
-      return baseTitle ? `<h1>${escHtml(baseTitle)}</h1>` : "<h1></h1>";
+    if (typeof text !== "string") {
+      return isTxt ? "<p></p>" : (baseTitle ? `<h1>${escHtml(baseTitle)}</h1><p></p>` : "<h1></h1><p></p>");
+    }
+    if (!text.trim()) {
+      const count = Math.max(1, (text.match(/\n/g) || []).length);
+      const emptyPs = "<p></p>".repeat(count);
+      return isTxt ? emptyPs : (baseTitle ? `<h1>${escHtml(baseTitle)}</h1>${emptyPs}` : `<h1></h1>${emptyPs}`);
     }
 
     if (isEncryptedNote(text)) {
@@ -3919,7 +4308,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (parsedFm.hasFrontmatter) {
       cleanText = parsedFm.bodyContent;
     }
-    cleanText = cleanText.replace(/^\r?\n/, "");
 
     if (isTxt) {
       if (!cleanText.trim()) return "<p></p>";
@@ -4168,6 +4556,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const debouncedVersionSnapshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveContentRef = useRef<{ id: string; content: string } | null>(null);
   const userEditedRef = useRef(false);
+  const hasPendingDiskSaveRef = useRef(false);
   const editorInstanceRef = useRef<TiptapEditor | null>(null);
 
   const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4311,29 +4700,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           class: "prosemirror-dropcursor",
         },
       }),
-      Paragraph.extend({
-        addAttributes() {
-          return {
-            ...this.parent?.(),
-            id: {
-              default: null,
-              parseHTML: (element) => element.getAttribute("id"),
-              renderHTML: (attributes) => {
-                if (!attributes.id) return {};
-                return { id: attributes.id };
-              },
-            },
-            "data-footnote-def": {
-              default: null,
-              parseHTML: (element) => element.getAttribute("data-footnote-def"),
-              renderHTML: (attributes) => {
-                if (!attributes["data-footnote-def"]) return {};
-                return { "data-footnote-def": attributes["data-footnote-def"] };
-              },
-            },
-          };
-        },
-      }),
+      CustomParagraph,
       CodeBlockLowlight.extend({
         addNodeView() {
           return ReactNodeViewRenderer(CodeBlockNodeView);
@@ -4362,6 +4729,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Highlight,
       Superscript,
       Subscript,
+      Kbd,
       Toggle,
       TaskList,
       TaskItem,
@@ -4370,8 +4738,42 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         resizable: true,
       }),
       TableRow,
-      TableHeader,
-      TableCell,
+      TableHeader.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            align: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("align") || element.style.textAlign || null,
+              renderHTML: (attributes) => {
+                if (!attributes.align) return {};
+                return {
+                  align: attributes.align,
+                  style: `text-align: ${attributes.align};`,
+                };
+              },
+            },
+          };
+        },
+      }),
+      TableCell.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            align: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("align") || element.style.textAlign || null,
+              renderHTML: (attributes) => {
+                if (!attributes.align) return {};
+                return {
+                  align: attributes.align,
+                  style: `text-align: ${attributes.align};`,
+                };
+              },
+            },
+          };
+        },
+      }),
       IndentKeymap,
       Link.extend({
         addAttributes() {
@@ -4740,7 +5142,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         flushPendingRename();
       }
     },
-    onUpdate: ({ editor: instance }) => {
+    onUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
       scheduleEditorTick();
       if (note?.id) {
@@ -4748,7 +5150,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       if (isReadingMode || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (loadingNoteIdRef.current === note.id) return;
+      if (transaction?.getMeta("isSync")) return;
       userEditedRef.current = true;
+      hasPendingDiskSaveRef.current = true;
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
       if (note.fileType === "image" || note.fileType === "binary" || isHtmlFile(note) || isCssFile(note) || isTxtFile(note)) return;
 
@@ -4824,15 +5228,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               editorStats.charCount
             );
           }, 10000);
-        } else if (!userEditedRef.current) {
+
+          if (!settings.autoSave) {
+            setSaveStatus("unsaved");
+            return;
+          }
+          setSaveStatus("auto_saving");
+          scheduleAutoSaveDiskRef.current?.();
+        } else {
           pendingSaveContentRef.current = null;
         }
-        if (!settings.autoSave) {
-          setSaveStatus("unsaved");
-          return;
-        }
-        setSaveStatus("auto_saving");
-        scheduleAutoSaveDiskRef.current?.();
       }, 1000);
     },
   });
@@ -5161,11 +5566,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [rootDirHandle]);
 
   const saveLinkedFileToDisk = useCallback(async () => {
+    if (!hasPendingDiskSaveRef.current) return;
     if (!note || (!editor && !isHtmlFile(note) && !isCssFile(note)) || !settings.autoSave) return;
     if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
     if (deletedNoteIdsRef.current.has(note.id) || isNoteDeleted(note.id)) return;
     if (Array.isArray(notes) && !notes.some((n) => n.id === note.id)) return;
+    if (loadingNoteIdRef.current === note.id || syncingFromNote.current) return;
 
     const opId = ++saveOpIdRef.current;
     setSaveStatus("auto_saving");
@@ -5202,15 +5609,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
   }, [scheduleAutoSaveDisk]);
 
+  const prevNoteIdForTagsRef = useRef<string | null>(null);
   const prevTagsStrRef = useRef<string>("");
   useEffect(() => {
     if (!note) return;
     const currentTagsStr = JSON.stringify(note.tags || []);
-    if (prevTagsStrRef.current && prevTagsStrRef.current !== currentTagsStr) {
+    if (prevNoteIdForTagsRef.current === note.id && prevTagsStrRef.current !== currentTagsStr) {
+      hasPendingDiskSaveRef.current = true;
       scheduleAutoSaveDiskRef.current?.();
     }
+    prevNoteIdForTagsRef.current = note.id;
     prevTagsStrRef.current = currentTagsStr;
-  }, [note?.tags]);
+  }, [note?.id, note?.tags]);
 
   useEffect(() => {
     return () => {
@@ -5301,38 +5711,75 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [statusPortalTarget, setStatusPortalTarget] = useState<HTMLElement | null>(null);
 
+  // Synchronously compute active/connected targets so that portals mount immediately without waiting for state or effect cycles
+  const effectivePortalTarget =
+    portalTarget && portalTarget.isConnected
+      ? portalTarget
+      : typeof document !== "undefined"
+      ? (document.getElementById(`breadcrumb-editor-actions-${paneId}`) as HTMLElement | null)
+      : null;
+
+  const effectiveStatusPortalTarget =
+    statusPortalTarget && statusPortalTarget.isConnected
+      ? statusPortalTarget
+      : typeof document !== "undefined"
+      ? (document.getElementById(`breadcrumb-save-status-${paneId}`) as HTMLElement | null)
+      : null;
+
   useEffect(() => {
     const actionId = `breadcrumb-editor-actions-${paneId}`;
     const statusId = `breadcrumb-save-status-${paneId}`;
 
-    let interval: ReturnType<typeof setInterval> | null = null;
-
-    const findTargets = () => {
+    const updateTargets = () => {
       const target = document.getElementById(actionId);
-      if (target) {
+      const sTarget = document.getElementById(statusId);
+      if (target && target.isConnected) {
         setPortalTarget((prev) => (prev !== target ? target : prev));
+      } else {
+        setPortalTarget((prev) => (prev ? null : prev));
       }
-      const statusTarget = document.getElementById(statusId);
-      if (statusTarget) {
-        setStatusPortalTarget((prev) => (prev !== statusTarget ? statusTarget : prev));
-      }
-      if (target && statusTarget && interval) {
-        clearInterval(interval);
-        interval = null;
+      if (sTarget && sTarget.isConnected) {
+        setStatusPortalTarget((prev) => (prev !== sTarget ? sTarget : prev));
+      } else {
+        setStatusPortalTarget((prev) => (prev ? null : prev));
       }
     };
 
-    findTargets();
-    interval = setInterval(findTargets, 300);
+    updateTargets();
 
-    const observer = new MutationObserver(findTargets);
-    observer.observe(document.body, { childList: true, subtree: true });
+    const handleBreadcrumbChange = () => {
+      updateTargets();
+    };
+
+    window.addEventListener("luno:breadcrumb-mounted", handleBreadcrumbChange);
+    window.addEventListener("luno:breadcrumb-unmounted", handleBreadcrumbChange);
+    window.addEventListener("resize", handleBreadcrumbChange);
+
+    // Periodic lightweight check to ensure targets stay connected across tab switches and views
+    const interval = setInterval(() => {
+      const target = document.getElementById(actionId);
+      const sTarget = document.getElementById(statusId);
+      setPortalTarget((prev) => {
+        if (!prev || !prev.isConnected || prev !== target) {
+          return target && target.isConnected ? target : null;
+        }
+        return prev;
+      });
+      setStatusPortalTarget((prev) => {
+        if (!prev || !prev.isConnected || prev !== sTarget) {
+          return sTarget && sTarget.isConnected ? sTarget : null;
+        }
+        return prev;
+      });
+    }, 1000);
 
     return () => {
-      if (interval) clearInterval(interval);
-      observer.disconnect();
+      window.removeEventListener("luno:breadcrumb-mounted", handleBreadcrumbChange);
+      window.removeEventListener("luno:breadcrumb-unmounted", handleBreadcrumbChange);
+      window.removeEventListener("resize", handleBreadcrumbChange);
+      clearInterval(interval);
     };
-  }, [paneId]);
+  }, [paneId, note?.id]);
 
   useEffect(() => {
     if (note?.content) {
@@ -5391,6 +5838,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (baseTitle && currentH1 !== baseTitle) {
             syncingFromNote.current = true;
             const tr = editor.state.tr;
+            tr.setMeta("addToHistory", false);
+            tr.setMeta("isSync", true);
             const from = 1;
             const to = 1 + firstChild.nodeSize - 2;
             tr.replaceWith(from, to, editor.schema.text(baseTitle));
@@ -5442,6 +5891,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       syncingFromNote.current = true;
       editorActiveNoteIdRef.current = note.id;
       editor.view.updateState(savedState);
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
+        debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+        autoSaveDiskTimeoutRef.current = null;
+      }
+      setSaveStatus("saved");
       syncingFromNote.current = false;
       loadingNoteIdRef.current = null;
       setEditorTick((v) => v + 1);
@@ -5475,6 +5935,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const currentH1 = (firstChild.textContent || "").trim();
         if (baseTitle && currentH1 !== baseTitle) {
           const tr = editor.state.tr;
+          tr.setMeta("addToHistory", false);
+          tr.setMeta("isSync", true);
           const from = 1;
           const to = 1 + firstChild.nodeSize - 2;
           tr.replaceWith(from, to, editor.schema.text(baseTitle));
@@ -5490,6 +5952,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
     editor.view.updateState(cleanState);
     noteEditorStateMap.set(note.id, editor.state);
+
+    userEditedRef.current = false;
+    hasPendingDiskSaveRef.current = false;
+    if (debouncedContentSaveTimeoutRef.current) {
+      clearTimeout(debouncedContentSaveTimeoutRef.current);
+      debouncedContentSaveTimeoutRef.current = null;
+    }
+    if (autoSaveDiskTimeoutRef.current) {
+      clearTimeout(autoSaveDiskTimeoutRef.current);
+      autoSaveDiskTimeoutRef.current = null;
+    }
+    setSaveStatus("saved");
 
     setEditorTick((v) => v + 1);
     syncingFromNote.current = false;
@@ -5519,6 +5993,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
         userEditedRef.current = false;
       }
+      hasPendingDiskSaveRef.current = false;
     };
   }, [note?.id, onUpdate]);
 
@@ -5578,14 +6053,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode]);
 
-  const isFirstReadingModeEffectRef = useRef(true);
+  const prevReadingModeRef = useRef(isReadingMode);
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.setEditable(!isReadingMode);
-    if (isFirstReadingModeEffectRef.current) {
-      isFirstReadingModeEffectRef.current = false;
+    if (prevReadingModeRef.current === isReadingMode) {
       return;
     }
+    prevReadingModeRef.current = isReadingMode;
     if (!note) return;
     const rawContent = noteRef.current?.content ?? note.content ?? "";
     const isTxt = isTxtFile(note);
@@ -5593,11 +6068,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const baseTitle = getBaseTitle(note);
     const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, isReadingMode);
     const prevScroll = editorScrollContainerRef.current?.scrollTop;
+    syncingFromNote.current = true;
     (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+    const cleanState = EditorState.create({
+      doc: editor.state.doc,
+      plugins: editor.state.plugins,
+    });
+    editor.view.updateState(cleanState);
+    if (note.id) {
+      noteEditorStateMap.set(note.id, editor.state);
+    }
+    syncingFromNote.current = false;
     if (typeof prevScroll === "number" && editorScrollContainerRef.current) {
       editorScrollContainerRef.current.scrollTop = prevScroll;
     }
-  }, [editor, isReadingMode, note?.id, getBaseTitle]);
+  }, [editor, isReadingMode, getBaseTitle, isTxtFile, isHtmlFile]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -5609,13 +6094,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         ext.options.enabled = settings.wrongLanguageSuggestion !== false;
       }
     });
-    editor.view.dispatch(editor.state.tr);
+    editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
   }, [editor, spellCheckEnabled, settings.wrongLanguageSuggestion]);
 
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
-    editor.view.dispatch(editor.state.tr);
+    editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
   }, [editor, settings.language, t]);
 
   useEffect(() => {
@@ -6450,24 +6935,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return `${safeTitle}.${ext}`;
   };
 
-  const normalizeSerializedMarkdown = (markdown: string): string => {
-    let clean = markdown.replace(/\r\n?/g, "\n");
-    let leadingBlankCount = 0;
-    while (clean.startsWith("<!--luno:blank-->") || clean.startsWith("\n<!--luno:blank-->")) {
-      leadingBlankCount++;
-      clean = clean.replace(/^\n*<!--luno:blank-->\n*/, "");
-    }
-    clean = clean.replace(/^\n+/, "");
-    clean = clean.replace(/\n*<!--luno:blank-->\n*/g, "\n\n");
-    clean = clean.replace(/<!--luno:blank-->/g, "");
-    clean = clean.replace(/\n[ \t]*\|[ \t|]*\n/g, "\n\n");
-    clean = clean.replace(/[ \t]+(?=\n)/g, "");
-    clean = clean.replace(/\n+$/, "");
-    if (leadingBlankCount > 0) {
-      clean = "\n".repeat(leadingBlankCount) + clean;
-    }
-    return clean;
-  };
 
   const getMarkdownFromHtml = (html: string): string => {
     return normalizeSerializedMarkdown(turndown.turndown(html));
@@ -6584,6 +7051,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!instance || instance.isDestroyed || !note) return;
 
     const { doc, tr } = instance.state;
+    // Fast check: avoid traversing documents that do not contain any image nodes
+    let hasImageNode = false;
+    doc.descendants((node) => {
+      if (node.type.name === "image") {
+        hasImageNode = true;
+        return false;
+      }
+      return true;
+    });
+    if (!hasImageNode) return;
+
     const tasks: Array<{ pos: number; relPath: string }> = [];
 
     doc.descendants((node, pos) => {
@@ -6649,10 +7127,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     if (modified && !instance.isDestroyed) {
-      instance.view.dispatch(tr);
-      setEditorTick((v) => v + 1);
+      syncingFromNote.current = true;
+      try {
+        tr.setMeta("addToHistory", false);
+        tr.setMeta("isSync", true);
+        instance.view.dispatch(tr);
+        setEditorTick((v) => v + 1);
+      } finally {
+        syncingFromNote.current = false;
+      }
     }
-  }, [rootDirHandle, note]);
+  }, [rootDirHandle, note?.id]);
 
   useEffect(() => {
     if (editor) {
@@ -6689,6 +7174,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     // 4. Trigger Auto-Save to Disk / Workspace Files
+    hasPendingDiskSaveRef.current = true;
     setSaveStatus("auto_saving");
     scheduleAutoSaveDiskRef.current?.();
 
@@ -6988,6 +7474,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         const ok = await electronAPI.writeFileContent({ fullPath, content: finalPayloadToDisk });
         if (ok) {
+          hasPendingDiskSaveRef.current = false;
           setSavedSnapshot(note.id, ext, normalizedContent);
           if (saveOpIdRef.current === currentOpId) {
             setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
@@ -7033,6 +7520,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       await writable.write(finalPayloadToDisk);
       await writable.close();
       writable = null;
+      hasPendingDiskSaveRef.current = false;
       await setStoredFileHandle(note.id, existingHandle);
       const savedFile = await existingHandle.getFile();
       updateLinkedMetadata(note.id, savedFile.name);
@@ -7194,25 +7682,46 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
 
   useEffect(() => {
-    if (!note || !canUseNativeFs()) return;
+    if (!note) return;
 
     let cancelled = false;
     let objectUrl: string | null = null;
+    let audioObjectUrl: string | null = null;
 
-    if (note.content?.startsWith("data:image/") || note.content?.startsWith("data:application/")) {
-      setImageBlobUrl(note.content);
-    }
+    const initialUrl =
+      note.content?.startsWith("data:image/") ||
+      note.content?.startsWith("data:application/") ||
+      note.content?.startsWith("blob:") ||
+      note.content?.startsWith("http://") ||
+      note.content?.startsWith("https://")
+        ? note.content
+        : null;
+
+    setImageBlobUrl(initialUrl);
+    setAudioBlobUrl(note.content?.startsWith("data:audio/") ? note.content : null);
+    setIsImageZoomed(false);
+    setCanZoomImage(false);
+    setImageDimensions(null);
+    setImageZoomMode("fit");
+    setImageCustomZoom(100);
+    setActiveFileSize((note as any)?.fileSize || null);
 
     const hydrateHandle = async () => {
       // 1. Electron Desktop Native Support
       const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-      if (electronAPI?.getSavedWorkspace && (electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
+      if (electronAPI && (electronAPI.readImageDataUrl || electronAPI.readFileBase64)) {
         try {
-          const saved = await electronAPI.getSavedWorkspace();
-          if (saved?.folderPath && note?.fileName) {
-            const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
-            const fullPath = `${saved.folderPath}/${relPath}`;
-            const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(note.fileName);
+          let fullPath = (note as any).fullPath;
+          if (!fullPath && electronAPI.getSavedWorkspace && note?.fileName) {
+            const saved = await electronAPI.getSavedWorkspace();
+            if (saved?.folderPath) {
+              const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+              fullPath = `${saved.folderPath}/${relPath}`;
+            }
+          }
+
+          if (fullPath) {
+            const isImg = isImageFile(note);
             if (isImg) {
               let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
               if (!dataUrl && electronAPI.readFileBase64) {
@@ -7232,79 +7741,352 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 }
               }
               if (dataUrl && !cancelled) {
+                if (dataUrl.startsWith("data:")) {
+                  const base64Part = dataUrl.split(",")[1] || "";
+                  const padding = (base64Part.match(/=/g) || []).length;
+                  setActiveFileSize(Math.max(0, Math.floor((base64Part.length * 3) / 4 - padding)));
+                }
                 setImageBlobUrl(dataUrl);
                 return;
               }
             }
+
+            const isAud = isAudioFile(note);
+            if (isAud && electronAPI.readFileBase64) {
+              const b64 = await electronAPI.readFileBase64(fullPath);
+              if (b64 && !cancelled) {
+                const ext = (note.fileName || "").toLowerCase();
+                let mime = "audio/mpeg";
+                if (ext.endsWith(".wav")) mime = "audio/wav";
+                else if (ext.endsWith(".ogg") || ext.endsWith(".opus")) mime = "audio/ogg";
+                else if (ext.endsWith(".m4a") || ext.endsWith(".aac")) mime = "audio/mp4";
+                else if (ext.endsWith(".flac")) mime = "audio/flac";
+                else if (ext.endsWith(".webm")) mime = "audio/webm";
+
+                try {
+                  const byteCharacters = atob(b64);
+                  setActiveFileSize(byteCharacters.length);
+                  const byteNumbers = new Uint8Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  const blob = new Blob([byteNumbers], { type: mime });
+                  audioObjectUrl = URL.createObjectURL(blob);
+                  setAudioBlobUrl(audioObjectUrl);
+                } catch {
+                  const padding = (b64.match(/=/g) || []).length;
+                  setActiveFileSize(Math.max(0, Math.floor((b64.length * 3) / 4 - padding)));
+                  setAudioBlobUrl(`data:${mime};base64,${b64}`);
+                }
+                return;
+              }
+            }
+
+            // For other binary / raw files in Electron, load file size from base64 if not known yet
+            if (!isImg && !isAud && electronAPI.readFileBase64) {
+              try {
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                if (b64 && !cancelled) {
+                  const padding = (b64.match(/=/g) || []).length;
+                  setActiveFileSize(Math.max(0, Math.floor((b64.length * 3) / 4 - padding)));
+                }
+              } catch {}
+            }
           }
         } catch (err) {
-          console.warn("Electron hydrate image failed:", err);
+          console.warn("Electron hydrate media failed:", err);
         }
       }
 
-      let storedHandle = await getStoredFileHandle(note.id);
-      if (!storedHandle && rootDirHandle && note.fileName) {
+      // 2. Web File System Access API
+      if (canUseNativeFs()) {
+        let storedHandle = await getStoredFileHandle(note.id);
+        if (!storedHandle && rootDirHandle && note.fileName) {
+          try {
+            let targetDir = rootDirHandle;
+            const segments = (note.folderPath ?? "").split("/").filter(Boolean);
+            for (const segment of segments) {
+              targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+            }
+            storedHandle = await targetDir.getFileHandle(note.fileName, { create: false });
+            await setStoredFileHandle(note.id, storedHandle);
+          } catch {
+            /* ignore handle fallback error */
+          }
+        }
+        if (cancelled || !storedHandle) return;
+
+        fileHandleByNoteIdRef.current[note.id] = storedHandle;
+
         try {
-          let targetDir = rootDirHandle;
-          const segments = (note.folderPath ?? "").split("/").filter(Boolean);
-          for (const segment of segments) {
-            targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+          const permission = await requestPermissionIfAvailable(storedHandle, "read");
+          if (permission !== "granted") return;
+
+          const file = await storedHandle.getFile();
+          if (!cancelled) {
+            setActiveFileSize(file.size);
           }
-          storedHandle = await targetDir.getFileHandle(note.fileName, { create: false });
-          await setStoredFileHandle(note.id, storedHandle);
-        } catch {
-          /* ignore handle fallback error */
+
+          if (isImageFile(note)) {
+            objectUrl = URL.createObjectURL(file);
+            if (!cancelled) setImageBlobUrl(objectUrl);
+            return;
+          }
+
+          if (isAudioFile(note)) {
+            audioObjectUrl = URL.createObjectURL(file);
+            if (!cancelled) setAudioBlobUrl(audioObjectUrl);
+            return;
+          }
+
+          if (note.fileType === "binary") return;
+
+          const text = await file.text();
+          const fname = file.name.toLowerCase();
+          let format: "plain" | "markdown" | "html" = "markdown";
+          if (fname.endsWith(".txt")) format = "plain";
+          else if (fname.endsWith(".html") || fname.endsWith(".htm")) format = "html";
+
+          if (!cancelled) {
+            if (format === "html") {
+              onUpdate(note.id, { content: text, contentFormat: "html" });
+            } else {
+              parseAndSetContent(text, format);
+            }
+            updateLinkedMetadata(note.id, file.name);
+            setSavedSnapshot(note.id, format === "plain" ? "txt" : format === "html" ? "html" : "md", text);
+          }
+        } catch (error) {
+          console.error("Load linked file failed", error);
+          if (!cancelled) await clearLinkedMetadata();
         }
       }
-      if (cancelled || !storedHandle) return;
 
-      fileHandleByNoteIdRef.current[note.id] = storedHandle;
-
-      try {
-        const permission = await requestPermissionIfAvailable(storedHandle, "read");
-        if (permission !== "granted") return;
-
-        const file = await storedHandle.getFile();
-
-        if (note.fileType === "image") {
-          objectUrl = URL.createObjectURL(file);
-          if (!cancelled) setImageBlobUrl(objectUrl);
-          return;
-        }
-
-        if (note.fileType === "binary") return;
-
-        const text = await file.text();
-        const fname = file.name.toLowerCase();
-        let format: "plain" | "markdown" | "html" = "markdown";
-        if (fname.endsWith(".txt")) format = "plain";
-        else if (fname.endsWith(".html") || fname.endsWith(".htm")) format = "html";
-
-        if (!cancelled) {
-          if (format === "html") {
-            onUpdate(note.id, { content: text, contentFormat: "html" });
-          } else {
-            parseAndSetContent(text, format);
+      // 3. IndexedDB Image Fallback
+      if (!cancelled && isImageFile(note) && !objectUrl && !initialUrl) {
+        try {
+          const idbBlob = await getImageFromIndexedDb(note.id);
+          if (idbBlob && !cancelled) {
+            objectUrl = URL.createObjectURL(idbBlob);
+            setActiveFileSize(idbBlob.size);
+            setImageBlobUrl(objectUrl);
           }
-          updateLinkedMetadata(note.id, file.name);
-          setSavedSnapshot(note.id, format === "plain" ? "txt" : format === "html" ? "html" : "md", text);
-        }
-      } catch (error) {
-        console.error("Load linked file failed", error);
-        if (!cancelled) await clearLinkedMetadata();
+        } catch {}
       }
     };
 
-    setImageBlobUrl(null);
-    setIsImageZoomed(false);
-    setCanZoomImage(false);
     void hydrateHandle();
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
     };
-  }, [note?.id]);
+  }, [note?.id, note?.fileName, note?.folderPath, note?.fileType, (note as any)?.fullPath, canUseNativeFs, rootDirHandle]);
+
+  async function blobUrlToDataUrl(url: string): Promise<string> {
+    if (!url || url.startsWith("data:")) return url;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.warn("blobUrlToDataUrl failed:", err);
+      return url;
+    }
+  }
+
+  async function inlineImagesToDataUrls(html: string): Promise<string> {
+    if (!html || !html.includes("<img")) return html;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      const images = Array.from(doc.querySelectorAll("img"));
+      if (images.length === 0) return html;
+
+      await Promise.all(
+        images.map(async (img) => {
+          const src = img.getAttribute("src");
+          if (!src || src.startsWith("data:")) return;
+          try {
+            const res = await fetch(src);
+            const blob = await res.blob();
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            img.setAttribute("src", dataUrl);
+          } catch (err) {
+            console.warn("inlineImagesToDataUrls failed for:", src, err);
+          }
+        })
+      );
+
+      return doc.body ? doc.body.innerHTML : html;
+    } catch (err) {
+      console.warn("inlineImagesToDataUrls parse error:", err);
+      return html;
+    }
+  }
+
+  function printHtmlInBrowser(html: string) {
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    iframe.style.visibility = "hidden";
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      try {
+        document.body.removeChild(iframe);
+      } catch {}
+      return;
+    }
+
+    iframeDoc.open();
+    iframeDoc.write(html);
+    iframeDoc.close();
+
+    const cleanup = () => {
+      setTimeout(() => {
+        try {
+          if (iframe.parentNode) {
+            document.body.removeChild(iframe);
+          }
+        } catch {}
+      }, 1000);
+    };
+
+    const executePrint = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error("Browser print failed:", err);
+      } finally {
+        cleanup();
+      }
+    };
+
+    const images = Array.from(iframeDoc.images);
+    if (images.length === 0) {
+      setTimeout(executePrint, 250);
+    } else {
+      let loaded = 0;
+      const checkAllLoaded = () => {
+        loaded++;
+        if (loaded >= images.length) {
+          setTimeout(executePrint, 250);
+        }
+      };
+      images.forEach((img) => {
+        if (img.complete) {
+          checkAllLoaded();
+        } else {
+          img.onload = checkAllLoaded;
+          img.onerror = checkAllLoaded;
+        }
+      });
+    }
+  }
+
+  function escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  const handlePrintImage = useCallback(async () => {
+    if (!note) return;
+    let src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
+
+    const electronAPI = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+
+    if (electronAPI?.readFileBase64 && (!src || src.startsWith("blob:"))) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace?.();
+        if (saved?.folderPath && note.fileName) {
+          const folderPrefix = note.folderPath ? `${note.folderPath}/` : "";
+          const fullPath = `${saved.folderPath}/${folderPrefix}${note.fileName}`;
+          const b64 = await electronAPI.readFileBase64(fullPath);
+          if (b64) {
+            const ext = (note.fileName || "").toLowerCase();
+            const mime = ext.endsWith(".png")
+              ? "image/png"
+              : ext.endsWith(".gif")
+              ? "image/gif"
+              : ext.endsWith(".webp")
+              ? "image/webp"
+              : ext.endsWith(".svg")
+              ? "image/svg+xml"
+              : "image/jpeg";
+            src = `data:${mime};base64,${b64}`;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to read image for printing:", err);
+      }
+    }
+
+    if (!src && imageBlobUrl) {
+      src = imageBlobUrl;
+    }
+
+    if (!src) {
+      toast({
+        title: t("common.error") || "Error",
+        description: t("editor.imageLoadError") || "Image could not be loaded",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (src.startsWith("blob:")) {
+      try {
+        src = await blobUrlToDataUrl(src);
+      } catch (e) {
+        console.warn("Could not convert blob URL to data URL:", e);
+      }
+    }
+
+    const docTitle = note.fileName || note.title?.trim() || t("editor.untitled");
+    const printHtml =
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title>` +
+      `<style>` +
+      `@page { size: auto; margin: 15mm; } ` +
+      `body { margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #fff; } ` +
+      `img { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }` +
+      `</style>` +
+      `</head><body><img src="${src}" alt="${escapeHtml(docTitle)}" /></body></html>`;
+
+    if (electronAPI?.printContent) {
+      const res = await electronAPI.printContent({ html: printHtml, title: docTitle });
+      if (res && !res.success && res.error && res.failureReason !== "cancelled") {
+        toast({
+          title: t("common.error") || "Error",
+          description: res.error,
+          variant: "destructive",
+        });
+      }
+    } else {
+      printHtmlInBrowser(printHtml);
+    }
+  }, [note, imageBlobUrl, t]);
 
   function getExportBaseName() {
     if (!note) return t("editor.untitled");
@@ -7313,25 +8095,90 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return dotIdx > 0 ? name.slice(0, dotIdx) : name;
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
     if (!note) return;
-    const content = isHtmlFile(note) ? note.content : (editor?.getHTML() ?? note.content);
+    const rawContent = isHtmlFile(note)
+      ? (previewHtml || note.content)
+      : (editor?.getHTML() ?? note.content);
 
-    const win = window.open("", "_blank");
-    if (!win) return;
-    const docTitle = note.fileName || note.title?.trim() || t("editor.untitled");
-    win.document.write(
-      isHtmlFile(note)
-        ? content
-        : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${docTitle}</title>` +
-          `<style>body{font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;}` +
-          `h1,h2,h3{margin-top:1.2em;}pre{background:#f4f4f4;padding:1em;border-radius:4px;overflow:auto;}` +
-          `code{background:#f4f4f4;padding:.2em .4em;border-radius:3px;}blockquote{border-left:4px solid #ccc;margin:0;padding-left:1em;color:#666;}</style>` +
-          `</head><body>${content}</body></html>`
-    );
-    win.document.close();
-    win.focus();
-    win.print();
+    if (!rawContent) return;
+
+    const content = await inlineImagesToDataUrls(rawContent);
+    const baseName = getExportBaseName();
+    const docTitle = note.fileName?.replace(/\.[^/.]+$/, "") || note.title?.trim() || t("editor.untitled");
+
+    const hasH1 = /^\s*<h1[^>]*>/i.test(content.trim());
+    const titleHeader = (!isHtmlFile(note) && !hasH1 && docTitle) ? `<h1 class="doc-title">${escapeHtml(docTitle)}</h1>` : "";
+
+    const fullHtml = isHtmlFile(note)
+      ? (content.includes("<html") ? content : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title></head><body>${content}</body></html>`)
+      : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title>` +
+        `<style>` +
+        `@page { size: A4; margin: 15mm 15mm 20mm 15mm; } ` +
+        `body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Thai", sans-serif; padding: 20px 40px; max-width: 800px; margin: 0 auto; line-height: 1.6; color: #1e293b; background: #fff; } ` +
+        `.doc-title { font-size: 2rem; font-weight: 700; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0; color: #0f172a; } ` +
+        `h1, h2, h3, h4, h5, h6 { color: #0f172a; margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 600; } ` +
+        `h1 { font-size: 1.75rem; } h2 { font-size: 1.4rem; } h3 { font-size: 1.2rem; } ` +
+        `p { margin: 0.75em 0; } ` +
+        `pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 1em; border-radius: 6px; overflow-x: auto; font-family: Consolas, Monaco, "Courier New", monospace; font-size: 0.9em; margin: 1em 0; } ` +
+        `code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 4px; font-family: Consolas, Monaco, "Courier New", monospace; font-size: 0.875em; color: #0f172a; } ` +
+        `pre code { background: transparent; padding: 0; border-radius: 0; } ` +
+        `blockquote { border-left: 4px solid #cbd5e1; margin: 1em 0; padding: 0.5em 1em; color: #64748b; background: #f8fafc; border-radius: 0 6px 6px 0; } ` +
+        `table { border-collapse: collapse; width: 100%; margin: 1.5em 0; } ` +
+        `th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; font-size: 0.95em; } ` +
+        `th { background: #f1f5f9; font-weight: 600; color: #0f172a; } ` +
+        `img { max-width: 100%; height: auto; border-radius: 6px; margin: 1em 0; } ` +
+        `ul, ol { padding-left: 1.75em; margin: 0.75em 0; } ` +
+        `li { margin: 0.35em 0; } ` +
+        `input[type="checkbox"] { margin-right: 0.5em; } ` +
+        `hr { border: none; border-top: 1px solid #e2e8f0; margin: 2em 0; } ` +
+        `@media print { body { padding: 0; max-width: 100%; } h1, h2, h3 { page-break-after: avoid; } pre, blockquote, table, img { page-break-inside: avoid; } }` +
+        `</style>` +
+        `</head><body>${titleHeader}${content}</body></html>`;
+
+    const electronAPI = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+    if (electronAPI?.exportPdf) {
+      try {
+        const res = await electronAPI.exportPdf({
+          html: fullHtml,
+          title: docTitle,
+          defaultPath: `${baseName}.pdf`,
+        });
+
+        if (res.canceled) return;
+
+        if (res.success && res.filePath) {
+          const justName = res.filePath.replace(/\\/g, "/").split("/").pop() || `${baseName}.pdf`;
+          toast({
+            title: t("editor.exportPdfSuccess") || "Exported PDF successfully",
+            description: justName,
+            action: electronAPI.showItemInFolder ? (
+              <ToastAction
+                altText={t("editor.showInFolder") || "Show in folder"}
+                onClick={() => electronAPI.showItemInFolder?.(res.filePath!)}
+              >
+                {t("editor.showInFolder") || "Show in folder"}
+              </ToastAction>
+            ) : undefined,
+          });
+        } else if (res.error) {
+          toast({
+            title: t("common.error") || "Error",
+            description: res.error,
+            variant: "destructive",
+          });
+        }
+      } catch (err) {
+        console.error("Export PDF failed:", err);
+        toast({
+          title: t("common.error") || "Error",
+          description: String(err),
+          variant: "destructive",
+        });
+      }
+    } else {
+      printHtmlInBrowser(fullHtml);
+    }
   }
 
   function handleExportWord() {
@@ -7520,9 +8367,143 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }
 
   function renderActionButtons() {
+    if (!note) return null;
+
+    const isImg = isImageFile(note);
+    const isBin = isBinaryFile(note);
+    const isHtml = note.contentFormat === "html" || isHtmlFile(note);
+    const isCss = note.contentFormat === "css" || isCssFile(note);
+    const isCode = isCodeFile(note);
+
+    // 1. Image Actions: Print, Share (and Relock if locked)
+    if (isImg) {
+      return (
+        <Fragment>
+          {/* Print Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={handlePrintImage}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span className="sr-only">{t("editor.print") || "Print"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("editor.print") || "Print"}</TooltipContent>
+          </Tooltip>
+
+          {/* Share Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={!note || isSharingLoading}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                onClick={handleShareClick}
+              >
+                {isSharingLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  (() => {
+                    const ShareIconComp = getToolbarIcon("share", settings.iconPack);
+                    return <ShareIconComp className="h-3.5 w-3.5" />;
+                  })()
+                )}
+                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+          </Tooltip>
+
+          {/* Relock Note */}
+          {note.isLocked && note.isDecrypted && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRelockNote?.(note.id)}
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                >
+                  {(() => {
+                    const LockIconComp = getToolbarIcon("lock", settings.iconPack);
+                    return <LockIconComp className="h-3.5 w-3.5" />;
+                  })()}
+                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+            </Tooltip>
+          )}
+        </Fragment>
+      );
+    }
+
+    // 2. Binary / Archive / Document Actions: Share (and Relock if locked)
+    if (isBin) {
+      return (
+        <Fragment>
+          {/* Share Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={!note || isSharingLoading}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                onClick={handleShareClick}
+              >
+                {isSharingLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  (() => {
+                    const ShareIconComp = getToolbarIcon("share", settings.iconPack);
+                    return <ShareIconComp className="h-3.5 w-3.5" />;
+                  })()
+                )}
+                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+          </Tooltip>
+
+          {/* Relock Note */}
+          {note.isLocked && note.isDecrypted && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRelockNote?.(note.id)}
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                >
+                  {(() => {
+                    const LockIconComp = getToolbarIcon("lock", settings.iconPack);
+                    return <LockIconComp className="h-3.5 w-3.5" />;
+                  })()}
+                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+            </Tooltip>
+          )}
+        </Fragment>
+      );
+    }
+
+    // 3. Text / Code / HTML / Markdown Notes
     return (
       <Fragment>
-        {note?.contentFormat === "html" && (
+        {isHtml && (
           <div className="flex items-center gap-1 mr-1.5">
             <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
               <button
@@ -7617,7 +8598,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             )}
           </div>
         )}
-        {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
+
+        {/* Reading Mode button for Markdown / Text files */}
+        {!(isHtml || isCss || isCode) && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -7661,6 +8644,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </TooltipContent>
           </Tooltip>
         )}
+
+        {/* Lock note button */}
         {note && note.isLocked && note.isDecrypted && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -7681,30 +8666,32 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
           </Tooltip>
         )}
+
+        {/* Save Dropdown */}
         <DropdownMenu>
           <Tooltip>
-          <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
-              {(() => {
-                const SaveIconComp = getToolbarIcon("save", settings.iconPack);
-                return <SaveIconComp className="h-3.5 w-3.5" />;
-              })()}
-              <span className="sr-only">{t("editor.saveFile")}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>{t("editor.saveFile")}</TooltipContent>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+                  {(() => {
+                    const SaveIconComp = getToolbarIcon("save", settings.iconPack);
+                    return <SaveIconComp className="h-3.5 w-3.5" />;
+                  })()}
+                  <span className="sr-only">{t("editor.saveFile")}</span>
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("editor.saveFile")}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" className="w-48 rounded-xl px-0 py-2">
-            <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()}>
               {(() => {
                 const SaveIconComp = getToolbarIcon("save", settings.iconPack);
                 return <SaveIconComp className="h-4 w-4" />;
               })()}
               <span>{t("editor.save")}</span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!note} onClick={() => void performSaveAs()} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <DropdownMenuItem disabled={!note} onClick={() => void performSaveAs()}>
               {(() => {
                 const FileIconComp = getToolbarIcon("file", settings.iconPack);
                 return <FileIconComp className="h-4 w-4" />;
@@ -7713,6 +8700,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Share Button */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -7736,6 +8725,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </TooltipTrigger>
           <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
         </Tooltip>
+
+        {/* Version History Button */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -7766,8 +8757,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   if (!note) {
     return (
       <>
-        {statusPortalTarget && createPortal(renderSaveStatusIndicator(), statusPortalTarget)}
-        {portalTarget && createPortal(renderActionButtons(), portalTarget)}
+        {effectiveStatusPortalTarget && createPortal(renderSaveStatusIndicator(), effectiveStatusPortalTarget)}
+        {effectivePortalTarget && createPortal(renderActionButtons(), effectivePortalTarget)}
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground relative">
           <p className="text-sm">{t("editor.selectOrCreate")}</p>
           <DropdownMenu>
@@ -7777,12 +8768,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 {t("sidebar.newNote")}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" className="w-44 rounded-xl px-0 py-2">
-              <DropdownMenuItem onClick={handleOpenCreateFileDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+            <DropdownMenuContent align="center" className="w-52">
+              <DropdownMenuItem onClick={handleOpenCreateFileDialog}>
                 <FileText className="h-4 w-4" />
                 <span>{t("sidebar.createFileAction")}</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleOpenCreateFolderDialog} className="gap-2 cursor-pointer py-2 px-4 mx-1 rounded-lg">
+              <DropdownMenuItem onClick={handleOpenCreateFolderDialog}>
                 <FolderPlus className="h-4 w-4" />
                 <span>{t("sidebar.createFolderAction")}</span>
               </DropdownMenuItem>
@@ -7970,7 +8961,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={(note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note)) && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+          <div className={(note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
           {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
@@ -8148,45 +9139,45 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("settings.aiAssistant")}</TooltipContent>
                       </Tooltip>
-                      <DropdownMenuContent align="end" className="w-56 rounded-xl px-0 py-2">
-                        <DropdownMenuItem onClick={() => handleAiAction("improve")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <WandSparklesIcon className="mr-2 h-4 w-4" />
+                      <DropdownMenuContent align="end" className="w-60">
+                        <DropdownMenuItem onClick={() => handleAiAction("improve")}>
+                          <WandSparklesIcon className="h-4 w-4" />
                           <span>{t("settings.aiImprove")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("fix_grammar")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <SpellCheckIcon className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("fix_grammar")}>
+                          <SpellCheckIcon className="h-4 w-4" />
                           <span>{t("settings.aiFixGrammar")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("make_shorter")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Minimize2 className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("make_shorter")}>
+                          <Minimize2 className="h-4 w-4" />
                           <span>{t("settings.aiMakeShorter")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("make_longer")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Maximize2 className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("make_longer")}>
+                          <Maximize2 className="h-4 w-4" />
                           <span>{t("settings.aiMakeLonger")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("simplify")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <BookOpen className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("simplify")}>
+                          <BookOpen className="h-4 w-4" />
                           <span>{t("settings.aiSimplify")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("formalize")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <BriefcaseBusinessIcon className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("formalize")}>
+                          <BriefcaseBusinessIcon className="h-4 w-4" />
                           <span>{t("settings.aiFormalize")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("make_casual")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <MessageCircle className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("make_casual")}>
+                          <MessageCircle className="h-4 w-4" />
                           <span>{t("settings.aiMakeCasual")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("translate")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Languages className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("translate")}>
+                          <Languages className="h-4 w-4" />
                           <span>{t("settings.aiTranslate")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("continue_writing")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <ArrowRight className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("continue_writing")}>
+                          <ArrowRight className="h-4 w-4" />
                           <span>{t("settings.aiContinueWriting")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleAiAction("rewrite")} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <PenLineIcon className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => handleAiAction("rewrite")}>
+                          <PenLineIcon className="h-4 w-4" />
                           <span>{t("settings.aiRewrite")}</span>
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -8636,56 +9627,54 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("editor.tableOptions")}</TooltipContent>
                       </Tooltip>
-                      <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
-                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowBefore().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Plus className="mr-2 h-4 w-4" />
+                      <DropdownMenuContent align="start" className="w-60">
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowBefore().run()}>
+                          <Plus className="h-4 w-4" />
                           <span>{t("editor.addRowAbove")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowAfter().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Plus className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addRowAfter().run()}>
+                          <Plus className="h-4 w-4" />
                           <span>{t("editor.addRowBelow")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteRow().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
-                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteRow().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteRow")}</span>
                         </DropdownMenuItem>
-                        <div className="my-1 border-t border-border/40" />
-                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnBefore().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Plus className="mr-2 h-4 w-4" />
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnBefore().run()}>
+                          <Plus className="h-4 w-4" />
                           <span>{t("editor.addColumnLeft")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnAfter().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Plus className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().addColumnAfter().run()}>
+                          <Plus className="h-4 w-4" />
                           <span>{t("editor.addColumnRight")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteColumn().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
-                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteColumn().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteColumn")}</span>
                         </DropdownMenuItem>
-                        <div className="my-1 border-t border-border/40" />
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => editor.chain().focus().mergeCells().run()}
                           disabled={!editor.can().mergeCells()}
-                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                         >
-                          {renderToolIcon("table", "mr-2")}
+                          {renderToolIcon("table")}
                           <span>{t("editor.mergeCells")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor.chain().focus().splitCell().run()}
                           disabled={!editor.can().splitCell()}
-                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                         >
-                          {renderToolIcon("table", "mr-2")}
+                          {renderToolIcon("table")}
                           <span>{t("editor.splitCell")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeaderRow().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          {renderToolIcon("table", "mr-2")}
+                        <DropdownMenuItem onClick={() => editor.chain().focus().toggleHeaderRow().run()}>
+                          {renderToolIcon("table")}
                           <span>{t("editor.toggleHeaderRow")}</span>
                         </DropdownMenuItem>
-                        <div className="my-1 border-t border-border/40" />
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteTable().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2 text-destructive focus:text-destructive">
-                          <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteTable().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteTable")}</span>
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -8712,8 +9701,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("editor.emoji")}</TooltipContent>
                       </Tooltip>
-                      <PopoverContent align="start" className="w-72 rounded-xl p-3 shadow-lg">
-                        <div className="text-xs font-semibold text-muted-foreground mb-2 px-1">
+                      <PopoverContent align="start" className="w-72 rounded-xl p-2.5 shadow-xl border border-border/80">
+                        <div className="text-xs font-semibold text-muted-foreground mb-1.5 px-1">
                           {t("editor.insertEmoji")}
                         </div>
                         <div className="grid grid-cols-7 gap-1 max-h-56 overflow-y-auto pr-1 select-none no-scrollbar">
@@ -8721,7 +9710,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             <button
                               key={`${emoji}-${index}`}
                               type="button"
-                              className="h-8 w-8 text-lg rounded-lg hover:bg-muted focus:bg-muted flex items-center justify-center transition-colors cursor-pointer"
+                              className="h-8 w-8 text-lg rounded-lg hover:bg-primary/8 focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => {
                                 if (editor) {
@@ -8834,13 +9823,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("editor.image")}</TooltipContent>
                       </Tooltip>
-                      <DropdownMenuContent align="start" className="w-56 rounded-xl px-0 py-2">
-                        <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <ImagePlus className="mr-2 h-4 w-4" />
+                      <DropdownMenuContent align="start" className="w-60">
+                        <DropdownMenuItem onClick={openImageDialog}>
+                          <ImagePlus className="h-4 w-4" />
                           <span>{t("editor.insertImageByUrl")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={openWorkspaceImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                          <Images className="mr-2 h-4 w-4" />
+                        <DropdownMenuItem onClick={openWorkspaceImageDialog}>
+                          <Images className="h-4 w-4" />
                           <span>{t("editor.insertImageFromWorkspace")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -8848,9 +9837,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             rememberSelection();
                             imageInputRef.current?.click();
                           }}
-                          className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                         >
-                          <Upload className="mr-2 h-4 w-4" />
+                          <Upload className="h-4 w-4" />
                           <span>{t("editor.uploadImage")}</span>
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -8864,7 +9852,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${audioRecorderOpen ? "bg-primary/15 text-primary" : ""}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={openAudioRecorder}
@@ -8904,139 +9892,139 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             const renderDropdownItem = (id: string) => {
               const renderDropdownIcon = (toolId: string) => {
                 const IconComp = getToolbarIcon(toolId, settings.iconPack);
-                return <IconComp className="mr-2 h-4 w-4" />;
+                return <IconComp className="h-4 w-4" />;
               };
 
               switch (id) {
                 case "undo":
                   return (
-                    <DropdownMenuItem key="undo" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor || !editor.can().undo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="undo" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor || !editor.can().undo()}>
                       {renderDropdownIcon("undo")}
                       <span>{t("editor.undo")}</span>
                     </DropdownMenuItem>
                   );
                 case "redo":
                   return (
-                    <DropdownMenuItem key="redo" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor || !editor.can().redo()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="redo" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor || !editor.can().redo()}>
                       {renderDropdownIcon("redo")}
                       <span>{t("editor.redo")}</span>
                     </DropdownMenuItem>
                   );
                 case "h1":
                   return (
-                    <DropdownMenuItem key="h1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
                       {renderDropdownIcon("h1")}
                       <span>{t("editor.heading1")}</span>
                     </DropdownMenuItem>
                   );
                 case "h2":
                   return (
-                    <DropdownMenuItem key="h2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
                       {renderDropdownIcon("h2")}
                       <span>{t("editor.heading2")}</span>
                     </DropdownMenuItem>
                   );
                 case "h3":
                   return (
-                    <DropdownMenuItem key="h3" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h3" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}>
                       {renderDropdownIcon("h3")}
                       <span>{t("editor.heading3")}</span>
                     </DropdownMenuItem>
                   );
                 case "h4":
                   return (
-                    <DropdownMenuItem key="h4" onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h4" onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}>
                       {renderDropdownIcon("h4")}
                       <span>{t("editor.heading4")}</span>
                     </DropdownMenuItem>
                   );
                 case "h5":
                   return (
-                    <DropdownMenuItem key="h5" onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h5" onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}>
                       {renderDropdownIcon("h5")}
                       <span>{t("editor.heading5")}</span>
                     </DropdownMenuItem>
                   );
                 case "h6":
                   return (
-                    <DropdownMenuItem key="h6" onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="h6" onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}>
                       {renderDropdownIcon("h6")}
                       <span>{t("editor.heading6")}</span>
                     </DropdownMenuItem>
                   );
                 case "bold":
                   return (
-                    <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()}>
                       {renderDropdownIcon("bold")}
                       <span>{t("editor.bold")}</span>
                     </DropdownMenuItem>
                   );
                 case "italic":
                   return (
-                    <DropdownMenuItem key="italic" onClick={() => editor?.chain().focus().toggleItalic().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="italic" onClick={() => editor?.chain().focus().toggleItalic().run()}>
                       {renderDropdownIcon("italic")}
                       <span>{t("editor.italic")}</span>
                     </DropdownMenuItem>
                   );
                 case "underline":
                   return (
-                    <DropdownMenuItem key="underline" onClick={() => editor?.chain().focus().toggleUnderline().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="underline" onClick={() => editor?.chain().focus().toggleUnderline().run()}>
                       {renderDropdownIcon("underline")}
                       <span>{t("editor.underline")}</span>
                     </DropdownMenuItem>
                   );
                 case "strike":
                   return (
-                    <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()}>
                       {renderDropdownIcon("strike")}
                       <span>{t("editor.strikethrough")}</span>
                     </DropdownMenuItem>
                   );
                 case "highlight":
                   return (
-                    <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()}>
                       {renderDropdownIcon("highlight")}
                       <span>{t("editor.highlight")}</span>
                     </DropdownMenuItem>
                   );
                 case "bulletList":
                   return (
-                    <DropdownMenuItem key="bulletList" onClick={() => editor?.chain().focus().toggleBulletList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="bulletList" onClick={() => editor?.chain().focus().toggleBulletList().run()}>
                       {renderDropdownIcon("bulletList")}
                       <span>{t("editor.bulletList")}</span>
                     </DropdownMenuItem>
                   );
                 case "orderedList":
                   return (
-                    <DropdownMenuItem key="orderedList" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="orderedList" onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
                       {renderDropdownIcon("orderedList")}
                       <span>{t("editor.numberedList")}</span>
                     </DropdownMenuItem>
                   );
                 case "taskList":
                   return (
-                    <DropdownMenuItem key="taskList" onClick={() => editor?.chain().focus().toggleTaskList().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="taskList" onClick={() => editor?.chain().focus().toggleTaskList().run()}>
                       {renderDropdownIcon("taskList")}
                       <span>{t("editor.checkbox")}</span>
                     </DropdownMenuItem>
                   );
                 case "toggle":
                   return (
-                    <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)}>
                       {renderDropdownIcon("toggle")}
                       <span>{t("editor.toggle")}</span>
                     </DropdownMenuItem>
                   );
                 case "code":
                   return (
-                    <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()}>
                       {renderDropdownIcon("code")}
                       <span>{t("editor.inlineCode")}</span>
                     </DropdownMenuItem>
                   );
                 case "blockquote":
                   return (
-                    <DropdownMenuItem key="blockquote" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="blockquote" onClick={() => editor?.chain().focus().toggleBlockquote().run()}>
                       {renderDropdownIcon("blockquote")}
                       <span>{t("editor.blockquote")}</span>
                     </DropdownMenuItem>
@@ -9054,7 +10042,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           }
                         }
                       }}
-                      className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                     >
                       {renderDropdownIcon("table")}
                       <span>{t("editor.insertTable")}</span>
@@ -9062,35 +10049,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   );
                 case "emoji":
                   return (
-                    <DropdownMenuItem key="emoji" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="emoji" onClick={() => {}}>
                       {renderDropdownIcon("emoji")}
                       <span>{t("editor.insertEmoji")}</span>
                     </DropdownMenuItem>
                   );
                 case "calculator":
                   return (
-                    <DropdownMenuItem key="calculator" onClick={toggleCalculator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="calculator" onClick={toggleCalculator}>
                       {renderDropdownIcon("calculator")}
                       <span>{t("editor.calculator")}</span>
                     </DropdownMenuItem>
                   );
                 case "translator":
                   return (
-                    <DropdownMenuItem key="translator" onClick={toggleTranslator} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="translator" onClick={toggleTranslator}>
                       {renderDropdownIcon("translator")}
                       <span>{t("editor.translator")}</span>
                     </DropdownMenuItem>
                   );
                 case "clock":
                   return (
-                    <DropdownMenuItem key="clock" onClick={toggleClock} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="clock" onClick={toggleClock}>
                       {renderDropdownIcon("clock")}
                       <span>{t("editor.clock")}</span>
                     </DropdownMenuItem>
                   );
                 case "link":
                   return (
-                    <DropdownMenuItem key="link" onClick={openLinkDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="link" onClick={openLinkDialog}>
                       {renderDropdownIcon("link")}
                       <span>{t("editor.link")}</span>
                     </DropdownMenuItem>
@@ -9098,12 +10085,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 case "image":
                   return (
                     <Fragment key="image">
-                      <DropdownMenuItem onClick={openImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                      <DropdownMenuItem onClick={openImageDialog}>
                         {renderDropdownIcon("image")}
                         <span>{t("editor.insertImageByUrl")}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={openWorkspaceImageDialog} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
-                        <Images className="mr-2 h-4 w-4" />
+                      <DropdownMenuItem onClick={openWorkspaceImageDialog}>
+                        <Images className="h-4 w-4" />
                         <span>{t("editor.insertImageFromWorkspace")}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -9111,9 +10098,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           rememberSelection();
                           imageInputRef.current?.click();
                         }}
-                        className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                       >
-                        <Upload className="mr-2 h-4 w-4" />
+                        <Upload className="h-4 w-4" />
                         <span>{t("editor.uploadImage")}</span>
                       </DropdownMenuItem>
                     </Fragment>
@@ -9123,7 +10109,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuItem
                       key="audio"
                       onClick={openAudioRecorder}
-                      className="mx-1 cursor-pointer rounded-lg px-4 py-2"
                     >
                       {renderDropdownIcon("audio")}
                       <span>{t("editor.recordAudio")}</span>
@@ -9131,14 +10116,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   );
                 case "fixLanguage":
                   return (
-                    <DropdownMenuItem key="fixLanguage" onClick={handleFixLanguage} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="fixLanguage" onClick={handleFixLanguage}>
                       {renderDropdownIcon("fixLanguage")}
                       <span>{t("editor.fixLanguage")}</span>
                     </DropdownMenuItem>
                   );
                 case "aiAssistant":
                   return (
-                    <DropdownMenuItem key="aiAssistant" onClick={() => {}} className="mx-1 cursor-pointer rounded-lg px-4 py-2">
+                    <DropdownMenuItem key="aiAssistant" onClick={() => {}}>
                       {renderDropdownIcon("aiAssistant")}
                       <span>{t("settings.aiAssistant")}</span>
                     </DropdownMenuItem>
@@ -9182,7 +10167,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </TooltipTrigger>
                         <TooltipContent>{t("editor.moreTools")}</TooltipContent>
                       </Tooltip>
-                      <DropdownMenuContent align="end" sideOffset={4} className="w-56 rounded-xl px-0 py-2">
+                      <DropdownMenuContent align="end" sideOffset={4} className="w-60">
                         {overflowItems.map((item) => renderDropdownItem(item.id))}
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -9196,8 +10181,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           <div className="ml-auto flex items-center gap-1">
-          {statusPortalTarget && createPortal(renderSaveStatusIndicator(), statusPortalTarget)}
-          {portalTarget && createPortal(renderActionButtons(), portalTarget)}
+          {effectiveStatusPortalTarget && createPortal(renderSaveStatusIndicator(), effectiveStatusPortalTarget)}
+          {effectivePortalTarget && createPortal(renderActionButtons(), effectivePortalTarget)}
           <input ref={docxInputRef} type="file" accept=".docx" className="hidden" onChange={handleImportDocx} />
           <Dialog open={importDocxDialogOpen} onOpenChange={setImportDocxDialogOpen}>
             <DialogContent className="sm:max-w-md rounded-2xl">
@@ -9285,7 +10270,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </div>
       </div>
 
-        <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row min-w-0 overflow-hidden">
         <div
           ref={editorScrollContainerRef}
           onScroll={handleEditorScroll}
@@ -9299,6 +10284,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
             if (
               editor &&
+              !isReadingMode &&
               !target.closest("button, a, input, textarea, select, [role='button'], [role='menuitem'], summary, .code-block-wrapper, table")
             ) {
               if (target === e.currentTarget || target.closest("[data-editor-bottom-area]")) {
@@ -9306,8 +10292,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
           }}
-          className={`flex flex-col cursor-text ${
-            note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) ? "flex-1 min-h-0" : "flex-1 overflow-y-auto overflow-x-hidden"
+          className={`flex flex-col ${isReadingMode ? "cursor-default" : "cursor-text"} ${
+            isImageFile(note) || isBinaryFile(note) || note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note)
+              ? "flex-1 min-h-0 min-w-0 overflow-hidden"
+              : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
           } w-full`}
         >
           {comparingVersion ? (
@@ -9333,14 +10321,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 return false;
               }}
             />
-          ) : note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(note.fileName || "") ? (
-            <div className={`flex min-h-full w-full ${isImageZoomed && canZoomImage ? "items-start justify-center p-4 overflow-auto" : "items-center justify-center p-4 overflow-hidden"}`}>
-              {imageBlobUrl || (note.content?.startsWith("data:") ? note.content : null) ? (
+          ) : isImageFile(note) ? (
+            <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 overflow-auto flex">
+              {imageBlobUrl || (note.content?.startsWith("data:") || note.content?.startsWith("blob:") || note.content?.startsWith("http") ? note.content : null) ? (
                 <img
-                  src={imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined)}
+                  ref={(img) => {
+                    imageElementRef.current = img;
+                    if (img && img.complete && img.naturalWidth > 0 && !imageDimensions) {
+                      setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+                    }
+                  }}
+                  src={imageBlobUrl || (note.content?.startsWith("data:") || note.content?.startsWith("blob:") || note.content?.startsWith("http") ? note.content : undefined)}
                   alt={note.fileName}
+                  style={
+                    imageZoomMode === "fit"
+                      ? { maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }
+                      : {
+                          width: imageDimensions ? `${(imageDimensions.width * imageCustomZoom) / 100}px` : `${imageCustomZoom}%`,
+                          maxWidth: "none",
+                          maxHeight: "none",
+                          flexShrink: 0,
+                        }
+                  }
                   onLoad={(e) => {
                     const img = e.currentTarget;
+                    setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
                     const container = img.parentElement;
                     if (container) {
                       const maxW = container.clientWidth;
@@ -9349,32 +10354,70 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       setCanZoomImage(isLarge);
                     }
                   }}
-                  onClick={() => {
-                    if (canZoomImage) {
-                      setIsImageZoomed((prev) => !prev);
-                    }
-                  }}
-                  className={`object-contain select-none ${
-                    !canZoomImage
-                      ? "max-h-full max-w-full cursor-default"
-                      : isImageZoomed
-                        ? "max-h-none max-w-none cursor-zoom-out"
-                        : "max-h-full max-w-full cursor-zoom-in"
+                  onClick={handleToggleZoomFit}
+                  className={`m-auto select-none transition-[width,height] duration-150 ${
+                    imageZoomMode === "fit"
+                      ? "cursor-zoom-in"
+                      : "cursor-zoom-out"
                   }`}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{note.fileName}</p>
+                <p className="m-auto text-sm text-muted-foreground">{note.fileName}</p>
               )}
             </div>
-          ) : note.fileType === "binary" || (note.fileName?.toLowerCase()?.endsWith(".zip")) ? (
-            <div className="flex min-h-full w-full flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
-              {note.fileName?.toLowerCase()?.endsWith(".zip") ? (
-                <FolderArchive className="h-12 w-12 opacity-30" />
-              ) : (
-                <File className="h-12 w-12 opacity-30" />
+          ) : isBinaryFile(note) ? (
+            <div className="flex-1 min-h-0 min-w-0 w-full h-full flex flex-col items-center justify-center gap-3.5 p-6 text-muted-foreground">
+              {(() => {
+                const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+                const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+                const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+                const baseCls = "h-12 w-12 shrink-0 stroke-[1.5]";
+                const defaultColorCls = customColor ? "" : "text-muted-foreground/70";
+
+                if (customIcon) {
+                  const custom = renderCustomIcon(
+                    customIcon,
+                    `${baseCls} ${defaultColorCls}`,
+                    { color: customColor || undefined, fontSize: "2.75rem" }
+                  );
+                  if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+                }
+
+                const defaultKey = getNoteDefaultIconKey(note);
+                const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
+                return (
+                  <IconComp
+                    className={`${baseCls} ${defaultColorCls}`}
+                    strokeWidth={1.5}
+                    style={customColor ? { color: customColor } : undefined}
+                  />
+                );
+              })()}
+              <div className="flex flex-col items-center gap-1 text-center">
+                <p className="text-sm font-semibold text-foreground">{note.fileName}</p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>{getFileFormatLabel(note)}</span>
+                  {activeFileSize != null && (
+                    <>
+                      <span>•</span>
+                      <span>{formatFileSize(activeFileSize)}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {isAudioFile(note) && (
+                audioBlobUrl ? (
+                  <div className="w-full max-w-[430px] mt-2">
+                    <AudioPlayer src={audioBlobUrl} title={note.fileName} />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2 py-1">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    <span>{t("common.loading") || "Loading audio..."}</span>
+                  </div>
+                )
               )}
-              <p className="text-sm">{note.fileName}</p>
-              <p className="text-xs opacity-60">{t("editor.previewNotSupported")}</p>
             </div>
           ) : note.contentFormat === "css" || isCssFile(note) ? (
             <HtmlCodeEditor
@@ -9532,19 +10575,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <div
                     data-editor-bottom-area="true"
                     onClick={() => {
-                      if (editor) {
+                      if (editor && !isReadingMode) {
                         editor.commands.focus("end");
                       }
                     }}
-                    className="h-10 sm:h-12 md:h-14 w-full shrink-0 cursor-text"
+                    className={
+                      isReadingMode
+                        ? "min-h-8 sm:min-h-12 w-full shrink-0 cursor-default"
+                        : "min-h-[40vh] sm:min-h-[50vh] w-full shrink-0 cursor-text"
+                    }
                   />
                 </div>
               </ContextMenuTrigger>
 
-              <ContextMenuContent className="w-56 rounded-xl">
+              <ContextMenuContent className="w-60 rounded-xl">
                 {contextSpellData && contextSpellData.suggestions.length > 0 && (
                   <>
-                    <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1">
+                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1">
                       <span>{t("settings.spellCheckSetting") || "Spell Suggestions"}</span>
                       <span className="text-[10px] text-muted-foreground/60 italic font-mono">({contextSpellData.word})</span>
                     </div>
@@ -9561,7 +10608,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             .run();
                           setContextSpellData(null);
                         }}
-                        className="gap-2 font-medium text-primary focus:text-primary focus:bg-primary/10"
+                        className="gap-2.5 font-medium text-primary focus:text-primary focus:bg-primary/10"
                       >
                         <Check className="h-4 w-4 shrink-0" />
                         <span>{suggestion}</span>
@@ -9574,7 +10621,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <ContextMenuItem
                   onClick={() => editor?.chain().focus().undo().run()}
                   disabled={!editor?.can().undo()}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <Undo2 className="h-4 w-4" />
                   <span>{t("editor.undo") || "Undo"}</span>
@@ -9584,7 +10631,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <ContextMenuItem
                   onClick={() => editor?.chain().focus().redo().run()}
                   disabled={!editor?.can().redo()}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <Redo2 className="h-4 w-4" />
                   <span>{t("editor.redo") || "Redo"}</span>
@@ -9604,7 +10651,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   disabled={!editor || editor.state.selection.empty}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <Scissors className="h-4 w-4" />
                   <span>{t("editor.cut") || "Cut"}</span>
@@ -9621,7 +10668,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   disabled={!editor || editor.state.selection.empty}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <Copy className="h-4 w-4" />
                   <span>{t("editor.copy") || "Copy"}</span>
@@ -9640,7 +10687,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       // clipboard fallback
                     }
                   }}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <ClipboardList className="h-4 w-4" />
                   <span>{t("editor.paste") || "Paste"}</span>
@@ -9651,7 +10698,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
                 <ContextMenuItem
                   onClick={() => editor?.chain().focus().selectAll().run()}
-                  className="gap-2"
+                  className="gap-2.5"
                 >
                   <FileText className="h-4 w-4" />
                   <span>{t("editor.selectAll") || "Select All"}</span>
@@ -9663,14 +10710,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <ContextMenuSeparator />
                     <ContextMenuItem
                       onClick={openTranslatorWithSelection}
-                      className="gap-2"
+                      className="gap-2.5"
                     >
                       <Languages className="h-4 w-4" />
                       <span>{t("editor.translateSelection") || "Translate"}</span>
                     </ContextMenuItem>
                     <ContextMenuItem
                       onClick={handleFixLanguage}
-                      className="gap-2"
+                      className="gap-2.5"
                     >
                       <Wrench className="h-4 w-4" />
                       <span>{t("editor.fixLanguage") || "Fix Language (TH/EN)"}</span>
@@ -9685,36 +10732,209 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         {/* Editor Status Bar */}
         {note && (
-          <div className="flex h-7 w-full shrink-0 items-center justify-between border-t border-border/60 bg-card/60 dark:bg-card/40 px-3 text-[11px] text-muted-foreground select-none overflow-x-auto no-scrollbar">
-            {/* Left side: Ln 1, Col 1 | (words | characters if not HTML) | Markdown/HTML */}
-            <div className="flex items-center gap-2.5 shrink-0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                    {t("editor.lineCol", { line: editorStats.line, col: editorStats.col }) || `Ln ${editorStats.line}, Col ${editorStats.col}`}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.cursorPosition", { line: editorStats.line, col: editorStats.col })}
-                </TooltipContent>
-              </Tooltip>
+          <div className="flex h-7 w-full min-w-0 shrink-0 items-center justify-between border-t border-border/60 bg-card/60 dark:bg-card/40 px-3 text-[11px] text-muted-foreground select-none overflow-hidden">
+            {isImageFile(note) ? (
+              <>
+                {/* Left side: Dimensions | File Size | Format */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {imageDimensions ? `${imageDimensions.width} × ${imageDimensions.height} px` : "— px"}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.imageDimensions") || "Dimensions"}: {imageDimensions ? `${imageDimensions.width} × ${imageDimensions.height} px` : "—"}
+                    </TooltipContent>
+                  </Tooltip>
 
-              {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
-                <>
+                  <div className="h-3 w-[1px] bg-border/60" />
+
+                  {activeFileSize != null && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {formatFileSize(activeFileSize)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {getFileFormatLabel(note)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Right side: Zoom Out | % / Fit | Zoom In | Open in App */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Zoom out button */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleZoomOutImage}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
+                      >
+                        <ZoomOut className="h-3.5 w-3.5" />
+                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomOut") || "Zoom Out"}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Zoom Level / Fit Toggle */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleToggleZoomFit}
+                        className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                      >
+                        {imageZoomMode === "fit" ? (t("editor.fitToWindow") || "Fit") : `${imageCustomZoom}%`}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {imageZoomMode === "fit" ? (t("editor.actualSize") || "Actual size (100%)") : (t("editor.fitToWindow") || "Fit to Window")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Zoom in button */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleZoomInImage}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
+                      >
+                        <ZoomIn className="h-3.5 w-3.5" />
+                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomIn") || "Zoom In"}
+                    </TooltipContent>
+                  </Tooltip>
+
                   <div className="h-3 w-[1px] bg-border/60" />
 
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="cursor-default hover:text-foreground transition-colors">
-                        {editorStats.wordCount === 1
-                          ? t("editor.wordCountSingle", { count: 1 })
-                          : t("editor.wordsCount", { count: editorStats.wordCount.toLocaleString() })}
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenInSystemApp()}
+                        className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </>
+            ) : isBinaryFile(note) ? (
+              <>
+                {/* Left side: File Size | Format */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  {activeFileSize != null && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {formatFileSize(activeFileSize)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {getFileFormatLabel(note)}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("rightPanel.wordCount")}
+                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
                     </TooltipContent>
                   </Tooltip>
+                </div>
+
+                {/* Right side: Open in App */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenInSystemApp()}
+                        className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Left side: Ln 1, Col 1 | (words | characters if not HTML/Code) | Format */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {t("editor.lineCol", { line: editorStats.line, col: editorStats.col }) || `Ln ${editorStats.line}, Col ${editorStats.col}`}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.cursorPosition", { line: editorStats.line, col: editorStats.col })}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                    <>
+                      <div className="h-3 w-[1px] bg-border/60" />
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {editorStats.wordCount === 1
+                              ? t("editor.wordCountSingle", { count: 1 })
+                              : t("editor.wordsCount", { count: editorStats.wordCount.toLocaleString() })}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("rightPanel.wordCount")}
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
 
                   <div className="h-3 w-[1px] bg-border/60" />
 
@@ -9730,165 +10950,165 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       {t("rightPanel.characterCount")}
                     </TooltipContent>
                   </Tooltip>
-                </>
-              )}
 
-              <div className="h-3 w-[1px] bg-border/60" />
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                    {editorStats.syntaxLabel}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.syntaxMode", { syntax: editorStats.syntaxLabel })}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-
-            {/* Right side: 100% - + UTF-8 LF | (Spell if not HTML) */}
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Clickable % to reset zoom to 100% */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => updateSetting("editorFontSize", 15)}
-                    className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60"
-                  >
-                    {`${editorStats.zoom}%`}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.zoomReset")}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Zoom out button - */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => updateSetting("editorFontSize", Math.max(13, (settings.editorFontSize || 15) - 1))}
-                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
-                  >
-                    -
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.zoomOut")}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Zoom in button + */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => updateSetting("editorFontSize", Math.min(22, (settings.editorFontSize || 15) + 1))}
-                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
-                  >
-                    +
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.zoomIn")}
-                </TooltipContent>
-              </Tooltip>
-
-              <div className="h-3 w-[1px] bg-border/60" />
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-muted-foreground font-normal cursor-default hover:text-foreground transition-colors px-1">
-                    UTF-8
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.encoding")}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Line Ending toggle */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleToggleLineEnding}
-                    className="hover:text-foreground text-muted-foreground transition-colors cursor-pointer font-normal rounded px-1 py-0.5 hover:bg-muted/60"
-                  >
-                    {lineEnding}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {t("editor.lineEndingToggle", { lineEnding })}
-                </TooltipContent>
-              </Tooltip>
-
-              <div className="h-3 w-[1px] bg-border/60" />
-
-              {/* Keyboard Input Language Indicator: EN / ไทย (View-only indicator) */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className="flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground select-none font-normal leading-none cursor-default"
-                  >
-                    <span>
-                      {settings.language === "th"
-                        ? keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"
-                        : keyboardLanguage === "th" ? "TH" : "EN"}
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">
-                  <p className="font-semibold">
-                    {settings.language === "th"
-                      ? `แป้นพิมพ์: ${keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"}`
-                      : `Keyboard: ${keyboardLanguage === "th" ? "TH" : "EN"}`}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {settings.language === "th"
-                      ? "สลับภาษา: Win+Spacebar"
-                      : "Switch: Win+Spacebar"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-
-              {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note)) && (
-                <>
                   <div className="h-3 w-[1px] bg-border/60" />
 
-                  {/* Spellcheck toggle: status bar pill with tooltip */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {getFileFormatLabel(note)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.syntaxMode", { syntax: getFileFormatLabel(note) })}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Right side: 100% - + UTF-8 LF | (Spell if not HTML/Code) */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Clickable % to reset zoom to 100% */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        onClick={() => updateSetting("spellCheck", !spellCheckEnabled)}
-                        className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                        onClick={() => updateSetting("editorFontSize", 15)}
+                        className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60"
                       >
-                        <Check
-                          className={`h-3 w-3 transition-colors ${
-                            spellCheckEnabled
-                              ? "text-primary stroke-[2.5]"
-                              : "opacity-30 text-muted-foreground"
-                          }`}
-                        />
-                        <span className={spellCheckEnabled ? "text-muted-foreground font-normal" : "text-muted-foreground/60 line-through"}>
-                          {t("editor.spellCheck")}
-                        </span>
+                        {`${editorStats.zoom}%`}
                       </button>
                     </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomReset")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Zoom out button - */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting("editorFontSize", Math.max(13, (settings.editorFontSize || 15) - 1))}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
+                      >
+                        -
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomOut")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Zoom in button + */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting("editorFontSize", Math.min(22, (settings.editorFontSize || 15) + 1))}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
+                      >
+                        +
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomIn")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <div className="h-3 w-[1px] bg-border/60" />
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-muted-foreground font-normal cursor-default hover:text-foreground transition-colors px-1">
+                        UTF-8
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.encoding")}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Line Ending toggle */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleToggleLineEnding}
+                        className="hover:text-foreground text-muted-foreground transition-colors cursor-pointer font-normal rounded px-1 py-0.5 hover:bg-muted/60"
+                      >
+                        {lineEnding}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.lineEndingToggle", { lineEnding })}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <div className="h-3 w-[1px] bg-border/60" />
+
+                  {/* Keyboard Input Language Indicator: EN / ไทย (View-only indicator) */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground select-none font-normal leading-none cursor-default"
+                      >
+                        <span>
+                          {settings.language === "th"
+                            ? keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"
+                            : keyboardLanguage === "th" ? "TH" : "EN"}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
-                      <p className="font-semibold">{t("settings.spellCheckSetting")}</p>
+                      <p className="font-semibold">
+                        {settings.language === "th"
+                          ? `แป้นพิมพ์: ${keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"}`
+                          : `Keyboard: ${keyboardLanguage === "th" ? "TH" : "EN"}`}
+                      </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {spellCheckEnabled ? t("editor.spellCheckDisable") : t("editor.spellCheckEnable")}
+                        {settings.language === "th"
+                          ? "สลับภาษา: Win+Spacebar"
+                          : "Switch: Win+Spacebar"}
                       </p>
                     </TooltipContent>
                   </Tooltip>
-                </>
-              )}
-            </div>
+
+                  {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                    <>
+                      <div className="h-3 w-[1px] bg-border/60" />
+
+                      {/* Spellcheck toggle: status bar pill with tooltip */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => updateSetting("spellCheck", !spellCheckEnabled)}
+                            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                          >
+                            <Check
+                              className={`h-3 w-3 transition-colors ${
+                                spellCheckEnabled
+                                  ? "text-primary stroke-[2.5]"
+                                  : "opacity-30 text-muted-foreground"
+                              }`}
+                            />
+                            <span className={spellCheckEnabled ? "text-muted-foreground font-normal" : "text-muted-foreground/60 line-through"}>
+                              {t("editor.spellCheck")}
+                            </span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          <p className="font-semibold">{t("settings.spellCheckSetting")}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {spellCheckEnabled ? t("editor.spellCheckDisable") : t("editor.spellCheckEnable")}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
         </div>
@@ -9937,6 +11157,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }}
               onExportPdf={handleExportPdf}
               onExportWord={handleExportWord}
+              imageDimensions={imageDimensions}
+              fileSize={activeFileSize ?? note?.fileSize}
             />
           )}
 
@@ -10284,6 +11506,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         onInsertAudio={({ src, title }) => {
           if (!editor) return;
           userEditedRef.current = true;
+          hasPendingDiskSaveRef.current = true;
           editorSelectionRef.current = null;
           editor.chain().focus().setAudio({ src, title }).run();
           setLastEditedTime(Date.now());
@@ -10375,14 +11598,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div
           role="menu"
           data-slash-menu="true"
-          className="fixed z-50 w-56 rounded-xl border border-border bg-popover px-0 py-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
+          className="fixed z-50 w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
           style={{
             top: `${Math.min(slashMenuState.coords.top + 6, window.innerHeight - 300)}px`,
             left: `${Math.min(slashMenuState.coords.left, window.innerWidth - 240)}px`,
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
+          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
             {t("editor.slashMenuTitle")}
           </div>
 
@@ -10407,7 +11630,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             className="overflow-y-auto no-scrollbar flex-1 py-1"
           >
             {slashMenuState.filteredItems.length === 0 ? (
-              <div className="px-4 py-3 text-xs text-center text-muted-foreground">
+              <div className="px-3 py-2.5 text-xs text-center text-muted-foreground">
                 {t("editor.noCommandsFound")}
               </div>
             ) : (
@@ -10419,7 +11642,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 return (
                   <Fragment key={item.id}>
                     {showCategoryHeader && item.categoryKey && (
-                      <div className={`px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/80 select-none ${idx > 0 ? "mt-1 border-t border-border/25" : ""}`}>
+                      <div className={`px-3 pt-2 pb-1 text-[11px] font-semibold text-muted-foreground/80 tracking-wider select-none ${idx > 0 ? "mt-1 border-t border-border/25" : ""}`}>
                         {t(item.categoryKey)}
                       </div>
                     )}
@@ -10432,10 +11655,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         setSlashMenuState((prev) => ({ ...prev, selectedIndex: idx }));
                         slashMenuStateRef.current.selectedIndex = idx;
                       }}
-                      className={`mx-1 flex cursor-pointer items-center rounded-lg px-3 py-2 text-sm transition-all select-none gap-2.5 ${
+                      className={`flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>span>svg]:h-4 [&>span>svg]:w-4 [&>span>svg]:shrink-0 [&>span>svg]:text-muted-foreground ${
                         isSelected
-                          ? "bg-primary/10 text-primary font-semibold shadow-2xs"
-                          : "text-foreground font-normal hover:bg-foreground/5 hover:text-foreground"
+                          ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                          : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
                       }`}
                       onClick={() => {
                         if (editor) {
@@ -10589,7 +11812,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => window.open(shareLink, "_blank")}
+                onClick={() => {
+                  if (onOpenWebTab) {
+                    onOpenWebTab(shareLink, "Google Drive");
+                  } else {
+                    window.open(shareLink, "_blank", "noopener,noreferrer");
+                  }
+                }}
                 className="rounded-xl text-xs gap-1.5 cursor-pointer"
               >
                 <ExternalLink className="h-3.5 w-3.5" />

@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from "react";
-import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal, MoreVertical, Cloud, Globe } from "lucide-react";
+import React, { useState, useMemo, useEffect } from "react";
+import { ChevronRight, ChevronDown, Home, Folder, FolderOpen, FileText, FileImage, FileCode, File, FolderArchive, CheckCircle2, Share2, Bell, History, MoreHorizontal, MoreVertical, Cloud, Globe, ArrowDown, Star } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import type { Note } from "@/hooks/useNotes";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getToolbarIcon, IconPack } from "@/lib/iconPacks";
+import { getToolbarIcon, renderCustomIcon, IconPack } from "@/lib/iconPacks";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,28 +36,48 @@ interface TreeNode {
   children: TreeNode[];
 }
 
+function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
+  const { settings } = useAppSettings();
+  const pack = settings?.iconPack || "lucide";
+  const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
+  if (note.fileType === "web-viewer") return <Globe className={cls} />;
+  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+  if (customIcon) {
+    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
+    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+  }
+  if (note.isLocked) {
+    const LockIcon = getToolbarIcon("lock", pack);
+    return <LockIcon className={cls} />;
+  }
+  const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
+  const IconComp = getToolbarIcon(defaultKey, pack);
+  return <IconComp className={cls} />;
+}
+
+function MarkdownIndicator({ active, className = "" }: { active: boolean; className?: string }) {
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-end gap-[1px] text-[10px] font-bold leading-none select-none cursor-default ${
+        active ? "text-primary opacity-90" : "text-muted-foreground/70"
+      } ${className}`}
+      title="Markdown"
+      aria-label="Markdown"
+    >
+      <span>M</span>
+      <ArrowDown className="h-2.5 w-2.5 shrink-0 stroke-[2.5]" />
+    </span>
+  );
+}
+
 function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = false, pack: IconPack = "lucide") {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   if (fileType === "web-viewer") return <Globe className={cls} />;
-  const name = fileName?.toLowerCase() || "";
-  if (name.endsWith(".zip")) {
-    const ZipIcon = getToolbarIcon("fileZip", pack);
-    return <ZipIcon className={cls} />;
-  }
-  if (fileType === "image" || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".svg") || name.endsWith(".gif") || name.endsWith(".webp")) {
-    const ImgIcon = getToolbarIcon("fileImage", pack);
-    return <ImgIcon className={cls} />;
-  }
-  if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".html") || name.endsWith(".htm") || name.endsWith(".css") || name.endsWith(".scss") || name.endsWith(".json") || name.endsWith(".ts") || name.endsWith(".tsx")) {
-    const CodeIcon = getToolbarIcon("fileCode", pack);
-    return <CodeIcon className={cls} />;
-  }
-  if (fileType === "binary") {
-    const FileIcon = getToolbarIcon("file", pack);
-    return <FileIcon className={cls} />;
-  }
-  const TextIcon = getToolbarIcon("fileText", pack);
-  return <TextIcon className={cls} />;
+  const defaultKey = getDefaultFileIconKey(fileName, fileType);
+  const IconComp = getToolbarIcon(defaultKey, pack);
+  return <IconComp className={cls} />;
 }
 
 function buildTreeFromNotes(notes: Note[], baseFolderPath: string): TreeNode {
@@ -149,6 +170,10 @@ function BreadcrumbTreeView({
   const renderNoteItem = (note: Note, depth: number) => {
     const fileName = note.fileName || note.title?.trim() || t("editor.untitled");
     const isActive = activeNoteId === note.id;
+    const isMarkdownNote = note.fileName
+      ? note.fileName.endsWith(".md") || note.fileName.endsWith(".markdown")
+      : false;
+
     return (
       <button
         key={note.id}
@@ -156,16 +181,29 @@ function BreadcrumbTreeView({
         onClick={() => {
           onSelectNote?.(note.id);
         }}
-        className={`flex w-full items-center gap-1.5 py-1.5 pr-3 text-left text-xs font-medium transition-colors cursor-pointer ${
+        className={`relative flex w-full items-center gap-1.5 px-3 ${
+          settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"
+        } text-left transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none cursor-pointer ${
           isActive
-            ? "bg-sidebar-accent/70 text-primary font-semibold"
-            : "text-foreground hover:bg-sidebar-accent/50"
+            ? "bg-sidebar-accent text-foreground font-semibold"
+            : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
         }`}
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
+        {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
+          <span
+            key={i}
+            className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+            style={{ left: `${18 + i * 14}px` }}
+          />
+        ))}
         <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {getFileIcon(note.fileName, note.fileType, isActive, settings.iconPack)}
-        <span className="truncate flex-1">{fileName}</span>
+        <NoteIcon note={note} active={isActive} />
+        <span className={`truncate flex-1 ${isActive ? "font-semibold text-primary" : "font-normal"}`}>{fileName}</span>
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {isMarkdownNote && <MarkdownIndicator active={isActive} />}
+          {note.isFavorite && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
+        </div>
       </button>
     );
   };
@@ -179,6 +217,7 @@ function BreadcrumbTreeView({
     const ChevRight = getToolbarIcon("chevronRight", pack);
     const FolderOpenIcon = getToolbarIcon("folderOpen", pack);
     const FolderIcon = getToolbarIcon("folder", pack);
+    const customFolderIcon = settings.folderIcons?.[node.path];
 
     return (
       <div key={node.path} className="group/tree-item relative w-full">
@@ -188,32 +227,37 @@ function BreadcrumbTreeView({
             e.stopPropagation();
             toggleFolder(node.path);
           }}
-          className="flex w-full items-center gap-1.5 py-1.5 pr-3 text-left text-xs font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50 cursor-pointer"
+          className={`relative flex w-full items-center gap-1.5 px-3 ${
+            settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"
+          } font-medium text-left transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none cursor-pointer text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40`}
           style={{ paddingLeft: `${12 + depth * 14}px` }}
         >
+          {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
+            <span
+              key={i}
+              className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+              style={{ left: `${18 + i * 14}px` }}
+            />
+          ))}
           {isOpen ? (
             <ChevDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           ) : (
             <ChevRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          {isOpen ? (
+          {customFolderIcon ? (
+            renderCustomIcon(customFolderIcon.icon, "h-3.5 w-3.5 shrink-0", { color: customFolderIcon.color })
+          ) : isOpen ? (
             <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
           ) : (
             <FolderIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate flex-1 font-semibold text-foreground/90">{node.name}</span>
+          <span className="truncate flex-1 text-left font-semibold text-foreground/90">{node.name}</span>
           {hasContent && (
             <span className="ml-auto shrink-0 text-[10px] opacity-50">{totalCount}</span>
           )}
         </button>
         {isOpen && (
           <div className="relative w-full">
-            {settings.showGuideLines && (
-              <div
-                className="absolute top-0 bottom-0 border-l border-transparent transition-colors duration-150 group-hover/tree-item:border-sidebar-border hover:border-sidebar-foreground/40 pointer-events-none z-10"
-                style={{ left: `${18 + depth * 14}px` }}
-              />
-            )}
             <div className="w-full">
               {node.notes.map((n) => renderNoteItem(n, depth + 1))}
               {node.children.map((child) => renderFolderItem(child, depth + 1))}
@@ -245,6 +289,14 @@ function BreadcrumbTreeView({
 function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, onOpenRightPanel, paneId = "main", isCloudWorkspace = false }: BreadcrumbProps) {
   const { t } = useTranslation();
   const { settings } = useAppSettings();
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("luno:breadcrumb-mounted", { detail: { paneId } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent("luno:breadcrumb-unmounted", { detail: { paneId } }));
+    };
+  }, [paneId, note?.id]);
+
   if (!note) return null;
 
   const segmentItems: SegmentItem[] = [];
@@ -264,14 +316,16 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
     <div className="flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40">
       <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
         {isSplitPane ? (
-          <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none">
-            {fileName}
+          <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none flex items-center gap-1.5">
+            <NoteIcon note={note} active={false} />
+            <span className="truncate">{fileName}</span>
           </span>
         ) : (
           <>
             {/* Mobile / Small Screen: Show only file name */}
-            <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none sm:hidden">
-              {fileName}
+            <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none sm:hidden flex items-center gap-1.5">
+              <NoteIcon note={note} active={false} />
+              <span className="truncate">{fileName}</span>
             </span>
 
             {/* Desktop / Large Screen: Show full breadcrumb path */}
@@ -298,7 +352,7 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                   </TooltipTrigger>
                   <TooltipContent>{rootFolderName || "Root Folder"}</TooltipContent>
                 </Tooltip>
-                <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
                   <BreadcrumbTreeView notes={notes} baseFolderPath="" activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -312,12 +366,12 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className="flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none max-w-[120px] truncate"
+                          className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none text-muted-foreground/90 leading-none max-w-[120px] truncate"
                         >
                           <span className="truncate">{seg.label}</span>
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-80 overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                      <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
                         <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -329,7 +383,10 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                 const ChevRight = getToolbarIcon("chevronRight", settings.iconPack);
                 return <ChevRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;
               })()}
-              <span className="font-semibold text-foreground truncate min-w-[40px] px-0.5 leading-none shrink">{fileName}</span>
+              <span className="flex items-center gap-1.5 min-w-[40px] px-0.5 leading-none shrink truncate font-semibold text-foreground">
+                <NoteIcon note={note} active={false} />
+                <span className="truncate">{fileName}</span>
+              </span>
             </div>
           </>
         )}

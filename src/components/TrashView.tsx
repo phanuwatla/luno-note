@@ -23,7 +23,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { TrashedNote, formatByteSize } from "@/hooks/useTrash";
-import { renderCustomIcon } from "@/lib/iconPacks";
+import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import { formatDate } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 
@@ -264,20 +265,9 @@ export default function TrashView({
       const custom = renderCustomIcon(note.icon, cls, { color: note.iconColor });
       if (custom) return custom;
     }
-    const name = (note.fileName || "").toLowerCase();
-    if (name.endsWith(".md") || name.endsWith(".markdown")) {
-      return <FileText className={`${cls} text-muted-foreground/80`} />;
-    }
-    if (name.endsWith(".txt")) {
-      return <FileText className={`${cls} text-muted-foreground/80`} />;
-    }
-    if (name.endsWith(".html") || name.endsWith(".htm")) {
-      return <FileCode className={`${cls} text-muted-foreground/80`} />;
-    }
-    if (note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name)) {
-      return <FileImage className={`${cls} text-muted-foreground/80`} />;
-    }
-    return <FileText className={`${cls} text-muted-foreground/80`} />;
+    const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
+    const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
+    return <IconComp className={`${cls} text-muted-foreground/80`} />;
   };
 
   const getNoteSnippet = (content?: string) => {
@@ -361,59 +351,59 @@ export default function TrashView({
                     </TooltipTrigger>
                     <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
                   </Tooltip>
-                  <DropdownMenuContent align="end" className="w-44 rounded-xl p-1 shadow-md text-xs">
+                  <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       onClick={() => setFilterType("all")}
-                      className={`py-1.5 px-2.5 rounded-lg flex items-center gap-2 cursor-pointer ${
-                        filterType === "all" ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted/50"
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        filterType === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                       }`}
                     >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                        {filterType === "all" && <Check className="h-3.5 w-3.5 text-primary stroke-[2.5]" />}
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {filterType === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("md")}
-                      className={`py-1.5 px-2.5 rounded-lg flex items-center gap-2 cursor-pointer ${
-                        filterType === "md" ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted/50"
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        filterType === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                       }`}
                     >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                        {filterType === "md" && <Check className="h-3.5 w-3.5 text-primary stroke-[2.5]" />}
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {filterType === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("txt")}
-                      className={`py-1.5 px-2.5 rounded-lg flex items-center gap-2 cursor-pointer ${
-                        filterType === "txt" ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted/50"
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        filterType === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                       }`}
                     >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                        {filterType === "txt" && <Check className="h-3.5 w-3.5 text-primary stroke-[2.5]" />}
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {filterType === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("html")}
-                      className={`py-1.5 px-2.5 rounded-lg flex items-center gap-2 cursor-pointer ${
-                        filterType === "html" ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted/50"
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        filterType === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                       }`}
                     >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                        {filterType === "html" && <Check className="h-3.5 w-3.5 text-primary stroke-[2.5]" />}
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {filterType === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("other")}
-                      className={`py-1.5 px-2.5 rounded-lg flex items-center gap-2 cursor-pointer ${
-                        filterType === "other" ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted/50"
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        filterType === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
                       }`}
                     >
-                      <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
-                        {filterType === "other" && <Check className="h-3.5 w-3.5 text-primary stroke-[2.5]" />}
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {filterType === "other" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterOther") || (isTh ? "ไฟล์อื่นๆ" : "Other files")}</span>
                     </DropdownMenuItem>
@@ -437,21 +427,21 @@ export default function TrashView({
                     </TooltipTrigger>
                     <TooltipContent>{t("trash.moreOptions") || (isTh ? "ตัวเลือกเพิ่มเติม" : "More options")}</TooltipContent>
                   </Tooltip>
-                  <DropdownMenuContent align="end" className="w-48 rounded-xl p-1 shadow-md text-xs">
+                  <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       disabled={trashedNotes.length === 0}
                       onClick={handleRestoreAll}
-                      className="gap-2 py-1.5 px-2 rounded-lg cursor-pointer"
+                      className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                     >
-                      <RotateCcw className="h-3.5 w-3.5" />
+                      <RotateCcw className="h-4 w-4" />
                       <span>{isTh ? "กู้คืนไฟล์ทั้งหมด" : "Restore all files"}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       disabled={trashedNotes.length === 0}
                       onClick={() => setEmptyTrashDialogOpen(true)}
-                      className="gap-2 py-1.5 px-2 rounded-lg text-rose-600 dark:text-rose-400 focus:text-rose-600 cursor-pointer"
+                      className="gap-2.5 py-1.5 px-3 rounded-lg text-rose-600 dark:text-rose-400 focus:text-rose-600 cursor-pointer text-[13px]"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-4 w-4" />
                       <span>{t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty trash")}</span>
                     </DropdownMenuItem>
                     {onOpenSettings && (
@@ -459,9 +449,9 @@ export default function TrashView({
                         <DropdownMenuSeparator className="my-1" />
                         <DropdownMenuItem
                           onClick={onOpenSettings}
-                          className="gap-2 py-1.5 px-2 rounded-lg cursor-pointer text-foreground hover:text-foreground"
+                          className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                         >
-                          <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+                          <Settings className="h-4 w-4 text-muted-foreground" />
                           <span>{isTh ? "ตั้งค่าถังขยะ" : "Settings"}</span>
                         </DropdownMenuItem>
                       </>

@@ -143,3 +143,22 @@ export const Subscript = Mark.create({
     };
   },
 });
+
+export const Kbd = Mark.create({
+  name: "kbd",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "kbd" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["kbd", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+});
+

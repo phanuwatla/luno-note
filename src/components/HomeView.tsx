@@ -31,8 +31,9 @@ import { getTagColorClass } from "@/lib/tagColors";
 import { TIPS, getRandomTipIndex, getNextTipIndex } from "@/lib/tips";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Note } from "@/hooks/useNotes";
-import { type NoteTemplateType, NOTE_TEMPLATE_METADATA, getTemplateIcon } from "@/lib/templates";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { NOTE_TEMPLATE_METADATA, getTemplateIcon, type NoteTemplateType } from "@/lib/templates";
 
 interface HomeViewProps {
   notes: Note[];
@@ -180,25 +181,9 @@ export default function HomeView({
       const custom = renderCustomIcon(customIcon, cls, { color: customColor });
       if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
     }
-    const name = (note.fileName || "").toLowerCase();
-    if (note.fileType === "image" || name.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|tiff|avif)$/i)) {
-      const ImgIcon = getToolbarIcon("fileImage", pack);
-      return <ImgIcon className={cls} />;
-    }
-    if (name.endsWith(".zip")) {
-      const ZipIcon = getToolbarIcon("fileZip", pack);
-      return <ZipIcon className={cls} />;
-    }
-    if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".html") || name.endsWith(".htm")) {
-      const CodeIcon = getToolbarIcon("fileCode", pack);
-      return <CodeIcon className={cls} />;
-    }
-    if (name.endsWith(".txt")) {
-      const TextIcon = getToolbarIcon("fileText", pack);
-      return <TextIcon className={cls} />;
-    }
-    const FileIcon = getToolbarIcon("file", pack);
-    return <FileIcon className={cls} />;
+    const defaultKey = getNoteDefaultIconKey(note);
+    const IconComp = getToolbarIcon(defaultKey, pack);
+    return <IconComp className={cls} />;
   };
 
   // Global Ctrl+F / Ctrl+K handler to focus search input
