@@ -22,26 +22,26 @@ Luno Note is a robust, lightweight, and modern note-taking application engineere
 
 ## What Is New in Version 1.2.1
 
-- **Gemini-Powered Voice Dictation and Transcription**: Dictate notes or communicate directly with Luno AI via multimodal audio transcription powered by the Google Gemini API. Includes automated silence filtering, hallucination prevention, timestamp cleanup, and native microphone access management in the desktop environment.
-- **Unified Custom Icon Rendering**: Custom note emoji and file icons are now consistently rendered across Quick Switcher, sidebar hierarchy trees, workspace navigation panels, and file attachment chips.
-- **Real-Time Workspace Folder Synchronization**: Folder expansion and collapse states remain synchronized across all active navigation views.
-- **Enhanced Cloud Integration and Authentication**: Improved Google Drive OAuth configuration and environment variable resolution for production deployments.
-- **Expanded Test Coverage and Reliability**: Additional automated unit tests for workspace trees and AI views, with intelligent fallback models and comprehensive verification.
+- <img src="./assets/icons/microphone.svg" width="16" height="16" align="center" /> **Gemini-Powered Voice Dictation and Transcription**: Dictate notes or communicate directly with Luno AI via multimodal audio transcription powered by the Google Gemini API. Includes automated silence filtering, hallucination prevention, timestamp cleanup, and native microphone access management in the desktop environment.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Unified Custom Icon Rendering**: Custom note emoji and file icons are now consistently rendered across Quick Switcher, sidebar hierarchy trees, workspace navigation panels, and file attachment chips.
+- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Real-Time Workspace Folder Synchronization**: Folder expansion and collapse states remain synchronized across all active navigation views.
+- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Enhanced Cloud Integration and Authentication**: Improved Google Drive OAuth configuration and environment variable resolution for production deployments.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Expanded Test Coverage and Reliability**: Additional automated unit tests for workspace trees and AI views, with intelligent fallback models and comprehensive verification.
 
 ---
 
 ## Key Features
 
-- **Rich-Text and Markdown Editing**: Full formatting support including headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
-- **Integrated Luno AI Assistant**: Context-aware artificial intelligence assistant supporting note attachments, voice dictation, automated summarization, language translation, and editing refinements.
-- **Hierarchical Workspaces and Folders**: Multi-level folder structuring with workspace separation and quick workspace switching.
-- **Tags and Quick Switcher**: Organize content using tags and jump directly to any document with the keyboard-driven Quick Switcher (`Ctrl+P` / `Cmd+P`).
-- **Media and Audio Attachments**: Attach images, documents, and audio recordings with an integrated audio player and client-side image compression.
-- **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
-- **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
-- **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
-- **Customization and Visual Themes**: Select from Dark, Light, Sepia, and Minimal themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
-- **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text and Markdown Editing**: Full formatting support including headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Integrated Luno AI Assistant**: Context-aware artificial intelligence assistant supporting note attachments, voice dictation, automated summarization, language translation, and editing refinements.
+- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Hierarchical Workspaces and Folders**: Multi-level folder structuring with workspace separation and quick workspace switching.
+- <img src="./assets/icons/tags.svg" width="16" height="16" align="center" /> **Tags and Quick Switcher**: Organize content using tags and jump directly to any document with the keyboard-driven Quick Switcher (`Ctrl+P` / `Cmd+P`).
+- <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Media and Audio Attachments**: Attach images, documents, and audio recordings with an integrated audio player and client-side image compression.
+- <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
+- <img src="./assets/icons/eye.svg" width="16" height="16" align="center" /> **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
+- <img src="./assets/icons/template.svg" width="16" height="16" align="center" /> **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Customization and Visual Themes**: Select from Dark, Light, Sepia, and Minimal themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
 
 ---
 
@@ -55,7 +55,8 @@ Download the production installer directly from [GitHub Releases](https://github
 | :--- | :--- | :--- |
 | **`luno-note-setup-1.2.1.exe`** | Automated Windows installer with differential update support | [Download v1.2.1](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
 
-> **Existing Installations**: Users running an earlier version can apply this update automatically by navigating to **Settings > Check for Updates** without manual re-installation.
+> [!NOTE]
+> Users running an earlier desktop installation can apply this update automatically by navigating to **Settings > Check for Updates** without manual re-installation.
 
 ---
 
@@ -70,13 +71,12 @@ Luno Note Desktop includes integrated update distribution powered by `electron-u
 
 ## Architecture and Technology Stack
 
-- **Frontend Framework**: [React 19](https://react.dev/), [Vite](https://vite.dev/), [TypeScript](https://www.typescriptlang.org/)
-- **Desktop Runtime**: [Electron](https://www.electronjs.org/) and [Tauri](https://tauri.app/)
-- **Rich-Text Engine**: [TipTap](https://tiptap.dev/) Core with Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
-- **Styling and UI Components**: [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/)
-- **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Audio and Text)
-- **Icon Libraries**: Lucide Icons, Tabler Icons, Phosphor Icons
-- **Testing Framework**: [Vitest](https://vitest.dev/) with Testing Library
+- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **Frontend Framework**: [React 19](https://react.dev/), [Vite](https://vite.dev/), [TypeScript](https://www.typescriptlang.org/)
+- <img src="./assets/icons/device-desktop.svg" width="16" height="16" align="center" /> **Desktop Runtime**: [Electron](https://www.electronjs.org/) and [Tauri](https://tauri.app/)
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text Engine**: [TipTap](https://tiptap.dev/) Core with Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Styling and UI Components**: [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/)
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Audio and Text)
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Testing Framework**: [Vitest](https://vitest.dev/) with Testing Library
 
 ---
 
