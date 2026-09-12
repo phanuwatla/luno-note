@@ -319,7 +319,11 @@ async function fetchSupportedModels(apiKey: string): Promise<string[]> {
               name.includes("embed") ||
               name.includes("imagen") ||
               name.includes("bison") ||
-              name.includes("aqa")
+              name.includes("aqa") ||
+              name.includes("veo") ||
+              name.includes("lyria") ||
+              name.includes("banana") ||
+              name.includes("robotics")
             ) {
               return false;
             }
@@ -332,7 +336,7 @@ async function fetchSupportedModels(apiKey: string): Promise<string[]> {
   } catch (_) {
     // Ignore fetch failure
   }
-  return ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+  return ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"];
 }
 
 export interface GeminiActionResult {
@@ -410,7 +414,7 @@ export async function runGeminiAction(
   }
 
   const prompt = promptBuilder(text.trim());
-  let models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
+  let models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"];
 
   let lastError: Error | null = null;
 
@@ -494,11 +498,11 @@ export async function runGeminiPrompt(
     );
   }
 
-  let preferredModels = ["gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"];
+  let preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-pro-latest"];
   if (selectedModel === "fast") {
-    preferredModels = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
+    preferredModels = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"];
   } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+    preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
   }
 
   let lastError: Error | null = null;
@@ -622,11 +626,11 @@ export async function runGeminiChatHistory(
     );
   }
 
-  let preferredModels = ["gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"];
+  let preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-pro-latest"];
   if (selectedModel === "fast") {
-    preferredModels = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
+    preferredModels = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"];
   } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+    preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
   }
 
   const contents = buildGeminiContents(history, newPrompt, attachedFilesContext);
@@ -692,3 +696,199 @@ export async function runGeminiChatHistory(
 
   throw lastError || new Error(lang === "en" ? "Failed to contact Gemini API." : "ไม่สามารถเชื่อมต่อ Gemini API ได้");
 }
+
+export async function transcribeAudioWithGemini(
+  apiKey: string,
+  audioBlob: Blob,
+  lang: "th" | "en" = "th",
+  instruction?: string
+): Promise<string> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) {
+    throw new Error(
+      lang === "en"
+        ? "Gemini API key is missing. Please add your API key in Settings."
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+    );
+  }
+
+  const base64Data = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = reader.result as string;
+      const base64 = res.includes(",") ? res.split(",")[1] : res;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(audioBlob);
+  });
+
+  const rawMimeType = audioBlob.type || "audio/webm";
+  const cleanMimeType = rawMimeType.split(";")[0].trim() || "audio/webm";
+
+  let models = [
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+  ];
+
+  const defaultPrompt =
+    lang === "th"
+      ? "คุณคือระบบถอดความเสียงพูด (Speech-to-Text) โปรดถอดความสิ่งที่ผู้พูดพูดในคลิปเสียงนี้เป็นข้อความภาษาไทยหรือภาษาอังกฤษตามที่พูดจริงอย่างถูกต้อง ตอบเฉพาะข้อความที่ถอดความได้เท่านั้น ห้ามตอบเป็นบทสนทนา ห้ามกล่าวขอโทษ ห้ามพูดว่าไม่ได้ยินหรือขอให้พูดใหม่ (ห้ามตอบ 'I'm sorry, I didn't catch that') ห้ามใส่ตัวเลขเวลา timestamp (เช่น 00:00) หากไม่มีเสียงพูดหรือมีแต่เสียงเงียบ ให้ตอบเป็นข้อความว่างเท่านั้น"
+      : "You are a speech-to-text transcriber. Accurately transcribe the spoken audio verbatim. Output ONLY the transcribed text. Do NOT output conversational replies (NEVER say 'I'm sorry, I didn't catch that', 'Please repeat', or apologize). Do not add quotes, commentary, or timestamps like 00:00. If there is no speech or only silence, output an empty string.";
+
+  const promptText = instruction?.trim() || defaultPrompt;
+
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: base64Data,
+                  },
+                },
+                {
+                  text: promptText,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+        if (message.includes("not found") || response.status === 404 || response.status === 503) {
+          if (i === models.length - 1) {
+            const dynamicallyDiscovered = await fetchSupportedModels(trimmedKey);
+            const newModels = dynamicallyDiscovered.filter((m) => !models.includes(m));
+            if (newModels.length > 0) {
+              models = models.concat(newModels);
+            }
+          }
+          lastError = parseGeminiApiError(response.status, message, lang);
+          continue;
+        }
+
+        throw parseGeminiApiError(response.status, message, lang);
+      }
+
+      const data = await response.json();
+      const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof candidateText === "string") {
+        return cleanVoiceTranscription(candidateText);
+      }
+      return "";
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (
+        lastError.message.includes("Invalid Gemini API Key") ||
+        lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
+        lastError.message.includes("Token Limit") ||
+        lastError.message.includes("โควตา Gemini API") ||
+        lastError.message.includes("quota exceeded")
+      ) {
+        throw lastError;
+      }
+    }
+  }
+
+  throw lastError || new Error(lang === "en" ? "Failed to transcribe audio." : "ไม่สามารถแปลงเสียงเป็นข้อความได้");
+}
+
+export function cleanVoiceTranscription(raw: string): string {
+  if (!raw) return "";
+  let cleaned = raw.trim();
+
+  // Remove markdown code blocks if any
+  if (cleaned.startsWith("```") && cleaned.endsWith("```")) {
+    cleaned = cleaned.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+  }
+
+  // Strip wrapping quotes
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("“") && cleaned.endsWith("”")) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  // Match conversational assistant apology / no speech fallbacks
+  const fallbackPatterns = [
+    /^(i'?m\s+)?(very\s+)?sorry[,\s]+(but\s+)?(i\s+)?(didn'?t|couldn'?t|did\s+not|could\s+not|can'?t|cannot)\s+(catch|hear|understand|make\s+out|detect)\s*(what\s+you\s+said|that|anything|any\s+speech|any\s+audio)?/i,
+    /^(i'?m\s+)?(very\s+)?sorry[,\s]+(but\s+)?(there\s+(is|was)|i\s+heard)?\s*(no\s+speech|no\s+audio|silence|nothing)/i,
+    /^(could\s+you|can\s+you|please)\s+(please\s+)?(repeat|say\s+that\s+again|speak\s+again|try\s+again)/i,
+    /^(there\s+(is|was)\s+)?(no\s+speech|no\s+audio|no\s+sound|silence|silent)\s*(detected|found|heard|recorded)?[\s.!?]*/i,
+    /^(i\s+)?(didn'?t|couldn'?t|cannot|can'?t)\s+(hear|catch|understand)\s+(anything|that|what\s+you\s+said)/i,
+    /^(there\s+(is|was)\s+)?no\s+spoken\s+words?/i,
+    /^(ขออภัย|ขอโทษ)[\s,]+(ไม่ได้ยิน|ไม่พบเสียง|ไม่สามารถจับใจความ|ไม่มีเสียงพูด)/i,
+    /^(ไม่ได้ยินเสียงพูด|ไม่พบเสียงพูด|ไม่มีเสียงพูด)/i,
+  ];
+
+  // Match common autoregressive speech model hallucinations generated on silence / noise
+  const hallucinationPatterns = [
+    /^i'?m\s+going\s+to\s+go\s+to\s+the\s+store[\s.!?]*/i,
+    /^(thank\s+you|thanks)\s+(very\s+much\s+)?(for\s+watching|for\s+listening)[\s.!?]*/i,
+    /^(please\s+)?(like|share|subscribe)[\s.!?]*/i,
+    /^(subtitles?|captions?)\s+(by|created\s+by|community)[\s.!?]*/i,
+    /^amara\.org[\s.!?]*/i,
+  ];
+
+  for (const pattern of fallbackPatterns) {
+    if (pattern.test(cleaned)) {
+      return "";
+    }
+  }
+
+  for (const pattern of hallucinationPatterns) {
+    if (pattern.test(cleaned)) {
+      return "";
+    }
+  }
+
+  // Strip silence / noise markers
+  if (
+    /^(\[|\()?\s*(silence|no speech|ไม่มีเสียงพูด|เสียงเงียบ|music|ดนตรี|sound|noise|quiet|blank)\s*(\]|\))?$/i.test(
+      cleaned
+    )
+  ) {
+    return "";
+  }
+
+  // Match timestamps like: 00:00, 00:02:547, 00:02.547, 00:00:00, 00:00 - 00:02, [00:00], (00:02:547), 00:00:00,000 --> 00:02:547
+  const timestampPattern = /(?:\[|\()?\s*(?:\d{1,2}:)?\d{1,2}:\d{1,4}(?:[:.,]\d{1,4})?(?:\s*(?:-->|-|–|to)\s*(?:\d{1,2}:)?\d{1,2}:\d{1,4}(?:[:.,]\d{1,4})?)?\s*(?:\]|\))?/;
+
+  // If the entire output is just timestamp(s)
+  if (new RegExp("^" + timestampPattern.source + "$", "i").test(cleaned)) {
+    return "";
+  }
+
+  // If text starts with a timestamp prefix (e.g. "00:02:547 สวัสดี"), strip the timestamp prefix
+  cleaned = cleaned.replace(new RegExp("^" + timestampPattern.source + "[:\\s-]*", "i"), "").trim();
+
+  // If after stripping timestamp nothing or just punctuation is left
+  if (/^[\s.,:;!?()\[\]\-_]*$/.test(cleaned)) {
+    return "";
+  }
+
+  return cleaned;
+}
+

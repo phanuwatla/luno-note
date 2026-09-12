@@ -784,11 +784,39 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
           OPEN_FOLDERS_STORAGE_PREFIX + openedFolderName,
           JSON.stringify(Array.from(openFolders))
         );
+        window.dispatchEvent(
+          new CustomEvent("luno:open-folders-changed", {
+            detail: { workspace: openedFolderName, openFolders: Array.from(openFolders) },
+          })
+        );
       }
     } catch {
       // Ignore storage errors
     }
   }, [openFolders, openedFolderName]);
+
+  // Sync openFolders if changed externally (e.g. from workspace dialogs)
+  useEffect(() => {
+    if (!openedFolderName) return;
+
+    const handleFoldersChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ workspace?: string; openFolders?: string[] }>;
+      if (customEvent.detail?.workspace === openedFolderName && Array.isArray(customEvent.detail?.openFolders)) {
+        const nextArray = customEvent.detail.openFolders;
+        setOpenFolders((prev) => {
+          if (prev.size === nextArray.length && nextArray.every((p) => prev.has(p))) {
+            return prev;
+          }
+          return new Set(nextArray);
+        });
+      }
+    };
+
+    window.addEventListener("luno:open-folders-changed", handleFoldersChanged);
+    return () => {
+      window.removeEventListener("luno:open-folders-changed", handleFoldersChanged);
+    };
+  }, [openedFolderName]);
   const getVisibleNotesInTree = (node: FolderNode, openFolderSet: Set<string>): Note[] => {
     const result: Note[] = [];
     const traverse = (n: FolderNode) => {

@@ -11389,7 +11389,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         }`}
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
-                          <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                          {(() => {
+                            const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
+                            const customIcon = n.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+                            const customColor = n.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+                            const cls = "h-3.5 w-3.5 shrink-0";
+                            if (customIcon) {
+                              const custom = renderCustomIcon(customIcon, cls, { color: customColor });
+                              if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+                            }
+                            if (n.isLocked) {
+                              const LockIcon = getToolbarIcon("lock", settings?.iconPack);
+                              return <LockIcon className={`${cls} opacity-70`} />;
+                            }
+                            const defaultKey = getNoteDefaultIconKey(n);
+                            const IconComp = getToolbarIcon(defaultKey, settings?.iconPack);
+                            return <IconComp className={`${cls} opacity-70`} />;
+                          })()}
                           <span className="text-xs truncate min-w-0">{title}</span>
                           {n.folderPath && (
                             <span className="text-[10px] text-muted-foreground/70 truncate shrink-0">

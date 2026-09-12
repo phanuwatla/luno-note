@@ -40,6 +40,7 @@ import {
   BookOpen,
   Briefcase,
   CheckCheck,
+  Square,
 } from "lucide-react";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon as Wand2 } from "@/components/icons/WandSparklesIcon";
@@ -49,7 +50,7 @@ import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
-import { runGeminiPrompt, runGeminiAction, runGeminiChatHistory } from "@/lib/geminiApi";
+import { runGeminiPrompt, runGeminiAction, runGeminiChatHistory, transcribeAudioWithGemini, cleanVoiceTranscription } from "@/lib/geminiApi";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -58,6 +59,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import type { Note } from "@/hooks/useNotes";
+import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
 
 function stripMarkdownSyntax(text: string): string {
   if (!text) return "";
@@ -120,6 +123,7 @@ interface ChatSession {
 interface LunoAiViewProps {
   notes?: Note[];
   activeNote?: Note | null;
+  openedFolderName?: string | null;
   onInsertToActiveNote?: (text: string) => void;
   onInsertToSelectedNote?: (noteId: string, text: string) => void;
   onCreateNewNote?: (fileName: string, content: string, folderPath?: string) => void;
@@ -130,6 +134,41 @@ interface LunoAiViewProps {
 const CHAT_SESSIONS_STORAGE_KEY = "luno-ai-chat-sessions-v2";
 const LAST_ACTIVE_SESSION_STORAGE_KEY = "luno-ai-last-active-session-id";
 const HISTORY_PANEL_OPEN_STORAGE_KEY = "luno-ai-history-panel-open";
+const OPEN_FOLDERS_STORAGE_PREFIX = "luno_open_folders_";
+const LAST_WORKSPACE_STORAGE_KEY = "luno_last_workspace_name";
+
+function getLocalStorage(): Storage | null {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
+function getInitialOpenFolders(openedFolderName?: string | null): Set<string> {
+  const currentWs =
+    openedFolderName ||
+    (typeof window !== "undefined" ? getLocalStorage()?.getItem(LAST_WORKSPACE_STORAGE_KEY) : null) ||
+    "default";
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      const raw = storage.getItem(OPEN_FOLDERS_STORAGE_PREFIX + currentWs);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length > 0) {
+          return new Set(arr);
+        }
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return new Set(["__opened_root__"]);
+}
 
 interface WorkspaceFolderNode {
   name: string;
@@ -164,13 +203,88 @@ function buildWorkspaceFolderTree(notes: Note[]): WorkspaceFolderNode {
   return root;
 }
 
-function WorkspaceFolderTree({
+export function WorkspaceNoteIcon({
+  note,
+  className = "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors",
+}: {
+  note: Note;
+  className?: string;
+}) {
+  const { settings } = useAppSettings();
+  const pack = settings?.iconPack || "lucide";
+  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+
+  if (customIcon) {
+    const custom = renderCustomIcon(customIcon, className, { color: customColor });
+    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+  }
+
+  if (note.isLocked) {
+    const LockIcon = getToolbarIcon("lock", pack);
+    return <LockIcon className={className} />;
+  }
+
+  const defaultKey = getNoteDefaultIconKey(note);
+  const IconComp = getToolbarIcon(defaultKey, pack);
+  return <IconComp className={className} />;
+}
+
+export function WorkspaceFolderIcon({
+  path,
+  isOpen,
+  className = "h-3.5 w-3.5 text-primary shrink-0",
+}: {
+  path: string;
+  isOpen: boolean;
+  className?: string;
+}) {
+  const { settings } = useAppSettings();
+  const customFolderIcon = settings?.folderIcons?.[path];
+
+  if (customFolderIcon) {
+    const custom = renderCustomIcon(customFolderIcon.icon, className, { color: customFolderIcon.color });
+    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+  }
+
+  const FolderOpenIcon = getToolbarIcon("folderOpen", settings?.iconPack);
+  const FolderIcon = getToolbarIcon("folder", settings?.iconPack);
+  return isOpen ? <FolderOpenIcon className={className} /> : <FolderIcon className={className} />;
+}
+
+export function AttachedFileChipIcon({
+  fileName,
+  dataUrl,
+  notes,
+  className = "h-3.5 w-3.5 text-primary shrink-0",
+}: {
+  fileName: string;
+  dataUrl?: string;
+  notes: Note[];
+  className?: string;
+}) {
+  const { settings } = useAppSettings();
+  if (dataUrl) {
+    return <img src={dataUrl} alt={fileName} className="h-4 w-4 rounded object-cover shrink-0" />;
+  }
+  const matchedNote = notes.find((n) => (n.fileName || n.title) === fileName);
+  if (matchedNote) {
+    return <WorkspaceNoteIcon note={matchedNote} className={className} />;
+  }
+  const defaultKey = getDefaultFileIconKey(fileName);
+  const IconComp = getToolbarIcon(defaultKey, settings?.iconPack);
+  return <IconComp className={className} />;
+}
+
+export function WorkspaceFolderTree({
   notes,
   searchQuery = "",
   activeNoteId,
   attachedFileNames = [],
   onSelectNote,
   actionType,
+  openedFolderName,
 }: {
   notes: Note[];
   searchQuery?: string;
@@ -178,36 +292,70 @@ function WorkspaceFolderTree({
   attachedFileNames?: string[];
   onSelectNote: (note: Note) => void;
   actionType: "insert" | "attach";
+  openedFolderName?: string | null;
 }) {
   const { settings } = useAppSettings();
   const workspaceNotes = useMemo(() => notes.filter((n) => n.id !== "luno-ai" && n.id !== "settings"), [notes]);
   const tree = useMemo(() => buildWorkspaceFolderTree(workspaceNotes), [workspaceNotes]);
 
-  const allFolderPaths = useMemo(() => {
-    const paths = new Set<string>();
-    const collect = (node: WorkspaceFolderNode) => {
-      if (node.path) paths.add(node.path);
-      node.children.forEach(collect);
-    };
-    collect(tree);
-    return paths;
-  }, [tree]);
-
-  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set(allFolderPaths));
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() =>
+    getInitialOpenFolders(openedFolderName)
+  );
 
   useEffect(() => {
-    setOpenFolders((prev) => {
-      const next = new Set(prev);
-      allFolderPaths.forEach((p) => next.add(p));
-      return next;
-    });
-  }, [allFolderPaths]);
+    setOpenFolders(getInitialOpenFolders(openedFolderName));
+  }, [openedFolderName]);
+
+  useEffect(() => {
+    const currentWs =
+      openedFolderName ||
+      (typeof window !== "undefined" ? getLocalStorage()?.getItem(LAST_WORKSPACE_STORAGE_KEY) : null) ||
+      "default";
+
+    const handleFoldersChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ workspace?: string; openFolders?: string[] }>;
+      if (customEvent.detail?.workspace === currentWs && Array.isArray(customEvent.detail?.openFolders)) {
+        const nextArray = customEvent.detail.openFolders;
+        setOpenFolders((prev) => {
+          if (prev.size === nextArray.length && nextArray.every((p) => prev.has(p))) {
+            return prev;
+          }
+          return new Set(nextArray);
+        });
+      }
+    };
+
+    window.addEventListener("luno:open-folders-changed", handleFoldersChanged);
+    return () => {
+      window.removeEventListener("luno:open-folders-changed", handleFoldersChanged);
+    };
+  }, [openedFolderName]);
 
   const toggleFolder = (path: string) => {
     setOpenFolders((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
+
+      try {
+        const storage = getLocalStorage();
+        if (storage) {
+          const currentWs =
+            openedFolderName ||
+            storage.getItem(LAST_WORKSPACE_STORAGE_KEY) ||
+            "default";
+          const serialized = JSON.stringify(Array.from(next));
+          storage.setItem(OPEN_FOLDERS_STORAGE_PREFIX + currentWs, serialized);
+          window.dispatchEvent(
+            new CustomEvent("luno:open-folders-changed", {
+              detail: { workspace: currentWs, openFolders: Array.from(next) },
+            })
+          );
+        }
+      } catch {
+        // Ignore
+      }
+
       return next;
     });
   };
@@ -253,7 +401,7 @@ function WorkspaceFolderTree({
               }`}
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors" />
+                <WorkspaceNoteIcon note={note} className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors" />
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="truncate text-xs font-medium text-foreground">
                     {fileName}
@@ -298,15 +446,16 @@ function WorkspaceFolderTree({
         type="button"
         disabled={actionType === "attach" && isAttached}
         onClick={() => onSelectNote(note)}
-        className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors rounded-lg group my-0.5 outline-none focus-visible:ring-0 ${
+        className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors rounded-lg group my-0.5 outline-none focus-visible:ring-0 ${
           actionType === "attach" && isAttached
             ? "bg-sidebar-accent/40 opacity-60 cursor-not-allowed"
             : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground cursor-pointer"
         }`}
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors" />
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <WorkspaceNoteIcon note={note} className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors" />
           <span className="truncate text-xs font-medium text-foreground">
             {fileName}
           </span>
@@ -349,7 +498,7 @@ function WorkspaceFolderTree({
           style={{ paddingLeft: `${12 + depth * 14}px` }}
         >
           <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${isOpen ? "rotate-90 text-foreground" : ""}`} />
-          {isOpen ? <FolderOpen className="h-3.5 w-3.5 text-primary shrink-0" /> : <Folder className="h-3.5 w-3.5 text-primary shrink-0" />}
+          <WorkspaceFolderIcon path={node.path} isOpen={isOpen} />
           <span className="truncate flex-1 font-semibold text-xs text-foreground">{node.name}</span>
           <span className="text-[10px] text-muted-foreground/70 shrink-0 font-normal">
             {node.notes.length + node.children.length}
@@ -480,6 +629,7 @@ const AI_TOOLS: AiToolItem[] = [
 export default function LunoAiView({
   notes = [],
   activeNote,
+  openedFolderName,
   onInsertToActiveNote,
   onInsertToSelectedNote,
   onCreateNewNote,
@@ -779,100 +929,391 @@ export default function LunoAiView({
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
-  useEffect(() => {
-    const SpeechRecognitionClass =
-      typeof window !== "undefined"
-        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        : null;
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioMonitorIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasAnySpeechRef = useRef(false);
+  const hasNewSpeechSinceLastTickRef = useRef(false);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingMimeTypeRef = useRef<string>("audio/webm");
+  const liveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    if (SpeechRecognitionClass) {
-      const recognition = new SpeechRecognitionClass();
-      recognition.continuous = true;
-      recognition.interimResults = true;
+  const isRecordingActiveRef = useRef(false);
+  const isTranscribingRef = useRef(false);
+  const reqSeqRef = useRef(0);
+  const initialPromptRef = useRef("");
+  const activePrefixRef = useRef(activePrefix);
+  activePrefixRef.current = activePrefix;
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
 
-      recognition.onresult = (event: any) => {
-        let currentTranscript = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (transcript) {
-            currentTranscript += transcript;
-          }
-        }
+  const getVoiceInstruction = () => {
+    const currentP = (promptRef.current || "").toLowerCase();
+    const currentPrefix = (activePrefixRef.current || "").toLowerCase();
+    const isTranslate =
+      currentPrefix.includes("translate") ||
+      currentPrefix.includes("แปล") ||
+      currentP.startsWith("translate") ||
+      currentP.startsWith("แปล");
 
-        if (currentTranscript.trim()) {
-          setPrompt((prev) => {
-            const base = (prev || "").trim();
-            if (!base) return currentTranscript.trim();
-            if (base.endsWith(currentTranscript.trim())) return prev;
-            return `${base} ${currentTranscript.trim()}`;
-          });
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn("Speech recognition error:", event.error);
-        setIsListening(false);
-        if (event.error === "not-allowed") {
-          toast({
-            title: t("lunoAi.voiceErrorTitle") || "Microphone Error",
-            description: t("lunoAi.voiceNotAllowed") || "Microphone access denied. Please allow permission.",
-          });
-        } else if (event.error !== "no-speech") {
-          toast({
-            title: t("lunoAi.voiceErrorTitle") || "Microphone Error",
-            description: t("lunoAi.voiceErrorDesc") || "Could not recognize voice.",
-          });
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
+    if (isTranslate) {
+      return lang === "th"
+        ? "แปลสิ่งที่ผู้พูดพูดในคลิปเสียงนี้เป็นภาษาตามที่ต้องการโดยตรงอย่างถูกต้องและเป็นธรรมชาติ (หากพูดภาษาไทยให้แปลเป็นภาษาอังกฤษ หากพูดภาษาอื่นให้แปลเป็นภาษาไทย) ตอบเฉพาะผลลัพธ์ที่แปลได้เท่านั้น ห้ามตอบเป็นบทสนทนา ห้ามกล่าวขอโทษ ห้ามพูดว่าไม่ได้ยินหรือขอให้พูดใหม่ (ห้ามตอบ 'I'm sorry, I didn't catch that') ห้ามใส่ตัวเลขเวลา timestamp เช่น 00:00 ใดๆ ทั้งสิ้น หากไม่มีเสียงพูดให้ตอบเป็นข้อความว่าง"
+        : "Translate this spoken audio directly into the requested target language (if Thai translate to English, if other translate to Thai). Output ONLY the translated text. Do NOT output conversational replies (NEVER apologize or say 'I didn't catch that'). Do not add quotes or timestamps. If no speech is detected, output an empty string.";
     }
 
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-  }, [lang, t]);
+    return lang === "th"
+      ? "คุณคือระบบถอดความเสียงพูด (Speech-to-Text) โปรดถอดความสิ่งที่ผู้พูดพูดในคลิปเสียงนี้เป็นข้อความภาษาไทยหรือภาษาอังกฤษตามที่พูดจริงอย่างถูกต้อง ตอบเฉพาะข้อความที่ถอดความได้เท่านั้น ห้ามตอบเป็นบทสนทนา ห้ามกล่าวขอโทษ ห้ามพูดว่าไม่ได้ยินหรือขอให้พูดใหม่ (ห้ามตอบ 'I'm sorry, I didn't catch that') ห้ามใส่ตัวเลขเวลา timestamp หรือ timecode เช่น 00:00 ใดๆ ทั้งสิ้น หากไม่มีเสียงพูดหรือมีแต่เสียงเงียบ ให้ตอบเป็นข้อความว่างเท่านั้น"
+      : "You are a speech-to-text transcriber. Accurately transcribe the spoken audio verbatim. Output ONLY the transcribed text. Do NOT output conversational replies (NEVER say 'I'm sorry, I didn't catch that', 'Please repeat', or apologize). Do not add quotes, commentary, markdown formatting, or timestamps/timecodes like 00:00. If there is no speech or only silence, output an empty string.";
+  };
 
-  const handleToggleVoiceInput = () => {
-    if (!recognitionRef.current) {
-      toast({
-        title: t("lunoAi.voiceNotSupportedTitle") || "Voice Input Not Supported",
-        description: t("lunoAi.voiceNotSupportedDesc") || "Your browser does not support Speech Recognition. Please try Chrome, Edge, or Safari.",
-      });
-      return;
+  const cleanupMediaResources = () => {
+    isRecordingActiveRef.current = false;
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
     }
-
-    if (isListening) {
+    if (liveIntervalRef.current) {
+      clearInterval(liveIntervalRef.current);
+      liveIntervalRef.current = null;
+    }
+    if (audioMonitorIntervalRef.current) {
+      clearInterval(audioMonitorIntervalRef.current);
+      audioMonitorIntervalRef.current = null;
+    }
+    if (mediaRecorderRef.current) {
       try {
-        recognitionRef.current.stop();
+        if (mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
       } catch {
         /* ignore */
       }
-      setIsListening(false);
-    } else {
+      mediaRecorderRef.current = null;
+    }
+    if (audioContextRef.current) {
       try {
-        recognitionRef.current.lang = lang === "th" ? "th-TH" : "en-US";
-        recognitionRef.current.start();
-        setIsListening(true);
-        toast({
-          title: t("lunoAi.voiceListeningTitle") || "Listening...",
-          description: t("lunoAi.voiceListeningDesc") || "Speak now. Your voice will be typed into the box.",
-        });
-      } catch (err) {
-        console.error(err);
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {
+        /* ignore */
       }
+      mediaStreamRef.current = null;
+    }
+    setIsListening(false);
+    setIsTranscribing(false);
+    isTranscribingRef.current = false;
+    hasAnySpeechRef.current = false;
+    hasNewSpeechSinceLastTickRef.current = false;
+  };
+
+  useEffect(() => {
+    return () => {
+      cleanupMediaResources();
+    };
+  }, []);
+
+  const stopVoiceRecording = async () => {
+    if (!isRecordingActiveRef.current && !isListening) return;
+
+    isRecordingActiveRef.current = false;
+    setIsListening(false);
+
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+    if (liveIntervalRef.current) {
+      clearInterval(liveIntervalRef.current);
+      liveIntervalRef.current = null;
+    }
+    if (audioMonitorIntervalRef.current) {
+      clearInterval(audioMonitorIntervalRef.current);
+      audioMonitorIntervalRef.current = null;
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.requestData();
+      } catch {}
+
+      await new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+        try {
+          recorder.stop();
+        } catch {
+          resolve();
+        }
+      });
+    }
+
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {}
+      mediaStreamRef.current = null;
+    }
+
+    // If no speech was ever detected during the recording, do not call Gemini
+    if (!hasAnySpeechRef.current) {
+      setIsTranscribing(false);
+      isTranscribingRef.current = false;
+      return;
+    }
+
+    setIsTranscribing(true);
+    isTranscribingRef.current = true;
+
+    const finalChunks = [...recordedChunksRef.current];
+    const mimeType = recordingMimeTypeRef.current || "audio/webm";
+
+    if (finalChunks.length > 0) {
+      const finalBlob = new Blob(finalChunks, { type: mimeType });
+      if (finalBlob.size >= 800) {
+        const mySeq = ++reqSeqRef.current;
+        try {
+          const instruction = getVoiceInstruction();
+          const finalText = await transcribeAudioWithGemini(
+            settings.geminiApiKey,
+            finalBlob,
+            lang,
+            instruction
+          );
+          const cleanedText = cleanVoiceTranscription(finalText);
+
+          if (mySeq === reqSeqRef.current && cleanedText) {
+            const base = initialPromptRef.current;
+            const newPromptVal = base ? `${base} ${cleanedText}` : cleanedText;
+            setPrompt(newPromptVal);
+
+            setTimeout(() => {
+              if (textareaRef.current) {
+                textareaRef.current.focus();
+                textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+              } else if (chatInputRef.current) {
+                chatInputRef.current.focus();
+              }
+            }, 30);
+          }
+        } catch (err: any) {
+          console.error("Final voice transcription error:", err);
+          toast({
+            title: t("lunoAi.voiceErrorTitle") || "เกิดข้อผิดพลาดในการแปลงเสียง",
+            description:
+              err?.message || (t("lunoAi.voiceErrorDesc") || "ไม่สามารถแปลงเสียงเป็นข้อความได้"),
+          });
+        }
+      }
+    }
+
+    setIsTranscribing(false);
+    isTranscribingRef.current = false;
+  };
+
+  const startVoiceRecording = async () => {
+    if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+      toast({
+        title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
+        description:
+          t("lunoAi.voiceApiKeyRequired") ||
+          "Gemini API Key is required for voice input. Please set it in Settings.",
+      });
+      if (onOpenSettings) {
+        onOpenSettings();
+      }
+      return;
+    }
+
+    try {
+      cleanupMediaResources();
+      recordedChunksRef.current = [];
+      initialPromptRef.current = (promptRef.current || "").trim();
+      hasAnySpeechRef.current = false;
+      hasNewSpeechSinceLastTickRef.current = false;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      mediaStreamRef.current = stream;
+
+      // Web Audio Analyser for voice energy detection
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          audioContextRef.current = audioCtx;
+          const source = audioCtx.createMediaStreamSource(stream);
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.3;
+          source.connect(analyser);
+          analyserRef.current = analyser;
+
+          // Check voice frequency band every 100ms
+          audioMonitorIntervalRef.current = setInterval(() => {
+            if (!isRecordingActiveRef.current || !analyserRef.current) return;
+            const freqData = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(freqData);
+            let voicePeak = 0;
+            // Bins 1 to 24 correspond to ~150Hz - 4000Hz (human voice spectrum)
+            const maxBin = Math.min(25, freqData.length);
+            for (let i = 1; i < maxBin; i++) {
+              if (freqData[i] > voicePeak) voicePeak = freqData[i];
+            }
+            if (voicePeak > 18) {
+              hasAnySpeechRef.current = true;
+              hasNewSpeechSinceLastTickRef.current = true;
+            }
+          }, 100);
+        }
+      } catch (audioCtxErr) {
+        console.warn("Could not create AudioContext for speech detection:", audioCtxErr);
+        hasAnySpeechRef.current = true;
+        hasNewSpeechSinceLastTickRef.current = true;
+      }
+
+      let mimeType = "audio/webm";
+      if (typeof MediaRecorder !== "undefined") {
+        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+          mimeType = "audio/ogg;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        }
+      }
+      recordingMimeTypeRef.current = mimeType;
+
+      isRecordingActiveRef.current = true;
+      setIsListening(true);
+      setIsTranscribing(false);
+      isTranscribingRef.current = false;
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.start(250);
+
+      let lastSentSize = 0;
+
+      liveIntervalRef.current = setInterval(async () => {
+        if (!isRecordingActiveRef.current) return;
+        if (isTranscribingRef.current) return;
+        if (recordedChunksRef.current.length < 5) return;
+
+        // Skip sending if no speech was detected in this interval (prevents hallucinating on silence)
+        if (!hasNewSpeechSinceLastTickRef.current) return;
+
+        const currentBlob = new Blob(recordedChunksRef.current, {
+          type: recordingMimeTypeRef.current,
+        });
+        if (currentBlob.size < 1200) return;
+        if (currentBlob.size === lastSentSize) return;
+
+        lastSentSize = currentBlob.size;
+        hasNewSpeechSinceLastTickRef.current = false;
+        isTranscribingRef.current = true;
+        setIsTranscribing(true);
+        const mySeq = ++reqSeqRef.current;
+
+        try {
+          const instruction = getVoiceInstruction();
+          const text = await transcribeAudioWithGemini(
+            settings.geminiApiKey,
+            currentBlob,
+            lang,
+            instruction
+          );
+
+          const cleanedText = cleanVoiceTranscription(text);
+
+          if (mySeq === reqSeqRef.current && isRecordingActiveRef.current && cleanedText) {
+            const base = initialPromptRef.current;
+            const newPromptVal = base ? `${base} ${cleanedText}` : cleanedText;
+            setPrompt(newPromptVal);
+
+            setTimeout(() => {
+              if (textareaRef.current) {
+                textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+              }
+            }, 20);
+          }
+        } catch (liveErr) {
+          console.warn("Live transcription interval error:", liveErr);
+        } finally {
+          isTranscribingRef.current = false;
+          if (isRecordingActiveRef.current) {
+            setIsTranscribing(false);
+          }
+        }
+      }, 2500);
+
+      recordingTimeoutRef.current = setTimeout(() => {
+        stopVoiceRecording();
+      }, 120000);
+
+      toast({
+        title: t("lunoAi.voiceListeningTitle") || "กำลังฟังเสียง...",
+        description:
+          t("lunoAi.voiceListeningDesc") ||
+          "พูดคำสั่งเสียงได้เลย ข้อความจะขึ้นในกล่องทันทีขณะพูด",
+      });
+    } catch (err: any) {
+      console.error("Microphone access error:", err);
+      setIsListening(false);
+      setIsTranscribing(false);
+      isRecordingActiveRef.current = false;
+      const isDenied =
+        err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError";
+      toast({
+        title: t("lunoAi.voiceErrorTitle") || "เกิดข้อผิดพลาดจากไมโครโฟน",
+        description: isDenied
+          ? t("lunoAi.voiceNotAllowed") ||
+            "ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน กรุณาอนุญาตสิทธิ์การเข้าถึงไมโครโฟน"
+          : err?.message ||
+            (t("lunoAi.voiceErrorDesc") || "ไม่สามารถเปิดไมโครโฟนได้"),
+      });
+    }
+  };
+
+  const handleToggleVoiceInput = () => {
+    if (isListening) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
     }
   };
 
@@ -1022,6 +1463,9 @@ export default function LunoAiView({
   }, [messages, isGenerating]);
 
   const handleSendPrompt = async (customPrompt?: string) => {
+    if (isListening) {
+      stopVoiceRecording();
+    }
     const rawText = customPrompt ?? (activePrefix ? `${activePrefix}${prompt}` : prompt);
     const textToSend = rawText.trim();
     if (!textToSend || isGenerating) return;
@@ -1422,11 +1866,7 @@ export default function LunoAiView({
                       <Tooltip key={idx}>
                         <TooltipTrigger asChild>
                           <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                            {file.dataUrl ? (
-                              <img src={file.dataUrl} alt={file.name} className="h-4 w-4 rounded object-cover shrink-0" />
-                            ) : (
-                              <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                            )}
+                            <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
                             <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                             <button
                               type="button"
@@ -1546,19 +1986,36 @@ export default function LunoAiView({
                           <button
                             type="button"
                             onClick={handleToggleVoiceInput}
+                            disabled={!isListening && isTranscribing}
                             className={`h-8 px-3 rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
                               isListening
                                 ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse font-semibold"
+                                : isTranscribing
+                                ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
                                 : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
                             }`}
                           >
-                            {isListening ? <MicOff className="h-3.5 w-3.5 text-red-500" /> : <Mic className="h-3.5 w-3.5 text-primary shrink-0" />}
-                            <span>{isListening ? (t("lunoAi.listening") || "Listening...") : (t("lunoAi.voiceInput") || "Voice input")}</span>
+                            {isListening ? (
+                              <Square className="h-3 w-3 text-red-500 fill-red-500 shrink-0" />
+                            ) : isTranscribing ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                            ) : (
+                              <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
+                            )}
+                            <span>
+                              {isListening
+                                ? (t("lunoAi.stopListening") || "Stop listening")
+                                : isTranscribing
+                                ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
+                                : (t("lunoAi.voiceInput") || "Voice input")}
+                            </span>
                           </button>
                         </TooltipTrigger>
                         <TooltipContent>
                           {isListening
                             ? (t("lunoAi.stopListening") || "Stop listening")
+                            : isTranscribing
+                            ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
                             : (t("lunoAi.voiceInput") || "Voice input")}
                         </TooltipContent>
                       </Tooltip>
@@ -1713,7 +2170,7 @@ export default function LunoAiView({
                                 key={i}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-foreground font-medium text-xs shadow-2xs"
                               >
-                                <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                                <AttachedFileChipIcon fileName={name} notes={notes} />
                                 <span className="truncate max-w-[200px] text-xs font-medium text-foreground">{name}</span>
                               </div>
                             ))}
@@ -1913,11 +2370,7 @@ export default function LunoAiView({
                     <Tooltip key={idx}>
                       <TooltipTrigger asChild>
                         <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                          {file.dataUrl ? (
-                            <img src={file.dataUrl} alt={file.name} className="h-4 w-4 rounded object-cover shrink-0" />
-                          ) : (
-                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
-                          )}
+                          <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
                           <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                           <button
                             type="button"
@@ -1973,18 +2426,29 @@ export default function LunoAiView({
                     <button
                       type="button"
                       onClick={handleToggleVoiceInput}
+                      disabled={!isListening && isTranscribing}
                       className={`h-8 w-8 rounded-xl transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
                         isListening
                           ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse"
+                          : isTranscribing
+                          ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground border-border/40"
                       }`}
                     >
-                      {isListening ? <MicOff className="h-4 w-4 text-red-500" /> : <Mic className="h-4 w-4 text-primary shrink-0" />}
+                      {isListening ? (
+                        <Square className="h-3.5 w-3.5 text-red-500 fill-red-500 shrink-0" />
+                      ) : isTranscribing ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      ) : (
+                        <Mic className="h-4 w-4 text-primary shrink-0" />
+                      )}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>
                     {isListening
                       ? (t("lunoAi.stopListening") || "Stop listening")
+                      : isTranscribing
+                      ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
                       : (t("lunoAi.voiceInput") || "Voice input")}
                   </TooltipContent>
                 </Tooltip>
@@ -2232,6 +2696,7 @@ export default function LunoAiView({
               searchQuery={searchInsertNoteQuery}
               activeNoteId={activeNote?.id}
               actionType="insert"
+              openedFolderName={openedFolderName}
               onSelectNote={(n) => {
                 if (onInsertToSelectedNote) {
                   onInsertToSelectedNote(n.id, insertTextContent);
@@ -2288,6 +2753,7 @@ export default function LunoAiView({
               searchQuery={searchWorkspaceQuery}
               attachedFileNames={attachedFiles.map((f) => f.name)}
               actionType="attach"
+              openedFolderName={openedFolderName}
               onSelectNote={(n) => handleAttachWorkspaceNote(n)}
             />
           </div>

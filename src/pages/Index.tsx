@@ -4468,6 +4468,7 @@ export default function Index() {
                       {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                         <LunoAiView
                           notes={notes}
+                          openedFolderName={openedFolderName}
                           activeNote={splitTabNote ?? (notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null)}
                           onInsertToActiveNote={(text) => {
                             const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
@@ -4689,6 +4690,7 @@ export default function Index() {
                   {(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) && (
                     <LunoAiView
                       notes={notes}
+                      openedFolderName={openedFolderName}
                       activeNote={splitTabNote}
                       onInsertToActiveNote={(text) => {
                         if (splitTabNote) {
@@ -4913,6 +4915,7 @@ export default function Index() {
                     {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                       <LunoAiView
                         notes={notes}
+                        openedFolderName={openedFolderName}
                         activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null}
                         onInsertToActiveNote={(text) => {
                           const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];

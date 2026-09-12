@@ -14,10 +14,9 @@ const TOKEN_KEY = "luno_gdrive_token_info";
 const PROFILE_KEY = "luno_gdrive_user_profile";
 const CLIENT_ID_KEY = "luno_gdrive_client_id";
 
-// Fallback public client ID if environment or setting is not provided
+// Fallback client ID if environment or setting is not provided
 export const DEFAULT_CLIENT_ID =
-  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
-  "843941002582-fseklvkec1fqn2ir08oasqh4cmllomli.apps.googleusercontent.com";
+  import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
 export const DEFAULT_CLIENT_SECRET =
   import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "";

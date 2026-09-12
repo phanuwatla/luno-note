@@ -510,6 +510,25 @@ function createWindow(initialWorkspacePath = null) {
     } catch {
       /* ignore */
     }
+
+    // Grant microphone and audio media permissions for voice recording
+    try {
+      session.setPermissionRequestHandler((_webContents, permission, callback) => {
+        if (permission === "media") {
+          return callback(true);
+        }
+        callback(false);
+      });
+
+      session.setPermissionCheckHandler((_webContents, permission) => {
+        if (permission === "media") {
+          return true;
+        }
+        return false;
+      });
+    } catch (permErr) {
+      console.warn("Could not set media permission handler:", permErr);
+    }
   } catch (err) {
     console.warn("Could not set spellchecker languages:", err);
   }
@@ -605,7 +624,7 @@ function createWindow(initialWorkspacePath = null) {
 
 function setupIpcHandlers() {
   ipcMain.handle("google-oauth-login", async (event, payload) => {
-    const clientId = typeof payload === "string" ? payload : (payload?.clientId || "843941002582-fseklvkec1fqn2ir08oasqh4cmllomli.apps.googleusercontent.com");
+    const clientId = typeof payload === "string" ? payload : (payload?.clientId || process.env.VITE_GOOGLE_CLIENT_ID || "");
     const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "");
 
     return new Promise((resolve, reject) => {
@@ -1660,7 +1679,7 @@ app.whenReady().then(() => {
     try {
       app.setAboutPanelOptions({
         applicationName: "Luno Note",
-        applicationVersion: app.getVersion ? app.getVersion() : "1.2.0",
+        applicationVersion: app.getVersion ? app.getVersion() : "1.2.1",
         copyright: "Copyright © 2026 phanuwatla",
         authors: ["phanuwatla"],
         website: "https://github.com/phanuwatla",
