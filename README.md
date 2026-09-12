@@ -7,10 +7,10 @@
 ### Modern, High-Performance Note-Taking Application
 
 [![Version](https://img.shields.io/badge/version-1.2.1-26A295.svg)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.1)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-lightgrey.svg)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/github/v/release/phanuwatla/luno-note?color=26A295)](https://github.com/phanuwatla/luno-note/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-passing-26A295.svg)](https://github.com/phanuwatla/luno-note)
-[![License](https://img.shields.io/badge/license-MIT-26A295.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-334155.svg)](https://github.com/phanuwatla/luno-note)
+[![Release](https://img.shields.io/github/v/release/phanuwatla/luno-note?color=0891B2)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Tests](https://img.shields.io/badge/tests-passing-10B981.svg)](https://github.com/phanuwatla/luno-note)
+[![License](https://img.shields.io/badge/license-MIT-0F766E.svg)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
@@ -53,9 +53,9 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.2.1.exe`** | Automated Windows installer with differential update support | [Download v1.2.1](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
+| **`luno-note-setup-1.2.1.exe`** | Automated Windows installer with differential update support | [![Download v1.2.1](https://img.shields.io/badge/Download-v1.2.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
 
-> [!NOTE]
+> [!TIP]
 > Users running an earlier desktop installation can apply this update automatically by navigating to **Settings > Check for Updates** without manual re-installation.
 
 ---
