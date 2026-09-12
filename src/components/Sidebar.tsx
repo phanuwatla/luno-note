@@ -1210,8 +1210,8 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                 <span>{t("sidebar.renameAction")}</span>
               </ContextMenuItem>
             )}
-            <ContextMenuItem onClick={() => handleDeleteFromContext(note)} className="gap-2 text-destructive focus:text-destructive">
-              <Trash2 className="h-4 w-4" />
+            <ContextMenuItem variant="destructive" onClick={() => handleDeleteFromContext(note)} className="gap-2 text-destructive focus:text-destructive">
+              <Trash2 className="h-4 w-4 text-destructive" />
               <span>{isMultiSelected ? `${t("sidebar.deleteFileAction")} (${targetCount})` : t("sidebar.deleteFileAction")}</span>
             </ContextMenuItem>
             {!isMultiSelected && (
@@ -1371,8 +1371,8 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               <span>{t("sidebar.renameAction")}</span>
             </ContextMenuItem>
           )}
-          <ContextMenuItem onClick={() => handleDeleteFromContext(note)} className="gap-2 text-destructive focus:text-destructive">
-            <Trash2 className="h-4 w-4" />
+          <ContextMenuItem variant="destructive" onClick={() => handleDeleteFromContext(note)} className="gap-2 text-destructive focus:text-destructive">
+            <Trash2 className="h-4 w-4 text-destructive" />
             <span>{isMultiSelected ? `${t("sidebar.deleteFileAction")} (${targetCount})` : t("sidebar.deleteFileAction")}</span>
           </ContextMenuItem>
           {!isMultiSelected && (
@@ -1584,8 +1584,8 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             </ContextMenuItem>
           )}
           {node.path !== "__opened_root__" && (
-            <ContextMenuItem onClick={() => handleDeleteFolderFromContext(node.path)} className="gap-2 text-destructive focus:text-destructive">
-              <Trash2 className="h-4 w-4" />
+            <ContextMenuItem variant="destructive" onClick={() => handleDeleteFolderFromContext(node.path)} className="gap-2 text-destructive focus:text-destructive">
+              <Trash2 className="h-4 w-4 text-destructive" />
               <span>{t("sidebar.deleteFolderAction")}</span>
             </ContextMenuItem>
           )}

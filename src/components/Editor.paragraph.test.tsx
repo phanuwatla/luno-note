@@ -9,7 +9,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import Image from "@tiptap/extension-image";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES } from "@/components/Editor";
+import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES, HashtagDecoration, collapseBlockWhitespace } from "@/components/Editor";
 import { Kbd, Highlight, Underline, Superscript, Subscript } from "@/lib/tiptapCustomMarks";
 import fs from "fs";
 
@@ -1320,5 +1320,65 @@ This is HTML with inline styling.
     const editorHtml = renderMarkdownToEditorHtml(md);
     expect(editorHtml).toBe("<p></p><p>First line of content</p>");
   });
+
+  it("Test 25 — Preserves space between multiple hashtags (#study #research #notes)", () => {
+    const input = "#study #research #notes ";
+    const editorHtml = renderMarkdownToEditorHtml(input);
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit, HashtagDecoration],
+      content: editorHtml,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    expect(editor.getText().trim()).toBe("#study #research #notes");
+
+    const saved = normalizeSaved(td.turndown(editor.getHTML()));
+    editor.destroy();
+    expect(saved.trim()).toBe("#study #research #notes");
+  });
+
+  it("Test 26 — Preserves space between hashtags in static HTML preview", () => {
+    const input = "#study #research #notes";
+    const html = renderMarkdownToEditorHtml(input, { forStaticHtmlPreview: true });
+
+    expect(html).toContain("</span> <span");
+    expect(html).not.toContain("</span><span");
+  });
+
+  it("Test 27 — Preserves spaces between wikilinks", () => {
+    const input = "[[Study]] [[Research]] [[Notes]]";
+    const html = renderMarkdownToEditorHtml(input);
+
+    expect(html).toContain("</a> <a");
+    expect(html).not.toContain("</a><a");
+  });
+
+  it("Test 28 — Tags at the end of a line or text without spacebar render as badges (#travel #itinerary #vacation)", () => {
+    const input = "#travel #itinerary #vacation";
+    const editorHtml = renderMarkdownToEditorHtml(input);
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit, HashtagDecoration],
+      content: editorHtml,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    expect(editor.getText().trim()).toBe("#travel #itinerary #vacation");
+
+    // Verify HashtagDecoration generated badges for all 3 tags including the final #vacation without space
+    const hashtagPlugin = editor.state.plugins.find((p: any) => p.key.startsWith("hashtagDecoration"));
+    expect(hashtagPlugin).toBeDefined();
+    const decoSet = hashtagPlugin!.getState(editor.state);
+    const decorations = decoSet.find(0, editor.state.doc.content.size);
+    expect(decorations.length).toBe(3);
+
+    // Static HTML preview without trailing space also formats the final tag as a badge
+    const staticHtml = renderMarkdownToEditorHtml(input, { forStaticHtmlPreview: true });
+    expect(staticHtml).toContain("#vacation</span>");
+
+    editor.destroy();
+  });
 });
+
 

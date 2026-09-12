@@ -101,18 +101,30 @@ const MenubarItem = React.forwardRef<
   React.ElementRef<typeof MenubarPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof MenubarPrimitive.Item> & {
     inset?: boolean;
+    variant?: "default" | "destructive";
   }
->(({ className, inset, ...props }, ref) => (
-  <MenubarPrimitive.Item
-    ref={ref}
-    className={cn(
-      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/15 focus:text-primary data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary",
-      inset && "pl-8",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ className, inset, variant = "default", ...props }, ref) => {
+  const isDestructive =
+    variant === "destructive" ||
+    (typeof className === "string" &&
+      /\b(text-destructive|text-rose-\d+|text-red-\d+|text-danger)\b/.test(className));
+
+  return (
+    <MenubarPrimitive.Item
+      ref={ref}
+      data-variant={isDestructive ? "destructive" : undefined}
+      className={cn(
+        "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        isDestructive
+          ? "text-destructive focus:bg-destructive/10 focus:text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive hover:bg-destructive/10 hover:text-destructive [&>svg]:text-destructive focus:[&>svg]:text-destructive data-[highlighted]:[&>svg]:text-destructive hover:[&>svg]:text-destructive hover:[&_svg]:text-destructive data-[highlighted]:hover:[&_svg]:text-destructive"
+          : "focus:bg-primary/15 focus:text-primary data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary",
+        inset && "pl-8",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
 MenubarItem.displayName = MenubarPrimitive.Item.displayName;
 
 const MenubarCheckboxItem = React.forwardRef<

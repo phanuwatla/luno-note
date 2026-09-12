@@ -6,8 +6,12 @@ import {
   type NoteTemplateType,
   NOTE_TEMPLATE_METADATA,
   getNoteTemplateContent,
+  getNoteTemplateMetadata,
   getTemplateIcon,
+  replaceFirstH1InMarkdown,
 } from "@/lib/templates";
+import { formatDateForFileName } from "@/lib/dateTimeFormatter";
+import type { Note } from "@/hooks/useNotes";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,6 +20,7 @@ import { Check, Copy, Plus, Code, Eye, Monitor, Smartphone, Tablet, RotateCcw, X
 import { marked } from "marked";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import { renderMarkdownToEditorHtml, EDITOR_CLASSES } from "@/components/Editor";
+import NoteEditorPreview from "@/components/NoteEditorPreview";
 
 export interface TemplateItemDef {
   type: NoteTemplateType;
@@ -496,10 +501,12 @@ const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
 
 interface TemplatesViewProps {
   onCreateWithTemplate: (templateType: NoteTemplateType, format?: "markdown" | "html" | "plain") => void;
+  notes?: Note[];
 }
 
 export default function TemplatesView({
   onCreateWithTemplate,
+  notes,
 }: TemplatesViewProps) {
   const { settings } = useAppSettings();
   const isTh = settings.language === "th";
@@ -688,18 +695,108 @@ export default function TemplatesView({
     );
   }, [previewItem, settings]);
 
+  /**
+   * Title that will be displayed in the editor when this template is created and opened.
+   * Matches handleCreateFromHomeTemplate and getBaseTitle 100%.
+   */
+  const appliedTitle = useMemo(() => {
+    if (!previewItem || previewItem.format !== "markdown") return "";
+    const meta = getNoteTemplateMetadata(previewItem.type);
+    const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
+    const prefix = meta?.filePrefix || (previewItem.type === "daily" ? "Daily" : "Note");
+    const defaultExt = previewItem.formatExt || "md";
+    const desiredFileName = `${prefix}-${dateStr}.${defaultExt}`;
+
+    const currentNotes = notes || [];
+    if (currentNotes.length > 0) {
+      const existingNames = new Set(
+        currentNotes
+          .filter((n) => !n.folderPath && n.fileName)
+          .map((n) => n.fileName!.toLowerCase())
+      );
+      if (!existingNames.has(desiredFileName.toLowerCase())) {
+        return `${prefix}-${dateStr}`;
+      }
+      let index = 1;
+      while (true) {
+        const candidate = `${prefix}-${dateStr}-${index}.${defaultExt}`;
+        if (!existingNames.has(candidate.toLowerCase())) {
+          return `${prefix}-${dateStr}-${index}`;
+        }
+        index += 1;
+      }
+    }
+
+    return `${prefix}-${dateStr}`;
+  }, [previewItem, settings.dateFormat, notes]);
+
+  /**
+   * Preview markdown content with the H1 heading replaced by the exact appliedTitle,
+   * guaranteeing 100% WYSIWYG consistency with the editor when applied.
+   */
+  const displayPreviewContent = useMemo(() => {
+    if (!previewItem || previewItem.format !== "markdown" || !appliedTitle || !previewContent) {
+      return previewContent;
+    }
+    return replaceFirstH1InMarkdown(previewContent, appliedTitle);
+  }, [previewItem, appliedTitle, previewContent]);
+
   const renderedMarkdownHtml = useMemo(() => {
-    if (!previewItem || previewItem.format !== "markdown" || !previewContent) return "";
-    return renderMarkdownToEditorHtml(previewContent, {
+    if (!previewItem || previewItem.format !== "markdown" || !displayPreviewContent) return "";
+    return renderMarkdownToEditorHtml(displayPreviewContent, {
       isReadingMode: false,
       theme: settings.theme,
       tagColorStyle: settings.tagColorStyle,
     });
-  }, [previewItem, previewContent, settings.theme, settings.tagColorStyle]);
+  }, [previewItem, displayPreviewContent, settings.theme, settings.tagColorStyle]);
+
+  const safeHtmlPreviewContent = useMemo(() => {
+    if (!previewItem || previewItem.format !== "html" || !previewContent) return "";
+    const interceptorScript = `
+<script>
+  (function() {
+    document.addEventListener('click', function(e) {
+      var link = e.target.closest('a');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href) return;
+      if (href === '#' || href === 'javascript:void(0)' || href === 'javascript:;') {
+        e.preventDefault();
+        return;
+      }
+      if (href.indexOf('#') === 0) {
+        e.preventDefault();
+        var targetId = href.substring(1);
+        if (targetId) {
+          var targetEl = document.getElementById(targetId);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+        return;
+      }
+      if (href.indexOf('http://') === 0 || href.indexOf('https://') === 0 || href.indexOf('mailto:') === 0) {
+        e.preventDefault();
+        if (href.indexOf('mailto:') === 0) {
+          window.open(href, '_blank');
+        } else {
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }
+      }
+    }, true);
+  })();
+</script>
+`;
+    if (previewContent.includes("</body>")) {
+      return previewContent.replace("</body>", `${interceptorScript}</body>`);
+    }
+    return previewContent + interceptorScript;
+  }, [previewItem, previewContent]);
 
   const handleCopyPreview = () => {
-    if (!previewContent) return;
-    navigator.clipboard.writeText(previewContent).then(() => {
+    const textToCopy = previewItem?.format === "markdown" ? displayPreviewContent : previewContent;
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
       toast({
         title: isTh ? "คัดลอกแล้ว" : "Copied to clipboard",
@@ -828,25 +925,31 @@ export default function TemplatesView({
         {previewItem ? (
           // ==================== IN-TAB TEMPLATE PREVIEW VIEW ====================
           <div className="flex-1 flex flex-col min-h-0 w-full">
-            {/* Top Breadcrumb Toolbar (Matching Editor's Top Bar Style) */}
-            <div className="sticky top-0 z-30 flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
+            {/* Top Breadcrumb Toolbar (Slightly larger for Template Preview) */}
+            <div className="sticky top-0 z-30 flex items-center justify-between bg-background px-3.5 h-10 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
               {/* Left: ArrowLeft (replaces home icon) + Templates > Template Name */}
               <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewItem(null);
-                    mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
-                  }}
-                  className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
-                  title={isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
-                >
-                  {(() => {
-                    const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
-                    return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
-                  })()}
-                  <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewItem(null);
+                        mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
+                      }}
+                      className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
+                    >
+                      {(() => {
+                        const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
+                        return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
+                      })()}
+                      <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    {isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
+                  </TooltipContent>
+                </Tooltip>
                 {(() => {
                   const ChevRightIcon = getToolbarIcon("chevronRight", pack);
                   return <ChevRightIcon className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;
@@ -863,44 +966,63 @@ export default function TemplatesView({
 
               {/* Right: Action and view buttons (100% matched with Editor controls) */}
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 text-[11.5px] pl-1">
-                {/* View Mode Toggle: Live / Formatted vs Source Code */}
+                {/* View Mode Toggle: Live / Formatted vs Source Code (Matching Editor Breadcrumb) */}
                 <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTab("rendered")}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
-                      previewTab === "rendered"
-                        ? "bg-background text-foreground shadow-xs font-semibold"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {(() => {
-                      const EyeIcon = getToolbarIcon("eye", pack);
-                      return <EyeIcon className="h-3.5 w-3.5" />;
-                    })()}
-                    <span className="hidden sm:inline">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab("rendered")}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                          previewTab === "rendered"
+                            ? "bg-background text-foreground shadow-xs font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {(() => {
+                          const EyeIcon = getToolbarIcon("eye", pack);
+                          return <EyeIcon className="h-3 w-3" />;
+                        })()}
+                        <span className="hidden sm:inline">
+                          {previewItem.format === "html"
+                            ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
+                            : previewItem.format === "markdown"
+                            ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
+                            : isTh ? "ข้อความ" : "Text"}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
                       {previewItem.format === "html"
                         ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
                         : previewItem.format === "markdown"
                         ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
                         : isTh ? "ข้อความ" : "Text"}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTab("code")}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
-                      previewTab === "code"
-                        ? "bg-background text-foreground shadow-xs font-semibold"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {(() => {
-                      const CodeIcon = getToolbarIcon("code", pack);
-                      return <CodeIcon className="h-3.5 w-3.5" />;
-                    })()}
-                    <span className="hidden sm:inline">{isTh ? "โค้ดต้นฉบับ" : "Source Code"}</span>
-                  </button>
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewTab("code")}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
+                          previewTab === "code"
+                            ? "bg-background text-foreground shadow-xs font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {(() => {
+                          const CodeIcon = getToolbarIcon("code", pack);
+                          return <CodeIcon className="h-3 w-3" />;
+                        })()}
+                        <span className="hidden sm:inline">{isTh ? "โค้ดต้นฉบับ" : "Source Code"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
+                      {isTh ? "ดูโค้ดต้นฉบับ" : "View Source Code"}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
 
                 {/* HTML device switcher if HTML & rendered (placed after view mode toggle, exactly like HTML Editor) */}
@@ -977,45 +1099,58 @@ export default function TemplatesView({
                   </div>
                 )}
 
-                {/* Copy button - rounded-[10px] and matching editor toolbar icon */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyPreview}
-                  className="h-7 px-2.5 rounded-[10px] text-[11.5px] font-medium gap-1.5 cursor-pointer border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {copied ? (
-                    (() => {
-                      const CheckIcon = getToolbarIcon("check", pack);
-                      return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
-                    })()
-                  ) : (
-                    (() => {
-                      const CopyIcon = getToolbarIcon("copy", pack);
-                      return <CopyIcon className="h-3.5 w-3.5" />;
-                    })()
-                  )}
-                  <span className="hidden sm:inline">
+                {/* Copy button - matching Editor Breadcrumb action button style */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleCopyPreview}
+                      className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus-visible:ring-0 focus-visible:outline-none focus:outline-none"
+                    >
+                      {copied ? (
+                        (() => {
+                          const CheckIcon = getToolbarIcon("check", pack);
+                          return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
+                        })()
+                      ) : (
+                        (() => {
+                          const CopyIcon = getToolbarIcon("copy", pack);
+                          return <CopyIcon className="h-3.5 w-3.5" />;
+                        })()
+                      )}
+                      <span className="sr-only">
+                        {copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}
+                      </span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
                     {copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}
-                  </span>
-                </Button>
+                  </TooltipContent>
+                </Tooltip>
 
-                {/* Use this template primary button - rounded-[10px] and matching editor toolbar icon */}
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    onCreateWithTemplate(previewItem.type, previewItem.format);
-                  }}
-                  className="h-7 px-3 rounded-[10px] text-[11.5px] font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs cursor-pointer transition-colors shrink-0"
-                >
-                  {(() => {
-                    const PlusIcon = getToolbarIcon("plus", pack);
-                    return <PlusIcon className="h-3.5 w-3.5" />;
-                  })()}
-                  <span>{isTh ? "ใช้เทมเพลตนี้" : "Use this template"}</span>
-                </Button>
+                {/* Use this template primary button - styled like the image button (comfortable height h-7, slightly more rounded) */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        onCreateWithTemplate(previewItem.type, previewItem.format);
+                      }}
+                      className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs cursor-pointer shrink-0"
+                    >
+                      {(() => {
+                        const PlusIcon = getToolbarIcon("plus", pack);
+                        return <PlusIcon className="h-3.5 w-3.5" />;
+                      })()}
+                      <span>{isTh ? "ใช้เทมเพลตนี้" : "Use this template"}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    {isTh ? "ใช้เทมเพลตนี้" : "Use this template"}
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
 
@@ -1062,14 +1197,21 @@ export default function TemplatesView({
                         <span>https://preview.luno.local/{previewItem.type}.html</span>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setIframeKey((prev) => prev + 1)}
-                        className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                        title={isTh ? "โหลดใหม่" : "Reload"}
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setIframeKey((prev) => prev + 1)}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span className="sr-only">{isTh ? "โหลดใหม่" : "Reload"}</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={4}>
+                          {isTh ? "โหลดใหม่" : "Reload"}
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
 
                     {/* Responsive Device Container with High-Fidelity Exact Viewport Simulation */}
@@ -1082,8 +1224,8 @@ export default function TemplatesView({
                           <iframe
                             key={iframeKey}
                             title="Live HTML Preview"
-                            srcDoc={previewContent}
-                            sandbox="allow-scripts allow-same-origin"
+                            srcDoc={safeHtmlPreviewContent}
+                            sandbox="allow-scripts allow-popups"
                             className="w-full h-full border-0 bg-white block"
                           />
                         </div>
@@ -1106,8 +1248,8 @@ export default function TemplatesView({
                             <iframe
                               key={iframeKey}
                               title="Live HTML Preview"
-                              srcDoc={previewContent}
-                              sandbox="allow-scripts allow-same-origin"
+                              srcDoc={safeHtmlPreviewContent}
+                              sandbox="allow-scripts allow-popups"
                               style={{
                                 width: `${deviceViewport.targetW}px`,
                                 height: deviceViewport.iframeH,
@@ -1120,24 +1262,13 @@ export default function TemplatesView({
                     </div>
                   </div>
                 ) : previewItem.format === "markdown" ? (
-                  // 100% Editor-Matching Realistic Markdown Preview (Scrollbar on the far right edge)
-                  <div className="flex-1 h-full overflow-y-auto w-full select-text">
-                    <div className="editor-content-area flex w-full min-w-0 flex-col max-w-2xl sm:max-w-3xl mx-auto min-h-full px-6 py-5">
-                      <div
-                        className={`tiptap ProseMirror ${EDITOR_CLASSES} ${
-                          settings.accentHeadings
-                            ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
-                            : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
-                        }`}
-                        style={{
-                          fontFamily: settings?.fontFamily || "var(--editor-font-family, var(--app-font-family))",
-                          fontSize: settings?.fontSize ? `${settings.fontSize}px` : undefined,
-                          lineHeight: settings?.lineHeight || undefined,
-                        }}
-                        dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
-                      />
-                    </div>
-                  </div>
+                  // 100% Editor-Matching Realistic Markdown Preview using live TipTap Editor Renderer
+                  <NoteEditorPreview
+                    content={displayPreviewContent}
+                    title={appliedTitle}
+                    format="markdown"
+                    className="h-full select-text"
+                  />
                 ) : (
                   // Plain Text Formatting (Matching Plain Text Editor with scrollbar on the far right edge)
                   <div className="flex-1 h-full overflow-y-auto w-full select-text">
@@ -1154,7 +1285,7 @@ export default function TemplatesView({
               ) : (
                 // Raw Source Code
                 <div className="flex-1 h-full overflow-auto p-4 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed bg-muted/40 selection:bg-primary/20 select-text">
-                  {previewContent}
+                  {displayPreviewContent}
                 </div>
               )}
             </div>

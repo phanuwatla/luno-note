@@ -348,10 +348,11 @@ export default function TagsTabView({
                         )}
                         {onDeleteTagGlobally && (
                           <DropdownMenuItem
+                            variant="destructive"
                             onClick={() => setTagToDelete(tag)}
                             className="text-destructive focus:text-destructive"
                           >
-                            <Trash2 className="h-4 w-4 shrink-0" />
+                            <Trash2 className="h-4 w-4 shrink-0 text-destructive" />
                             <span>{isTh ? "ลบแท็กนี้" : "Delete Tag"}</span>
                           </DropdownMenuItem>
                         )}

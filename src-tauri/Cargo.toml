@@ -1,10 +1,10 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "1.2.0"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["phanuwatla <https://github.com/phanuwatla>"]
 license = ""
-repository = ""
+repository = "https://github.com/phanuwatla/luno-note"
 edition = "2021"
 rust-version = "1.77.2"
 

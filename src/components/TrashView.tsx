@@ -437,11 +437,12 @@ export default function TrashView({
                       <span>{isTh ? "กู้คืนไฟล์ทั้งหมด" : "Restore all files"}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      variant="destructive"
                       disabled={trashedNotes.length === 0}
                       onClick={() => setEmptyTrashDialogOpen(true)}
-                      className="gap-2.5 py-1.5 px-3 rounded-lg text-rose-600 dark:text-rose-400 focus:text-rose-600 cursor-pointer text-[13px]"
+                      className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4 text-destructive" />
                       <span>{t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty trash")}</span>
                     </DropdownMenuItem>
                     {onOpenSettings && (

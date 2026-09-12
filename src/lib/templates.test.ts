@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getNoteTemplateContent, getDefaultTemplateForExtension, NOTE_TEMPLATE_METADATA, getTemplateIcon } from "./templates";
+import { getNoteTemplateContent, getDefaultTemplateForExtension, NOTE_TEMPLATE_METADATA, getTemplateIcon, replaceFirstH1InMarkdown } from "./templates";
 
 describe("templates.ts", () => {
   it("generates all HTML templates correctly", () => {
@@ -153,12 +153,12 @@ describe("templates.ts", () => {
 
     // 13. Recipe Plain Text
     const recipeTxt = getNoteTemplateContent("recipe-txt", "en", "plain");
-    expect(recipeTxt).toContain("Recipe: [Dish Name]");
+    expect(recipeTxt).toContain("Recipe: Handcrafted Truffle Cream Fettuccine");
     expect(recipeTxt).toContain("Ingredients");
     expect(recipeTxt).toContain("Instructions");
 
     const recipeTxtTh = getNoteTemplateContent("recipe-txt", "th", "plain");
-    expect(recipeTxtTh).toContain("สูตรอาหาร: [ชื่อเมนูอาหาร]");
+    expect(recipeTxtTh).toContain("สูตรอาหาร: พาสต้าเส้นสดซอสเห็ดทรัฟเฟิล");
     expect(recipeTxtTh).toContain("ขั้นตอนการทำ (Step-by-Step Instructions)");
   });
 
@@ -295,6 +295,32 @@ describe("templates.ts", () => {
     expect(getTemplateIcon("server-config", "lucide")).toBe("lucide:Server");
     expect(getTemplateIcon("server-config", "tabler")).toBe("tabler:IconServer");
     expect(getTemplateIcon("server-config", "phosphor")).toBe("phosphor:HardDrives");
+  });
+
+  it("replaces the first H1 in markdown while preserving frontmatter", () => {
+    // 1. Regular markdown with H1
+    const md1 = "# Old Title\n\nParagraph content";
+    expect(replaceFirstH1InMarkdown(md1, "Brainstorm-2026-09-12")).toBe(
+      "# Brainstorm-2026-09-12\n\nParagraph content"
+    );
+
+    // 2. Markdown with frontmatter
+    const md2 = "---\ntags:\n  - idea\n---\n\n# Old Title\n\nBody";
+    expect(replaceFirstH1InMarkdown(md2, "Meeting-2026-09-12")).toBe(
+      "---\ntags:\n  - idea\n---\n\n# Meeting-2026-09-12\n\nBody"
+    );
+
+    // 3. Markdown without existing H1
+    const md3 = "Just some text without any heading.";
+    expect(replaceFirstH1InMarkdown(md3, "New Title")).toBe(
+      "# New Title\n\nJust some text without any heading."
+    );
+
+    // 4. Markdown with frontmatter but no H1
+    const md4 = "---\ntags:\n  - test\n---\n\nNo heading here.";
+    expect(replaceFirstH1InMarkdown(md4, "Daily-2026-09-12")).toBe(
+      "---\ntags:\n  - test\n---\n\n# Daily-2026-09-12\n\nNo heading here."
+    );
   });
 });
 

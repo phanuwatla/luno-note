@@ -79,7 +79,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
-import { APP_VERSION } from "@/lib/appVersion";
+import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_ABOUT_CREDIT, openExternalUrl } from "@/lib/appVersion";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 
 const TOOLBAR_TOOL_DEFS: Record<
@@ -1940,6 +1940,20 @@ export default function SettingsTabView({
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
                           {t("settings.aboutAppDesc")}
+                        </p>
+                        <p className="text-xs text-muted-foreground pt-1">
+                          <a
+                            href={APP_AUTHOR_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openExternalUrl(APP_AUTHOR_URL);
+                            }}
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          >
+                            {APP_ABOUT_CREDIT}
+                          </a>
                         </p>
                       </div>
 

@@ -2539,21 +2539,21 @@ html:not([data-animations="false"]) .animate-in {
    ========================================================================== */
 
 /* Focus state (keyboard / highlighted without hover) */
-[role="menuitem"][data-highlighted]:not(:hover):not(.text-destructive),
-[role="menuitem"]:focus-visible:not(:hover):not(.text-destructive),
+[role="menuitem"][data-highlighted]:not(:hover):not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]),
+[role="menuitem"]:focus-visible:not(:hover):not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]),
 [role="menuitemcheckbox"][data-highlighted]:not(:hover),
 [role="menuitemradio"][data-highlighted]:not(:hover),
 [role="option"][data-highlighted]:not(:hover),
 [cmdk-item][data-selected="true"]:not(:hover),
 [data-slash-item][data-selected="true"]:not(:hover),
-[data-flat-index][data-selected="true"]:not(:hover):not(.text-destructive) {
+[data-flat-index][data-selected="true"]:not(:hover):not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) {
   background-color: hsl(var(--primary) / 0.15) !important;
   color: hsl(var(--primary)) !important;
 }
 
 /* Hover state (noticeably lighter accent than focus) */
-[role="menuitem"]:hover:not(.text-destructive):not([data-disabled="true"]),
-[role="menuitem"][data-highlighted]:hover:not(.text-destructive):not([data-disabled="true"]),
+[role="menuitem"]:hover:not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]):not([data-disabled="true"]),
+[role="menuitem"][data-highlighted]:hover:not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]):not([data-disabled="true"]),
 [role="menuitemcheckbox"]:hover:not([data-disabled="true"]),
 [role="menuitemcheckbox"][data-highlighted]:hover:not([data-disabled="true"]),
 [role="menuitemradio"]:hover:not([data-disabled="true"]),
@@ -2564,14 +2564,14 @@ html:not([data-animations="false"]) .animate-in {
 [cmdk-item][data-selected="true"]:hover:not([data-disabled="true"]),
 [data-slash-item]:hover,
 [data-slash-item][data-selected="true"]:hover,
-[data-flat-index]:hover:not(.text-destructive) {
+[data-flat-index]:hover:not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) {
   background-color: hsl(var(--primary) / 0.08) !important;
   color: hsl(var(--primary)) !important;
 }
 
 /* Icons turn to accent color on both hover and focus */
-[role="menuitem"]:hover:not(.text-destructive) svg,
-[role="menuitem"][data-highlighted] svg,
+[role="menuitem"]:hover:not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg,
+[role="menuitem"][data-highlighted]:not(.text-destructive):not([data-variant="destructive"]):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg,
 [role="menuitemcheckbox"]:hover svg,
 [role="menuitemcheckbox"][data-highlighted] svg,
 [role="menuitemradio"]:hover svg,
@@ -2582,7 +2582,92 @@ html:not([data-animations="false"]) .animate-in {
 [cmdk-item][data-selected="true"] svg,
 [data-slash-item]:hover svg,
 [data-slash-item][data-selected="true"] svg,
-[data-flat-index]:hover:not(.text-destructive) svg,
-[data-flat-index][data-selected="true"]:not(.text-destructive) svg {
+[data-flat-index]:hover:not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg,
+[data-flat-index][data-selected="true"]:not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg {
   color: hsl(var(--primary)) !important;
 }
+
+/* Destructive / Danger Menu Items & Buttons: Red icon, text, and soft red background on hover/focus */
+[role="menuitem"].text-destructive svg,
+[role="menuitem"][data-variant="destructive"] svg,
+[role="menuitem"][class*="text-destructive"] svg,
+[role="menuitem"][class*="text-rose"] svg,
+[role="menuitem"][class*="text-red"] svg,
+[role="menuitem"][class*="text-danger"] svg,
+[role="menuitem"].text-destructive:hover svg,
+[role="menuitem"][data-variant="destructive"]:hover svg,
+[role="menuitem"][class*="text-destructive"]:hover svg,
+[role="menuitem"][class*="text-rose"]:hover svg,
+[role="menuitem"][class*="text-red"]:hover svg,
+[role="menuitem"][class*="text-danger"]:hover svg,
+[role="menuitem"][data-highlighted].text-destructive svg,
+[role="menuitem"][data-highlighted][data-variant="destructive"] svg,
+[role="menuitem"][data-highlighted][class*="text-destructive"] svg,
+[role="menuitem"][data-highlighted][class*="text-rose"] svg,
+[role="menuitem"][data-highlighted][class*="text-red"] svg,
+[role="menuitem"][data-highlighted][class*="text-danger"] svg,
+[data-flat-index].text-destructive svg,
+[data-flat-index][class*="text-destructive"] svg,
+[data-flat-index][class*="text-rose"] svg,
+[data-flat-index][class*="text-red"] svg,
+[data-flat-index][class*="text-danger"] svg,
+[data-flat-index].text-destructive:hover svg,
+[data-flat-index][class*="text-destructive"]:hover svg,
+[data-flat-index][class*="text-rose"]:hover svg,
+[data-flat-index][class*="text-red"]:hover svg,
+[data-flat-index][class*="text-danger"]:hover svg,
+[data-flat-index].text-destructive[data-selected="true"] svg,
+[data-flat-index][class*="text-destructive"][data-selected="true"] svg,
+[data-flat-index][class*="text-rose"][data-selected="true"] svg,
+[data-flat-index][class*="text-red"][data-selected="true"] svg,
+[data-flat-index][class*="text-danger"][data-selected="true"] svg {
+  color: hsl(var(--destructive)) !important;
+}
+
+[role="menuitem"].text-destructive:hover:not([data-disabled="true"]),
+[role="menuitem"][data-variant="destructive"]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-destructive"]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-rose"]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-red"]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-danger"]:hover:not([data-disabled="true"]),
+[role="menuitem"].text-destructive[data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"][data-variant="destructive"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-destructive"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-rose"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-red"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"][class*="text-danger"][data-highlighted]:hover:not([data-disabled="true"]),
+[role="menuitem"].text-destructive[data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"][data-variant="destructive"][data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"][class*="text-destructive"][data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"][class*="text-rose"][data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"][class*="text-red"][data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"][class*="text-danger"][data-highlighted]:not([data-disabled="true"]),
+[role="menuitem"].text-destructive:focus-visible:not([data-disabled="true"]),
+[role="menuitem"][data-variant="destructive"]:focus-visible:not([data-disabled="true"]),
+[role="menuitem"][class*="text-destructive"]:focus-visible:not([data-disabled="true"]),
+[role="menuitem"][class*="text-rose"]:focus-visible:not([data-disabled="true"]),
+[role="menuitem"][class*="text-red"]:focus-visible:not([data-disabled="true"]),
+[role="menuitem"][class*="text-danger"]:focus-visible:not([data-disabled="true"]),
+[data-flat-index].text-destructive:hover,
+[data-flat-index][class*="text-destructive"]:hover,
+[data-flat-index][class*="text-rose"]:hover,
+[data-flat-index][class*="text-red"]:hover,
+[data-flat-index][class*="text-danger"]:hover,
+[data-flat-index].text-destructive[data-selected="true"],
+[data-flat-index][class*="text-destructive"][data-selected="true"],
+[data-flat-index][class*="text-rose"][data-selected="true"],
+[data-flat-index][class*="text-red"][data-selected="true"],
+[data-flat-index][class*="text-danger"][data-selected="true"] {
+  background-color: hsl(var(--destructive) / 0.1) !important;
+  color: hsl(var(--destructive)) !important;
+}
+
+/* Ensure any icon in danger/destructive buttons or items without explicit color class inherits the danger color */
+button.text-destructive > svg:not([class*="text-"]),
+button[class*="text-rose"] > svg:not([class*="text-"]),
+button[class*="text-red"] > svg:not([class*="text-"]),
+button[class*="text-destructive"] > svg:not([class*="text-"]),
+button[class*="text-danger"] > svg:not([class*="text-"]) {
+  color: currentColor !important;
+}
+

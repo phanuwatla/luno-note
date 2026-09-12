@@ -1,8 +1,16 @@
 {
   "name": "luno-note",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.2.0",
   "main": "electron/main.js",
+  "author": {
+    "name": "phanuwatla",
+    "url": "https://github.com/phanuwatla"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phanuwatla/luno-note.git"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -20,6 +28,7 @@
   "build": {
     "appId": "com.luno.note",
     "productName": "Luno Note",
+    "copyright": "Copyright © 2026 phanuwatla",
     "directories": {
       "output": "release"
     },

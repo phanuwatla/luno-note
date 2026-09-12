@@ -168,7 +168,7 @@ import { createLowlight, common } from "lowlight";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import CodeBlockNodeView from "@/components/CodeBlockNodeView";
 
-const lowlight = createLowlight(common);
+export const lowlight = createLowlight(common);
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -540,6 +540,7 @@ export const prepareDomForEditor = (
     assetBlobUrlMap?: Map<string, string>;
     theme?: string;
     tagColorStyle?: string;
+    forStaticHtmlPreview?: boolean;
   }
 ) => {
   migrateDomTaskLists(root);
@@ -645,53 +646,55 @@ export const prepareDomForEditor = (
     }
   });
 
-  // Convert inline hashtags (#tag)
-  const inlineTagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
-  const formatHashtagsInNode = (element: Node) => {
-    const children = Array.from(element.childNodes);
-    for (const child of children) {
-      if (child.nodeType === Node.ELEMENT_NODE) {
-        const tag = (child as HTMLElement).tagName.toLowerCase();
-        if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
-          continue;
-        }
-        formatHashtagsInNode(child);
-      } else if (child.nodeType === Node.TEXT_NODE) {
-        const text = child.nodeValue || "";
-        inlineTagRegex.lastIndex = 0;
-        if (inlineTagRegex.test(text)) {
-          const frag = document.createDocumentFragment();
+  // Convert inline hashtags (#tag) for static HTML previews only (TipTap Editor & NoteEditorPreview use live HashtagDecoration)
+  if (options && (options as Record<string, unknown>).forStaticHtmlPreview === true) {
+    const inlineTagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
+    const formatHashtagsInNode = (element: Node) => {
+      const children = Array.from(element.childNodes);
+      for (const child of children) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = (child as HTMLElement).tagName.toLowerCase();
+          if (tag === "pre" || tag === "code" || tag === "a" || tag === "input" || tag === "style" || tag === "script") {
+            continue;
+          }
+          formatHashtagsInNode(child);
+        } else if (child.nodeType === Node.TEXT_NODE) {
+          const text = child.nodeValue || "";
           inlineTagRegex.lastIndex = 0;
-          let lastIndex = 0;
-          let match: RegExpExecArray | null;
-          while ((match = inlineTagRegex.exec(text)) !== null) {
-            const rawTag = match[1];
-            if (/^\d+$/.test(rawTag)) continue;
-            const hashIndex = match[0].indexOf("#");
-            const matchStart = match.index + hashIndex;
-            const matchEnd = matchStart + 1 + rawTag.length;
+          if (inlineTagRegex.test(text)) {
+            const frag = document.createDocumentFragment();
+            inlineTagRegex.lastIndex = 0;
+            let lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = inlineTagRegex.exec(text)) !== null) {
+              const rawTag = match[1];
+              if (/^\d+$/.test(rawTag)) continue;
+              const hashIndex = match[0].indexOf("#");
+              const matchStart = match.index + hashIndex;
+              const matchEnd = matchStart + 1 + rawTag.length;
 
-            if (matchStart > lastIndex) {
-              frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+              if (matchStart > lastIndex) {
+                frag.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+              }
+
+              const badge = document.createElement("span");
+              const colorClass = getTagColorClass(rawTag, options?.theme, undefined, options?.tagColorStyle);
+              badge.className = `inline-tag-badge border ${colorClass}`;
+              badge.textContent = `#${rawTag}`;
+              frag.appendChild(badge);
+
+              lastIndex = matchEnd;
             }
-
-            const badge = document.createElement("span");
-            const colorClass = getTagColorClass(rawTag, options?.theme, undefined, options?.tagColorStyle);
-            badge.className = `inline-tag-badge border ${colorClass}`;
-            badge.textContent = `#${rawTag}`;
-            frag.appendChild(badge);
-
-            lastIndex = matchEnd;
+            if (lastIndex < text.length) {
+              frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+            child.replaceWith(frag);
           }
-          if (lastIndex < text.length) {
-            frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-          }
-          child.replaceWith(frag);
         }
       }
-    }
-  };
-  formatHashtagsInNode(root);
+    };
+    formatHashtagsInNode(root);
+  }
 
   // Convert inline Wikilinks [[Target|Alias]]
   const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
@@ -772,6 +775,27 @@ export const prepareDomForEditor = (
   }
 };
 
+const BLOCK_HTML_TAGS =
+  "address|article|aside|blockquote|canvas|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|noscript|ol|p|pre|section|table|tfoot|thead|tbody|tr|th|td|ul|video|details|summary";
+const BLOCK_TAG_REGEX = new RegExp(`^(?:\\/?(?:${BLOCK_HTML_TAGS})|hr\\/?)(?:[\\s\\/>]|$)`, "i");
+
+export function collapseBlockWhitespace(html: string): string {
+  return html.replace(/>(\s+)</g, (match, _spaces, offset, string) => {
+    const before = string.slice(0, offset + 1);
+    const tagBeforeMatch = before.match(/<([^>]+)>$/);
+    const after = string.slice(offset + match.length - 1);
+    const tagAfterMatch = after.match(/^<([^>]+)>/);
+
+    const isBlockBefore = Boolean(tagBeforeMatch && BLOCK_TAG_REGEX.test(tagBeforeMatch[1].trim()));
+    const isBlockAfter = Boolean(tagAfterMatch && BLOCK_TAG_REGEX.test(tagAfterMatch[1].trim()));
+
+    if (isBlockBefore || isBlockAfter) {
+      return "><";
+    }
+    return match;
+  });
+}
+
 const markdownRenderCache = new Map<string, string>();
 const MAX_MARKDOWN_CACHE_SIZE = 100;
 
@@ -783,6 +807,7 @@ export function renderMarkdownToEditorHtml(
     tagColorStyle?: string;
     assetBlobUrlMap?: Map<string, string>;
     contentFormat?: "markdown" | "html" | "plain";
+    forStaticHtmlPreview?: boolean;
   }
 ): string {
   if (!markdown) return "<p></p>";
@@ -805,8 +830,9 @@ export function renderMarkdownToEditorHtml(
   const isReading = Boolean(options?.isReadingMode);
   const theme = options?.theme || "";
   const tagStyle = options?.tagColorStyle || "";
+  const isStatic = Boolean(options?.forStaticHtmlPreview);
   // Check cache for identical markdown content and display options
-  const cacheKey = `${isReading}:${theme}:${tagStyle}:${markdown.length}:${markdown}`;
+  const cacheKey = `${isReading}:${theme}:${tagStyle}:${isStatic}:${markdown.length}:${markdown}`;
   const cached = markdownRenderCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;
@@ -842,10 +868,12 @@ export function renderMarkdownToEditorHtml(
 
     prepareDomForEditor(root, options);
 
-    const cleanHtml = root.innerHTML
-      .replace(/^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i, "")
-      .replace(/>\s+</g, "><")
-      .trim();
+    const cleanHtml = collapseBlockWhitespace(
+      root.innerHTML.replace(
+        /^\s*(?:<hr\s*\/?>\s*)?<p>\s*tags:\s*<\/p>\s*(?:<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|\s*)*/i,
+        ""
+      )
+    ).trim();
 
     finalHtml = sanitizeHtml(cleanHtml);
   } else {
@@ -863,7 +891,7 @@ export function renderMarkdownToEditorHtml(
 
 function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
   const decorations: Decoration[] = [];
-  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
 
   doc.descendants((node: any, pos: number, parent: any) => {
     if (node.isText) {
@@ -942,7 +970,7 @@ export const HashtagDecoration = Extension.create({
                   set = set.remove(set.find(start, end));
                   const newDecos: Decoration[] = [];
                   const parentNode = $from.parent;
-                  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+                  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
                   parentNode.descendants((child: any, childPos: number, parent: any) => {
                     if (child.isText) {
                       if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
@@ -1426,6 +1454,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -4323,7 +4352,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else if (!/^\s*<h1[^>]*>/i.test(editorHtml)) {
       editorHtml = titleH1Html + editorHtml;
     }
-    return editorHtml.replace(/>\s+</g, "><");
+    return collapseBlockWhitespace(editorHtml);
   };
 
   const toEditorHtml = (text: string, isTxt: boolean = false, readingMode: boolean = isReadingMode): string => {
@@ -9636,7 +9665,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           <Plus className="h-4 w-4" />
                           <span>{t("editor.addRowBelow")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteRow().run()} className="text-destructive focus:text-destructive">
+                        <DropdownMenuItem variant="destructive" onClick={() => editor.chain().focus().deleteRow().run()} className="text-destructive focus:text-destructive">
                           <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteRow")}</span>
                         </DropdownMenuItem>
@@ -9649,7 +9678,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           <Plus className="h-4 w-4" />
                           <span>{t("editor.addColumnRight")}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteColumn().run()} className="text-destructive focus:text-destructive">
+                        <DropdownMenuItem variant="destructive" onClick={() => editor.chain().focus().deleteColumn().run()} className="text-destructive focus:text-destructive">
                           <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteColumn")}</span>
                         </DropdownMenuItem>
@@ -9673,7 +9702,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           <span>{t("editor.toggleHeaderRow")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => editor.chain().focus().deleteTable().run()} className="text-destructive focus:text-destructive">
+                        <DropdownMenuItem variant="destructive" onClick={() => editor.chain().focus().deleteTable().run()} className="text-destructive focus:text-destructive">
                           <Trash2 className="h-4 w-4 text-destructive" />
                           <span>{t("editor.deleteTable")}</span>
                         </DropdownMenuItem>

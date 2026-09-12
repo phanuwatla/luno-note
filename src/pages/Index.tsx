@@ -37,7 +37,7 @@ import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo } fr
 import { createCloudWorkspace } from "@/lib/googleDriveApi";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
 import { encryptNoteContent, decryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
-import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, type NoteTemplateType } from "@/lib/templates";
+import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, replaceFirstH1InMarkdown, type NoteTemplateType } from "@/lib/templates";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
@@ -4179,13 +4179,16 @@ export default function Index() {
     const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
     const prefix = meta.filePrefix || (templateType === "daily" ? "Daily" : "Note");
     const fileName = `${prefix}-${dateStr}.${defaultExt}`;
-    const initialTitle = settings.language === "th" ? meta.defaultTitleTh : meta.defaultTitleEn;
+    const initialTitle = `${prefix}-${dateStr}`;
+    const initialContent = format === "markdown"
+      ? replaceFirstH1InMarkdown(templateContent, initialTitle)
+      : templateContent;
 
     if (openedRootDirHandle || electronWorkspacePathRef.current || isCloudWorkspace) {
       const created = await createNoteInFolder(undefined, {
         fileName,
         contentFormat: format,
-        initialContent: templateContent,
+        initialContent,
         icon: templateIcon,
         iconColor: meta.iconColor,
       });
@@ -4200,7 +4203,7 @@ export default function Index() {
       updateNote(note.id, {
         fileName,
         contentFormat: format,
-        content: templateContent,
+        content: initialContent,
         title: initialTitle,
         icon: templateIcon || undefined,
         iconColor: meta.iconColor || undefined,
@@ -4388,6 +4391,7 @@ export default function Index() {
                       {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
                         <TemplatesView
                           onCreateWithTemplate={handleCreateFromHomeTemplate}
+                          notes={notes}
                         />
                       )}
                     </div>
@@ -4608,6 +4612,7 @@ export default function Index() {
                   {(splitTabId === "templates" || splitTabId?.startsWith("templates:")) && (
                     <TemplatesView
                       onCreateWithTemplate={handleCreateFromHomeTemplate}
+                      notes={notes}
                     />
                   )}
                 </div>
@@ -4831,6 +4836,7 @@ export default function Index() {
                     {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
                       <TemplatesView
                         onCreateWithTemplate={handleCreateFromHomeTemplate}
+                        notes={notes}
                       />
                     )}
                   </div>

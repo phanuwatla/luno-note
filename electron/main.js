@@ -1656,6 +1656,20 @@ function startNativeKeyboardWatcher() {
 }
 
 app.whenReady().then(() => {
+  if (app.setAboutPanelOptions) {
+    try {
+      app.setAboutPanelOptions({
+        applicationName: "Luno Note",
+        applicationVersion: app.getVersion ? app.getVersion() : "1.2.0",
+        copyright: "Copyright © 2026 phanuwatla",
+        authors: ["phanuwatla"],
+        website: "https://github.com/phanuwatla",
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   app.on("browser-window-created", (event, window) => {
     try {
       window.setIcon(getNativeAppIcon());
