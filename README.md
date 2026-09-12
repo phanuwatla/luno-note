@@ -4,7 +4,7 @@
 
 ![Luno Note](electron/icon.ico)
 
-### Modern, Fast, and Feature-Rich Note-Taking Application
+### Modern, High-Performance Note-Taking Application
 
 [![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.1)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-lightgrey.svg)](https://github.com/phanuwatla/luno-note)
@@ -12,110 +12,111 @@
 [![Tests](https://img.shields.io/badge/tests-passing-success.svg)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-*Luno Note is a powerful, lightweight, and modern note-taking application designed for productivity, focus, and seamless knowledge management. Featuring rich-text and Markdown editing, an integrated Gemini AI assistant with voice dictation, folder hierarchy, visual version history with split diffs, and automated desktop updates.*
+Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Latest Version (v1.2.1)](https://github.com/phanuwatla/luno-note/releases/latest) • [Features](#-features) • [What's New in v1.2.1](#-whats-new-in-v121) • [Auto-Update](#-in-app-auto-update) • [Development](#-development)
+[Download Version 1.2.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.1](#what-is-new-in-version-121) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## 🌟 What's New in v1.2.1
+## What Is New in Version 1.2.1
 
-- 🎙️ **Gemini-Powered Voice Dictation & Speech-to-Text**: Dictate notes or talk directly to Luno AI with multimodal Gemini audio transcription. Includes intelligent silence/hallucination filtering, automatic timestamp stripping, and native microphone permission management in Desktop Electron.
-- 🎨 **Enhanced Custom Icon Integration**: Custom note emoji and file icons are now consistently rendered across Quick Switcher, sidebar file tree, Luno AI workspace browser, and attached file chips.
-- 🔄 **Real-Time Workspace Folder Sync**: Synchronize folder expansion and collapse states seamlessly across all workspace views and sidebar trees.
-- 🔑 **Updated Cloud & OAuth Configuration**: Improved Google Drive credentials and environment variable handling for production builds.
-- 🛡️ **Polished Error Handling & Testing**: Comprehensive unit tests for workspace trees and AI views, with intelligent fallback and model auto-discovery.
-
----
-
-## 🚀 Features
-
-- **📝 Rich-Text & Markdown Editing**: Create notes effortlessly with support for headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
-- **🤖 Integrated Luno AI Assistant**: Context-aware AI assistant with note attachments, voice dictation, automated summarization, language translation, and writing improvements.
-- **📂 Workspaces & Folder Hierarchy**: Organize notes with multi-level nested folders, workspace management, and quick workspace switching.
-- **🏷️ Smart Tags & Quick Switcher**: Organize across folders with tags and jump to any note instantly using the Quick Switcher (`Ctrl+P` / `Cmd+P`).
-- **📎 Media & Audio Attachments**: Attach images, documents, and audio clips with an integrated audio player and image compression.
-- **🕒 Version History & Split Diff**: Inspect revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
-- **👁️ Live Note Preview**: Switch instantly between editing mode and full-rendered Markdown preview.
-- **📋 Built-in Template Library**: Ready-to-use templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs in both English and Thai.
-- **🎨 Customization & Themes**: Choose from Dark, Light, Sepia, and Minimal themes, along with customizable fonts, font sizes, and icon packs (Lucide, Tabler, Phosphor).
-- **🔄 Auto-Update Ready**: Seamless desktop updates on Windows via GitHub Releases.
+- **Gemini-Powered Voice Dictation and Transcription**: Dictate notes or communicate directly with Luno AI via multimodal audio transcription powered by the Google Gemini API. Includes automated silence filtering, hallucination prevention, timestamp cleanup, and native microphone access management in the desktop environment.
+- **Unified Custom Icon Rendering**: Custom note emoji and file icons are now consistently rendered across Quick Switcher, sidebar hierarchy trees, workspace navigation panels, and file attachment chips.
+- **Real-Time Workspace Folder Synchronization**: Folder expansion and collapse states remain synchronized across all active navigation views.
+- **Enhanced Cloud Integration and Authentication**: Improved Google Drive OAuth configuration and environment variable resolution for production deployments.
+- **Expanded Test Coverage and Reliability**: Additional automated unit tests for workspace trees and AI views, with intelligent fallback models and comprehensive verification.
 
 ---
 
-## 📥 Download & Installation
+## Key Features
+
+- **Rich-Text and Markdown Editing**: Full formatting support including headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
+- **Integrated Luno AI Assistant**: Context-aware artificial intelligence assistant supporting note attachments, voice dictation, automated summarization, language translation, and editing refinements.
+- **Hierarchical Workspaces and Folders**: Multi-level folder structuring with workspace separation and quick workspace switching.
+- **Tags and Quick Switcher**: Organize content using tags and jump directly to any document with the keyboard-driven Quick Switcher (`Ctrl+P` / `Cmd+P`).
+- **Media and Audio Attachments**: Attach images, documents, and audio recordings with an integrated audio player and client-side image compression.
+- **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
+- **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
+- **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
+- **Customization and Visual Themes**: Select from Dark, Light, Sepia, and Minimal themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
+- **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
+
+---
+
+## Installation and Downloads
 
 ### Windows Installer (x64)
 
-Download the latest installer from [GitHub Releases](https://github.com/phanuwatla/luno-note/releases/latest):
+Download the production installer directly from [GitHub Releases](https://github.com/phanuwatla/luno-note/releases/latest):
 
-| File | Description | Download |
+| Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.2.1.exe`** | Automatic installer for Windows (supports background auto-update) | [Download v1.2.1](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
+| **`luno-note-setup-1.2.1.exe`** | Automated Windows installer with differential update support | [Download v1.2.1](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
 
-> **Updating from an existing desktop installation:** If you already have Luno Note installed, go to **Settings > Check for Updates** to automatically download and install v1.2.1 without downloading the installer manually.
-
----
-
-## 🔄 In-App Auto-Update
-
-Luno Note Desktop includes built-in automated updates powered by `electron-updater`:
-1. The app automatically checks GitHub Releases for new updates in the background (or manually via **Settings > Check for Updates**).
-2. When an update is detected, it is downloaded automatically in the background.
-3. Once downloaded, a **"Restart & Install"** notification prompts you to apply the update seamlessly without data loss.
+> **Existing Installations**: Users running an earlier version can apply this update automatically by navigating to **Settings > Check for Updates** without manual re-installation.
 
 ---
 
-## 🛠️ Tech Stack
+## In-App Automatic Updates
 
-- **Frontend**: [React 19](https://react.dev/) + [Vite](https://vite.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- **Desktop Runtime**: [Electron](https://www.electronjs.org/) / [Tauri](https://tauri.app/)
-- **Editor Engine**: [TipTap](https://tiptap.dev/) Core + Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/)
-- **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Text & Audio Multimodal)
-- **Icons**: Lucide Icons, Tabler Icons, Phosphor Icons
-- **Testing**: [Vitest](https://vitest.dev/) + Testing Library
+Luno Note Desktop includes integrated update distribution powered by `electron-updater`:
+1. The application checks GitHub Releases for new published versions automatically on startup or manually through **Settings > Check for Updates**.
+2. When a newer version is published, the package is downloaded in the background.
+3. Once the download completes, a prompt offers to **Restart & Install**, applying the update without data loss.
 
 ---
 
-## 💻 Development
+## Architecture and Technology Stack
+
+- **Frontend Framework**: [React 19](https://react.dev/), [Vite](https://vite.dev/), [TypeScript](https://www.typescriptlang.org/)
+- **Desktop Runtime**: [Electron](https://www.electronjs.org/) and [Tauri](https://tauri.app/)
+- **Rich-Text Engine**: [TipTap](https://tiptap.dev/) Core with Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
+- **Styling and UI Components**: [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/)
+- **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Audio and Text)
+- **Icon Libraries**: Lucide Icons, Tabler Icons, Phosphor Icons
+- **Testing Framework**: [Vitest](https://vitest.dev/) with Testing Library
+
+---
+
+## Development
 
 ### Prerequisites
-- Node.js (v20 or higher recommended)
+- Node.js (version 20 or higher recommended)
 - npm or bun
 
-### Setup & Run
+### Local Environment Setup
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/phanuwatla/luno-note.git
 cd luno-note
 
 # Install dependencies
 npm install
 
-# Run Web Development Server (Vite)
+# Start local Vite development server
 npm run dev
 
-# Run Electron Desktop in Development Mode
+# Start Electron desktop in development mode
 npm run electron:dev
 
-# Run Unit Tests
+# Execute automated test suites
 npm test
 
-# Build Web Application
+# Build production web application bundle
 npm run build
 
-# Build Windows Desktop Installer
+# Package Windows desktop installer
 npm run electron:build
 ```
 
 ---
 
-## 📄 License & Credits
+## License and Copyright
 
 Copyright © 2026 [phanuwatla](https://github.com/phanuwatla). All rights reserved.  
-Made with ❤️ by phanuwatla for productive thinkers and note-takers.
+Distributed under the MIT License.
+
 
 
