@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 84" width="100%" height="84" fill="none">
+  <style>
+    .bg { fill: rgba(38, 162, 149, 0.08); }
+    .title { fill: #26A295; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13.5px; font-weight: 600; }
+    .text { fill: #24292f; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.5; }
+    .bold { font-weight: 600; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: rgba(38, 162, 149, 0.12); }
+      .text { fill: #c9d1d9; }
+      .bold { fill: #f0f6fc; }
+    }
+  </style>
+
+  <!-- Background container -->
+  <rect x="0" y="0" width="780" height="84" rx="6" class="bg" />
+  
+  <!-- Left accent border with exact Luno emerald #26A295 -->
+  <rect x="0" y="0" width="4.5" height="84" fill="#26A295" rx="2" />
+
+  <!-- Info Icon in #26A295 -->
+  <g transform="translate(18, 14)">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#26A295" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+      <polyline points="11 12 12 12 12 16 13 16" />
+    </svg>
+  </g>
+
+  <!-- Title -->
+  <text x="44" y="28" class="title">Note</text>
+
+  <!-- Description line 1 -->
+  <text x="44" y="49" class="text">Users running an earlier desktop installation can apply this update automatically</text>
+  
+  <!-- Description line 2 -->
+  <text x="44" y="68" class="text">by navigating to <tspan class="bold">Settings &gt; Check for Updates</tspan> without manual re-installation.</text>
+</svg>
