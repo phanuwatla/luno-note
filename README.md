@@ -6,11 +6,11 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.2.1-26A295.svg)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.1)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/github/v/release/phanuwatla/luno-note?color=14B8A6)](https://github.com/phanuwatla/luno-note/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-passing-10B981.svg)](https://github.com/phanuwatla/luno-note)
-[![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.2.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.1)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
+[![Release](https://img.shields.io/badge/release-v1.2.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
+[![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
