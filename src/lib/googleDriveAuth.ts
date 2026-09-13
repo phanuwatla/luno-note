@@ -77,7 +77,9 @@ export function notifyAuthProfileChanged(profile: GoogleUserProfile | null): voi
 export function getStoredClientId(): string {
   try {
     const saved = localStorage.getItem(CLIENT_ID_KEY);
-    if (saved && saved.trim()) return saved.trim();
+    if (saved && saved.trim() && saved !== "undefined" && saved !== "null" && !saved.includes("placeholder")) {
+      return saved.trim();
+    }
   } catch {
     // ignore
   }
@@ -424,17 +426,16 @@ export async function requestGoogleDriveAuth(customClientId?: string): Promise<{
   tokenInfo: GoogleTokenInfo;
   profile: GoogleUserProfile;
 }> {
-  const clientId = customClientId || getStoredClientId();
-
-  if (clientId.includes("placeholder")) {
-    throw new Error("Invalid Client ID: Please set a valid Google OAuth Client ID in your .env file (VITE_GOOGLE_CLIENT_ID).");
+  let clientId = (customClientId || getStoredClientId() || DEFAULT_CLIENT_ID).trim();
+  if (!clientId || clientId === "undefined" || clientId === "null" || clientId.includes("placeholder")) {
+    clientId = DEFAULT_CLIENT_ID;
   }
 
   // 1. Electron Desktop: Use native loopback authentication via user's default browser or auth window
   const electronAPI = (window as unknown as { electronAPI?: { googleOAuthLogin?: (params: any) => Promise<any> } })?.electronAPI;
   if (electronAPI?.googleOAuthLogin) {
     const result = await electronAPI.googleOAuthLogin({
-      clientId,
+      clientId: clientId || DEFAULT_CLIENT_ID,
       clientSecret: DEFAULT_CLIENT_SECRET || undefined,
     });
     if (result?.access_token) {

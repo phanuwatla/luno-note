@@ -722,7 +722,10 @@ function setupIpcHandlers() {
 
   ipcMain.handle("google-oauth-login", async (event, payload) => {
     const DEFAULT_GOOGLE_CLIENT_ID = "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
-    const clientId = (typeof payload === "string" ? payload : payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
+    let clientId = (typeof payload === "string" ? payload : payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
+    if (!clientId || clientId === "undefined" || clientId === "null" || String(clientId).includes("placeholder")) {
+      clientId = DEFAULT_GOOGLE_CLIENT_ID;
+    }
     const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "");
 
     return new Promise((resolve, reject) => {
@@ -740,7 +743,7 @@ function setupIpcHandlers() {
         clientId
       )}&redirect_uri=${encodeURIComponent(
         redirectUri
-      )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account%20consent&access_type=offline`;
+      )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account&access_type=offline`;
 
       const authWindow = new BrowserWindow({
         width: 520,
@@ -898,7 +901,10 @@ function setupIpcHandlers() {
       throw new Error("No refresh token provided");
     }
     const DEFAULT_GOOGLE_CLIENT_ID = "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
-    const clientId = (typeof payload === "object" && payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
+    let clientId = (typeof payload === "object" && payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
+    if (!clientId || clientId === "undefined" || clientId === "null" || String(clientId).includes("placeholder")) {
+      clientId = DEFAULT_GOOGLE_CLIENT_ID;
+    }
     const clientSecret = (typeof payload === "object" && payload?.clientSecret) || process.env.VITE_GOOGLE_CLIENT_SECRET || "";
 
     const tokenBody = {
