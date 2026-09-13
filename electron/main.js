@@ -721,7 +721,8 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("google-oauth-login", async (event, payload) => {
-    const clientId = typeof payload === "string" ? payload : (payload?.clientId || process.env.VITE_GOOGLE_CLIENT_ID || "");
+    const DEFAULT_GOOGLE_CLIENT_ID = "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
+    const clientId = (typeof payload === "string" ? payload : payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
     const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "");
 
     return new Promise((resolve, reject) => {
@@ -896,7 +897,8 @@ function setupIpcHandlers() {
     if (!refreshToken) {
       throw new Error("No refresh token provided");
     }
-    const clientId = (typeof payload === "object" && payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || "";
+    const DEFAULT_GOOGLE_CLIENT_ID = "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
+    const clientId = (typeof payload === "object" && payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
     const clientSecret = (typeof payload === "object" && payload?.clientSecret) || process.env.VITE_GOOGLE_CLIENT_SECRET || "";
 
     const tokenBody = {

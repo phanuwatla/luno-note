@@ -18,7 +18,8 @@ export const CONNECTED_KEY = "luno_gdrive_connected";
 
 // Fallback client ID if environment or setting is not provided
 export const DEFAULT_CLIENT_ID =
-  import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+  "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
 
 export const DEFAULT_CLIENT_SECRET =
   import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "";

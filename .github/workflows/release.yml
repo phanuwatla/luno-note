@@ -28,14 +28,14 @@ jobs:
 
       - name: Build Web App
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID || '727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com' }}
           VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
         run: npm run build
 
       - name: Build and Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID || '727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com' }}
           VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
         run: npx electron-builder --win --publish always
 

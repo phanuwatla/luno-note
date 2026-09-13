@@ -5078,7 +5078,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
-              if (item && item.kind === "file") {
+              if (item && (item.kind === "file" || (item.type && item.type.startsWith("image/")))) {
                 const file = item.getAsFile();
                 if (file && isImageFile(file)) {
                   event.preventDefault();
@@ -5115,7 +5115,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
-              if (item && item.kind === "file") {
+              if (item && (item.kind === "file" || (item.type && item.type.startsWith("image/")))) {
                 const file = item.getAsFile();
                 if (file && isImageFile(file)) {
                   event.preventDefault();
@@ -5124,6 +5124,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 }
               }
             }
+          }
+
+          // Fallback: If no image file was found directly in clipboardData and there's no plain text, check native Electron clipboard
+          const plainText = event.clipboardData.getData("text/plain") || "";
+          const htmlText = event.clipboardData.getData("text/html") || "";
+
+          const electronAPI = (window as unknown as { electronAPI?: { readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }> } })?.electronAPI;
+          if (electronAPI?.readClipboardImage && !plainText.trim() && !htmlText.trim()) {
+            event.preventDefault();
+            void (async () => {
+              try {
+                const clipImg = await electronAPI.readClipboardImage();
+                if (clipImg?.hasImage && clipImg.dataUrl) {
+                  const res = await fetch(clipImg.dataUrl);
+                  const blob = await res.blob();
+                  const file = new File([blob], "image.png", { type: blob.type || "image/png" });
+                  void processAndInsertImageFileRef.current?.(file);
+                }
+              } catch (err) {
+                console.warn("Failed reading native clipboard image on paste:", err);
+              }
+            })();
+            return true;
           }
         }
         return false;
@@ -6428,7 +6451,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     let chain = editor.chain().focus();
     if (editorSelectionRef.current) {
-      chain = chain.setTextSelection(editorSelectionRef.current);
+      const docSize = editor.state.doc.content.size;
+      const { from, to } = editorSelectionRef.current;
+      if (typeof from === "number" && typeof to === "number" && from >= 0 && to <= docSize && from <= to) {
+        chain = chain.setTextSelection({ from, to });
+      }
+      editorSelectionRef.current = null;
     }
 
     return chain;
@@ -6928,9 +6956,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       console.warn("Failed to compress image file:", err);
     }
 
-    const finalDataUrl = compressed?.dataUrl;
+    let finalDataUrl = compressed?.dataUrl;
     const finalBlob = compressed?.blob || file;
     const finalFileName = compressed?.fileName || targetFileName;
+
+    // Ensure finalDataUrl is always available
+    if (!finalDataUrl) {
+      try {
+        finalDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+          reader.onerror = reject;
+          reader.readAsDataURL(finalBlob);
+        });
+      } catch (err) {
+        console.warn("Fallback FileReader failed for image:", err);
+      }
+    }
 
     // 1. Electron Desktop Workspace Support
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
@@ -6955,20 +6997,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
 
             const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueName}`;
-            await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+            const writeResult = await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
 
-            const relPath = getRelativeAttachmentPath(uniqueName);
-            const blobUrl = URL.createObjectURL(finalBlob);
-            const decodedRel = decodeURIComponent(relPath);
-            assetBlobUrlMap.current.set(relPath, blobUrl);
-            assetBlobUrlMap.current.set(decodedRel, blobUrl);
-            assetBlobUrlMap.current.set(blobUrl, relPath);
+            if (writeResult !== false) {
+              const relPath = getRelativeAttachmentPath(uniqueName);
+              const blobUrl = URL.createObjectURL(finalBlob);
+              const decodedRel = decodeURIComponent(relPath);
+              assetBlobUrlMap.current.set(relPath, blobUrl);
+              assetBlobUrlMap.current.set(decodedRel, blobUrl);
+              assetBlobUrlMap.current.set(blobUrl, relPath);
 
-            const chain = getFocusedChain();
-            if (chain) {
-              chain.setImage({ src: blobUrl, alt: uniqueName, "data-relative-src": relPath } as any).run();
+              const chain = getFocusedChain();
+              if (chain) {
+                chain.setImage({ src: blobUrl, alt: uniqueName, "data-relative-src": relPath } as any).run();
+              }
+              return;
             }
-            return;
           }
         }
       } catch (err) {
@@ -7003,10 +7047,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    if (finalDataUrl) {
-      const chain = getFocusedChain();
-      if (chain) chain.setImage({ src: finalDataUrl, alt: file.name }).run();
-
+    // 3. Fallback to direct insertion (dataUrl or objectUrl)
+    const insertSrc = finalDataUrl || URL.createObjectURL(finalBlob);
+    const chain = getFocusedChain();
+    if (chain) {
+      chain.setImage({ src: insertSrc, alt: finalFileName }).run();
       const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       void saveImageToIndexedDb(imgId, finalBlob);
     } else {
