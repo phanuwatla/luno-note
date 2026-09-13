@@ -22,12 +22,12 @@ Luno Note is a robust, lightweight, and modern note-taking application engineere
 
 ## What Is New in Version 1.2.6
 
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Instant Image Pasting & Heading Fallback**: Completely overhauled clipboard image pasting to render instantly with local blob caching. Added intelligent structural insertion fallback when cursor is positioned inside title headings (`H1`) or code blocks, inserting the image directly below without losing focus.
-- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Google Drive OAuth Completion & Focus Restoration**: Added an elegant authentication completion card with a one-click close button and automatic closure scripts. Instantly restores and focuses Luno Note in the foreground upon login completion.
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Background Cloud Attachment Sync**: Images pasted under Google Drive storage mode render immediately without UI latency, uploading and syncing asynchronously in the background.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Zero-Latency Native Clipboard IPC**: Direct synchronous IPC communication guarantees clipboard images from Windows Snipping Tool (`Win + Shift + S`), Print Screen, web browsers, and file explorers paste reliably.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Local HTTP loopback authentication (`127.0.0.1`) launching the system default browser, fully resolving Google account security blocks.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Expanded Test Suite**: Automated unit testing suite with 38 test suites and 231 tests passing.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Instant Image Pasting & Heading Fallback**: Overhauled clipboard image pasting with synchronous native IPC and direct data URL insertion, eliminating decode latency. Added intelligent structural insertion fallback when cursor is positioned inside title headings (`H1`) or code blocks, cleanly placing the image directly below without losing cursor focus.
+- <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Automatic Local Attachment Resolution**: Image node view now automatically resolves relative attachment paths (`attachments/...`) directly from the workspace folder on disk in production packaged installations.
+- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Unified Google Drive OAuth Completion Flow**: Authentication completion screen now features design parity with the in-app Settings / Data & Storage tab, displaying the official Google Drive icon, a direct clickable storage location link, and a Return button with instant feedback (`✓ สลับไปยัง Luno Note แล้ว`) and foreground window restoration.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Background Cloud Attachment Sync**: Images pasted under Google Drive storage mode render immediately without UI blocking, syncing asynchronously in the background.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Uses local HTTP loopback authentication (`127.0.0.1`) in the default system browser, adhering to modern security standards.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Comprehensive Test Suite**: Automated unit testing suite with 38 test suites and 231 tests passing.
 
 ---
 
