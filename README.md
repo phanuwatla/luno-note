@@ -6,27 +6,28 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.2.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.1)
+[![Version](https://img.shields.io/badge/version-1.2.2-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.2)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.2.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.2.2-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.2.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.1](#what-is-new-in-version-121) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.2.2](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.2](#what-is-new-in-version-122) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.2.1
+## What Is New in Version 1.2.2
 
-- <img src="./assets/icons/microphone.svg" width="16" height="16" align="center" /> **Gemini-Powered Voice Dictation and Transcription**: Dictate notes or communicate directly with Luno AI via multimodal audio transcription powered by the Google Gemini API. Includes automated silence filtering, hallucination prevention, timestamp cleanup, and native microphone access management in the desktop environment.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Unified Custom Icon Rendering**: Custom note emoji and file icons are now consistently rendered across Quick Switcher, sidebar hierarchy trees, workspace navigation panels, and file attachment chips.
-- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Real-Time Workspace Folder Synchronization**: Folder expansion and collapse states remain synchronized across all active navigation views.
-- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Enhanced Cloud Integration and Authentication**: Improved Google Drive OAuth configuration and environment variable resolution for production deployments.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Expanded Test Coverage and Reliability**: Additional automated unit tests for workspace trees and AI views, with intelligent fallback models and comprehensive verification.
+- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Full Workspace ZIP Backup & Hierarchical Export**: Export complete workspaces with nested folder structures directly into ZIP archives, complete with automatic file sanitization, document formatting preservation, and manifest data.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Editor Superscript and Subscript**: Rich-text formatting now features dedicated Superscript (`x²`) and Subscript (`x₂`) styling with standard keyboard shortcuts (`Ctrl + .` and `Ctrl + Shift + ,`).
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Intelligent Gemini AI Quota Management**: Automated model selection with seamless fallback when API quota limits are encountered, plus dynamic model list refresh and quota status reset.
+- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Robust Google Drive Cloud Synchronization**: Complete OAuth lifecycle handling with automatic token refresh, explicit account switcher dialog, and secure cookie clearing upon logout.
+- <img src="./assets/icons/terminal-2.svg" width="16" height="16" align="center" /> **Desktop Native Keyboard Watcher**: Improved ASAR package compatibility by extracting the native watcher script to application user data and implementing automatic watcher recovery.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Expanded Test Suite**: Upgraded automated unit testing suite to 38 test suites and 231 tests passing with 100% parity across languages.
 
 ---
 
@@ -53,7 +54,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.2.1.exe`** | Automated Windows installer with differential update support | [![Download v1.2.1](https://img.shields.io/badge/Download-v1.2.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.1/luno-note-setup-1.2.1.exe) |
+| **`luno-note-setup-1.2.2.exe`** | Automated Windows installer with differential update support | [![Download v1.2.2](https://img.shields.io/badge/Download-v1.2.2-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.2/luno-note-setup-1.2.2.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

@@ -97,6 +97,8 @@ import {
   Lock,
   Unlock,
   Printer,
+  Superscript as SuperscriptIcon,
+  Subscript as SubscriptIcon,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
@@ -147,7 +149,7 @@ import { SettingsBody } from "@/components/SettingsBody";
 import { docxToHtml } from "@/lib/docxUtils";
 import { parseFrontmatterAndTags, updateFrontmatterTags, updateFrontmatterIcon, updateFrontmatterFavorite, isMarkdownNote } from "@/lib/frontmatter";
 import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare } from "@/lib/googleDriveApi";
-import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth } from "@/lib/googleDriveAuth";
+import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
 import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
@@ -1919,6 +1921,22 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     keywords: ["highlight", "mark", "hl", "ไฮไลต์", "ไฮไลท์", "เน้นข้อความ", "ป้าย"],
     action: (editor) => editor.chain().focus().toggleHighlight().run(),
   },
+  {
+    id: "superscript",
+    titleKey: "editor.superscript",
+    categoryKey: "settings.toolCategoryInline",
+    icon: <SuperscriptIcon className="mr-2 h-4 w-4" />,
+    keywords: ["superscript", "sup", "ตัวยก", "ยกกำลัง", "x2"],
+    action: (editor) => editor.chain().focus().toggleSuperscript().run(),
+  },
+  {
+    id: "subscript",
+    titleKey: "editor.subscript",
+    categoryKey: "settings.toolCategoryInline",
+    icon: <SubscriptIcon className="mr-2 h-4 w-4" />,
+    keywords: ["subscript", "sub", "ตัวห้อย", "ห้อย", "x2"],
+    action: (editor) => editor.chain().focus().toggleSubscript().run(),
+  },
 
   // 4. Lists
   {
@@ -3545,9 +3563,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (note.driveFileId && isGoogleDriveConnected()) {
       setIsSharingLoading(true);
       try {
-        const tokenInfo = getStoredTokenInfo();
-        if (tokenInfo?.access_token) {
-          const link = await getDriveFileShareLink(tokenInfo.access_token, note.driveFileId);
+        const accessToken = await getValidAccessToken();
+        if (accessToken) {
+          const link = await getDriveFileShareLink(accessToken, note.driveFileId);
           setShareLink(link);
           try {
             await navigator.clipboard.writeText(link);
@@ -3590,8 +3608,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       // 2. Switch storageMode to 'gdrive'
       updateSettings({ storageMode: "gdrive" });
 
-      const tokenInfo = getStoredTokenInfo();
-      if (!tokenInfo?.access_token) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         setIsSharingLoading(false);
         return;
       }
@@ -3671,10 +3689,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     setIsRevokingShare(true);
     try {
-      const tokenInfo = getStoredTokenInfo();
-      if (!tokenInfo?.access_token) return;
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) return;
 
-      const success = await revokeDriveFileShare(tokenInfo.access_token, targetFileId);
+      const success = await revokeDriveFileShare(accessToken, targetFileId);
       if (success) {
         setShareLink("");
         setShareSuccessDialogOpen(false);
@@ -5037,12 +5055,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return false;
       },
       handleDrop: (_view, event) => {
+        const isImageFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          if (file.type && file.type.startsWith("image/")) return true;
+          const name = file.name || "";
+          return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
+        };
+
         if (event.dataTransfer) {
           const files = event.dataTransfer.files;
           if (files && files.length > 0) {
             for (let i = 0; i < files.length; i++) {
               const file = files[i];
-              if (file && file.type.startsWith("image/")) {
+              if (file && isImageFile(file)) {
                 event.preventDefault();
                 void processAndInsertImageFileRef.current?.(file);
                 return true;
@@ -5053,9 +5078,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
-              if (item && item.kind === "file" && item.type.startsWith("image/")) {
+              if (item && item.kind === "file") {
                 const file = item.getAsFile();
-                if (file) {
+                if (file && isImageFile(file)) {
                   event.preventDefault();
                   void processAndInsertImageFileRef.current?.(file);
                   return true;
@@ -5067,12 +5092,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return false;
       },
       handlePaste: (_view, event) => {
+        const isImageFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          if (file.type && file.type.startsWith("image/")) return true;
+          const name = file.name || "";
+          return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
+        };
+
         if (event.clipboardData) {
           const files = event.clipboardData.files;
           if (files && files.length > 0) {
             for (let i = 0; i < files.length; i++) {
               const file = files[i];
-              if (file && file.type.startsWith("image/")) {
+              if (file && isImageFile(file)) {
                 event.preventDefault();
                 void processAndInsertImageFileRef.current?.(file);
                 return true;
@@ -5083,9 +5115,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
-              if (item && item.kind === "file" && item.type.startsWith("image/")) {
+              if (item && item.kind === "file") {
                 const file = item.getAsFile();
-                if (file) {
+                if (file && isImageFile(file)) {
                   event.preventDefault();
                   void processAndInsertImageFileRef.current?.(file);
                   return true;
@@ -6280,6 +6312,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         return;
       }
 
+      // Ctrl + . or Ctrl + Shift + . (Superscript)
+      if ((key === "." || key === ">" || code === "Period") && !e.altKey) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleSuperscript().run();
+        }
+        return;
+      }
+
+      // Ctrl + Shift + , (Subscript)
+      if ((key === "," || key === "<" || code === "Comma") && e.shiftKey && !e.altKey) {
+        if (editor && !editor.isDestroyed) {
+          e.preventDefault();
+          e.stopPropagation();
+          editor.chain().focus().toggleSubscript().run();
+        }
+        return;
+      }
+
       // Ctrl + Shift + E or Ctrl + ` (Inline Code)
       if ((e.shiftKey && (key === "e" || code === "KeyE")) || key === "`" || code === "Backquote") {
         if (editor && !editor.isDestroyed) {
@@ -6501,7 +6553,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setAiErrorMsg("");
 
     try {
-      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText, lang);
+      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText, lang, settings.aiModel);
       const cleanResult = result.trim();
       setAiOutputText(cleanResult);
 
@@ -6800,28 +6852,70 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
-  const processAndInsertImageFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+  const processAndInsertImageFile = async (rawFile: File) => {
+    const isImg = (f: { name?: string; type?: string } | null | undefined): boolean => {
+      if (!f) return false;
+      if (f.type && f.type.startsWith("image/")) return true;
+      const name = f.name || "";
+      return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
+    };
+
+    if (!isImg(rawFile)) {
       showUiAlert(t("editor.invalidImageFile"));
       return;
     }
 
+    // Ensure proper mime type if rawFile.type was empty
+    let file = rawFile;
+    if (!file.type || !file.type.startsWith("image/")) {
+      const ext = (file.name.split(".").pop() || "png").toLowerCase();
+      const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+        : ext === "png" ? "image/png"
+        : ext === "webp" ? "image/webp"
+        : ext === "gif" ? "image/gif"
+        : ext === "svg" ? "image/svg+xml"
+        : ext === "bmp" ? "image/bmp"
+        : "image/png";
+      file = new File([rawFile], rawFile.name || `image_${Date.now()}.${ext}`, { type: mime });
+    }
+
+    // Give pasted screenshots (often named "image.png") a unique timestamped name
+    let targetFileName = file.name || "image.png";
+    if (targetFileName === "image.png" || targetFileName === "image.webp" || !targetFileName) {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const timeTag = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const ext = file.type === "image/jpeg" ? "jpg" : file.type === "image/webp" ? "webp" : "png";
+      targetFileName = `Pasted_Image_${timeTag}.${ext}`;
+      file = new File([file], targetFileName, { type: file.type });
+    }
+
     if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
       try {
-        const tokenInfo = getStoredTokenInfo();
-        const structure = await syncEngine.initializeSync();
-        if (tokenInfo && structure) {
-          const uploaded = await uploadDriveAttachmentFile(
-            tokenInfo.access_token,
-            structure.attachmentsId,
-            file,
-            file.name
-          );
-          const driveImgUrl = uploaded.webContentLink || `https://drive.google.com/uc?export=view&id=${uploaded.id}`;
-          const chain = getFocusedChain();
-          if (chain) chain.setImage({ src: driveImgUrl, alt: file.name }).run();
-          return;
-        }
+        const uploadPromise = (async () => {
+          const accessToken = await getValidAccessToken();
+          const structure = await syncEngine.initializeSync();
+          if (accessToken && structure) {
+            const uploaded = await uploadDriveAttachmentFile(
+              accessToken,
+              structure.attachmentsId,
+              file,
+              targetFileName
+            );
+            const driveImgUrl = uploaded.webContentLink || `https://drive.google.com/uc?export=view&id=${uploaded.id}`;
+            const chain = getFocusedChain();
+            if (chain) {
+              chain.setImage({ src: driveImgUrl, alt: targetFileName }).run();
+              return true;
+            }
+          }
+          return false;
+        })();
+
+        // 6 second timeout to prevent UI freezes on flaky connections
+        const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 6000));
+        const uploadedSuccess = await Promise.race([uploadPromise, timeoutPromise]);
+        if (uploadedSuccess) return;
       } catch (err) {
         console.warn("Failed to upload image to Google Drive attachments:", err);
       }
@@ -6836,7 +6930,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     const finalDataUrl = compressed?.dataUrl;
     const finalBlob = compressed?.blob || file;
-    const finalFileName = file.name;
+    const finalFileName = compressed?.fileName || targetFileName;
 
     // 1. Electron Desktop Workspace Support
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
@@ -6872,7 +6966,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
             const chain = getFocusedChain();
             if (chain) {
-              chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath } as any).run();
+              chain.setImage({ src: blobUrl, alt: uniqueName, "data-relative-src": relPath } as any).run();
             }
             return;
           }
@@ -8952,6 +9046,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutStrike")}</kbd>
               </div>
               <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutSuperscriptDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSuperscript")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+                <span className="text-muted-foreground">{t("editor.shortcutSubscriptDesc")}</span>
+                <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSubscript")}</kbd>
+              </div>
+              <div className="flex items-center justify-between py-1.5 border-b border-border/50">
                 <span className="text-muted-foreground">{t("editor.shortcutToggleDesc")}</span>
                 <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutToggle")}</kbd>
               </div>
@@ -9012,6 +9114,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "underline", group: "inline", labelKey: "editor.underline" },
               { id: "strike", group: "inline", labelKey: "editor.strikethrough" },
               { id: "highlight", group: "inline", labelKey: "editor.highlight" },
+              { id: "superscript", group: "inline", labelKey: "editor.superscript" },
+              { id: "subscript", group: "inline", labelKey: "editor.subscript" },
               { id: "bulletList", group: "list", labelKey: "editor.bulletList" },
               { id: "orderedList", group: "list", labelKey: "editor.numberedList" },
               { id: "taskList", group: "list", labelKey: "editor.checkbox" },
@@ -9430,6 +9534,46 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t("editor.highlight")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "superscript":
+                  return (
+                    <Tooltip key="superscript">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("superscript") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleSuperscript().run()}
+                        >
+                          {renderToolIcon("superscript")}
+                          <span className="sr-only">{t("editor.superscript")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.superscript")}</TooltipContent>
+                    </Tooltip>
+                  );
+                case "subscript":
+                  return (
+                    <Tooltip key="subscript">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("subscript") ? "bg-primary/15 text-primary" : ""}`}
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => editor?.chain().focus().toggleSubscript().run()}
+                        >
+                          {renderToolIcon("subscript")}
+                          <span className="sr-only">{t("editor.subscript")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.subscript")}</TooltipContent>
                     </Tooltip>
                   );
                 case "bulletList":
@@ -10014,6 +10158,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()}>
                       {renderDropdownIcon("highlight")}
                       <span>{t("editor.highlight")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "superscript":
+                  return (
+                    <DropdownMenuItem key="superscript" onClick={() => editor?.chain().focus().toggleSuperscript().run()}>
+                      {renderDropdownIcon("superscript")}
+                      <span>{t("editor.superscript")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "subscript":
+                  return (
+                    <DropdownMenuItem key="subscript" onClick={() => editor?.chain().focus().toggleSubscript().run()}>
+                      {renderDropdownIcon("subscript")}
+                      <span>{t("editor.subscript")}</span>
                     </DropdownMenuItem>
                   );
                 case "bulletList":
@@ -10708,6 +10866,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   onClick={async () => {
                     if (!editor) return;
                     try {
+                      // 1. Check native Electron clipboard image first
+                      const electronAPI = (window as any)?.electronAPI;
+                      if (electronAPI?.readClipboardImage) {
+                        const clipImg = await electronAPI.readClipboardImage();
+                        if (clipImg?.hasImage && clipImg.dataUrl) {
+                          const res = await fetch(clipImg.dataUrl);
+                          const blob = await res.blob();
+                          const file = new File([blob], "image.png", { type: blob.type || "image/png" });
+                          await processAndInsertImageFile(file);
+                          return;
+                        }
+                      }
+
+                      // 2. Check web clipboard API for image items
+                      if (navigator.clipboard?.read) {
+                        try {
+                          const items = await navigator.clipboard.read();
+                          for (const item of items) {
+                            const imgType = item.types.find((t) => t.startsWith("image/"));
+                            if (imgType) {
+                              const blob = await item.getType(imgType);
+                              const file = new File([blob], "image.png", { type: imgType });
+                              await processAndInsertImageFile(file);
+                              return;
+                            }
+                          }
+                        } catch {
+                          // clipboard read permission or unsupported
+                        }
+                      }
+
+                      // 3. Fallback to text
                       const text = await navigator.clipboard.readText();
                       if (text) {
                         editor.chain().focus().insertContent(text).run();
@@ -10946,39 +11136,43 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </TooltipContent>
                   </Tooltip>
 
-                  {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                  {settings.showWordCount !== false && (
                     <>
+                      {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                        <>
+                          <div className="h-3 w-[1px] bg-border/60" />
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-default hover:text-foreground transition-colors">
+                                {editorStats.wordCount === 1
+                                  ? t("editor.wordCountSingle", { count: 1 })
+                                  : t("editor.wordsCount", { count: editorStats.wordCount.toLocaleString() })}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {t("rightPanel.wordCount")}
+                            </TooltipContent>
+                          </Tooltip>
+                        </>
+                      )}
+
                       <div className="h-3 w-[1px] bg-border/60" />
 
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-default hover:text-foreground transition-colors">
-                            {editorStats.wordCount === 1
-                              ? t("editor.wordCountSingle", { count: 1 })
-                              : t("editor.wordsCount", { count: editorStats.wordCount.toLocaleString() })}
+                            {editorStats.charCount === 1
+                              ? t("editor.characterCountSingle", { count: 1 })
+                              : t("editor.charactersCount", { count: editorStats.charCount.toLocaleString() })}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("rightPanel.wordCount")}
+                          {t("rightPanel.characterCount")}
                         </TooltipContent>
                       </Tooltip>
                     </>
                   )}
-
-                  <div className="h-3 w-[1px] bg-border/60" />
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="cursor-default hover:text-foreground transition-colors">
-                        {editorStats.charCount === 1
-                          ? t("editor.characterCountSingle", { count: 1 })
-                          : t("editor.charactersCount", { count: editorStats.charCount.toLocaleString() })}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {t("rightPanel.characterCount")}
-                    </TooltipContent>
-                  </Tooltip>
 
                   <div className="h-3 w-[1px] bg-border/60" />
 
@@ -11615,6 +11809,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <div className="flex items-center justify-between py-1.5 border-b border-border/50">
               <span className="text-muted-foreground">{t("editor.shortcutStrikeDesc")}</span>
               <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutStrike")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutSuperscriptDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSuperscript")}</kbd>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-border/50">
+              <span className="text-muted-foreground">{t("editor.shortcutSubscriptDesc")}</span>
+              <kbd className="px-2 py-1 rounded bg-muted border border-border text-xs font-mono font-semibold">{t("editor.shortcutSubscript")}</kbd>
             </div>
             <div className="flex items-center justify-between py-1.5 border-b border-border/50">
               <span className="text-muted-foreground">{t("editor.shortcutToggleDesc")}</span>

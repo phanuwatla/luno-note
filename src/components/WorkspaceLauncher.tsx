@@ -13,7 +13,7 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./ui/tooltip";
-import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo } from "@/lib/googleDriveAuth";
+import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { listCloudWorkspaces, createCloudWorkspace, ensureWorkspacesRootOnly } from "@/lib/googleDriveApi";
 import {
   CloudWorkspaceInfo,
@@ -86,13 +86,13 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
     if (!isGoogleDriveConnected()) return;
     setIsLoadingCloudWorkspaces(true);
     try {
-      const tokenInfo = getStoredTokenInfo();
-      if (!tokenInfo?.access_token) return;
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) return;
 
       const [cloudList, localManifests, wsFolderId] = await Promise.all([
-        listCloudWorkspaces(tokenInfo.access_token),
+        listCloudWorkspaces(accessToken),
         getAllKnownLocalManifests(),
-        ensureWorkspacesRootOnly(tokenInfo.access_token).catch(() => null),
+        ensureWorkspacesRootOnly(accessToken).catch(() => null),
       ]);
 
       if (wsFolderId) {
@@ -333,9 +333,9 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                         let targetFolderId = workspacesFolderId;
                         if (!targetFolderId) {
                           try {
-                            const tokenInfo = getStoredTokenInfo();
-                            if (tokenInfo?.access_token) {
-                              targetFolderId = await ensureWorkspacesRootOnly(tokenInfo.access_token);
+                            const accessToken = await getValidAccessToken();
+                            if (accessToken) {
+                              targetFolderId = await ensureWorkspacesRootOnly(accessToken);
                               setWorkspacesFolderId(targetFolderId);
                             }
                           } catch {}

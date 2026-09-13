@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen, clipboard, session } = require("electron");
 let autoUpdater = null;
 try {
   const updaterModule = require("electron-updater");
@@ -30,6 +30,68 @@ if (!gotSingleInstanceLock) {
 }
 
 const configPath = path.join(app.getPath("userData"), "workspace-config.json");
+const gdriveAuthPath = path.join(app.getPath("userData"), "gdrive-auth.json");
+
+function getSavedGdriveAuth() {
+  try {
+    if (fs.existsSync(gdriveAuthPath)) {
+      const raw = fs.readFileSync(gdriveAuthPath, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn("Failed reading gdrive-auth.json:", err);
+  }
+  return null;
+}
+
+function saveGdriveAuthData(data) {
+  try {
+    const existing = getSavedGdriveAuth() || {};
+    const merged = { ...existing, ...(data || {}) };
+    fs.writeFileSync(gdriveAuthPath, JSON.stringify(merged, null, 2), "utf8");
+    return merged;
+  } catch (err) {
+    console.warn("Failed saving gdrive-auth.json:", err);
+    return null;
+  }
+}
+
+function clearGdriveAuthData() {
+  try {
+    if (fs.existsSync(gdriveAuthPath)) {
+      fs.unlinkSync(gdriveAuthPath);
+    }
+    return true;
+  } catch (err) {
+    console.warn("Failed clearing gdrive-auth.json:", err);
+    return false;
+  }
+}
+
+async function fetchGoogleUserProfileFromMain(accessToken) {
+  if (!accessToken) return null;
+  try {
+    let res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      res = await fetch("https://www.googleapis.com/userinfo/v2/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        email: data.email || "user@google.com",
+        name: data.name || data.given_name || "Google User",
+        picture: data.picture,
+      };
+    }
+  } catch (err) {
+    console.warn("Main process failed to fetch Google user profile:", err);
+  }
+  return null;
+}
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
 const TEXT_EXTS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".js", ".ts", ".jsx", ".tsx", ".json", ".css", ".scss", ".yaml", ".yml", ".xml", ".py"]);
@@ -146,6 +208,7 @@ const DEFAULT_WORKSPACE_SETTINGS = {
   highlightInlineCode: false,
   spellCheck: true,
   geminiApiKey: "",
+  aiModel: "auto",
   storageMode: "local",
   googleDriveClientId: "",
 };
@@ -623,6 +686,40 @@ function createWindow(initialWorkspacePath = null) {
 }
 
 function setupIpcHandlers() {
+  ipcMain.handle("get-gdrive-auth", () => {
+    return getSavedGdriveAuth();
+  });
+
+  ipcMain.handle("save-gdrive-auth", (_event, data) => {
+    return saveGdriveAuthData(data);
+  });
+
+  ipcMain.handle("clear-gdrive-auth", () => {
+    return clearGdriveAuthData();
+  });
+
+  ipcMain.handle("google-fetch-profile", async (_event, accessToken) => {
+    const profile = await fetchGoogleUserProfileFromMain(accessToken);
+    if (profile) {
+      saveGdriveAuthData({ profile });
+    }
+    return profile;
+  });
+
+  ipcMain.handle("read-clipboard-image", () => {
+    try {
+      const img = clipboard.readImage();
+      if (!img.isEmpty()) {
+        const dataUrl = img.toDataURL();
+        const size = img.getSize();
+        return { hasImage: true, dataUrl, width: size.width, height: size.height };
+      }
+    } catch (err) {
+      console.warn("Failed reading image from clipboard:", err);
+    }
+    return { hasImage: false, dataUrl: null };
+  });
+
   ipcMain.handle("google-oauth-login", async (event, payload) => {
     const clientId = typeof payload === "string" ? payload : (payload?.clientId || process.env.VITE_GOOGLE_CLIENT_ID || "");
     const clientSecret = typeof payload === "object" && payload?.clientSecret ? payload.clientSecret : (process.env.VITE_GOOGLE_CLIENT_SECRET || "");
@@ -642,7 +739,7 @@ function setupIpcHandlers() {
         clientId
       )}&redirect_uri=${encodeURIComponent(
         redirectUri
-      )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account&access_type=offline`;
+      )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account%20consent&access_type=offline`;
 
       const authWindow = new BrowserWindow({
         width: 520,
@@ -708,11 +805,30 @@ function setupIpcHandlers() {
 
               const tokenData = await tokenRes.json();
               try { authWindow.destroy(); } catch {}
+
+              let userProfile = null;
+              if (tokenData.access_token) {
+                userProfile = await fetchGoogleUserProfileFromMain(tokenData.access_token);
+              }
+              const authToSave = {
+                tokenInfo: {
+                  access_token: tokenData.access_token,
+                  expires_at: Date.now() + (Number(tokenData.expires_in) || 3600) * 1000,
+                  refresh_token: tokenData.refresh_token,
+                  scope: tokenData.scope,
+                },
+                profile: userProfile,
+                connected: true,
+                clientId,
+              };
+              saveGdriveAuthData(authToSave);
+
               resolve({
                 access_token: tokenData.access_token,
                 expires_in: Number(tokenData.expires_in) || 3600,
                 refresh_token: tokenData.refresh_token,
                 scope: tokenData.scope,
+                profile: userProfile,
               });
             } catch (exchangeErr) {
               try { authWindow.destroy(); } catch {}
@@ -721,9 +837,22 @@ function setupIpcHandlers() {
           } else if (accessToken) {
             isSettled = true;
             try { authWindow.destroy(); } catch {}
+            let userProfile = await fetchGoogleUserProfileFromMain(accessToken);
+            const authToSave = {
+              tokenInfo: {
+                access_token: accessToken,
+                expires_at: Date.now() + (Number(expiresIn) || 3600) * 1000,
+              },
+              profile: userProfile,
+              connected: true,
+              clientId,
+            };
+            saveGdriveAuthData(authToSave);
+
             resolve({
               access_token: accessToken,
               expires_in: Number(expiresIn) || 3600,
+              profile: userProfile,
             });
           } else if (error) {
             isSettled = true;
@@ -760,6 +889,79 @@ function setupIpcHandlers() {
 
       authWindow.loadURL(authUrl);
     });
+  });
+
+  ipcMain.handle("google-oauth-refresh", async (event, payload) => {
+    const refreshToken = typeof payload === "string" ? payload : (payload?.refreshToken || payload?.refresh_token);
+    if (!refreshToken) {
+      throw new Error("No refresh token provided");
+    }
+    const clientId = (typeof payload === "object" && payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || "";
+    const clientSecret = (typeof payload === "object" && payload?.clientSecret) || process.env.VITE_GOOGLE_CLIENT_SECRET || "";
+
+    const tokenBody = {
+      client_id: clientId,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    };
+    if (clientSecret) {
+      tokenBody.client_secret = clientSecret;
+    }
+    const tokenParams = new URLSearchParams(tokenBody);
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: tokenParams.toString(),
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      throw new Error(`Token refresh failed (${tokenRes.status}): ${errText}`);
+    }
+
+    const tokenData = await tokenRes.json();
+    const existing = getSavedGdriveAuth();
+    let updatedProfile = existing?.profile || null;
+    if (tokenData.access_token) {
+      const freshProfile = await fetchGoogleUserProfileFromMain(tokenData.access_token);
+      if (freshProfile) updatedProfile = freshProfile;
+    }
+    const tokenInfo = {
+      access_token: tokenData.access_token,
+      expires_at: Date.now() + (Number(tokenData.expires_in) || 3600) * 1000,
+      refresh_token: refreshToken,
+      scope: tokenData.scope,
+    };
+    saveGdriveAuthData({ tokenInfo, profile: updatedProfile, connected: true });
+
+    return {
+      access_token: tokenData.access_token,
+      expires_in: Number(tokenData.expires_in) || 3600,
+      scope: tokenData.scope,
+      profile: updatedProfile,
+    };
+  });
+
+  ipcMain.handle("google-oauth-logout", async (_event, token) => {
+    try {
+      if (token && typeof token === "string") {
+        await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }).catch(() => {});
+      }
+      clearGdriveAuthData();
+      // Clear cookies for Google accounts so old accounts don't linger
+      await session.defaultSession.clearStorageData({
+        origins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
+        storages: ["cookies"],
+      }).catch(() => {});
+      return true;
+    } catch (err) {
+      console.warn("Error during Google OAuth logout:", err);
+      return false;
+    }
   });
 
   ipcMain.handle("open-external", async (event, url) => {
@@ -1136,18 +1338,28 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle("write-file-base64", (event, { fullPath, base64 }) => {
+  ipcMain.handle("write-file-base64", (event, data) => {
     try {
+      const fullPath = data?.fullPath;
+      const base64 = data?.base64 || data?.contentBase64;
       if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
         console.warn("Blocked writing base64 to protected or invalid path:", fullPath);
+        return false;
+      }
+      if (!base64 || typeof base64 !== "string") {
+        console.warn("write-file-base64: missing or invalid base64 data for:", fullPath);
         return false;
       }
       const parentDir = path.dirname(fullPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
-      const rawData = (base64 || "").includes(",") ? base64.split(",")[1] : (base64 || "");
+      const rawData = base64.includes(",") ? base64.split(",")[1] : base64;
       const buffer = Buffer.from(rawData, "base64");
+      if (buffer.length === 0) {
+        console.warn("write-file-base64: decoded buffer is empty for:", fullPath);
+        return false;
+      }
       fs.writeFileSync(fullPath, buffer);
       return true;
     } catch (err) {
@@ -1630,20 +1842,66 @@ if (autoUpdater) {
 
 let currentNativeKeyboardLang = "en";
 let keyboardWatcherProcess = null;
+let watcherRestartTimeout = null;
+let isAppQuitting = false;
+
+function getKeyboardWatcherScriptPath() {
+  const directPath = path.join(__dirname, "keyboardLayoutWatcher.ps1");
+  const unpackedPath = directPath.replace("app.asar", "app.asar.unpacked");
+
+  // 1. If unpacked by electron-builder (app.asar.unpacked)
+  if (fs.existsSync(unpackedPath)) {
+    return unpackedPath;
+  }
+
+  // 2. If running directly in dev mode outside of asar
+  if (!directPath.includes("app.asar") && fs.existsSync(directPath)) {
+    return directPath;
+  }
+
+  // 3. If inside app.asar, extract to userData so external powershell.exe can execute it
+  try {
+    const userDataPath = app.getPath("userData");
+    const extractedPath = path.join(userDataPath, "keyboardLayoutWatcher.ps1");
+    if (fs.existsSync(directPath)) {
+      const content = fs.readFileSync(directPath, "utf8");
+      let shouldWrite = true;
+      if (fs.existsSync(extractedPath)) {
+        try {
+          const current = fs.readFileSync(extractedPath, "utf8");
+          if (current === content) shouldWrite = false;
+        } catch {}
+      }
+      if (shouldWrite) {
+        fs.writeFileSync(extractedPath, content, "utf8");
+      }
+      return extractedPath;
+    }
+  } catch (err) {
+    console.warn("Failed to extract keyboardLayoutWatcher.ps1 to userData:", err);
+  }
+
+  return directPath;
+}
 
 function startNativeKeyboardWatcher() {
-  if (process.platform !== "win32") return;
+  if (process.platform !== "win32" || isAppQuitting) return;
+  if (keyboardWatcherProcess) return;
+
   try {
     const { spawn } = require("child_process");
-    const scriptPath = path.join(__dirname, "keyboardLayoutWatcher.ps1");
-    if (!fs.existsSync(scriptPath)) return;
+    const scriptPath = getKeyboardWatcherScriptPath();
+    if (!fs.existsSync(scriptPath)) {
+      console.warn("Keyboard watcher script does not exist:", scriptPath);
+      return;
+    }
 
     keyboardWatcherProcess = spawn(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       {
         windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
+        stdio: ["ignore", "pipe", "pipe"],
       }
     );
 
@@ -1654,12 +1912,18 @@ function startNativeKeyboardWatcher() {
         if (line === "th" || line === "en") {
           currentNativeKeyboardLang = line;
           BrowserWindow.getAllWindows().forEach((w) => {
-            if (!w.isDestroyed()) {
-              w.webContents.send("native-keyboard-language-changed", line);
-            }
+            try {
+              if (!w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
+                w.webContents.send("native-keyboard-language-changed", line);
+              }
+            } catch {}
           });
         }
       }
+    });
+
+    keyboardWatcherProcess.stderr.on("data", (errChunk) => {
+      console.warn("Keyboard watcher stderr:", errChunk.toString().trim());
     });
 
     keyboardWatcherProcess.on("error", (e) => {
@@ -1668,6 +1932,12 @@ function startNativeKeyboardWatcher() {
 
     keyboardWatcherProcess.on("exit", () => {
       keyboardWatcherProcess = null;
+      if (!isAppQuitting) {
+        if (watcherRestartTimeout) clearTimeout(watcherRestartTimeout);
+        watcherRestartTimeout = setTimeout(() => {
+          startNativeKeyboardWatcher();
+        }, 3000);
+      }
     });
   } catch (err) {
     console.warn("Failed to start keyboard watcher", err);
@@ -1679,7 +1949,7 @@ app.whenReady().then(() => {
     try {
       app.setAboutPanelOptions({
         applicationName: "Luno Note",
-        applicationVersion: app.getVersion ? app.getVersion() : "1.2.1",
+        applicationVersion: app.getVersion ? app.getVersion() : "1.2.2",
         copyright: "Copyright © 2026 phanuwatla",
         authors: ["phanuwatla"],
         website: "https://github.com/phanuwatla",
@@ -1773,7 +2043,20 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("before-quit", () => {
+  isAppQuitting = true;
+  if (watcherRestartTimeout) {
+    clearTimeout(watcherRestartTimeout);
+    watcherRestartTimeout = null;
+  }
+});
+
 app.on("will-quit", () => {
+  isAppQuitting = true;
+  if (watcherRestartTimeout) {
+    clearTimeout(watcherRestartTimeout);
+    watcherRestartTimeout = null;
+  }
   if (keyboardWatcherProcess) {
     try {
       keyboardWatcherProcess.kill();

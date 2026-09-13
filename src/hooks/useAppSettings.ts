@@ -82,6 +82,8 @@ export const DEFAULT_TOOLBAR_ORDER: string[] = [
   "underline",
   "strike",
   "highlight",
+  "superscript",
+  "subscript",
   "bulletList",
   "orderedList",
   "taskList",
@@ -108,6 +110,8 @@ export const DEFAULT_HIDDEN_TOOLBAR_ITEMS: string[] = [
   "h4",
   "h5",
   "h6",
+  "superscript",
+  "subscript",
   "footnote",
   "calculator",
   "translator",
@@ -151,6 +155,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "h6",
       "underline",
       "strike",
+      "superscript",
+      "subscript",
       "orderedList",
       "toggle",
       "code",
@@ -175,6 +181,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "h6",
       "underline",
       "strike",
+      "superscript",
+      "subscript",
       "orderedList",
       "toggle",
       "code",
@@ -220,6 +228,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "italic",
       "underline",
       "strike",
+      "superscript",
+      "subscript",
       "code",
       "codeBlock",
       "blockquote",
@@ -238,6 +248,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "italic",
       "underline",
       "strike",
+      "superscript",
+      "subscript",
       "code",
       "codeBlock",
       "blockquote",
@@ -262,6 +274,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "italic",
       "underline",
       "highlight",
+      "superscript",
+      "subscript",
       "orderedList",
       "bulletList",
       "blockquote",
@@ -330,6 +344,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "underline",
       "strike",
       "highlight",
+      "superscript",
+      "subscript",
       "orderedList",
       "blockquote",
       "footnote",
@@ -349,6 +365,8 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "underline",
       "strike",
       "highlight",
+      "superscript",
+      "subscript",
       "orderedList",
       "blockquote",
       "footnote",
@@ -587,6 +605,7 @@ export interface AppSettings {
 
   // AI Assistant Settings
   geminiApiKey: string;
+  aiModel: string;
 
   // Cloud Storage Settings
   storageMode: "local" | "gdrive";
@@ -721,6 +740,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
   geminiApiKey: "",
+  aiModel: "auto",
 
   storageMode: "local",
   googleDriveClientId: "",
@@ -730,7 +750,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSettings {
+export function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSettings {
   const defaultLang = detectSystemLanguage();
   const language = raw?.language === "th" || raw?.language === "en" ? raw.language : defaultLang;
   const fontFamily: FontFamilyOption =
@@ -810,7 +830,19 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     ? raw.hiddenToolbarItems.filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id) && id !== "undo" && id !== "redo")
     : null;
 
-  const hiddenToolbarItems: string[] = rawHidden ?? DEFAULT_HIDDEN_TOOLBAR_ITEMS;
+  let hiddenToolbarItems: string[];
+  if (rawHidden) {
+    hiddenToolbarItems = [...rawHidden];
+    const rawOrderSet = new Set(Array.isArray(raw?.toolbarItemsOrder) ? raw.toolbarItemsOrder : []);
+    if (!rawOrderSet.has("superscript") && !hiddenToolbarItems.includes("superscript")) {
+      hiddenToolbarItems.push("superscript");
+    }
+    if (!rawOrderSet.has("subscript") && !hiddenToolbarItems.includes("subscript")) {
+      hiddenToolbarItems.push("subscript");
+    }
+  } else {
+    hiddenToolbarItems = DEFAULT_HIDDEN_TOOLBAR_ITEMS;
+  }
 
   const geminiApiKey = typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey.trim() : "";
   const storageMode = raw?.storageMode === "gdrive" ? "gdrive" : "local";
@@ -875,6 +907,7 @@ function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSet
     toolbarItemsOrder,
     hiddenToolbarItems,
     geminiApiKey,
+    aiModel: typeof raw?.aiModel === "string" && raw.aiModel.trim() ? raw.aiModel.trim() : DEFAULT_SETTINGS.aiModel,
     storageMode,
     googleDriveClientId,
   };
@@ -1063,11 +1096,22 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       });
     }
 
+    const handleFocus = () => {
+      electronAPI?.getNativeKeyboardLanguage?.().then((lang: string) => {
+        if (lang === "th" || lang === "en") {
+          setKeyboardLanguageState(lang);
+        }
+      });
+    };
+
+    window.addEventListener("focus", handleFocus);
+
     return () => {
       window.removeEventListener("keydown", handleSwitchKey, true);
       window.removeEventListener("keyup", handleSwitchKey, true);
       window.removeEventListener("beforeinput", handleInputChar, true);
       window.removeEventListener("input", handleInputChar, true);
+      window.removeEventListener("focus", handleFocus);
       if (typeof unsubNative === "function") {
         unsubNative();
       }

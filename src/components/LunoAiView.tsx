@@ -1511,7 +1511,8 @@ export default function LunoAiView({
           textToSend,
           fileContexts,
           model,
-          lang
+          lang,
+          settings.aiModel
         );
 
         const assistantMsg: MessageItem = {
@@ -1558,7 +1559,8 @@ export default function LunoAiView({
           textToSend,
           fileContexts,
           model,
-          lang
+          lang,
+          settings.aiModel
         );
 
         const assistantMsg: MessageItem = {
@@ -1638,7 +1640,8 @@ export default function LunoAiView({
         targetUserMsg.content,
         undefined,
         model,
-        lang
+        lang,
+        settings.aiModel
       );
 
       const newAssistantMsg: MessageItem = {

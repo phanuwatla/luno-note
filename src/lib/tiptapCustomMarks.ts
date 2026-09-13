@@ -108,6 +108,7 @@ export const Superscript = Mark.create({
   addKeyboardShortcuts() {
     return {
       "Mod-.": () => this.editor.commands.toggleSuperscript(),
+      "Mod-Shift-.": () => this.editor.commands.toggleSuperscript(),
     };
   },
 });
@@ -139,7 +140,7 @@ export const Subscript = Mark.create({
 
   addKeyboardShortcuts() {
     return {
-      "Mod-,": () => this.editor.commands.toggleSubscript(),
+      "Mod-Shift-,": () => this.editor.commands.toggleSubscript(),
     };
   },
 });

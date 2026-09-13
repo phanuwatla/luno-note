@@ -112,6 +112,16 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconHighlight,
     phosphor: PhosphorIcons.Highlighter,
   },
+  superscript: {
+    lucide: LucideIcons.Superscript,
+    tabler: TablerIcons.IconSuperscript,
+    phosphor: PhosphorIcons.TextSuperscript,
+  },
+  subscript: {
+    lucide: LucideIcons.Subscript,
+    tabler: TablerIcons.IconSubscript,
+    phosphor: PhosphorIcons.TextSubscript,
+  },
   bulletList: {
     lucide: LucideIcons.List,
     tabler: TablerIcons.IconList,

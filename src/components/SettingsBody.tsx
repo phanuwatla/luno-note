@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Sun, Moon, Monitor, Wand, Key, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
@@ -9,6 +9,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Check } from "lucide-react";
 import { getDatePatternLabel } from "@/lib/dateTimeFormatter";
+import { fetchAvailableModels, type AvailableModelOption } from "@/lib/geminiApi";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -20,6 +21,37 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
   const { settings, updateSetting, applyAppearanceStyle } = useAppSettings();
   const { t } = useTranslation();
   const [showApiKey, setShowApiKey] = useState(false);
+  const [availableModels, setAvailableModels] = useState<AvailableModelOption[]>([
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", isExhausted: false },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", isExhausted: false },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", isExhausted: false },
+    { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", isExhausted: false },
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", isExhausted: false },
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", isExhausted: false },
+  ]);
+
+  const loadAiModels = useCallback(async () => {
+    try {
+      const models = await fetchAvailableModels(settings.geminiApiKey);
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+      }
+    } catch {}
+  }, [settings.geminiApiKey]);
+
+  useEffect(() => {
+    void loadAiModels();
+  }, [loadAiModels]);
+
+  useEffect(() => {
+    const handleQuotaChange = () => {
+      void loadAiModels();
+    };
+    window.addEventListener("luno_gemini_quota_changed", handleQuotaChange);
+    return () => {
+      window.removeEventListener("luno_gemini_quota_changed", handleQuotaChange);
+    };
+  }, [loadAiModels]);
 
   return (
     <div className="no-scrollbar flex-1 overflow-y-auto space-y-7 px-1 py-1.5">
@@ -688,6 +720,41 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
+        </div>
+
+        <div className="space-y-1.5 pt-1">
+          <label htmlFor={`${idPrefix}-aiModel`} className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+            <SparklesIcon className="h-3.5 w-3.5 text-primary" />
+            {t("settings.aiModelLabel")}
+          </label>
+          <p className="text-xs text-muted-foreground pb-0.5">{t("settings.aiModelDesc")}</p>
+          <Select
+            value={settings.aiModel || "auto"}
+            onValueChange={(val) => updateSetting("aiModel", val)}
+          >
+            <SelectTrigger id={`${idPrefix}-aiModel`} className="w-full h-10 text-xs font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              <SelectItem value="auto">
+                {t("settings.aiModelAuto")}
+              </SelectItem>
+              {availableModels.map((m) => (
+                <SelectItem key={m.id} value={m.id} disabled={m.isExhausted}>
+                  <div className="flex items-center justify-between w-full gap-2">
+                    <span className={m.isExhausted ? "line-through opacity-60 text-muted-foreground" : ""}>
+                      {m.name}
+                    </span>
+                    {m.isExhausted && (
+                      <span className="text-[10px] text-destructive font-medium shrink-0">
+                        ({t("settings.aiModelQuotaExceeded")})
+                      </span>
+                    )}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 {
   "name": "luno-note",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "main": "electron/main.js",
   "author": {
     "name": "phanuwatla",
@@ -41,6 +41,9 @@
     "files": [
       "dist/**/*",
       "electron/**/*"
+    ],
+    "asarUnpack": [
+      "**/keyboardLayoutWatcher.ps1"
     ],
     "win": {
       "icon": "electron/icon.ico",
@@ -118,6 +121,7 @@
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.38.0",
     "input-otp": "^1.4.2",
+    "jszip": "^3.10.1",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.31.0",
     "mammoth": "^1.12.0",

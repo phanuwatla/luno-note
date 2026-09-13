@@ -302,7 +302,147 @@ export function formatModelName(modelName?: string): string {
     .join(" ");
 }
 
-async function fetchSupportedModels(apiKey: string): Promise<string[]> {
+export const EXHAUSTED_MODELS_KEY = "luno_gemini_exhausted_models";
+const EXHAUSTION_TTL_MS = 20 * 60 * 1000; // 20 minutes cooldown before rechecking
+
+export function getExhaustedModelsMap(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(EXHAUSTED_MODELS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    const active: Record<string, number> = {};
+    let changed = false;
+    for (const [m, ts] of Object.entries(parsed)) {
+      if (typeof ts === "number" && now - ts < EXHAUSTION_TTL_MS) {
+        active[m] = ts;
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      localStorage.setItem(EXHAUSTED_MODELS_KEY, JSON.stringify(active));
+    }
+    return active;
+  } catch {
+    return {};
+  }
+}
+
+export function markModelExhausted(model: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const clean = model.replace(/^models\//, "").trim();
+    if (!clean) return;
+    const current = getExhaustedModelsMap();
+    current[clean] = Date.now();
+    localStorage.setItem(EXHAUSTED_MODELS_KEY, JSON.stringify(current));
+    window.dispatchEvent(new CustomEvent("luno_gemini_quota_changed", { detail: { model: clean } }));
+  } catch {}
+}
+
+export function isModelExhausted(model: string): boolean {
+  const clean = model.replace(/^models\//, "").trim();
+  const map = getExhaustedModelsMap();
+  return Boolean(map[clean]);
+}
+
+export function getExhaustedModels(): string[] {
+  return Object.keys(getExhaustedModelsMap());
+}
+
+export function clearExhaustedModels(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(EXHAUSTED_MODELS_KEY);
+    window.dispatchEvent(new CustomEvent("luno_gemini_quota_changed", { detail: {} }));
+  } catch {}
+}
+
+export interface AvailableModelOption {
+  id: string;
+  name: string;
+  isExhausted: boolean;
+}
+
+export const STANDARD_MAIN_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+];
+
+export const SPECIALIZED_MODELS_CACHE_KEY = "luno_gemini_specialized_models";
+
+export function isSpecializedModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase().trim();
+  if (STANDARD_MAIN_MODELS.includes(lower)) return false;
+  // Snapshots with dated versions (e.g. -001, -002, -05-20, -01-21, -0827, -0924, -1206)
+  if (/-\d{3,4}$/.test(lower) || /-\d{2}-\d{2}$/.test(lower)) return true;
+  // Experimental, thinking, preview, 8b, learnlm, or other special tags
+  if (
+    lower.includes("exp") ||
+    lower.includes("thinking") ||
+    lower.includes("preview") ||
+    lower.includes("8b") ||
+    lower.includes("learnlm") ||
+    lower.includes("tuning") ||
+    lower.includes("custom")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function getStoredSpecializedModels(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SPECIALIZED_MODELS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function saveStoredSpecializedModels(models: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SPECIALIZED_MODELS_CACHE_KEY, JSON.stringify(models));
+  } catch {}
+}
+
+export function getAutoModelCandidates(preferredType?: "fast" | "smart" | "creative"): string[] {
+  let mainList = [...STANDARD_MAIN_MODELS];
+  if (preferredType === "fast") {
+    mainList = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+  } else if (preferredType === "creative") {
+    mainList = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
+  }
+
+  const specialized = getStoredSpecializedModels();
+
+  // Active (not exhausted) models first
+  const activeMain = mainList.filter((m) => !isModelExhausted(m));
+  const activeSpecialized = specialized.filter((m) => !isModelExhausted(m));
+  const exhaustedMain = mainList.filter((m) => isModelExhausted(m));
+  const exhaustedSpecialized = specialized.filter((m) => isModelExhausted(m));
+
+  return Array.from(
+    new Set([
+      ...activeMain,
+      ...activeSpecialized,
+      ...exhaustedMain,
+      ...exhaustedSpecialized,
+    ])
+  );
+}
+
+export async function fetchSupportedModels(apiKey: string): Promise<string[]> {
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`;
     const res = await fetch(url);
@@ -330,13 +470,35 @@ async function fetchSupportedModels(apiKey: string): Promise<string[]> {
             return Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent");
           })
           .map((m: any) => String(m.name).replace(/^models\//, ""));
-        if (supported.length > 0) return supported;
+
+        if (supported.length > 0) {
+          const spec = supported.filter((id: string) => isSpecializedModel(id));
+          if (spec.length > 0) {
+            saveStoredSpecializedModels(spec);
+          }
+          return supported;
+        }
       }
     }
   } catch (_) {
     // Ignore fetch failure
   }
-  return ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"];
+  return [...STANDARD_MAIN_MODELS];
+}
+
+export async function fetchAvailableModels(apiKey: string): Promise<AvailableModelOption[]> {
+  const rawModels = apiKey?.trim() ? await fetchSupportedModels(apiKey) : [];
+
+  // Filter out specialized models: only display main flagship models to the user
+  const mainFromApi = rawModels.filter((id) => !isSpecializedModel(id));
+  const unique = Array.from(new Set([...STANDARD_MAIN_MODELS, ...mainFromApi]));
+  const exhausted = getExhaustedModelsMap();
+
+  return unique.map((id) => ({
+    id,
+    name: formatModelName(id),
+    isExhausted: Boolean(exhausted[id]),
+  }));
 }
 
 export interface GeminiActionResult {
@@ -397,7 +559,8 @@ export async function runGeminiAction(
   apiKey: string,
   action: AiActionType,
   text: string,
-  lang: "th" | "en" = "th"
+  lang: "th" | "en" = "th",
+  configuredModel: string = "auto"
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
@@ -414,7 +577,12 @@ export async function runGeminiAction(
   }
 
   const prompt = promptBuilder(text.trim());
-  let models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"];
+  let models: string[];
+  if (configuredModel && configuredModel !== "auto") {
+    models = [configuredModel, ...getAutoModelCandidates().filter((m) => m !== configuredModel)];
+  } else {
+    models = getAutoModelCandidates();
+  }
 
   let lastError: Error | null = null;
 
@@ -442,6 +610,10 @@ export async function runGeminiAction(
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+        if (response.status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("resource_exhausted")) {
+          markModelExhausted(model);
+        }
 
         if (message.includes("not found") || response.status === 404) {
           if (i === models.length - 1) {
@@ -471,11 +643,19 @@ export async function runGeminiAction(
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
         lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
-        lastError.message.includes("Token Limit") ||
+        lastError.message.includes("Token Limit")
+      ) {
+        throw lastError;
+      }
+      if (
         lastError.message.includes("โควตา Gemini API") ||
         lastError.message.includes("quota exceeded")
       ) {
-        throw lastError;
+        markModelExhausted(model);
+        // Continue trying next available model in candidate list
+        if (i < models.length - 1) {
+          continue;
+        }
       }
     }
   }
@@ -487,7 +667,8 @@ export async function runGeminiPrompt(
   apiKey: string,
   promptText: string,
   selectedModel: "smart" | "fast" | "creative" = "smart",
-  lang: "th" | "en" = "th"
+  lang: "th" | "en" = "th",
+  configuredModel: string = "auto"
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
@@ -498,11 +679,11 @@ export async function runGeminiPrompt(
     );
   }
 
-  let preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-pro-latest"];
-  if (selectedModel === "fast") {
-    preferredModels = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"];
-  } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
+  let preferredModels: string[];
+  if (configuredModel && configuredModel !== "auto") {
+    preferredModels = [configuredModel, ...getAutoModelCandidates(selectedModel).filter((m) => m !== configuredModel)];
+  } else {
+    preferredModels = getAutoModelCandidates(selectedModel);
   }
 
   let lastError: Error | null = null;
@@ -527,6 +708,10 @@ export async function runGeminiPrompt(
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+        if (response.status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("resource_exhausted")) {
+          markModelExhausted(model);
+        }
 
         if (message.includes("not found") || response.status === 404) {
           if (i === preferredModels.length - 1) {
@@ -555,11 +740,18 @@ export async function runGeminiPrompt(
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
         lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
-        lastError.message.includes("Token Limit") ||
+        lastError.message.includes("Token Limit")
+      ) {
+        throw lastError;
+      }
+      if (
         lastError.message.includes("โควตา Gemini API") ||
         lastError.message.includes("quota exceeded")
       ) {
-        throw lastError;
+        markModelExhausted(model);
+        if (i < preferredModels.length - 1) {
+          continue;
+        }
       }
     }
   }
@@ -615,7 +807,8 @@ export async function runGeminiChatHistory(
   newPrompt: string,
   attachedFilesContext?: string,
   selectedModel: "smart" | "fast" | "creative" = "smart",
-  lang: "th" | "en" = "th"
+  lang: "th" | "en" = "th",
+  configuredModel: string = "auto"
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
@@ -626,11 +819,11 @@ export async function runGeminiChatHistory(
     );
   }
 
-  let preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-pro-latest"];
-  if (selectedModel === "fast") {
-    preferredModels = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"];
-  } else if (selectedModel === "creative") {
-    preferredModels = ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
+  let preferredModels: string[];
+  if (configuredModel && configuredModel !== "auto") {
+    preferredModels = [configuredModel, ...getAutoModelCandidates(selectedModel).filter((m) => m !== configuredModel)];
+  } else {
+    preferredModels = getAutoModelCandidates(selectedModel);
   }
 
   const contents = buildGeminiContents(history, newPrompt, attachedFilesContext);
@@ -657,6 +850,10 @@ export async function runGeminiChatHistory(
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+        if (response.status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("resource_exhausted")) {
+          markModelExhausted(model);
+        }
 
         if (message.includes("not found") || response.status === 404) {
           if (i === preferredModels.length - 1) {
@@ -685,11 +882,18 @@ export async function runGeminiChatHistory(
       if (
         lastError.message.includes("Invalid Gemini API Key") ||
         lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
-        lastError.message.includes("Token Limit") ||
+        lastError.message.includes("Token Limit")
+      ) {
+        throw lastError;
+      }
+      if (
         lastError.message.includes("โควตา Gemini API") ||
         lastError.message.includes("quota exceeded")
       ) {
-        throw lastError;
+        markModelExhausted(model);
+        if (i < preferredModels.length - 1) {
+          continue;
+        }
       }
     }
   }

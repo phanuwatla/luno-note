@@ -70,12 +70,10 @@ export function useAppUpdate() {
         setStatus("available");
         setUpdateInfo(info);
         setErrorMessage(null);
-        if (manualCheckRef.current) {
-          toast({
-            title: t("settings.updateAvailable") || "Update Available",
-            description: `${t("settings.newVersion") || "Version"} ${info.version} ${t("settings.isReadyToDownload") || "is available."}`,
-          });
-        }
+        toast({
+          title: t("settings.updateAvailable") || "Update Available",
+          description: `${t("settings.newVersion") || "Version"} ${info.version} ${t("settings.isReadyToDownload") || "is available."}`,
+        });
       });
       if (unsub) unsubs.push(unsub);
     }
@@ -136,10 +134,12 @@ export function useAppUpdate() {
 
   const checkForUpdates = useCallback(async (isManual = true) => {
     if (typeof window === "undefined" || !window.electronAPI?.checkForUpdates) {
-      toast({
-        title: t("settings.updateNotSupported") || "Desktop Only",
-        description: t("settings.updateDesktopOnlyDesc") || "Update checking is only available in the desktop application.",
-      });
+      if (isManual) {
+        toast({
+          title: t("settings.updateNotSupported") || "Desktop Only",
+          description: t("settings.updateDesktopOnlyDesc") || "Update checking is only available in the desktop application.",
+        });
+      }
       return;
     }
 

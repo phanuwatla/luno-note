@@ -3,9 +3,29 @@ import { getCachedFolderStructure, cacheFolderStructure, LunoFolderStructure } f
 import { syncEngine } from "@/lib/googleDriveSync";
 
 describe("Workspace-scoped Google Drive folder caching", () => {
+  const storageMap = new Map<string, string>();
+  const localStorageMock: Storage = {
+    getItem: (key: string) => storageMap.get(key) ?? null,
+    setItem: (key: string, value: string) => { storageMap.set(key, String(value)); },
+    removeItem: (key: string) => { storageMap.delete(key); },
+    clear: () => { storageMap.clear(); },
+    key: (index: number) => Array.from(storageMap.keys())[index] ?? null,
+    get length() { return storageMap.size; },
+  };
+
   beforeEach(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.clear();
+    storageMap.clear();
+    Object.defineProperty(globalThis, "localStorage", {
+      value: localStorageMock,
+      writable: true,
+      configurable: true,
+    });
+    if (typeof window !== "undefined") {
+      Object.defineProperty(window, "localStorage", {
+        value: localStorageMock,
+        writable: true,
+        configurable: true,
+      });
     }
     syncEngine.setRootFolderName(null);
   });
@@ -77,6 +97,34 @@ describe("Workspace-scoped Google Drive folder caching", () => {
     expect(sorted[3]).toBe("Chapter 3/Generate Artwork");
     expect(sorted[4]).toBe("Chapter 3/Storyboard");
     expect(sorted[5]).toBe("Chapter 1/Generate Artwork/part1");
+  });
+
+  it("should maintain isGoogleDriveConnected status even if access token expired when refresh token or connected flag exists", async () => {
+    const { saveTokenInfo, saveUserProfile, isGoogleDriveConnected } = await import("@/lib/googleDriveAuth");
+
+    saveUserProfile({ email: "phanuwat.l@kkumail.com", name: "Phanuwat" });
+    // Token expired 2 hours ago (-7200 seconds) but has a refresh_token
+    saveTokenInfo("expired_access_token", -7200, undefined, "mock_refresh_token_12345");
+
+    // Must still be connected!
+    expect(isGoogleDriveConnected()).toBe(true);
+  });
+
+  it("should update syncEngine userProfile immediately and notify subscribers", () => {
+    let capturedProfile: any = null;
+    const unsub = syncEngine.subscribe((state) => {
+      capturedProfile = state.userProfile;
+    });
+
+    syncEngine.setUserProfile({ email: "phanuwat.l@kkumail.com", name: "Phanuwat" });
+    expect(syncEngine.getState().userProfile?.email).toBe("phanuwat.l@kkumail.com");
+    expect(capturedProfile?.email).toBe("phanuwat.l@kkumail.com");
+
+    syncEngine.disconnect();
+    expect(syncEngine.getState().userProfile).toBeNull();
+    expect(capturedProfile).toBeNull();
+
+    unsub();
   });
 });
 

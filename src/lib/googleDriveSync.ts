@@ -1,5 +1,11 @@
 import { Note } from "@/hooks/useNotes";
-import { getStoredTokenInfo, GoogleUserProfile, getStoredUserProfile, isGoogleDriveConnected } from "./googleDriveAuth";
+import {
+  getStoredTokenInfo,
+  getValidAccessToken,
+  GoogleUserProfile,
+  getStoredUserProfile,
+  isGoogleDriveConnected,
+} from "./googleDriveAuth";
 import {
   ensureLunoFolderStructure,
   listDriveNoteFiles,
@@ -103,7 +109,33 @@ class GoogleDriveSyncEngine {
     if (typeof window !== "undefined") {
       window.addEventListener("online", this.handleNetworkChange);
       window.addEventListener("offline", this.handleNetworkChange);
+      window.addEventListener("luno:gdrive-profile-changed", this.handleProfileChange as EventListener);
     }
+  }
+
+  private handleProfileChange = (event: CustomEvent<GoogleUserProfile | null>) => {
+    this.setUserProfile(event.detail || null);
+  };
+
+  public setUserProfile(profile: GoogleUserProfile | null): void {
+    this.updateState({ userProfile: profile });
+  }
+
+  public disconnect(): void {
+    this.stopPolling();
+    clearFolderPathCache();
+    this.noteIdToDriveFileId.clear();
+    this.latestPendingNoteMap.clear();
+    for (const timer of this.noteDebounceTimers.values()) clearTimeout(timer);
+    this.noteDebounceTimers.clear();
+    this.inFlightNoteSyncs.clear();
+    this.updateState({
+      status: "idle",
+      folderStructure: null,
+      userProfile: null,
+      conflict: null,
+      errorMessage: undefined,
+    });
   }
 
   private handleNetworkChange = () => {
@@ -133,8 +165,8 @@ class GoogleDriveSyncEngine {
   }
 
   public async initializeSync(): Promise<LunoFolderStructure | null> {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo) {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) {
       this.updateState({ status: "offline", folderStructure: null });
       return null;
     }
@@ -146,13 +178,13 @@ class GoogleDriveSyncEngine {
 
     try {
       this.updateState({ status: "syncing", errorMessage: undefined });
-      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
+      const structure = await ensureLunoFolderStructure(accessToken, this.rootFolderName || "Luno Notes");
       const profile = getStoredUserProfile();
 
       this.updateState({
         status: "synced",
         folderStructure: structure,
-        userProfile: profile,
+        userProfile: profile || this.state.userProfile,
         lastSyncedAt: Date.now(),
       });
 
@@ -189,21 +221,21 @@ class GoogleDriveSyncEngine {
     existingLocalNotes: Note[],
     onImportComplete: (importedNotes: Note[]) => void
   ): Promise<void> {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !navigator.onLine) return;
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !navigator.onLine) return;
 
     try {
       const structure = await this.initializeSync();
       if (!structure) return;
 
       // Clean up any pre-existing duplicate files on Google Drive first
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId);
+      await cleanDriveDuplicates(accessToken, structure.projectId);
 
       if (this.rootDirHandle) {
-        void syncDriveAttachmentsToLocal(tokenInfo.access_token, structure.attachmentsId, this.rootDirHandle);
+        void syncDriveAttachmentsToLocal(accessToken, structure.attachmentsId, this.rootDirHandle);
       }
 
-      const rawDriveFiles = await listDriveNoteFiles(tokenInfo.access_token, structure.projectId);
+      const rawDriveFiles = await listDriveNoteFiles(accessToken, structure.projectId);
 
       // Deduplicate drive files by folderPath and fileName (keep newest, trash older duplicates on Drive)
       const driveFilesByPathName = new Map<string, (DriveFileItem & { folderPath?: string })[]>();
@@ -221,7 +253,7 @@ class GoogleDriveSyncEngine {
           group.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
           driveFiles.push(group[0]);
           for (let i = 1; i < group.length; i++) {
-            void trashDriveFile(tokenInfo.access_token, group[i].id);
+            void trashDriveFile(accessToken, group[i].id);
           }
         } else {
           driveFiles.push(group[0]);
@@ -269,8 +301,8 @@ class GoogleDriveSyncEngine {
             content = "";
             // Download binary content to local workspace if available
             try {
-              const resMedia = await fetch(`${BASE_URL}/files/${file.id}?alt=media`, {
-                headers: { Authorization: `Bearer ${tokenInfo.access_token}` },
+              const resMedia = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
               });
               if (resMedia.ok) {
                 const arrayBuffer = await resMedia.arrayBuffer();
@@ -310,7 +342,7 @@ class GoogleDriveSyncEngine {
             }
           } else {
             // Download text/markdown file
-            content = await fetchDriveFileContent(tokenInfo.access_token, file.id);
+            content = await fetchDriveFileContent(accessToken, file.id);
             format = file.name.endsWith(".html") ? "html" : file.name.endsWith(".txt") ? "plain" : "markdown";
           }
 
@@ -402,8 +434,8 @@ class GoogleDriveSyncEngine {
     if (note.fileType === "image" || note.fileType === "binary" || note.fileType === "settings" || note.fileType === "luno-ai") {
       return;
     }
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !navigator.onLine) {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !navigator.onLine) {
       this.updateState({ status: "offline" });
       return;
     }
@@ -428,7 +460,7 @@ class GoogleDriveSyncEngine {
       try {
         let structure = this.state.folderStructure;
         if (!structure) {
-          structure = await ensureLunoFolderStructure(tokenInfo.access_token, this.rootFolderName || "Luno Notes");
+          structure = await ensureLunoFolderStructure(accessToken, this.rootFolderName || "Luno Notes");
           this.updateState({ folderStructure: structure });
         }
 
@@ -437,7 +469,7 @@ class GoogleDriveSyncEngine {
         const targetDriveId = targetNote.driveFileId || this.noteIdToDriveFileId.get(targetNote.id);
 
         const uploaded = await uploadDriveNoteFile(
-          tokenInfo.access_token,
+          accessToken,
           structure.projectId,
           fileName,
           currentContentToUpload,
@@ -488,12 +520,12 @@ class GoogleDriveSyncEngine {
 
   // Rename note file on Drive
   public async renameNoteOnDrive(note: Note, newFileName: string): Promise<void> {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !note.driveFileId || !navigator.onLine) return;
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !note.driveFileId || !navigator.onLine) return;
 
     try {
       this.updateState({ status: "syncing" });
-      await renameDriveFile(tokenInfo.access_token, note.driveFileId, newFileName);
+      await renameDriveFile(accessToken, note.driveFileId, newFileName);
       this.updateState({ status: "synced", lastSyncedAt: Date.now() });
     } catch (err: any) {
       this.updateState({ status: "error", errorMessage: err.message });
@@ -502,12 +534,12 @@ class GoogleDriveSyncEngine {
 
   // Move note to Drive Trash
   public async trashNoteOnDrive(driveFileId: string): Promise<void> {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !driveFileId || !navigator.onLine) return;
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !driveFileId || !navigator.onLine) return;
 
     try {
       this.updateState({ status: "syncing" });
-      await trashDriveFile(tokenInfo.access_token, driveFileId);
+      await trashDriveFile(accessToken, driveFileId);
       this.updateState({ status: "synced", lastSyncedAt: Date.now() });
     } catch (err: any) {
       console.warn("Failed to trash Drive file:", err);
@@ -516,12 +548,12 @@ class GoogleDriveSyncEngine {
 
   // Check for external changes on Drive
   private async checkForExternalChanges() {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !this.state.folderStructure || !navigator.onLine) return;
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !this.state.folderStructure || !navigator.onLine) return;
 
     try {
       const driveFiles = await listDriveNoteFiles(
-        tokenInfo.access_token,
+        accessToken,
         this.state.folderStructure.projectId
       );
 
@@ -547,8 +579,8 @@ class GoogleDriveSyncEngine {
     onNotesUpdated?: (updatedNotes: Note[]) => void,
     folderPaths?: string[]
   ): Promise<void> {
-    const tokenInfo = getStoredTokenInfo();
-    if (!tokenInfo || !isGoogleDriveConnected() || !navigator.onLine) {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken || !isGoogleDriveConnected() || !navigator.onLine) {
       this.updateState({ status: "offline" });
       return;
     }
@@ -577,10 +609,10 @@ class GoogleDriveSyncEngine {
       }
 
       const activeWorkspaceName = this.rootFolderName || "Luno Notes";
-      const structure = await ensureLunoFolderStructure(tokenInfo.access_token, activeWorkspaceName);
+      const structure = await ensureLunoFolderStructure(accessToken, activeWorkspaceName);
       this.updateState({ folderStructure: structure });
 
-      await cleanDriveDuplicates(tokenInfo.access_token, structure.projectId);
+      await cleanDriveDuplicates(accessToken, structure.projectId);
       clearFolderPathCache();
 
       // 1. Ensure ALL folder paths exist on Google Drive (including empty and image folders)
@@ -736,7 +768,7 @@ class GoogleDriveSyncEngine {
 
       for (const fp of sortedFolderPaths) {
         try {
-          await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+          await ensureDriveFolderPath(accessToken, structure.projectId, fp);
           await new Promise((r) => setTimeout(r, 60));
         } catch (err) {
           console.warn(`Failed ensuring Drive folder path ${fp}:`, err);
@@ -746,7 +778,7 @@ class GoogleDriveSyncEngine {
       // 1. Sync all local files in attachments/ to Google Drive
       if (structure.attachmentsId) {
         void syncLocalAttachmentsToDrive(
-          tokenInfo.access_token,
+          accessToken,
           structure.attachmentsId,
           this.rootDirHandle,
           this.electronWorkspacePath
@@ -755,7 +787,7 @@ class GoogleDriveSyncEngine {
 
       // 2. Sync all local workspace subfolders and media files directly from disk to Google Drive
       await syncWorkspaceMediaAndFoldersToDrive(
-        tokenInfo.access_token,
+        accessToken,
         structure.projectId,
         this.electronWorkspacePath,
         this.rootDirHandle
@@ -764,7 +796,7 @@ class GoogleDriveSyncEngine {
       // 3. Sync all local metadata files in .luno/ (workspace.json, settings.json, etc.) to Google Drive
       if (structure.lunoMetaId) {
         await syncLocalLunoMetaToDrive(
-          tokenInfo.access_token,
+          accessToken,
           structure.lunoMetaId,
           this.electronWorkspacePath,
           this.rootDirHandle
@@ -815,7 +847,7 @@ class GoogleDriveSyncEngine {
               const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
 
               const uploaded = await uploadDriveNoteFile(
-                tokenInfo.access_token,
+                accessToken,
                 structure.projectId,
                 fileName,
                 note.content,
@@ -851,7 +883,7 @@ class GoogleDriveSyncEngine {
           const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
 
           const uploaded = await uploadDriveNoteFile(
-            tokenInfo.access_token,
+            accessToken,
             structure.projectId,
             fileName,
             note.content,
@@ -885,7 +917,7 @@ class GoogleDriveSyncEngine {
               if (fp.toLowerCase().startsWith("attachments")) {
                 targetFolderId = structure.attachmentsId;
               } else if (fp) {
-                targetFolderId = await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+                targetFolderId = await ensureDriveFolderPath(accessToken, structure.projectId, fp);
               }
 
               let fileData: File | Blob | ArrayBuffer | Uint8Array | string = note.content;
@@ -924,7 +956,7 @@ class GoogleDriveSyncEngine {
 
               const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
               const uploaded = await uploadDriveAttachmentFile(
-                tokenInfo.access_token,
+                accessToken,
                 targetFolderId,
                 fileData,
                 note.fileName,
@@ -958,7 +990,7 @@ class GoogleDriveSyncEngine {
           if (fp.toLowerCase().startsWith("attachments")) {
             targetFolderId = structure.attachmentsId;
           } else if (fp) {
-            targetFolderId = await ensureDriveFolderPath(tokenInfo.access_token, structure.projectId, fp);
+            targetFolderId = await ensureDriveFolderPath(accessToken, structure.projectId, fp);
           }
 
           let fileData: File | Blob | ArrayBuffer | Uint8Array | string = note.content;
@@ -975,7 +1007,7 @@ class GoogleDriveSyncEngine {
 
           const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
           const uploaded = await uploadDriveAttachmentFile(
-            tokenInfo.access_token,
+            accessToken,
             targetFolderId,
             fileData,
             note.fileName,
@@ -999,10 +1031,12 @@ class GoogleDriveSyncEngine {
         onNotesUpdated(updatedList);
       }
 
+      const currentProfile = getStoredUserProfile();
       this.updateState({
         status: "synced",
         lastSyncedAt: Date.now(),
         conflict: null,
+        userProfile: currentProfile || this.state.userProfile,
       });
     } catch (err: any) {
       this.updateState({

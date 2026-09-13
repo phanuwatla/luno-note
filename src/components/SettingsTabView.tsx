@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   SlidersHorizontal,
   Palette,
@@ -57,6 +57,8 @@ import {
   Feather,
   BookOpen,
   LayoutGrid,
+  Superscript as SuperscriptIcon,
+  Subscript as SubscriptIcon,
 } from "lucide-react";
 import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
@@ -67,8 +69,9 @@ import { Heading6Icon } from "@/components/icons/Heading6Icon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
-import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId } from "@/lib/googleDriveAuth";
+import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId, getStoredUserProfile, getValidAccessToken, fetchGoogleUserProfile } from "@/lib/googleDriveAuth";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
+import { syncEngine } from "@/lib/googleDriveSync";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
@@ -81,6 +84,8 @@ import { toast } from "@/hooks/use-toast";
 import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
 import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_ABOUT_CREDIT, openExternalUrl } from "@/lib/appVersion";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
+import { exportWorkspaceBackupZip } from "@/lib/backupExporter";
+import { fetchAvailableModels, clearExhaustedModels, type AvailableModelOption } from "@/lib/geminiApi";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -99,6 +104,8 @@ const TOOLBAR_TOOL_DEFS: Record<
   underline: { labelKey: "editor.underline", icon: UnderlineIcon, categoryKey: "settings.toolCategoryInline" },
   strike: { labelKey: "editor.strikethrough", icon: Strikethrough, categoryKey: "settings.toolCategoryInline" },
   highlight: { labelKey: "editor.highlight", icon: Highlighter, categoryKey: "settings.toolCategoryInline" },
+  superscript: { labelKey: "editor.superscript", icon: SuperscriptIcon, categoryKey: "settings.toolCategoryInline" },
+  subscript: { labelKey: "editor.subscript", icon: SubscriptIcon, categoryKey: "settings.toolCategoryInline" },
   bulletList: { labelKey: "editor.bulletList", icon: List, categoryKey: "settings.toolCategoryList" },
   orderedList: { labelKey: "editor.orderedList", icon: ListOrdered, categoryKey: "settings.toolCategoryList" },
   taskList: { labelKey: "editor.checkbox", icon: ListTodoIcon, categoryKey: "settings.toolCategoryList" },
@@ -226,10 +233,119 @@ export default function SettingsTabView({
   const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
   const appUpdate = useAppUpdate();
 
+  // Whenever user navigates to storage category, ensure userProfile matches latest Google userinfo
+  useEffect(() => {
+    if (activeCategory === "storage" && isGoogleDriveConnected()) {
+      const stored = getStoredUserProfile();
+      if (stored?.email && !userProfile?.email) {
+        syncEngine.setUserProfile(stored);
+      }
+      void (async () => {
+        try {
+          const token = await getValidAccessToken();
+          if (token) {
+            const freshProfile = await fetchGoogleUserProfile(token);
+            if (freshProfile?.email) {
+              syncEngine.setUserProfile(freshProfile);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }
+  }, [activeCategory]);
+
   // Additional local state matching the design
   const [draggedToolbarIndex, setDraggedToolbarIndex] = useState<number | null>(null);
   const [dragOverToolbarIndex, setDragOverToolbarIndex] = useState<number | null>(null);
-  const [aiModel, setAiModel] = useState<string>("gemini-2.5-flash");
+  const [availableModels, setAvailableModels] = useState<AvailableModelOption[]>([
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", isExhausted: false },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", isExhausted: false },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", isExhausted: false },
+    { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", isExhausted: false },
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", isExhausted: false },
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", isExhausted: false },
+  ]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+
+  const loadAiModels = useCallback(async () => {
+    setIsLoadingModels(true);
+    try {
+      const models = await fetchAvailableModels(settings.geminiApiKey);
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [settings.geminiApiKey]);
+
+  useEffect(() => {
+    if (activeCategory === "ai") {
+      void loadAiModels();
+    }
+  }, [activeCategory, loadAiModels]);
+
+  useEffect(() => {
+    const handleQuotaChange = () => {
+      void loadAiModels();
+    };
+    window.addEventListener("luno_gemini_quota_changed", handleQuotaChange);
+    return () => {
+      window.removeEventListener("luno_gemini_quota_changed", handleQuotaChange);
+    };
+  }, [loadAiModels]);
+
+  const handleExportBackup = async () => {
+    if (isExportingBackup) return;
+    if (!notes || notes.length === 0) {
+      toast({
+        variant: "destructive",
+        title: t("settings.backupFailedTitle") || "Export Failed",
+        description: "ไม่มีโน้ตใน Workspace สำหรับการส่งออก",
+      });
+      return;
+    }
+
+    setIsExportingBackup(true);
+    toast({
+      title: t("settings.backupStartedTitle") || "Backup Started",
+      description: t("settings.backupStartedDesc") || "Creating and compressing ZIP archive...",
+    });
+
+    try {
+      const result = await exportWorkspaceBackupZip({
+        notes,
+        workspaceName: openedFolderName || undefined,
+        folderPaths,
+      });
+
+      if (result.success) {
+        toast({
+          title: t("settings.backupSuccessTitle") || "Backup Exported Successfully",
+          description: t("settings.backupSuccessDesc", { count: result.count }) || `Backup exported (${result.count} files)`,
+        });
+      } else if (!result.canceled) {
+        toast({
+          variant: "destructive",
+          title: t("settings.backupFailedTitle") || "Export Failed",
+          description: result.error || "Failed to create backup archive.",
+        });
+      }
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: t("settings.backupFailedTitle") || "Export Failed",
+        description: err?.message || "Failed to export backup archive.",
+      });
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
 
   const pack = settings?.iconPack || "lucide";
 
@@ -335,7 +451,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.onStartupDesc")}</p>
                       </div>
                       <Select value={settings.onStartup || "home"} onValueChange={(v) => updateSetting("onStartup", v)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -377,7 +493,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.appLanguageDesc")}</p>
                       </div>
                       <Select value={settings.language || "en"} onValueChange={(v) => updateSetting("language", v)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -435,7 +551,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.startWeekOnDesc")}</p>
                       </div>
                       <Select value={settings.startWeekOn || "monday"} onValueChange={(v) => updateSetting("startWeekOn", v)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -694,7 +810,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.tagStyleDesc")}</p>
                       </div>
                       <Select value={settings.tagColorStyle} onValueChange={(v) => updateSetting("tagColorStyle", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -818,7 +934,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.fontSizeDesc")} ({settings.editorFontSize}px)</p>
                       </div>
                       <Select value={String(settings.editorFontSize)} onValueChange={(v) => updateSetting("editorFontSize", Number(v))}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="max-h-60">
@@ -842,7 +958,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.interfaceScaleDesc")}</p>
                       </div>
                       <Select value={String(settings.interfaceScale || 100)} onValueChange={(v) => updateSetting("interfaceScale", Number(v))}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -862,7 +978,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.editorWidthDesc")}</p>
                       </div>
                       <Select value={settings.editorWidth} onValueChange={(v) => updateSetting("editorWidth", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -879,7 +995,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.lineHeightDesc")}</p>
                       </div>
                       <Select value={settings.lineHeight} onValueChange={(v) => updateSetting("lineHeight", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -896,7 +1012,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.sidebarDensityDesc")}</p>
                       </div>
                       <Select value={settings.sidebarDensity} onValueChange={(v) => updateSetting("sidebarDensity", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1270,7 +1386,7 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.defaultExtensionDesc")}</p>
                       </div>
                       <Select value={settings.defaultExtension} onValueChange={(v) => updateSetting("defaultExtension", v as any)}>
-                        <SelectTrigger className="w-48 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1409,7 +1525,7 @@ export default function SettingsTabView({
                           updateSetting("defaultNoteTemplate", val as any);
                         }}
                       >
-                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1442,7 +1558,7 @@ export default function SettingsTabView({
                         value={settings.defaultTemplateTxt || "blank"}
                         onValueChange={(val) => updateSetting("defaultTemplateTxt", val as any)}
                       >
-                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1473,7 +1589,7 @@ export default function SettingsTabView({
                         value={settings.defaultTemplateHtml || "blank"}
                         onValueChange={(val) => updateSetting("defaultTemplateHtml", val as any)}
                       >
-                        <SelectTrigger className="w-52 h-10 text-xs font-medium">
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1543,20 +1659,67 @@ export default function SettingsTabView({
                   </div>
 
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.aiModelGroup")}</h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.aiModelGroup")}</h3>
+                      <div className="flex items-center gap-2">
+                        {availableModels.some((m) => m.isExhausted) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearExhaustedModels();
+                              void loadAiModels();
+                              toast({
+                                title: t("settings.aiModelResetQuota"),
+                                description: "ล้างสถานะโควตาเรียบร้อยแล้ว ทุกโมเดลกลับมาพร้อมใช้งาน",
+                              });
+                            }}
+                            className="text-[11px] text-primary hover:underline transition-colors cursor-pointer"
+                          >
+                            {t("settings.aiModelResetQuota")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void loadAiModels()}
+                          disabled={isLoadingModels}
+                          title={t("settings.aiModelRefresh")}
+                          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${isLoadingModels ? "animate-spin" : ""}`} />
+                        </button>
+                      </div>
+                    </div>
 
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <label className="text-xs font-semibold text-foreground">{t("settings.aiModelLabel")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.aiModelDesc")}</p>
                       </div>
-                      <Select value={aiModel} onValueChange={setAiModel}>
+                      <Select
+                        value={settings.aiModel || "auto"}
+                        onValueChange={(val) => updateSetting("aiModel", val)}
+                      >
                         <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="gemini-2.5-flash">{t("settings.optFlashFast")}</SelectItem>
-                          <SelectItem value="gemini-2.5-pro">{t("settings.optProDeep")}</SelectItem>
+                        <SelectContent className="max-h-72 w-auto min-w-[var(--radix-select-trigger-width)]">
+                          <SelectItem value="auto">
+                            {t("settings.aiModelAuto")}
+                          </SelectItem>
+                          {availableModels.map((m) => (
+                            <SelectItem key={m.id} value={m.id} disabled={m.isExhausted}>
+                              <div className="flex items-center justify-between w-full gap-2">
+                                <span className={m.isExhausted ? "line-through opacity-60 text-muted-foreground" : ""}>
+                                  {m.name}
+                                </span>
+                                {m.isExhausted && (
+                                  <span className="text-[10px] text-destructive font-medium shrink-0">
+                                    ({t("settings.aiModelQuotaExceeded")})
+                                  </span>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1591,6 +1754,8 @@ export default function SettingsTabView({
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbUnderline")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + U</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbStrike")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + X</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbHighlight")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + H</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSuperscript")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + .</kbd></div>
+                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSubscript")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + ,</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInlineCode")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + E / Ctrl + `</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInsertLink")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K</kbd></div>
                       <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbClearFormatting")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + N</kbd></div>
@@ -1688,9 +1853,11 @@ export default function SettingsTabView({
                           onClick={async () => {
                             try {
                               setIsConnectingDrive(true);
-                              await requestGoogleDriveAuth();
+                              const authResult = await requestGoogleDriveAuth();
                               updateSetting("storageMode", "gdrive");
-                              triggerSync(notes, onNotesUpdated);
+                              syncEngine.setUserProfile(authResult.profile);
+                              await syncEngine.initializeSync();
+                              triggerSync(notes, onNotesUpdated, folderPaths);
                               toast({
                                 title: t("settings.gdriveConnectedTitle") || "Google Drive Connected",
                                 description: t("settings.gdriveConnectedDesc") || "Luno is now synced with your Google Drive.",
@@ -1722,7 +1889,7 @@ export default function SettingsTabView({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.account") || "Account"}</span>
-                            <span className="font-semibold text-foreground truncate block mt-0.5">{userProfile?.email || "Connected"}</span>
+                            <span className="font-semibold text-foreground truncate block mt-0.5">{userProfile?.email || getStoredUserProfile()?.email || "Connected"}</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
@@ -1858,9 +2025,10 @@ export default function SettingsTabView({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         const isPureCloud = isCloudWorkspace === true || (openedFolderName === "Google Drive" && (!folderPaths || folderPaths.length === 0));
-                        disconnectGoogleDrive();
+                        await disconnectGoogleDrive();
+                        syncEngine.disconnect();
                         updateSetting("storageMode", "local");
                         setDisconnectModalOpen(false);
 
@@ -1900,10 +2068,16 @@ export default function SettingsTabView({
                       </div>
                       <button
                         type="button"
-                        onClick={() => toast({ title: t("settings.backupStartedTitle"), description: t("settings.backupStartedDesc") })}
-                        className="px-3.5 py-1.5 rounded-xl bg-foreground/[0.05] hover:bg-foreground/10 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+                        disabled={isExportingBackup || !notes || notes.length === 0}
+                        onClick={handleExportBackup}
+                        className="px-3.5 py-1.5 rounded-xl bg-foreground/[0.05] hover:bg-foreground/10 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <Download className="h-3.5 w-3.5" /> {t("settings.exportBackupBtn")}
+                        {isExportingBackup ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        {isExportingBackup ? (t("settings.exportingBackup") || "Creating ZIP...") : t("settings.exportBackupBtn")}
                       </button>
                     </div>
                   </div>

@@ -33,7 +33,7 @@ import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
-import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo } from "@/lib/googleDriveAuth";
+import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { createCloudWorkspace } from "@/lib/googleDriveApi";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
 import { encryptNoteContent, decryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
@@ -41,6 +41,7 @@ import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDe
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
+import { useAppUpdate } from "@/hooks/useAppUpdate";
 
 export default function Index() {
   const { t } = useTranslation();
@@ -70,6 +71,22 @@ export default function Index() {
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
   const workspaceFavoritesRef = useRef<Set<string>>(new Set());
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
+  const appUpdate = useAppUpdate();
+  const checkedUpdatesOnLaunchRef = useRef(false);
+
+  // Check for updates automatically on launch if enabled in settings
+  useEffect(() => {
+    if (checkedUpdatesOnLaunchRef.current) return;
+    if (settings.checkUpdates === false) return;
+    if (typeof window === "undefined" || !window.electronAPI?.checkForUpdates) return;
+
+    checkedUpdatesOnLaunchRef.current = true;
+    const timer = setTimeout(() => {
+      appUpdate.checkForUpdates(false).catch(() => {});
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [settings.checkUpdates, appUpdate]);
   const HOME_NOTE: Note = useMemo(
     () => ({
       id: "home",
@@ -3103,16 +3120,16 @@ export default function Index() {
     async (workspaceName: string) => {
       setIsCreatingWorkspace(true);
       try {
-        let tokenInfo = getStoredTokenInfo();
-        if (!tokenInfo?.access_token) {
+        let accessToken = await getValidAccessToken();
+        if (!accessToken) {
           await requestGoogleDriveAuth();
-          tokenInfo = getStoredTokenInfo();
+          accessToken = await getValidAccessToken();
         }
-        if (!tokenInfo?.access_token) {
+        if (!accessToken) {
           throw new Error("Not authenticated with Google Drive");
         }
 
-        const created = await createCloudWorkspace(tokenInfo.access_token, workspaceName);
+        const created = await createCloudWorkspace(accessToken, workspaceName);
         await handleOpenCloudWorkspace({
           id: created.folderId,
           name: created.name,
@@ -3244,9 +3261,14 @@ export default function Index() {
             restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
 
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
-              void triggerSync(nextNotes, (updated) => {
-                replaceNotes(updated);
-              }, folderPaths);
+              void (async () => {
+                const token = await getValidAccessToken();
+                if (token) {
+                  triggerSync(nextNotes, (updated) => {
+                    replaceNotes(updated);
+                  }, folderPaths);
+                }
+              })();
             }
 
             await new Promise((resolve) => setTimeout(resolve, 200));
@@ -3288,6 +3310,17 @@ export default function Index() {
             if (!active) return;
             setPendingReconnectDirHandle(null);
             await new Promise((resolve) => setTimeout(resolve, 200));
+
+            if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+              void (async () => {
+                const token = await getValidAccessToken();
+                if (token) {
+                  triggerSync(notesRef.current, (updated) => {
+                    replaceNotes(updated);
+                  });
+                }
+              })();
+            }
           } catch (syncErr) {
             console.warn("Could not sync directory handle:", syncErr);
           }
@@ -3297,7 +3330,32 @@ export default function Index() {
           return;
         }
 
-        // 3. Fallback: No local workspace found
+        // 3. Fallback: Check if Cloud Workspace was active
+        if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+          const folderName = localStorage.getItem("luno_last_workspace_name") || "Google Drive";
+          setOpenedFolderName(folderName);
+          setRootFolderName(folderName);
+          resetTabs();
+          replaceNotes([], true);
+
+          try {
+            await importDriveNotes([], (imported) => {
+              if (active) {
+                const nextNotes = replaceNotes(imported, true);
+                restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+              }
+            });
+          } catch (cloudRestoreErr) {
+            console.warn("Failed restoring cloud notes on startup:", cloudRestoreErr);
+          }
+
+          if (active) {
+            setIsWorkspaceLoading(false);
+          }
+          return;
+        }
+
+        // 4. Fallback: No workspace found
         if (active) {
           setOpenedFolderName(null);
           resetTabs();
