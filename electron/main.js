@@ -745,28 +745,22 @@ function setupIpcHandlers() {
 
             if (queryError) {
               res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Luno Note - Google Sign-In</title>
-                  <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-                    .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 420px; border: 1px solid #ef4444; }
-                    h2 { margin: 0 0 0.75rem 0; color: #f87171; font-size: 1.4rem; }
-                    p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
-                  </style>
-                </head>
-                <body>
-                  <div class="card">
-                    <h2>การเข้าสู่ระบบถูกยกเลิก</h2>
-                    <p>${queryError}<br>คุณสามารถปิดแท็บนี้และกลับไปที่ Luno Note ได้</p>
-                  </div>
-                  <script>setTimeout(() => window.close(), 2500);</script>
-                </body>
-                </html>
-              `);
+              res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
+
+              try {
+                const allWins = BrowserWindow.getAllWindows();
+                for (const win of allWins) {
+                  if (!win.isDestroyed()) {
+                    if (win.isMinimized()) win.restore();
+                    win.setAlwaysOnTop(true);
+                    win.show();
+                    win.focus();
+                    win.setAlwaysOnTop(false);
+                  }
+                }
+                app.focus({ steal: true });
+              } catch {}
+
               if (!isSettled) {
                 isSettled = true;
                 try { server.close(); } catch {}
@@ -777,28 +771,21 @@ function setupIpcHandlers() {
 
             if (queryCode) {
               res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Luno Note - Google Sign-In</title>
-                  <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-                    .card { background: #1e293b; padding: 2.5rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 420px; border: 1px solid #334155; }
-                    h2 { margin: 0 0 0.75rem 0; color: #38bdf8; font-size: 1.4rem; }
-                    p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
-                  </style>
-                </head>
-                <body>
-                  <div class="card">
-                    <h2>เข้าสู่ระบบสำเร็จ!</h2>
-                    <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>คุณสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
-                  </div>
-                  <script>setTimeout(() => window.close(), 1500);</script>
-                </body>
-                </html>
-              `);
+              res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
+
+              try {
+                const allWins = BrowserWindow.getAllWindows();
+                for (const win of allWins) {
+                  if (!win.isDestroyed()) {
+                    if (win.isMinimized()) win.restore();
+                    win.setAlwaysOnTop(true);
+                    win.show();
+                    win.focus();
+                    win.setAlwaysOnTop(false);
+                  }
+                }
+                app.focus({ steal: true });
+              } catch {}
 
               if (!isSettled) {
                 isSettled = true;
