@@ -5099,38 +5099,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
         };
 
-        const electronAPI = (window as unknown as {
-          electronAPI?: {
-            hasClipboardImage?: () => boolean;
-            readClipboardImageSync?: () => { hasImage: boolean; dataUrl: string | null };
-            readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }>;
-          };
-        })?.electronAPI;
-
-        // 1. In Electron, check synchronous clipboard first if it has an image
-        // (handles screenshots, Snipping Tool, images copied from web browsers / apps)
-        if (electronAPI?.readClipboardImageSync) {
+        const dataUrlToFile = (dataUrl: string, filename = "image.png"): File => {
           try {
-            const clip = electronAPI.readClipboardImageSync();
-            if (clip?.hasImage && clip.dataUrl) {
-              event.preventDefault();
-              void (async () => {
-                try {
-                  const res = await fetch(clip.dataUrl!);
-                  const blob = await res.blob();
-                  const file = new File([blob], "image.png", { type: blob.type || "image/png" });
-                  void processAndInsertImageFileRef.current?.(file);
-                } catch (err) {
-                  console.warn("Failed reading sync clipboard image on paste:", err);
-                }
-              })();
-              return true;
+            const parts = dataUrl.split(",");
+            const mimeMatch = parts[0].match(/:(.*?);/);
+            const mime = mimeMatch ? mimeMatch[1] : "image/png";
+            const bstr = atob(parts[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) {
+              u8arr[n] = bstr.charCodeAt(n);
             }
-          } catch (err) {
-            console.warn("readClipboardImageSync error:", err);
+            return new File([u8arr], filename, { type: mime });
+          } catch {
+            return new File([], filename, { type: "image/png" });
           }
-        }
+        };
 
+        // 1. Check standard clipboard files first (files copied from Explorer or dragged)
         if (event.clipboardData) {
           const files = event.clipboardData.files;
           if (files && files.length > 0) {
@@ -5143,6 +5129,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
           }
+
+          // 2. Check standard clipboard items (web browser image copy, screenshots)
           const items = event.clipboardData.items;
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
@@ -5157,8 +5145,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
           }
+        }
 
-          // Fallback: If async clipboard is available and no plain text, check native Electron clipboard
+        // 3. Native Electron clipboard check (handles Windows Snipping Tool, Print Screen, etc.)
+        const electronAPI = (window as unknown as {
+          electronAPI?: {
+            hasClipboardImage?: () => boolean;
+            readClipboardImageSync?: () => { hasImage: boolean; dataUrl: string | null };
+            readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }>;
+          };
+        })?.electronAPI;
+
+        if (electronAPI?.readClipboardImageSync) {
+          try {
+            const clip = electronAPI.readClipboardImageSync();
+            if (clip?.hasImage && clip.dataUrl) {
+              const file = dataUrlToFile(clip.dataUrl, "pasted_image.png");
+              if (file && file.size > 0) {
+                event.preventDefault();
+                void processAndInsertImageFileRef.current?.(file);
+                return true;
+              }
+            }
+          } catch (err) {
+            console.warn("readClipboardImageSync error:", err);
+          }
+        }
+
+        // Fallback: If async clipboard is available and no plain text, check native Electron clipboard
+        if (event.clipboardData) {
           const plainText = event.clipboardData.getData("text/plain") || "";
           if (electronAPI?.readClipboardImage && !plainText.trim()) {
             event.preventDefault();
@@ -5166,10 +5181,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               try {
                 const clipImg = await electronAPI.readClipboardImage();
                 if (clipImg?.hasImage && clipImg.dataUrl) {
-                  const res = await fetch(clipImg.dataUrl);
-                  const blob = await res.blob();
-                  const file = new File([blob], "image.png", { type: blob.type || "image/png" });
-                  void processAndInsertImageFileRef.current?.(file);
+                  const file = dataUrlToFile(clipImg.dataUrl, "pasted_image.png");
+                  if (file && file.size > 0) {
+                    void processAndInsertImageFileRef.current?.(file);
+                  }
                 }
               } catch (err) {
                 console.warn("Failed reading native clipboard image on paste:", err);
@@ -5178,6 +5193,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             return true;
           }
         }
+
         return false;
       },
       handleKeyDown: (view, event) => {
@@ -6498,6 +6514,53 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return `https://${trimmed}`;
   };
 
+  const insertImageToEditor = (attrs: { src: string; alt?: string; "data-relative-src"?: string; width?: number | null }): boolean => {
+    if (!editor) return false;
+
+    // 1. Try normal focused chain setImage first
+    const chain = getFocusedChain();
+    if (chain) {
+      try {
+        const success = chain.setImage(attrs as any).run();
+        if (success) return true;
+      } catch (e) {
+        console.warn("chain.setImage error:", e);
+      }
+    }
+
+    // 2. If chain.setImage failed or returned false (e.g. cursor inside heading or codeBlock)
+    try {
+      const { selection } = editor.state;
+      const { $from } = selection;
+      const parentNode = $from.parent;
+
+      // In Tiptap, Image is a block node. A heading or codeBlock only accepts inline content.
+      if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
+        const afterPos = $from.after();
+        editor.commands.insertContentAt(afterPos, [
+          { type: "image", attrs },
+          { type: "paragraph" },
+        ]);
+        return true;
+      }
+
+      // Try inserting at current selection
+      const inserted = editor.commands.insertContent({ type: "image", attrs });
+      if (inserted) return true;
+
+      // Last resort fallback: insert at end of document
+      const docEnd = editor.state.doc.content.size;
+      editor.commands.insertContentAt(docEnd, [
+        { type: "image", attrs },
+        { type: "paragraph" },
+      ]);
+      return true;
+    } catch (err) {
+      console.warn("insertImageToEditor fallback failed:", err);
+      return false;
+    }
+  };
+
   const handleFixLanguage = () => {
     if (!editor) return;
     const {
@@ -6817,10 +6880,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         assetBlobUrlMap.current.set(decodedRelPath, blobUrl);
         assetBlobUrlMap.current.set(blobUrl, encodedRelPath);
       }
-      const chain = getFocusedChain();
-      if (chain) {
-        chain.setImage({ src: finalBlobUrl, alt: fileName, "data-relative-src": encodedRelPath } as any).run();
-      }
+      insertImageToEditor({ src: finalBlobUrl, alt: fileName, "data-relative-src": encodedRelPath });
     },
     [getFocusedChain]
   );
@@ -6867,9 +6927,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    const chain = getFocusedChain();
-    if (!chain) return;
-    chain.setImage({ src: nextUrl, alt: "" }).run();
+    insertImageToEditor({ src: nextUrl, alt: "" });
     setImageDialogOpen(false);
     setImageUrl("");
   };
@@ -6947,37 +7005,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       file = new File([file], targetFileName, { type: file.type });
     }
 
-    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
-      try {
-        const uploadPromise = (async () => {
-          const accessToken = await getValidAccessToken();
-          const structure = await syncEngine.initializeSync();
-          if (accessToken && structure) {
-            const uploaded = await uploadDriveAttachmentFile(
-              accessToken,
-              structure.attachmentsId,
-              file,
-              targetFileName
-            );
-            const driveImgUrl = uploaded.webContentLink || `https://drive.google.com/uc?export=view&id=${uploaded.id}`;
-            const chain = getFocusedChain();
-            if (chain) {
-              chain.setImage({ src: driveImgUrl, alt: targetFileName }).run();
-              return true;
-            }
-          }
-          return false;
-        })();
-
-        // 6 second timeout to prevent UI freezes on flaky connections
-        const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 6000));
-        const uploadedSuccess = await Promise.race([uploadPromise, timeoutPromise]);
-        if (uploadedSuccess) return;
-      } catch (err) {
-        console.warn("Failed to upload image to Google Drive attachments:", err);
-      }
-    }
-
     let compressed: { dataUrl: string; blob: Blob; fileName: string } | null = null;
     try {
       compressed = await compressImageFile(file);
@@ -6989,26 +7016,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const finalBlob = compressed?.blob || file;
     const finalFileName = compressed?.fileName || targetFileName;
 
-    // Ensure finalDataUrl is always available
-    if (!finalDataUrl) {
-      try {
-        finalDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-          reader.onerror = reject;
-          reader.readAsDataURL(finalBlob);
-        });
-      } catch (err) {
-        console.warn("Fallback FileReader failed for image:", err);
-      }
-    }
+    // 1. Instant local display via Blob URL
+    const blobUrl = URL.createObjectURL(finalBlob);
+    const relPath = getRelativeAttachmentPath(finalFileName);
+    let decodedRel = relPath;
+    try {
+      decodedRel = decodeURIComponent(relPath);
+    } catch {}
 
-    // 1. Electron Desktop Workspace Support
+    assetBlobUrlMap.current.set(relPath, blobUrl);
+    assetBlobUrlMap.current.set(decodedRel, blobUrl);
+    assetBlobUrlMap.current.set(blobUrl, relPath);
+
+    // Insert into editor immediately so user sees the image without any delay
+    insertImageToEditor({
+      src: blobUrl,
+      alt: finalFileName,
+      "data-relative-src": relPath,
+    });
+
+    // 2. Electron Desktop Workspace Support - save file to disk asynchronously
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
+          if (!finalDataUrl) {
+            try {
+              finalDataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+                reader.onerror = reject;
+                reader.readAsDataURL(finalBlob);
+              });
+            } catch (err) {
+              console.warn("Fallback FileReader failed for image:", err);
+            }
+          }
+
           const rawBase64 = finalDataUrl?.includes("base64,") ? finalDataUrl.split("base64,")[1] : "";
           if (rawBase64) {
             let uniqueName = finalFileName;
@@ -7025,23 +7070,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
 
-            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueName}`;
-            const writeResult = await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
-
-            if (writeResult !== false) {
-              const relPath = getRelativeAttachmentPath(uniqueName);
-              const blobUrl = URL.createObjectURL(finalBlob);
-              const decodedRel = decodeURIComponent(relPath);
-              assetBlobUrlMap.current.set(relPath, blobUrl);
-              assetBlobUrlMap.current.set(decodedRel, blobUrl);
-              assetBlobUrlMap.current.set(blobUrl, relPath);
-
-              const chain = getFocusedChain();
-              if (chain) {
-                chain.setImage({ src: blobUrl, alt: uniqueName, "data-relative-src": relPath } as any).run();
-              }
-              return;
+            if (uniqueName !== finalFileName) {
+              const newRel = getRelativeAttachmentPath(uniqueName);
+              assetBlobUrlMap.current.set(newRel, blobUrl);
+              try {
+                assetBlobUrlMap.current.set(decodeURIComponent(newRel), blobUrl);
+              } catch {}
+              assetBlobUrlMap.current.set(blobUrl, newRel);
             }
+
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueName}`;
+            await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
           }
         }
       } catch (err) {
@@ -7049,7 +7088,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    // 2. Web File System Access API Support
+    // 3. Web File System Access API Support
     if (rootDirHandle) {
       try {
         const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
@@ -7058,35 +7097,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const writable = await fileHandle.createWritable();
         await writable.write(finalBlob);
         await writable.close();
-
-        const relPath = getRelativeAttachmentPath(attachmentFileName);
-        const blobUrl = URL.createObjectURL(finalBlob);
-        const decodedRel = decodeURIComponent(relPath);
-        assetBlobUrlMap.current.set(relPath, blobUrl);
-        assetBlobUrlMap.current.set(decodedRel, blobUrl);
-        assetBlobUrlMap.current.set(blobUrl, relPath);
-
-        const chain = getFocusedChain();
-        if (chain) {
-          chain.setImage({ src: blobUrl, alt: file.name, "data-relative-src": relPath } as any).run();
-        }
-        return;
       } catch (err) {
         console.warn("Failed to save attachment to workspace folder:", err);
       }
     }
 
-    // 3. Fallback to direct insertion (dataUrl or objectUrl)
-    const insertSrc = finalDataUrl || URL.createObjectURL(finalBlob);
-    const chain = getFocusedChain();
-    if (chain) {
-      chain.setImage({ src: insertSrc, alt: finalFileName }).run();
-      const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      void saveImageToIndexedDb(imgId, finalBlob);
-    } else {
-      showUiAlert(t("editor.invalidImageFile"));
+    // 4. Google Drive background sync upload
+    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      void (async () => {
+        try {
+          const accessToken = await getValidAccessToken();
+          const structure = await syncEngine.initializeSync();
+          if (accessToken && structure?.attachmentsId) {
+            await uploadDriveAttachmentFile(
+              accessToken,
+              structure.attachmentsId,
+              finalBlob,
+              finalFileName
+            );
+          }
+        } catch (err) {
+          console.warn("Failed to background upload image to Google Drive attachments:", err);
+        }
+      })();
     }
+
+    // 5. Always persist to IndexedDB as offline cache
+    const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    void saveImageToIndexedDb(imgId, finalBlob);
   };
+
+  processAndInsertImageFileRef.current = processAndInsertImageFile;
 
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

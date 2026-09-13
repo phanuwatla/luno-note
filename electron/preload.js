@@ -68,13 +68,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   readClipboardImageSync: () => {
     try {
+      const res = ipcRenderer.sendSync("read-clipboard-image-sync");
+      if (res && typeof res === "object") {
+        return res;
+      }
+    } catch (e) {
+      console.warn("ipc read-clipboard-image-sync failed:", e);
+    }
+    try {
       const img = clipboard.readImage();
       if (!img.isEmpty()) {
         const size = img.getSize();
         return { hasImage: true, dataUrl: img.toDataURL(), width: size.width, height: size.height };
       }
     } catch (e) {
-      console.warn("readClipboardImageSync error:", e);
+      console.warn("readClipboardImageSync fallback error:", e);
     }
     return { hasImage: false, dataUrl: null };
   },

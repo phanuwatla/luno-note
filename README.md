@@ -6,27 +6,27 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.2.5-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.5)
+[![Version](https://img.shields.io/badge/version-1.2.6-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.6)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.2.5-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.2.6-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.2.5](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.5](#what-is-new-in-version-125) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.2.6](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.6](#what-is-new-in-version-126) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.2.5
+## What Is New in Version 1.2.6
 
-- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Seamless Google Drive OAuth Auto-Close & Window Focus**: Removed lingering browser landing cards upon authentication completion. The browser tab now automatically executes immediate self-closing scripts while Luno Note instantly restores and gains active system focus in the foreground.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Synchronous Native Clipboard Image Pasting**: Integrated zero-latency Electron clipboard image inspection directly via preload context bridge, ensuring instantaneous pasting from Windows Snipping Tool (`Win + Shift + S`), Print Screen, web browser images, and Explorer file copies.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Implemented standard local HTTP loopback authentication (`127.0.0.1`) launching the system default browser, fully resolving Google account security blocks (*"This browser or app may not be secure"*).
-- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Full Workspace ZIP Backup & Hierarchical Export**: Export complete workspaces with nested folder structures directly into ZIP archives with manifest data.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Intelligent Gemini AI Quota Management**: Automated model selection with seamless fallback when API quota limits are encountered.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Instant Image Pasting & Heading Fallback**: Completely overhauled clipboard image pasting to render instantly with local blob caching. Added intelligent structural insertion fallback when cursor is positioned inside title headings (`H1`) or code blocks, inserting the image directly below without losing focus.
+- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Google Drive OAuth Completion & Focus Restoration**: Added an elegant authentication completion card with a one-click close button and automatic closure scripts. Instantly restores and focuses Luno Note in the foreground upon login completion.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Background Cloud Attachment Sync**: Images pasted under Google Drive storage mode render immediately without UI latency, uploading and syncing asynchronously in the background.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Zero-Latency Native Clipboard IPC**: Direct synchronous IPC communication guarantees clipboard images from Windows Snipping Tool (`Win + Shift + S`), Print Screen, web browsers, and file explorers paste reliably.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Local HTTP loopback authentication (`127.0.0.1`) launching the system default browser, fully resolving Google account security blocks.
 - <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Expanded Test Suite**: Automated unit testing suite with 38 test suites and 231 tests passing.
 
 ---
@@ -54,7 +54,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.2.5.exe`** | Automated Windows installer with differential update support | [![Download v1.2.5](https://img.shields.io/badge/Download-v1.2.5-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.5/luno-note-setup-1.2.5.exe) |
+| **`luno-note-setup-1.2.6.exe`** | Automated Windows installer with differential update support | [![Download v1.2.6](https://img.shields.io/badge/Download-v1.2.6-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.6/luno-note-setup-1.2.6.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

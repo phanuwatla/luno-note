@@ -720,6 +720,21 @@ function setupIpcHandlers() {
     return { hasImage: false, dataUrl: null };
   });
 
+  ipcMain.on("read-clipboard-image-sync", (event) => {
+    try {
+      const img = clipboard.readImage();
+      if (!img.isEmpty()) {
+        const dataUrl = img.toDataURL();
+        const size = img.getSize();
+        event.returnValue = { hasImage: true, dataUrl, width: size.width, height: size.height };
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed reading image sync from clipboard:", err);
+    }
+    event.returnValue = { hasImage: false, dataUrl: null };
+  });
+
   ipcMain.handle("google-oauth-login", async (event, payload) => {
     const DEFAULT_GOOGLE_CLIENT_ID = "727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com";
     let clientId = (typeof payload === "string" ? payload : payload?.clientId) || process.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
@@ -745,7 +760,37 @@ function setupIpcHandlers() {
 
             if (queryError) {
               res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Luno Note - Google Sign-In</title>
+                  <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
+                    .card { background: #1e293b; padding: 2.5rem 2rem; border-radius: 1.25rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #ef4444; }
+                    h2 { margin: 0 0 0.5rem 0; color: #f87171; font-size: 1.3rem; font-weight: 600; }
+                    p { margin: 0 0 1.5rem 0; color: #94a3b8; font-size: 0.92rem; line-height: 1.5; }
+                    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.5rem; background: #334155; color: #f8fafc; border: none; border-radius: 0.75rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; }
+                    .btn:hover { background: #475569; }
+                  </style>
+                  <script>
+                    function tryClose() {
+                      try { window.open('', '_self', ''); window.close(); } catch(e) {}
+                      try { window.close(); } catch(e) {}
+                    }
+                    tryClose();
+                  </script>
+                </head>
+                <body>
+                  <div class="card">
+                    <h2>การเข้าสู่ระบบถูกยกเลิก</h2>
+                    <p>${queryError}<br>คุณสามารถปิดแท็บนี้และกลับไปที่ Luno Note ได้</p>
+                    <button class="btn" onclick="window.close()">ปิดแท็บนี้</button>
+                  </div>
+                </body>
+                </html>
+              `);
 
               try {
                 const allWins = BrowserWindow.getAllWindows();
@@ -771,7 +816,42 @@ function setupIpcHandlers() {
 
             if (queryCode) {
               res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Luno Note - เข้าสู่ระบบสำเร็จ</title>
+                  <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
+                    .card { background: #1e293b; padding: 2.5rem 2rem; border-radius: 1.25rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #334155; }
+                    .icon { width: 56px; height: 56px; margin: 0 auto 1.25rem auto; background: rgba(38, 162, 149, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #26A295; }
+                    h2 { margin: 0 0 0.5rem 0; color: #f8fafc; font-size: 1.3rem; font-weight: 600; }
+                    p { margin: 0 0 1.5rem 0; color: #94a3b8; font-size: 0.92rem; line-height: 1.5; }
+                    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.5rem; background: #26A295; color: #ffffff; border: none; border-radius: 0.75rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+                    .btn:hover { background: #20877c; }
+                  </style>
+                  <script>
+                    function tryClose() {
+                      try { window.open('', '_self', ''); window.close(); } catch(e) {}
+                      try { window.close(); } catch(e) {}
+                    }
+                    tryClose();
+                    setTimeout(tryClose, 300);
+                  </script>
+                </head>
+                <body>
+                  <div class="card">
+                    <div class="icon">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    </div>
+                    <h2>เข้าสู่ระบบสำเร็จแล้ว</h2>
+                    <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>ท่านสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
+                    <button class="btn" onclick="window.close()">ปิดแท็บนี้</button>
+                  </div>
+                </body>
+                </html>
+              `);
 
               try {
                 const allWins = BrowserWindow.getAllWindows();
