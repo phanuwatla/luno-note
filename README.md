@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="electron/icon.ico" alt="Luno Note" width="128" height="128" />
+<img src="electron/icon.ico" alt="Luno Note" width="160" height="160" />
 
 ### Modern, High-Performance Note-Taking Application
 
