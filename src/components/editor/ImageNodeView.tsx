@@ -17,6 +17,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   const [hasError, setHasError] = useState(false);
+  const [localResolvedSrc, setLocalResolvedSrc] = useState<string | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [currentWidth, setCurrentWidth] = useState<number | null>(() => {
@@ -33,6 +34,46 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   useEffect(() => {
     setHasError(false);
   }, [src]);
+
+  // Automatically resolve relative attachment paths from disk (essential for packaged production app)
+  useEffect(() => {
+    let isCancelled = false;
+    const effectiveSrc = (!/^(https?:|data:|blob:)/i.test(src) ? src : null) || dataRelativeSrc;
+
+    if (!effectiveSrc || /^(https?:|data:)/i.test(effectiveSrc)) {
+      setLocalResolvedSrc(null);
+      return;
+    }
+
+    const resolveLocal = async () => {
+      try {
+        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            let cleanRel = decodeURIComponent(effectiveSrc);
+            while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
+              cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
+            }
+            const fullPath = `${saved.folderPath}/${cleanRel}`;
+            const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+            if (!isCancelled && dataUrl) {
+              setLocalResolvedSrc(dataUrl);
+              setHasError(false);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to resolve local attachment in ImageNodeView:", err);
+      }
+    };
+
+    resolveLocal();
+    return () => {
+      isCancelled = true;
+    };
+  }, [src, dataRelativeSrc]);
 
   // Sync internal state when node width changes externally (e.g. undo/redo)
   useEffect(() => {
@@ -123,6 +164,8 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
     );
   }
 
+  const displaySrc = localResolvedSrc || src;
+
   return (
     <NodeViewWrapper
       as="div"
@@ -140,7 +183,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       >
         <img
           ref={imgRef}
-          src={src}
+          src={displaySrc}
           alt={alt || ""}
           title={title || ""}
           data-relative-src={dataRelativeSrc || undefined}
@@ -148,7 +191,35 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           loading="lazy"
           decoding="async"
           onLoad={() => setHasError(false)}
-          onError={() => setHasError(true)}
+          onError={() => {
+            const rel = dataRelativeSrc || (!/^(https?:|data:)/i.test(src) ? src : null);
+            if (!localResolvedSrc && rel) {
+              const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+              if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+                void (async () => {
+                  try {
+                    const saved = await electronAPI.getSavedWorkspace();
+                    if (saved?.folderPath) {
+                      let cleanRel = decodeURIComponent(rel);
+                      while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
+                        cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
+                      }
+                      const fullPath = `${saved.folderPath}/${cleanRel}`;
+                      const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+                      if (dataUrl) {
+                        setLocalResolvedSrc(dataUrl);
+                        setHasError(false);
+                        return;
+                      }
+                    }
+                  } catch {}
+                  setHasError(true);
+                })();
+                return;
+              }
+            }
+            setHasError(true);
+          }}
           className="!m-0 !p-0 block h-auto max-w-full rounded-xl border border-border/80 object-contain"
           style={{
             width: currentWidth ? `${currentWidth}px` : "auto",
@@ -274,7 +345,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               <img
-                src={src}
+                src={displaySrc}
                 alt={alt || ""}
                 title={title || ""}
                 className="max-w-full max-h-[88vh] object-contain rounded-xl shadow-2xl border border-white/10 select-none animate-in zoom-in-95 duration-200"

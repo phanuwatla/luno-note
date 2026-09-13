@@ -730,7 +730,7 @@ function setupIpcHandlers() {
         return;
       }
     } catch (err) {
-      console.warn("Failed reading image sync from clipboard:", err);
+      console.warn("Failed reading image synchronously from clipboard:", err);
     }
     event.returnValue = { hasImage: false, dataUrl: null };
   });
@@ -750,61 +750,85 @@ function setupIpcHandlers() {
       const codeVerifier = crypto.randomBytes(32).toString("base64url");
       const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
 
+      const bringAppToFront = () => {
+        try {
+          const allWins = BrowserWindow.getAllWindows();
+          for (const win of allWins) {
+            if (!win.isDestroyed()) {
+              if (win.isMinimized()) win.restore();
+              win.setAlwaysOnTop(true);
+              win.show();
+              win.focus();
+              win.moveTop();
+              setTimeout(() => {
+                try {
+                  if (!win.isDestroyed()) {
+                    win.setAlwaysOnTop(false);
+                    win.focus();
+                  }
+                } catch {}
+              }, 300);
+            }
+          }
+          app.focus({ steal: true });
+        } catch {}
+      };
+
       const server = http.createServer(async (req, res) => {
         try {
           const parsedUrl = url.parse(req.url, true);
+
+          if (parsedUrl.pathname === "/favicon.ico") {
+            const icoPath = path.join(__dirname, "icon.ico");
+            if (fs.existsSync(icoPath)) {
+              res.writeHead(200, { "Content-Type": "image/x-icon", "Cache-Control": "public, max-age=86400" });
+              res.end(fs.readFileSync(icoPath));
+              return;
+            }
+            const altPath = path.join(__dirname, "../public/icon.ico");
+            if (fs.existsSync(altPath)) {
+              res.writeHead(200, { "Content-Type": "image/x-icon", "Cache-Control": "public, max-age=86400" });
+              res.end(fs.readFileSync(altPath));
+              return;
+            }
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+
+          if (parsedUrl.pathname === "/luno-logo.png" || parsedUrl.pathname === "/favicon.png") {
+            const logoPath = path.join(__dirname, "../public/luno-logo.png");
+            if (fs.existsSync(logoPath)) {
+              res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+              res.end(fs.readFileSync(logoPath));
+              return;
+            }
+            const altLogo = path.join(__dirname, "../src/assets/luno-logo.png");
+            if (fs.existsSync(altLogo)) {
+              res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+              res.end(fs.readFileSync(altLogo));
+              return;
+            }
+            res.writeHead(404);
+            res.end();
+            return;
+          }
+
+          if (parsedUrl.pathname === "/focus") {
+            bringAppToFront();
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+            return;
+          }
 
           if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
             const queryCode = parsedUrl.query.code;
             const queryError = parsedUrl.query.error;
 
             if (queryError) {
+              bringAppToFront();
               res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Luno Note - Google Sign-In</title>
-                  <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-                    .card { background: #1e293b; padding: 2.5rem 2rem; border-radius: 1.25rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #ef4444; }
-                    h2 { margin: 0 0 0.5rem 0; color: #f87171; font-size: 1.3rem; font-weight: 600; }
-                    p { margin: 0 0 1.5rem 0; color: #94a3b8; font-size: 0.92rem; line-height: 1.5; }
-                    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.5rem; background: #334155; color: #f8fafc; border: none; border-radius: 0.75rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; }
-                    .btn:hover { background: #475569; }
-                  </style>
-                  <script>
-                    function tryClose() {
-                      try { window.open('', '_self', ''); window.close(); } catch(e) {}
-                      try { window.close(); } catch(e) {}
-                    }
-                    tryClose();
-                  </script>
-                </head>
-                <body>
-                  <div class="card">
-                    <h2>การเข้าสู่ระบบถูกยกเลิก</h2>
-                    <p>${queryError}<br>คุณสามารถปิดแท็บนี้และกลับไปที่ Luno Note ได้</p>
-                    <button class="btn" onclick="window.close()">ปิดแท็บนี้</button>
-                  </div>
-                </body>
-                </html>
-              `);
-
-              try {
-                const allWins = BrowserWindow.getAllWindows();
-                for (const win of allWins) {
-                  if (!win.isDestroyed()) {
-                    if (win.isMinimized()) win.restore();
-                    win.setAlwaysOnTop(true);
-                    win.show();
-                    win.focus();
-                    win.setAlwaysOnTop(false);
-                  }
-                }
-                app.focus({ steal: true });
-              } catch {}
+              res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
 
               if (!isSettled) {
                 isSettled = true;
@@ -815,57 +839,8 @@ function setupIpcHandlers() {
             }
 
             if (queryCode) {
-              res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-              res.end(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Luno Note - เข้าสู่ระบบสำเร็จ</title>
-                  <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-                    .card { background: #1e293b; padding: 2.5rem 2rem; border-radius: 1.25rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); max-width: 400px; border: 1px solid #334155; }
-                    .icon { width: 56px; height: 56px; margin: 0 auto 1.25rem auto; background: rgba(38, 162, 149, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #26A295; }
-                    h2 { margin: 0 0 0.5rem 0; color: #f8fafc; font-size: 1.3rem; font-weight: 600; }
-                    p { margin: 0 0 1.5rem 0; color: #94a3b8; font-size: 0.92rem; line-height: 1.5; }
-                    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.5rem; background: #26A295; color: #ffffff; border: none; border-radius: 0.75rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background 0.2s; }
-                    .btn:hover { background: #20877c; }
-                  </style>
-                  <script>
-                    function tryClose() {
-                      try { window.open('', '_self', ''); window.close(); } catch(e) {}
-                      try { window.close(); } catch(e) {}
-                    }
-                    tryClose();
-                    setTimeout(tryClose, 300);
-                  </script>
-                </head>
-                <body>
-                  <div class="card">
-                    <div class="icon">
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                    </div>
-                    <h2>เข้าสู่ระบบสำเร็จแล้ว</h2>
-                    <p>เชื่อมต่อ Google Drive กับ Luno Note เรียบร้อยแล้ว<br>ท่านสามารถปิดแท็บนี้และกลับไปที่โปรแกรมได้เลย</p>
-                    <button class="btn" onclick="window.close()">ปิดแท็บนี้</button>
-                  </div>
-                </body>
-                </html>
-              `);
-
-              try {
-                const allWins = BrowserWindow.getAllWindows();
-                for (const win of allWins) {
-                  if (!win.isDestroyed()) {
-                    if (win.isMinimized()) win.restore();
-                    win.setAlwaysOnTop(true);
-                    win.show();
-                    win.focus();
-                    win.setAlwaysOnTop(false);
-                  }
-                }
-                app.focus({ steal: true });
-              } catch {}
+              // Immediately focus Luno Note in the foreground
+              bringAppToFront();
 
               if (!isSettled) {
                 isSettled = true;
@@ -895,12 +870,13 @@ function setupIpcHandlers() {
                   if (!tokenRes.ok) {
                     const errText = await tokenRes.text();
                     try { server.close(); } catch {}
+                    res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end(`Token exchange failed: ${errText}`);
                     reject(new Error(`Token exchange failed (${tokenRes.status}): ${errText}`));
                     return;
                   }
 
                   const tokenData = await tokenRes.json();
-                  try { server.close(); } catch {}
 
                   let userProfile = null;
                   if (tokenData.access_token) {
@@ -918,6 +894,433 @@ function setupIpcHandlers() {
                     clientId,
                   };
                   saveGdriveAuthData(authToSave);
+
+                  const safeEmail = (userProfile?.email || "Google User").replace(/[<>"']/g, "");
+                  const now = new Date();
+                  const pad = (n) => String(n).padStart(2, "0");
+                  const safeTime = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+                  // Serve the Google Drive Sync landing page matching Settings Data & Storage UI
+                  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                  res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title id="doc-title">Google Drive Sync</title>
+  <link rel="icon" type="image/png" href="/luno-logo.png">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: rgba(226, 232, 240, 0.8);
+      --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+      --foreground: #0f172a;
+      --muted-foreground: #64748b;
+      --muted-box: rgba(241, 245, 249, 0.65);
+      --muted-border: rgba(226, 232, 240, 0.75);
+      --btn-bg: #26A295;
+      --btn-hover: #1f8b7f;
+      --badge-bg: rgba(16, 185, 129, 0.1);
+      --badge-text: #059669;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f131a;
+        --card: #191d24;
+        --border: rgba(39, 48, 63, 0.8);
+        --card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        --foreground: #f1f5f9;
+        --muted-foreground: #8b97a8;
+        --muted-box: rgba(34, 41, 56, 0.5);
+        --muted-border: rgba(39, 48, 63, 0.7);
+        --btn-bg: #26A295;
+        --btn-hover: #2ea89b;
+        --badge-bg: rgba(16, 185, 129, 0.15);
+        --badge-text: #34d399;
+      }
+    }
+    body {
+      font-family: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      color: var(--foreground);
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--card-shadow);
+      width: 100%;
+      max-width: 520px;
+      padding: 28px 32px;
+      text-align: center;
+      animation: fadeIn 0.25s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card-top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .group-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted-foreground);
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 10px;
+      border-radius: 9999px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.8); }
+    }
+    .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: #10b981;
+      display: inline-block;
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    .hero-flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--muted-box);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .app-logo-img {
+      width: 26px;
+      height: 26px;
+      object-fit: contain;
+    }
+    .flow-connector {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+    }
+    .connector-line {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      border-top: 2px dashed #cbd5e1;
+      transform: translateY(-50%);
+    }
+    @media (prefers-color-scheme: dark) {
+      .connector-line { border-top-color: #334155; }
+    }
+    .check-badge {
+      position: relative;
+      z-index: 2;
+      width: 22px;
+      height: 22px;
+      background: #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(16, 185, 129, 0.35);
+    }
+    .title {
+      font-size: 18.5px;
+      font-weight: 700;
+      color: var(--foreground);
+      margin-bottom: 6px;
+      letter-spacing: -0.015em;
+    }
+    .subtitle {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--muted-foreground);
+      margin-bottom: 22px;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.25fr;
+      gap: 12px 18px;
+      padding: 16px 20px;
+      border-radius: 12px;
+      background: var(--muted-box);
+      border: 1px solid var(--muted-border);
+      margin-bottom: 22px;
+      text-align: left;
+    }
+    .info-cell {
+      min-width: 0;
+    }
+    .info-lbl {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted-foreground);
+      display: block;
+      margin-bottom: 3px;
+    }
+    .info-val {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--foreground);
+      display: block;
+      line-height: 1.4;
+    }
+    .truncate {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .location-val {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      word-break: break-word;
+    }
+    .location-link {
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.15s ease;
+    }
+    .location-link:hover {
+      color: var(--btn-bg);
+      text-decoration: underline;
+    }
+    .location-link:hover .ext-icon {
+      opacity: 1;
+    }
+    .ext-icon {
+      flex-shrink: 0;
+      opacity: 0.6;
+    }
+    .state-synced {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--badge-text);
+    }
+    .mini-green-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: #10b981;
+      display: inline-block;
+    }
+    .action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      background: var(--btn-bg);
+      color: #ffffff;
+      border: none;
+      border-radius: 12px;
+      padding: 11px 24px;
+      font-size: 13.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    .action-btn:hover {
+      background: var(--btn-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(38, 162, 149, 0.25);
+    }
+    .action-btn:active {
+      transform: translateY(0);
+    }
+    .close-hint {
+      margin-top: 12px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--muted-foreground);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      min-height: 18px;
+    }
+    .close-hint.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-top-bar">
+      <div id="lbl-group" class="group-title">Cloud Sync</div>
+      <div class="status-badge">
+        <span class="pulse-dot"></span>
+        <span id="lbl-status">Connected</span>
+      </div>
+    </div>
+
+    <div class="hero-flow">
+      <!-- Google Drive Icon matching Settings / Data & Storage -->
+      <div class="icon-box">
+        <svg viewBox="0 0 192 192" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block;">
+          <defs>
+            <clipPath id="gdrive_clip">
+              <path d="M63.09 37c14.626-25.333 51.193-25.334 65.819 0l45.033 78c14.626 25.334-3.657 57.001-32.91 57.001H50.967c-29.253 0-47.536-31.667-32.91-57.001z"/>
+            </clipPath>
+            <linearGradient id="gdrive_b" x1="193.6" x2="103.09" y1="165.6" y2="111.21" gradientUnits="userSpaceOnUse">
+              <stop offset="0.09" stop-color="#ffe921"/>
+              <stop offset="1" stop-color="#fec700"/>
+            </linearGradient>
+            <linearGradient id="gdrive_c" x1="114.4" x2="15.53" y1="181.61" y2="121.8" gradientUnits="userSpaceOnUse">
+              <stop offset="0.15" stop-color="#a9a8ff"/>
+              <stop offset="0.33" stop-color="#6d97ff"/>
+              <stop offset="0.48" stop-color="#3186ff"/>
+            </linearGradient>
+            <linearGradient id="gdrive_d" x1="128.88" x2="28.7" y1="37.88" y2="84.64" gradientUnits="userSpaceOnUse">
+              <stop offset="0.55" stop-color="#0ebc5f"/>
+              <stop offset="0.85" stop-color="#78c9ff"/>
+            </linearGradient>
+          </defs>
+          <g clip-path="url(#gdrive_clip)">
+            <path fill="url(#gdrive_b)" d="M206.905 172.02h-91.888l-19.015-32.934 45.944-79.578z"/>
+            <path fill="url(#gdrive_c)" d="M-14.919 172.006 50.04 59.494v.002L31.032 92.422h38.02L115 172.004l-129.918.001z"/>
+            <path fill="url(#gdrive_d)" d="M96.007-20.085 141.954 59.5l-19.011 32.928H31.048z"/>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Connector with Checkmark Badge -->
+      <div class="flow-connector">
+        <div class="connector-line"></div>
+        <div class="check-badge">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Luno Note Icon Box -->
+      <div class="icon-box">
+        <img src="/luno-logo.png" width="26" height="26" alt="Luno Note" class="app-logo-img" />
+      </div>
+    </div>
+
+    <h2 id="title" class="title">ซิงค์กับ Google Drive สำเร็จแล้ว!</h2>
+    <p id="subtitle" class="subtitle">โน้ตของคุณถูกอัปเดตเรียบร้อยแล้ว<br>ทุกการเปลี่ยนแปลงถูกบันทึกและซิงค์ไปยัง Google Drive อัตโนมัติ</p>
+
+    <!-- 2x2 Info Grid matching Settings / Data & Storage -->
+    <div class="info-grid">
+      <div class="info-cell">
+        <span id="lbl-account" class="info-lbl">บัญชีผู้ใช้</span>
+        <span class="info-val truncate" title="${safeEmail}">${safeEmail}</span>
+      </div>
+      <div class="info-cell">
+        <span id="lbl-location" class="info-lbl">ตำแหน่งจัดเก็บ</span>
+        <a href="https://drive.google.com" target="_blank" rel="noopener noreferrer" class="info-val location-val location-link" title="Google Drive / Luno / Workspaces">
+          <span>Google Drive / Luno / Workspaces</span>
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ext-icon">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
+      </div>
+      <div class="info-cell">
+        <span id="lbl-synced" class="info-lbl">ซิงค์ล่าสุด</span>
+        <span id="val-synced" class="info-val">${safeTime}</span>
+      </div>
+      <div class="info-cell">
+        <span id="lbl-sync-state" class="info-lbl">สถานะการซิงค์</span>
+        <span class="info-val state-synced">
+          <span class="mini-green-dot"></span>
+          <span id="val-sync-state">ซิงค์แล้ว</span>
+        </span>
+      </div>
+    </div>
+
+    <button id="btn-back" class="action-btn">
+      <span id="btn-text">กลับไปยัง Luno Note</span>
+    </button>
+    <p id="close-hint" class="close-hint"></p>
+  </div>
+
+  <script>
+    document.title = "Google Drive Sync";
+    const isThai = (navigator.language || navigator.userLanguage || "").toLowerCase().startsWith("th");
+    if (!isThai) {
+      document.getElementById("lbl-group").textContent = "CLOUD SYNC";
+      document.getElementById("lbl-status").textContent = "Connected";
+      document.getElementById("title").textContent = "Synced with Google Drive Successfully!";
+      document.getElementById("subtitle").innerHTML = "Your notes are now updated.<br>All changes are automatically saved and synced to Google Drive.";
+      document.getElementById("lbl-account").textContent = "ACCOUNT";
+      document.getElementById("lbl-location").textContent = "LOCATION";
+      document.getElementById("lbl-synced").textContent = "LAST SYNCED";
+      document.getElementById("lbl-sync-state").textContent = "SYNC STATE";
+      document.getElementById("val-sync-state").textContent = "Synced";
+      document.getElementById("btn-text").textContent = "Return to Luno Note";
+    }
+
+    document.getElementById("btn-back").addEventListener("click", function() {
+      fetch("/focus").catch(function() {});
+      var btn = document.getElementById("btn-back");
+      var btnText = document.getElementById("btn-text");
+      var hint = document.getElementById("close-hint");
+      if (btn) btn.style.opacity = "0.85";
+      if (btnText) {
+        btnText.textContent = isThai ? "✓ สลับไปยัง Luno Note แล้ว" : "✓ Switched to Luno Note";
+      }
+      if (hint) {
+        hint.textContent = isThai
+          ? "สลับหน้าต่างไปยัง Luno Note เรียบร้อยแล้ว หากแท็บนี้ไม่ปิดโดยอัตโนมัติ คุณสามารถปิดแท็บนี้ได้ด้วยตนเอง"
+          : "Switched to Luno Note window. You can safely close this tab now.";
+        hint.classList.add("visible");
+      }
+      try {
+        window.open("", "_self", "");
+        window.close();
+      } catch (e) {}
+    });
+  </script>
+</body>
+</html>`);
+
+                  // Allow 30 seconds for the user to interact with the button before closing server
+                  setTimeout(() => {
+                    try { server.close(); } catch {}
+                  }, 30000);
 
                   resolve({
                     access_token: tokenData.access_token,
