@@ -5099,6 +5099,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
         };
 
+        const electronAPI = (window as unknown as {
+          electronAPI?: {
+            hasClipboardImage?: () => boolean;
+            readClipboardImageSync?: () => { hasImage: boolean; dataUrl: string | null };
+            readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }>;
+          };
+        })?.electronAPI;
+
+        // 1. In Electron, check synchronous clipboard first if it has an image
+        // (handles screenshots, Snipping Tool, images copied from web browsers / apps)
+        if (electronAPI?.readClipboardImageSync) {
+          try {
+            const clip = electronAPI.readClipboardImageSync();
+            if (clip?.hasImage && clip.dataUrl) {
+              event.preventDefault();
+              void (async () => {
+                try {
+                  const res = await fetch(clip.dataUrl!);
+                  const blob = await res.blob();
+                  const file = new File([blob], "image.png", { type: blob.type || "image/png" });
+                  void processAndInsertImageFileRef.current?.(file);
+                } catch (err) {
+                  console.warn("Failed reading sync clipboard image on paste:", err);
+                }
+              })();
+              return true;
+            }
+          } catch (err) {
+            console.warn("readClipboardImageSync error:", err);
+          }
+        }
+
         if (event.clipboardData) {
           const files = event.clipboardData.files;
           if (files && files.length > 0) {
@@ -5126,12 +5158,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }
 
-          // Fallback: If no image file was found directly in clipboardData and there's no plain text, check native Electron clipboard
+          // Fallback: If async clipboard is available and no plain text, check native Electron clipboard
           const plainText = event.clipboardData.getData("text/plain") || "";
-          const htmlText = event.clipboardData.getData("text/html") || "";
-
-          const electronAPI = (window as unknown as { electronAPI?: { readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }> } })?.electronAPI;
-          if (electronAPI?.readClipboardImage && !plainText.trim() && !htmlText.trim()) {
+          if (electronAPI?.readClipboardImage && !plainText.trim()) {
             event.preventDefault();
             void (async () => {
               try {

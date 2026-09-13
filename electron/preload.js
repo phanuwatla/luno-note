@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, clipboard } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   isElectron: true,
@@ -59,6 +59,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clearGdriveAuth: () => ipcRenderer.invoke("clear-gdrive-auth"),
   googleFetchProfile: (token) => ipcRenderer.invoke("google-fetch-profile", token),
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
+  hasClipboardImage: () => {
+    try {
+      return !clipboard.readImage().isEmpty();
+    } catch {
+      return false;
+    }
+  },
+  readClipboardImageSync: () => {
+    try {
+      const img = clipboard.readImage();
+      if (!img.isEmpty()) {
+        const size = img.getSize();
+        return { hasImage: true, dataUrl: img.toDataURL(), width: size.width, height: size.height };
+      }
+    } catch (e) {
+      console.warn("readClipboardImageSync error:", e);
+    }
+    return { hasImage: false, dataUrl: null };
+  },
   googleOAuthLogin: (clientId) => ipcRenderer.invoke("google-oauth-login", clientId),
   googleOAuthRefresh: (payload) => ipcRenderer.invoke("google-oauth-refresh", payload),
   googleOAuthLogout: (token) => ipcRenderer.invoke("google-oauth-logout", token),
