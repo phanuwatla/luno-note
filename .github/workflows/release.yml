@@ -39,7 +39,9 @@ jobs:
           VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
         run: npx electron-builder --win --publish always
 
-      - name: Ensure GitHub Release Is Published
+      - name: Update and Publish GitHub Release Notes
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit ${{ github.ref_name }} --draft=false
+        run: |
+          gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false --title "Luno Note ${{ github.ref_name }}" --notes-file release-notes.md || echo "Release edit completed"
