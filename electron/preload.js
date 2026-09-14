@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
     return { hasImage: false, dataUrl: null };
   },
-  googleOAuthLogin: (clientId) => ipcRenderer.invoke("google-oauth-login", clientId),
+  googleOAuthLogin: (payload) => ipcRenderer.invoke("google-oauth-login", payload),
   googleOAuthRefresh: (payload) => ipcRenderer.invoke("google-oauth-refresh", payload),
   googleOAuthLogout: (token) => ipcRenderer.invoke("google-oauth-logout", token),
   fetchTtsAudio: (data) => ipcRenderer.invoke("fetch-tts-audio", data),
