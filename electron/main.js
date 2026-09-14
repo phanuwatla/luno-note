@@ -13,6 +13,7 @@ const crypto = require("crypto");
 const http = require("http");
 const url = require("url");
 const { getSpellingSuggestions } = require("./spellDictionary");
+const { exec } = require("child_process");
 
 // Prevent multiple Electron instances from locking user data cache and freezing
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -91,6 +92,69 @@ async function fetchGoogleUserProfileFromMain(accessToken) {
     console.warn("Main process failed to fetch Google user profile:", err);
   }
   return null;
+}
+
+async function resolveWorkspacesFolderId(accessToken) {
+  if (!accessToken) return null;
+  try {
+    // 1. Search for root folder "Luno"
+    const qRoot = "name = 'Luno' and mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+    const resRoot = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qRoot)}&fields=files(id,name)&pageSize=5`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resRoot.ok) return null;
+    const rootData = await resRoot.json();
+    let rootId = rootData.files?.[0]?.id;
+    if (!rootId) {
+      const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Luno",
+          mimeType: "application/vnd.google-apps.folder",
+        }),
+      });
+      if (createRes.ok) {
+        const cData = await createRes.json();
+        rootId = cData.id;
+      }
+    }
+    if (!rootId) return null;
+
+    // 2. Search for "Workspaces" inside "Luno"
+    const qWs = `'${rootId}' in parents and name = 'Workspaces' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const resWs = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(qWs)}&fields=files(id,name)&pageSize=5`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resWs.ok) return rootId;
+    const wsData = await resWs.json();
+    let workspacesId = wsData.files?.[0]?.id;
+    if (!workspacesId) {
+      const createWs = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Workspaces",
+          parents: [rootId],
+          mimeType: "application/vnd.google-apps.folder",
+        }),
+      });
+      if (createWs.ok) {
+        const cwData = await createWs.json();
+        workspacesId = cwData.id;
+      }
+    }
+    return workspacesId || rootId;
+  } catch (err) {
+    console.warn("Main process failed to resolve Workspaces folder ID:", err);
+    return null;
+  }
 }
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
@@ -706,33 +770,83 @@ function setupIpcHandlers() {
     return profile;
   });
 
-  ipcMain.handle("read-clipboard-image", () => {
+  const getClipboardImagePayload = () => {
     try {
+      // 1. Direct image from system clipboard (Snipping tool, PrintScreen, web browser "Copy Image", etc.)
       const img = clipboard.readImage();
       if (!img.isEmpty()) {
-        const dataUrl = img.toDataURL();
         const size = img.getSize();
-        return { hasImage: true, dataUrl, width: size.width, height: size.height };
+        return {
+          hasImage: true,
+          dataUrl: img.toDataURL(),
+          width: size.width,
+          height: size.height,
+        };
+      }
+
+      // 2. Copied image file from Windows File Explorer
+      if (process.platform === "win32") {
+        let filePath = "";
+        try {
+          const bufW = clipboard.readBuffer("FileNameW");
+          if (bufW && bufW.length > 0) {
+            filePath = bufW.toString("utf16le").replace(/\0.*$/, "").trim();
+          }
+        } catch {}
+        if (!filePath) {
+          try {
+            const bufA = clipboard.readBuffer("FileName");
+            if (bufA && bufA.length > 0) {
+              filePath = bufA.toString("utf8").replace(/\0.*$/, "").trim();
+            }
+          } catch {}
+        }
+        if (!filePath) {
+          try {
+            const text = clipboard.readText().trim();
+            if (/^[a-zA-Z]:\\.+\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(text)) {
+              filePath = text;
+            }
+          } catch {}
+        }
+
+        if (filePath && fs.existsSync(filePath)) {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const ext = path.extname(filePath).toLowerCase().replace(".", "");
+            const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff", "avif"];
+            if (imageExts.includes(ext)) {
+              const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+                : ext === "png" ? "image/png"
+                : ext === "webp" ? "image/webp"
+                : ext === "gif" ? "image/gif"
+                : ext === "svg" ? "image/svg+xml"
+                : ext === "bmp" ? "image/bmp"
+                : `image/${ext}`;
+              const fileData = fs.readFileSync(filePath);
+              const dataUrl = `data:${mime};base64,${fileData.toString("base64")}`;
+              return {
+                hasImage: true,
+                dataUrl,
+                fileName: path.basename(filePath),
+                filePath,
+              };
+            }
+          }
+        }
       }
     } catch (err) {
-      console.warn("Failed reading image from clipboard:", err);
+      console.warn("getClipboardImagePayload error:", err);
     }
     return { hasImage: false, dataUrl: null };
+  };
+
+  ipcMain.handle("read-clipboard-image", async () => {
+    return getClipboardImagePayload();
   });
 
   ipcMain.on("read-clipboard-image-sync", (event) => {
-    try {
-      const img = clipboard.readImage();
-      if (!img.isEmpty()) {
-        const dataUrl = img.toDataURL();
-        const size = img.getSize();
-        event.returnValue = { hasImage: true, dataUrl, width: size.width, height: size.height };
-        return;
-      }
-    } catch (err) {
-      console.warn("Failed reading image synchronously from clipboard:", err);
-    }
-    event.returnValue = { hasImage: false, dataUrl: null };
+    event.returnValue = getClipboardImagePayload();
   });
 
   const unpackCredential = (bytes, key = 42) => {
@@ -763,6 +877,43 @@ function setupIpcHandlers() {
     }
     return { clientId, clientSecret };
   }
+
+  let cachedLunoLogoDataUrl = "";
+  function getLunoLogoDataUrl() {
+    if (cachedLunoLogoDataUrl) return cachedLunoLogoDataUrl;
+    const candidates = [
+      path.join(__dirname, "luno-logo.png"),
+      path.join(__dirname, "../dist/luno-logo.png"),
+      path.join(__dirname, "../public/luno-logo.png"),
+      path.join(__dirname, "../src/assets/luno-logo.png"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        try {
+          const buf = fs.readFileSync(c);
+          cachedLunoLogoDataUrl = `data:image/png;base64,${buf.toString("base64")}`;
+          return cachedLunoLogoDataUrl;
+        } catch {}
+      }
+    }
+    return "/luno-logo.png";
+  }
+
+  let currentSyncState = {
+    status: "idle",
+    lastSyncedAt: null,
+    folderStructure: null,
+  };
+
+  ipcMain.handle("update-sync-state", async (_event, payload) => {
+    if (payload) {
+      currentSyncState = {
+        ...currentSyncState,
+        ...payload,
+      };
+    }
+    return { ok: true };
+  });
 
   ipcMain.handle("google-oauth-login", async (event, payload) => {
     const { clientId, clientSecret } = resolveGoogleOAuthCredentials(payload);
@@ -798,6 +949,68 @@ function setupIpcHandlers() {
         } catch {}
       };
 
+      const getCloseTabExePath = () => {
+        const directPath = path.join(__dirname, "closeTab.exe");
+        const unpackedPath = directPath.replace("app.asar", "app.asar.unpacked");
+        if (fs.existsSync(unpackedPath)) return unpackedPath;
+        if (!directPath.includes("app.asar") && fs.existsSync(directPath)) return directPath;
+        try {
+          const userDataPath = app.getPath("userData");
+          const extractedPath = path.join(userDataPath, "closeTab.exe");
+          if (fs.existsSync(directPath)) {
+            const content = fs.readFileSync(directPath);
+            let shouldWrite = true;
+            if (fs.existsSync(extractedPath)) {
+              try {
+                if (fs.readFileSync(extractedPath).equals(content)) shouldWrite = false;
+              } catch {}
+            }
+            if (shouldWrite) {
+              fs.writeFileSync(extractedPath, content);
+            }
+            return extractedPath;
+          }
+        } catch {}
+        return directPath;
+      };
+
+      const closeActiveBrowserTabAndFocusApp = () => {
+        if (process.platform === "win32") {
+          try {
+            const exePath = getCloseTabExePath();
+            if (fs.existsSync(exePath)) {
+              const child = require("child_process").spawn(exePath, [], {
+                windowsHide: true,
+                stdio: "ignore",
+                detached: false,
+              });
+              child.on("close", () => {
+                setTimeout(() => {
+                  bringAppToFront();
+                }, 150);
+              });
+              child.on("error", () => {
+                bringAppToFront();
+              });
+            } else {
+              bringAppToFront();
+            }
+          } catch {
+            bringAppToFront();
+          }
+        } else if (process.platform === "darwin") {
+          try {
+            exec('osascript -e \'tell application "System Events" to keystroke "w" using command down\'', () => {
+              setTimeout(() => { bringAppToFront(); }, 200);
+            });
+          } catch {
+            bringAppToFront();
+          }
+        } else {
+          bringAppToFront();
+        }
+      };
+
       const server = http.createServer(async (req, res) => {
         try {
           const parsedUrl = url.parse(req.url, true);
@@ -821,27 +1034,38 @@ function setupIpcHandlers() {
           }
 
           if (parsedUrl.pathname === "/luno-logo.png" || parsedUrl.pathname === "/favicon.png") {
-            const logoPath = path.join(__dirname, "../public/luno-logo.png");
-            if (fs.existsSync(logoPath)) {
-              res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
-              res.end(fs.readFileSync(logoPath));
-              return;
-            }
-            const altLogo = path.join(__dirname, "../src/assets/luno-logo.png");
-            if (fs.existsSync(altLogo)) {
-              res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
-              res.end(fs.readFileSync(altLogo));
-              return;
+            const candidates = [
+              path.join(__dirname, "luno-logo.png"),
+              path.join(__dirname, "../dist/luno-logo.png"),
+              path.join(__dirname, "../public/luno-logo.png"),
+              path.join(__dirname, "../src/assets/luno-logo.png"),
+            ];
+            for (const c of candidates) {
+              if (fs.existsSync(c)) {
+                res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+                res.end(fs.readFileSync(c));
+                return;
+              }
             }
             res.writeHead(404);
             res.end();
             return;
           }
 
-          if (parsedUrl.pathname === "/focus") {
-            bringAppToFront();
+          if (parsedUrl.pathname === "/sync-status") {
+            res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
+            res.end(JSON.stringify({
+              status: currentSyncState.status || "synced",
+              lastSyncedAt: currentSyncState.lastSyncedAt || Date.now(),
+              folderId: currentSyncState.folderStructure?.workspacesId || currentSyncState.folderStructure?.projectId || currentSyncState.folderStructure?.rootId || null,
+            }));
+            return;
+          }
+
+          if (parsedUrl.pathname === "/focus" || parsedUrl.pathname === "/close-tab") {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
+            closeActiveBrowserTabAndFocusApp();
             return;
           }
 
@@ -863,9 +1087,6 @@ function setupIpcHandlers() {
             }
 
             if (queryCode) {
-              // Immediately focus Luno Note in the foreground
-              bringAppToFront();
-
               if (!isSettled) {
                 isSettled = true;
                 try {
@@ -919,10 +1140,41 @@ function setupIpcHandlers() {
                   };
                   saveGdriveAuthData(authToSave);
 
+                  // Resolve target Google Drive Workspaces folder ID
+                  let targetFolderId = currentSyncState.folderStructure?.workspacesId || currentSyncState.folderStructure?.projectId || currentSyncState.folderStructure?.rootId;
+                  if (!targetFolderId && tokenData.access_token) {
+                    targetFolderId = await resolveWorkspacesFolderId(tokenData.access_token);
+                    if (targetFolderId) {
+                      currentSyncState.folderStructure = {
+                        ...(currentSyncState.folderStructure || {}),
+                        workspacesId: targetFolderId,
+                      };
+                    }
+                  }
+                  const safeDriveUrl = targetFolderId
+                    ? `https://drive.google.com/drive/folders/${targetFolderId}`
+                    : "https://drive.google.com";
+
+                  const logoDataUrl = getLunoLogoDataUrl();
                   const safeEmail = (userProfile?.email || "Google User").replace(/[<>"']/g, "");
-                  const now = new Date();
-                  const pad = (n) => String(n).padStart(2, "0");
-                  const safeTime = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                  const initialTime = currentSyncState.lastSyncedAt
+                    ? new Date(currentSyncState.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+                    : (() => {
+                        const now = new Date();
+                        const pad = (n) => String(n).padStart(2, "0");
+                        return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                      })();
+
+                  const initialStatusMap = {
+                    synced: "ซิงค์แล้ว",
+                    idle: "พร้อมทำงาน",
+                    syncing: "กำลังซิงค์...",
+                    saving: "กำลังบันทึก...",
+                    offline: "ออฟไลน์",
+                    error: "เกิดข้อผิดพลาด",
+                  };
+                  const initialStatusText = initialStatusMap[currentSyncState.status] || "ซิงค์แล้ว";
+                  const initialStatusColor = currentSyncState.status === "syncing" ? "#26A295" : (currentSyncState.status === "saving" ? "#f59e0b" : "#10b981");
 
                   // Serve the Google Drive Sync landing page matching Settings Data & Storage UI
                   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -932,8 +1184,8 @@ function setupIpcHandlers() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title id="doc-title">Google Drive Sync</title>
-  <link rel="icon" type="image/png" href="/luno-logo.png">
-  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" href="${logoDataUrl}">
+  <link rel="shortcut icon" href="${logoDataUrl}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -987,7 +1239,7 @@ function setupIpcHandlers() {
       box-shadow: var(--card-shadow);
       width: 100%;
       max-width: 520px;
-      padding: 28px 32px;
+      padding: 28px 32px 26px 32px;
       text-align: center;
       animation: fadeIn 0.25s ease-out;
     }
@@ -1110,6 +1362,7 @@ function setupIpcHandlers() {
     }
     .info-cell {
       min-width: 0;
+      position: relative;
     }
     .info-lbl {
       font-size: 10.5px;
@@ -1139,13 +1392,16 @@ function setupIpcHandlers() {
       word-break: break-word;
     }
     .location-link {
-      text-decoration: none;
+      text-decoration: none !important;
       cursor: pointer;
       transition: color 0.15s ease;
+      color: var(--foreground);
     }
-    .location-link:hover {
+    .location-link:hover,
+    .location-link:focus,
+    .location-link:active {
+      text-decoration: none !important;
       color: var(--btn-bg);
-      text-decoration: underline;
     }
     .location-link:hover .ext-icon {
       opacity: 1;
@@ -1155,18 +1411,54 @@ function setupIpcHandlers() {
       opacity: 0.6;
     }
     .state-synced {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      color: var(--badge-text);
-    }
-    .mini-green-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background-color: #10b981;
       display: inline-block;
+      color: var(--badge-text);
+      transition: color 0.15s ease;
     }
+
+    /* In-app styled tooltips (replacing native browser title tooltips) */
+    .tooltip-container {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      width: 100%;
+    }
+    .app-tooltip {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      background: var(--card);
+      color: var(--foreground);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.3;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-2px);
+      transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+      z-index: 100;
+    }
+    @media (prefers-color-scheme: dark) {
+      .app-tooltip {
+        background: #1e242d;
+        border-color: #334155;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+        color: #f1f5f9;
+      }
+    }
+    .tooltip-container:hover .app-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
     .action-btn {
       display: flex;
       align-items: center;
@@ -1175,6 +1467,7 @@ function setupIpcHandlers() {
       background: var(--btn-bg);
       color: #ffffff;
       border: none;
+      outline: none !important;
       border-radius: 12px;
       padding: 11px 24px;
       font-size: 13.5px;
@@ -1182,6 +1475,15 @@ function setupIpcHandlers() {
       font-family: inherit;
       cursor: pointer;
       transition: all 0.15s ease;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      margin: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .action-btn:focus,
+    .action-btn:focus-visible,
+    .action-btn:active {
+      outline: none !important;
       box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     }
     .action-btn:hover {
@@ -1191,18 +1493,6 @@ function setupIpcHandlers() {
     }
     .action-btn:active {
       transform: translateY(0);
-    }
-    .close-hint {
-      margin-top: 12px;
-      font-size: 11.5px;
-      line-height: 1.5;
-      color: var(--muted-foreground);
-      opacity: 0;
-      transition: opacity 0.2s ease;
-      min-height: 18px;
-    }
-    .close-hint.visible {
-      opacity: 1;
     }
   </style>
 </head>
@@ -1256,9 +1546,9 @@ function setupIpcHandlers() {
         </div>
       </div>
 
-      <!-- Luno Note Icon Box -->
+      <!-- Luno Note Icon Box with Inlined Logo -->
       <div class="icon-box">
-        <img src="/luno-logo.png" width="26" height="26" alt="Luno Note" class="app-logo-img" />
+        <img src="${logoDataUrl}" width="26" height="26" alt="Luno Note" class="app-logo-img" />
       </div>
     </div>
 
@@ -1269,41 +1559,43 @@ function setupIpcHandlers() {
     <div class="info-grid">
       <div class="info-cell">
         <span id="lbl-account" class="info-lbl">บัญชีผู้ใช้</span>
-        <span class="info-val truncate" title="${safeEmail}">${safeEmail}</span>
+        <div class="tooltip-container">
+          <span class="info-val truncate">${safeEmail}</span>
+          <div class="app-tooltip">${safeEmail}</div>
+        </div>
       </div>
       <div class="info-cell">
         <span id="lbl-location" class="info-lbl">ตำแหน่งจัดเก็บ</span>
-        <a href="https://drive.google.com" target="_blank" rel="noopener noreferrer" class="info-val location-val location-link" title="Google Drive / Luno / Workspaces">
-          <span>Google Drive / Luno / Workspaces</span>
-          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ext-icon">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-            <polyline points="15 3 21 3 21 9"></polyline>
-            <line x1="10" y1="14" x2="21" y2="3"></line>
-          </svg>
-        </a>
+        <div class="tooltip-container">
+          <a id="link-location" href="${safeDriveUrl}" target="_blank" rel="noopener noreferrer" class="info-val location-val location-link">
+            <span class="truncate">Google Drive / Luno / Workspaces</span>
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ext-icon">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+          <div class="app-tooltip">Google Drive / Luno / Workspaces</div>
+        </div>
       </div>
       <div class="info-cell">
         <span id="lbl-synced" class="info-lbl">ซิงค์ล่าสุด</span>
-        <span id="val-synced" class="info-val">${safeTime}</span>
+        <span id="val-synced" class="info-val">${initialTime}</span>
       </div>
       <div class="info-cell">
         <span id="lbl-sync-state" class="info-lbl">สถานะการซิงค์</span>
-        <span class="info-val state-synced">
-          <span class="mini-green-dot"></span>
-          <span id="val-sync-state">ซิงค์แล้ว</span>
-        </span>
+        <span id="val-sync-state" class="info-val state-synced" style="color: ${initialStatusColor};">${initialStatusText}</span>
       </div>
     </div>
 
     <button id="btn-back" class="action-btn">
       <span id="btn-text">กลับไปยัง Luno Note</span>
     </button>
-    <p id="close-hint" class="close-hint"></p>
   </div>
 
   <script>
     document.title = "Google Drive Sync";
-    const isThai = (navigator.language || navigator.userLanguage || "").toLowerCase().startsWith("th");
+    var isThai = (navigator.language || navigator.userLanguage || "").toLowerCase().startsWith("th");
     if (!isThai) {
       document.getElementById("lbl-group").textContent = "CLOUD SYNC";
       document.getElementById("lbl-status").textContent = "Connected";
@@ -1313,29 +1605,73 @@ function setupIpcHandlers() {
       document.getElementById("lbl-location").textContent = "LOCATION";
       document.getElementById("lbl-synced").textContent = "LAST SYNCED";
       document.getElementById("lbl-sync-state").textContent = "SYNC STATE";
-      document.getElementById("val-sync-state").textContent = "Synced";
+      var initialEnMap = {
+        synced: "Synced",
+        idle: "Idle",
+        syncing: "Syncing...",
+        saving: "Saving...",
+        offline: "Offline",
+        error: "Error"
+      };
+      var currStatus = "${currentSyncState.status || "synced"}";
+      document.getElementById("val-sync-state").textContent = initialEnMap[currStatus] || "Synced";
       document.getElementById("btn-text").textContent = "Return to Luno Note";
     }
 
+    function updateSyncDisplay(status, lastSyncedAt, folderId) {
+      if (lastSyncedAt) {
+        var d = new Date(lastSyncedAt);
+        var pad = function(n) { return String(n).padStart(2, "0"); };
+        var timeStr = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+        var elSynced = document.getElementById("val-synced");
+        if (elSynced) elSynced.textContent = timeStr;
+      }
+      var elState = document.getElementById("val-sync-state");
+      if (elState) {
+        var stateMap = {
+          synced: { text: isThai ? "ซิงค์แล้ว" : "Synced", color: "#10b981" },
+          idle: { text: isThai ? "พร้อมทำงาน" : "Idle", color: "#10b981" },
+          syncing: { text: isThai ? "กำลังซิงค์..." : "Syncing...", color: "#26A295" },
+          saving: { text: isThai ? "กำลังบันทึก..." : "Saving...", color: "#f59e0b" },
+          offline: { text: isThai ? "ออฟไลน์" : "Offline", color: "#94a3b8" },
+          error: { text: isThai ? "เกิดข้อผิดพลาด" : "Error", color: "#ef4444" }
+        };
+        var conf = stateMap[status] || stateMap.synced;
+        elState.textContent = conf.text;
+        elState.style.color = conf.color;
+      }
+      if (folderId) {
+        var link = document.getElementById("link-location");
+        if (link) {
+          link.href = "https://drive.google.com/drive/folders/" + folderId;
+        }
+      }
+    }
+
+    // Live sync status updates
+    var pollInterval = setInterval(function() {
+      fetch("/sync-status")
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data) {
+            updateSyncDisplay(data.status, data.lastSyncedAt, data.folderId);
+          }
+        })
+        .catch(function() {});
+    }, 1000);
+
     document.getElementById("btn-back").addEventListener("click", function() {
-      fetch("/focus").catch(function() {});
+      clearInterval(pollInterval);
       var btn = document.getElementById("btn-back");
       var btnText = document.getElementById("btn-text");
-      var hint = document.getElementById("close-hint");
       if (btn) btn.style.opacity = "0.85";
+      if (btn) btn.style.pointerEvents = "none";
       if (btnText) {
         btnText.textContent = isThai ? "✓ สลับไปยัง Luno Note แล้ว" : "✓ Switched to Luno Note";
       }
-      if (hint) {
-        hint.textContent = isThai
-          ? "สลับหน้าต่างไปยัง Luno Note เรียบร้อยแล้ว หากแท็บนี้ไม่ปิดโดยอัตโนมัติ คุณสามารถปิดแท็บนี้ได้ด้วยตนเอง"
-          : "Switched to Luno Note window. You can safely close this tab now.";
-        hint.classList.add("visible");
-      }
-      try {
-        window.open("", "_self", "");
-        window.close();
-      } catch (e) {}
+
+      // Tell Electron main process to send OS-level Ctrl+W to close this browser tab and focus app
+      fetch("/close-tab").catch(function() {});
     });
   </script>
 </body>

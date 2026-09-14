@@ -61,9 +61,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
   hasClipboardImage: () => {
     try {
-      return !clipboard.readImage().isEmpty();
+      const res = ipcRenderer.sendSync("read-clipboard-image-sync");
+      return !!res?.hasImage;
     } catch {
-      return false;
+      try {
+        return !clipboard.readImage().isEmpty();
+      } catch {
+        return false;
+      }
     }
   },
   readClipboardImageSync: () => {
@@ -89,6 +94,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   googleOAuthLogin: (payload) => ipcRenderer.invoke("google-oauth-login", payload),
   googleOAuthRefresh: (payload) => ipcRenderer.invoke("google-oauth-refresh", payload),
   googleOAuthLogout: (token) => ipcRenderer.invoke("google-oauth-logout", token),
+  updateSyncState: (payload) => ipcRenderer.invoke("update-sync-state", payload),
   fetchTtsAudio: (data) => ipcRenderer.invoke("fetch-tts-audio", data),
   getOsUserInfo: () => ipcRenderer.invoke("get-os-user-info"),
   onWorkspaceChanged: (callback) => {

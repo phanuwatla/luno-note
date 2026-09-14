@@ -162,6 +162,18 @@ class GoogleDriveSyncEngine {
   private updateState(partial: Partial<GoogleDriveSyncState>) {
     this.state = { ...this.state, ...partial };
     this.listeners.forEach((l) => l(this.state));
+    try {
+      const electronAPI = (window as unknown as { electronAPI?: { updateSyncState?: (payload: any) => Promise<any> } })?.electronAPI;
+      if (electronAPI?.updateSyncState) {
+        electronAPI.updateSyncState({
+          status: this.state.status,
+          lastSyncedAt: this.state.lastSyncedAt,
+          folderStructure: this.state.folderStructure,
+        }).catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
   }
 
   public async initializeSync(): Promise<LunoFolderStructure | null> {

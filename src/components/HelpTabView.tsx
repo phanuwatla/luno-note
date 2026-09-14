@@ -654,7 +654,7 @@ export default function HelpTabView({
                       <div className="pt-2 border-t border-border/30 space-y-1.5">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
-                          <span className="font-mono font-semibold text-foreground">{appUpdate.progress.percent}%</span>
+                          <span className="font-semibold text-foreground">{appUpdate.progress.percent}%</span>
                         </div>
                         <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                           <div

@@ -5063,6 +5063,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
         };
 
+        const coordinates = _view.posAtCoords({ left: event.clientX, top: event.clientY });
+        if (coordinates) {
+          editorSelectionRef.current = { from: coordinates.pos, to: coordinates.pos };
+        }
+
         if (event.dataTransfer) {
           const files = event.dataTransfer.files;
           if (files && files.length > 0) {
@@ -5112,12 +5117,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         };
 
         // 1. First priority in Electron: Synchronous native clipboard check
-        // Instantly captures Windows Snipping Tool (Win+Shift+S), PrintScreen, and images copied from anywhere
+        // Instantly captures Windows Snipping Tool (Win+Shift+S), PrintScreen, browser copied images, and copied image files from Windows Explorer
         const electronAPI = (window as unknown as {
           electronAPI?: {
             hasClipboardImage?: () => boolean;
-            readClipboardImageSync?: () => { hasImage: boolean; dataUrl: string | null };
-            readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null }>;
+            readClipboardImageSync?: () => { hasImage: boolean; dataUrl: string | null; fileName?: string };
+            readClipboardImage?: () => Promise<{ hasImage: boolean; dataUrl: string | null; fileName?: string }>;
           };
         })?.electronAPI;
 
@@ -5126,7 +5131,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             const clip = electronAPI.readClipboardImageSync();
             if (clip?.hasImage && clip.dataUrl) {
               event.preventDefault();
-              invokeImagePaste({ dataUrl: clip.dataUrl });
+              invokeImagePaste({ dataUrl: clip.dataUrl, fileName: clip.fileName });
               return true;
             }
           } catch (err) {
@@ -5161,6 +5166,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
           }
+
+          // 2.1 Check if clipboard contains copied HTML with data URL or remote image tag and no plain text
+          const plainText = event.clipboardData.getData("text/plain") || "";
+          const html = event.clipboardData.getData("text/html") || "";
+          if (html && !plainText.trim()) {
+            const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+            if (match && match[1]) {
+              const src = match[1];
+              if (src.startsWith("data:image/")) {
+                event.preventDefault();
+                invokeImagePaste({ dataUrl: src });
+                return true;
+              }
+            }
+          }
         }
 
         // 3. Fallback: If async clipboard is available and no plain text, check native Electron clipboard
@@ -5172,7 +5192,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               try {
                 const clipImg = await electronAPI.readClipboardImage();
                 if (clipImg?.hasImage && clipImg.dataUrl) {
-                  invokeImagePaste({ dataUrl: clipImg.dataUrl });
+                  invokeImagePaste({ dataUrl: clipImg.dataUrl, fileName: clipImg.fileName });
                 }
               } catch (err) {
                 console.warn("Failed reading native clipboard image on paste:", err);
@@ -6505,44 +6525,113 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const insertImageToEditor = (attrs: { src: string; alt?: string; "data-relative-src"?: string; width?: number | null }): boolean => {
     if (!editor) return false;
 
-    // 1. Try normal focused chain setImage first
-    const chain = getFocusedChain();
-    if (chain) {
+    // 1. Focus editor and check selection
+    if (!editor.isFocused) {
+      editor.commands.focus();
+    }
+
+    const savedSelection = editorSelectionRef.current;
+    if (savedSelection) {
+      const docSize = editor.state.doc.content.size;
+      const { from, to } = savedSelection;
+      if (typeof from === "number" && typeof to === "number" && from >= 0 && to <= docSize && from <= to) {
+        editor.commands.setTextSelection({ from, to });
+      }
+      editorSelectionRef.current = null;
+    }
+
+    const { state } = editor;
+    const { selection } = state;
+    const { $from } = selection;
+    const parentNode = $from.parent;
+
+    // 2. If inside a node that only accepts inline content (heading or codeBlock)
+    if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
       try {
-        const success = chain.setImage(attrs as any).run();
+        const afterPos = $from.after();
+        const success = editor.chain().focus().insertContentAt(afterPos, [
+          { type: "image", attrs },
+          { type: "paragraph" },
+        ]).run();
         if (success) return true;
-      } catch (e) {
-        console.warn("chain.setImage error:", e);
+      } catch (err) {
+        console.warn("insertContentAt after heading/codeBlock failed:", err);
       }
     }
 
-    // 2. If chain.setImage failed or returned false (e.g. cursor inside heading, codeBlock, or list)
-    try {
-      const { selection } = editor.state;
-      const { $from } = selection;
-      const parentNode = $from.parent;
-
-      // In Tiptap, Image is a block node. A heading or codeBlock only accepts inline content.
-      if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
-        const afterPos = $from.after();
-        editor.commands.insertContentAt(afterPos, [
+    // 3. If inside an empty paragraph, replace it directly
+    if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
+      try {
+        const fromPos = $from.before();
+        const toPos = $from.after();
+        const success = editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
           { type: "image", attrs },
           { type: "paragraph" },
-        ]);
+        ]).run();
+        if (success) return true;
+      } catch (err) {
+        console.warn("insertContentAt empty paragraph replacement failed:", err);
+      }
+    }
+
+    // 4. Try normal setImage first
+    try {
+      const success = editor.chain().focus().setImage(attrs as any).run();
+      if (success) return true;
+    } catch (e) {
+      console.warn("chain.setImage error:", e);
+    }
+
+    // 5. Try insertContent at selection
+    try {
+      const success = editor.commands.insertContent({ type: "image", attrs });
+      if (success) return true;
+    } catch (e) {
+      console.warn("commands.insertContent error:", e);
+    }
+
+    // 6. Fallback: insert after current block
+    try {
+      const afterPos = $from.after();
+      const success = editor.chain().focus().insertContentAt(afterPos, [
+        { type: "image", attrs },
+        { type: "paragraph" },
+      ]).run();
+      if (success) return true;
+    } catch (e) {
+      console.warn("insert afterPos failed:", e);
+    }
+
+    // 7. Direct ProseMirror schema transaction at top-level boundary
+    try {
+      const schema = editor.schema;
+      const imageType = schema.nodes.image;
+      if (imageType) {
+        const imageNode = imageType.create(attrs);
+        const pType = schema.nodes.paragraph;
+        const pNode = pType ? pType.create() : null;
+        const nodesToInsert = pNode ? [imageNode, pNode] : [imageNode];
+
+        let insertPos = $from.after(1);
+        if (typeof insertPos !== "number" || insertPos > editor.state.doc.content.size || insertPos < 0) {
+          insertPos = editor.state.doc.content.size;
+        }
+        const tr = editor.state.tr.insert(insertPos, nodesToInsert);
+        editor.view.dispatch(tr);
         return true;
       }
+    } catch (e) {
+      console.warn("Direct ProseMirror transaction failed:", e);
+    }
 
-      // Try inserting at current selection
-      const inserted = editor.commands.insertContent({ type: "image", attrs });
-      if (inserted) return true;
-
-      // Last resort fallback: insert at end of document
+    // 8. Ultimate fallback: insert at end of document
+    try {
       const docEnd = editor.state.doc.content.size;
-      editor.commands.insertContentAt(docEnd, [
+      const success = editor.commands.insertContentAt(docEnd, [
         { type: "image", attrs },
         { type: "paragraph" },
       ]);
-      return true;
+      return !!success;
     } catch (err) {
       console.warn("insertImageToEditor fallback failed:", err);
       return false;
@@ -7034,17 +7123,61 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    if (!finalBlob && finalDataUrl) {
+    const base64ToBlob = (dataUrl: string): Blob | null => {
       try {
-        const res = await fetch(finalDataUrl);
-        finalBlob = await res.blob();
-      } catch {
-        /* ignore */
+        const parts = dataUrl.split(",");
+        if (parts.length < 2) return null;
+        const mimeMatch = parts[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : "image/png";
+        const byteString = atob(parts[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mime });
+      } catch (e) {
+        console.warn("base64ToBlob error:", e);
+        return null;
+      }
+    };
+
+    if (!finalBlob && finalDataUrl) {
+      finalBlob = base64ToBlob(finalDataUrl);
+      if (!finalBlob) {
+        try {
+          const res = await fetch(finalDataUrl);
+          finalBlob = await res.blob();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    let uniqueTargetName = targetFileName;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const attachmentsFolder = `${saved.folderPath}/attachments`;
+          const existing: string[] = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const lastDot = targetFileName.lastIndexOf(".");
+          const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
+          const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
+          let counter = 1;
+          while (existing.includes(uniqueTargetName)) {
+            uniqueTargetName = `${baseName} ${counter}${ext}`;
+            counter++;
+          }
+        }
+      } catch (e) {
+        console.warn("Pre-checking attachments folder error:", e);
       }
     }
 
     const blobUrl = finalBlob ? URL.createObjectURL(finalBlob) : "";
-    const relPath = getRelativeAttachmentPath(targetFileName);
+    const relPath = getRelativeAttachmentPath(uniqueTargetName);
     let decodedRel = relPath;
     try {
       decodedRel = decodeURIComponent(relPath);
@@ -7064,7 +7197,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const insertSrc = finalDataUrl || blobUrl;
     const inserted = insertImageToEditor({
       src: insertSrc,
-      alt: targetFileName,
+      alt: uniqueTargetName,
       "data-relative-src": relPath,
     });
     if (!inserted) {
@@ -7077,7 +7210,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     // 2. Electron Desktop Workspace Support - save file to disk asynchronously in background
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64 && finalDataUrl) {
       void (async () => {
         try {
@@ -7085,31 +7217,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (saved?.folderPath) {
             const rawBase64 = finalDataUrl.includes("base64,") ? finalDataUrl.split("base64,")[1] : finalDataUrl;
             if (rawBase64) {
-              let uniqueName = targetFileName;
-              const attachmentsFolder = `${saved.folderPath}/attachments`;
-              if (electronAPI.readDirectoryFiles) {
-                const existing: string[] = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
-                const lastDot = targetFileName.lastIndexOf(".");
-                const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
-                const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
-                let counter = 1;
-                while (existing.includes(uniqueName)) {
-                  uniqueName = `${baseName} ${counter}${ext}`;
-                  counter++;
-                }
-              }
-
-              if (uniqueName !== targetFileName) {
-                const newRel = getRelativeAttachmentPath(uniqueName);
-                if (blobUrl) assetBlobUrlMap.current.set(newRel, blobUrl);
-                assetBlobUrlMap.current.set(newRel, finalDataUrl!);
-                try {
-                  if (blobUrl) assetBlobUrlMap.current.set(decodeURIComponent(newRel), blobUrl);
-                  assetBlobUrlMap.current.set(decodeURIComponent(newRel), finalDataUrl!);
-                } catch {}
-              }
-
-              const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueName}`;
+              const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
               await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
             }
           }
@@ -10819,7 +10927,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           ) : (
             <ContextMenu>
               <ContextMenuTrigger asChild onContextMenuCapture={handleEditorContextMenu}>
-                <div className={`flex w-full min-w-0 flex-col ${
+                <div
+                  onPasteCapture={(e) => {
+                    if (e.defaultPrevented) return;
+                    const target = e.target as HTMLElement | null;
+                    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || (target.isContentEditable && target.closest(".ProseMirror")))) {
+                      return;
+                    }
+                    if (editor && !isReadingMode) {
+                      const electronAPI = (window as any)?.electronAPI;
+                      if (electronAPI?.readClipboardImageSync) {
+                        try {
+                          const clip = electronAPI.readClipboardImageSync();
+                          if (clip?.hasImage && clip.dataUrl) {
+                            e.preventDefault();
+                            void (processAndInsertImageFileRef.current || processAndInsertImageFile)({
+                              dataUrl: clip.dataUrl,
+                              fileName: clip.fileName,
+                            });
+                            return;
+                          }
+                        } catch {}
+                      }
+                      if (e.clipboardData) {
+                        const files = e.clipboardData.files;
+                        if (files && files.length > 0) {
+                          for (let i = 0; i < files.length; i++) {
+                            const f = files[i];
+                            if (f && (f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(f.name))) {
+                              e.preventDefault();
+                              void (processAndInsertImageFileRef.current || processAndInsertImageFile)(f);
+                              return;
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }}
+                  className={`flex w-full min-w-0 flex-col ${
                   settings.editorWidth === "compact" ? "max-w-2xl" : settings.editorWidth === "full" ? "max-w-none" : "max-w-4xl"
                 } px-4 pt-6 pb-0 sm:px-6 sm:pt-8 md:px-8 md:pt-10 lg:px-12 lg:pt-12 mx-auto min-h-full ${
                   settings.showCodeLineNumbers ? "show-code-line-numbers" : ""
@@ -11015,14 +11160,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       if (electronAPI?.readClipboardImageSync) {
                         const clipSync = electronAPI.readClipboardImageSync();
                         if (clipSync?.hasImage && clipSync.dataUrl) {
-                          await processAndInsertImageFile({ dataUrl: clipSync.dataUrl });
+                          await processAndInsertImageFile({ dataUrl: clipSync.dataUrl, fileName: clipSync.fileName });
                           return;
                         }
                       }
                       if (electronAPI?.readClipboardImage) {
                         const clipImg = await electronAPI.readClipboardImage();
                         if (clipImg?.hasImage && clipImg.dataUrl) {
-                          await processAndInsertImageFile({ dataUrl: clipImg.dataUrl });
+                          await processAndInsertImageFile({ dataUrl: clipImg.dataUrl, fileName: clipImg.fileName });
                           return;
                         }
                       }

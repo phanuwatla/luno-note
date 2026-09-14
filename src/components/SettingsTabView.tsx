@@ -70,6 +70,7 @@ import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
 import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { requestGoogleDriveAuth, disconnectGoogleDrive, isGoogleDriveConnected, saveStoredClientId, getStoredClientId, getStoredUserProfile, getValidAccessToken, fetchGoogleUserProfile } from "@/lib/googleDriveAuth";
+import { ensureWorkspacesRootOnly } from "@/lib/googleDriveApi";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -492,7 +493,7 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.appLanguage")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.appLanguageDesc")}</p>
                       </div>
-                      <Select value={settings.language || "en"} onValueChange={(v) => updateSetting("language", v)}>
+                      <Select value={settings.language || "en"} onValueChange={(v) => updateSetting("language", v as "en" | "th")}>
                         <SelectTrigger className="w-56 h-10 text-xs font-medium">
                           <SelectValue />
                         </SelectTrigger>
@@ -1889,28 +1890,52 @@ export default function SettingsTabView({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.account") || "Account"}</span>
-                            <span className="font-semibold text-foreground truncate block mt-0.5">{userProfile?.email || getStoredUserProfile()?.email || "Connected"}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="font-semibold text-foreground truncate block mt-0.5 cursor-default">
+                                  {userProfile?.email || getStoredUserProfile()?.email || "Connected"}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" align="start" className="text-xs">
+                                {userProfile?.email || getStoredUserProfile()?.email || "Connected"}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const targetId = folderStructure?.workspacesId || folderStructure?.projectId || folderStructure?.rootId;
-                                const driveUrl = targetId
-                                  ? `https://drive.google.com/drive/folders/${targetId}`
-                                  : "https://drive.google.com";
-                                if (onOpenWebTab) {
-                                  onOpenWebTab(driveUrl, "Google Drive - Workspaces");
-                                } else {
-                                  window.open(driveUrl, "_blank", "noopener,noreferrer");
-                                }
-                              }}
-                              className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-0.5 group cursor-pointer text-left"
-                            >
-                              <span>Google Drive / Luno / Workspaces</span>
-                              <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 shrink-0" />
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    let targetId = folderStructure?.workspacesId || folderStructure?.projectId || folderStructure?.rootId;
+                                    if (!targetId) {
+                                      const token = await getValidAccessToken();
+                                      if (token) {
+                                        try {
+                                          targetId = await ensureWorkspacesRootOnly(token);
+                                        } catch {}
+                                      }
+                                    }
+                                    const driveUrl = targetId
+                                      ? `https://drive.google.com/drive/folders/${targetId}`
+                                      : "https://drive.google.com";
+                                    if (onOpenWebTab) {
+                                      onOpenWebTab(driveUrl, "Google Drive - Workspaces");
+                                    } else {
+                                      window.open(driveUrl, "_blank", "noopener,noreferrer");
+                                    }
+                                  }}
+                                  className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-0.5 group cursor-pointer text-left no-underline hover:no-underline"
+                                >
+                                  <span>Google Drive / Luno / Workspaces</span>
+                                  <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 shrink-0" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" align="start" className="text-xs">
+                                Google Drive / Luno / Workspaces
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           <div>
                             <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced") || "Last Synced"}</span>
@@ -2183,7 +2208,7 @@ export default function SettingsTabView({
                       <div className="pt-2 border-t border-border/30 space-y-1.5">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
-                          <span className="font-mono font-semibold text-foreground">{appUpdate.progress.percent}%</span>
+                          <span className="font-semibold text-foreground">{appUpdate.progress.percent}%</span>
                         </div>
                         <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                           <div

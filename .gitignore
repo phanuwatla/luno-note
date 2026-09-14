@@ -33,6 +33,7 @@ release
 src-tauri/target/
 src-tauri/target
 *.exe
+!electron/closeTab.exe
 *.asar
 *.blockmap
 
