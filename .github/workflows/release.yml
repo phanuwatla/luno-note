@@ -26,13 +26,6 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Clean Existing Release if Any
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete ${{ github.ref_name }} --repo ${{ github.repository }} --yes || true
-        shell: bash
-
       - name: Build Web App
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID || '727855294809-prjiqishk6f42d485dg4d9moa06vpdsr.apps.googleusercontent.com' }}
@@ -46,9 +39,13 @@ jobs:
           VITE_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_CLIENT_SECRET }}
         run: npx electron-builder --win --publish always
 
-      - name: Update and Publish GitHub Release Notes
+      - name: Ensure GitHub Release Is Published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false --title "Luno Note ${{ github.ref_name }}" --notes-file release-notes.md || true
+          if [ -f release-notes.md ]; then
+            gh release edit ${{ github.ref_name }} --draft=false --title "Luno Note ${{ github.ref_name }}" --notes-file release-notes.md || true
+          else
+            gh release edit ${{ github.ref_name }} --draft=false || true
+          fi
         shell: bash

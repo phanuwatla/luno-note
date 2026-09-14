@@ -27,6 +27,8 @@ Luno Note is a robust, lightweight, and modern note-taking application engineere
 - <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Multi-Layer Editor Insertion Fallback**: 8-tier insertion waterfall guaranteeing reliable image placement even when selection is positioned inside title headings (`H1`), code blocks, empty paragraphs, or container background padding.
 - <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Synchronized Attachment Pre-Resolution**: Pre-calculates unique attachment filenames against the workspace `attachments/` directory before document insertion, ensuring zero path mismatch.
 - <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Refined UI Typography**: Replaced monospace styling on in-app update download progress percentages with the standard interface font for visual consistency.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Background Cloud Attachment Sync**: Images pasted under Google Drive storage mode render immediately without UI blocking, syncing asynchronously in the background.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Uses local HTTP loopback authentication (`127.0.0.1`) in the default system browser, adhering to modern security standards.
 
 ---
 
