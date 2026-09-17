@@ -13,7 +13,7 @@ import {
   collapseBlockWhitespace,
   escapeHtml,
 } from "@/components/Editor";
-import { Underline, Highlight, Superscript, Subscript, Kbd } from "@/lib/tiptapCustomMarks";
+import { Underline, Highlight, Superscript, Subscript, Kbd, TextAlign } from "@/lib/tiptapCustomMarks";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
@@ -26,7 +26,7 @@ import ImageNodeView from "@/components/editor/ImageNodeView";
 import AudioExtension from "@/components/editor/AudioExtension";
 import { getTagColorClass } from "@/lib/tagColors";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
-import { useAppSettings } from "@/hooks/useAppSettings";
+import { useAppSettings, FONT_FAMILY_CSS } from "@/hooks/useAppSettings";
 
 export interface NoteEditorPreviewProps {
   content: string;
@@ -76,7 +76,7 @@ export default function NoteEditorPreview({
     lineHeight ??
     (settings.lineHeight === "1.4" ? 1.4 : settings.lineHeight === "1.8" ? 1.8 : 1.6);
   const resolvedFontFamily =
-    fontFamily || settings.fontFamily || "var(--editor-font-family, var(--app-font-family))";
+    fontFamily || (settings.editorFontFamily ? FONT_FAMILY_CSS[settings.editorFontFamily] : undefined) || (settings.fontFamily ? FONT_FAMILY_CSS[settings.fontFamily] : undefined) || "var(--editor-font-family, var(--app-font-family))";
   const resolvedTheme = theme || settings.theme;
   const resolvedTagColorStyle = tagColorStyle || settings.tagColorStyle;
   const resolvedAccentHeadings = accentHeadings ?? settings.accentHeadings;
@@ -179,6 +179,7 @@ export default function NoteEditorPreview({
       Highlight,
       Superscript,
       Subscript,
+      TextAlign,
       Kbd,
       Toggle,
       TaskList,

@@ -6,7 +6,7 @@ import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHist
 import { AnimatePresence } from "framer-motion";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
   Check,
@@ -18,7 +18,6 @@ import {
   Eye,
   Download,
   ExternalLink,
-  File,
   FileCode,
   FileText,
   FileImage,
@@ -45,9 +44,11 @@ import {
   FolderPlus,
   Undo2,
   Redo2,
+  RotateCcw,
   Strikethrough,
   Quote,
   Smile,
+  Palette,
   Star,
   Upload,
   Trash2,
@@ -99,6 +100,12 @@ import {
   Printer,
   Superscript as SuperscriptIcon,
   Subscript as SubscriptIcon,
+  QrCode,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Pencil,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
@@ -113,6 +120,7 @@ import FloatingCalculator from "@/components/FloatingCalculator";
 import FloatingTranslator from "@/components/FloatingTranslator";
 import FloatingClock from "@/components/FloatingClock";
 import FloatingAudioRecorder from "@/components/FloatingAudioRecorder";
+import QrCodeDialog from "@/components/QrCodeDialog";
 import AudioExtension from "@/components/editor/AudioExtension";
 import AudioPlayer from "@/components/editor/AudioPlayer";
 import { createPortal } from "react-dom";
@@ -142,7 +150,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
-import { APP_THEMES, useAppSettings } from "@/hooks/useAppSettings";
+import { APP_THEMES, useAppSettings, FONT_OPTIONS, FONT_FAMILY_CSS, type AppTheme, useCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/hooks/useAppSettings";
 import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
 import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
 import { SettingsBody } from "@/components/SettingsBody";
@@ -162,7 +170,7 @@ import { EditorState, TextSelection, Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { InputRule, inputRules } from "@tiptap/pm/inputrules";
 import Image from "@tiptap/extension-image";
-import ImageNodeView from "@/components/editor/ImageNodeView";
+import ImageNodeView, { dataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
 import Link from "@tiptap/extension-link";
 import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
@@ -181,7 +189,33 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import { countWords, countCharacters } from "@/lib/wordCount";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
-import { Underline, Highlight, Superscript, Subscript, Kbd } from "@/lib/tiptapCustomMarks";
+import { Underline, Highlight, Superscript, Subscript, Kbd, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
+
+marked.use({
+  extensions: [
+    {
+      name: "highlight",
+      level: "inline",
+      start(src: string) {
+        return src.match(/==/)?.index;
+      },
+      tokenizer(src: string) {
+        const match = src.match(/^==((?:\\=|[^\r\n=]|=(?!=))+?)==/);
+        if (match) {
+          return {
+            type: "highlight",
+            raw: match[0],
+            text: match[1],
+            tokens: (this as any).lexer.inlineTokens(match[1]),
+          };
+        }
+      },
+      renderer(token: any) {
+        return `<mark class="luno-highlight">${(this as any).parser.parseInline(token.tokens || [])}</mark>`;
+      },
+    },
+  ],
+});
 
 /** Preserves full ProseMirror undo/redo history and document state per note across tab switching */
 export const noteEditorStateMap = new Map<string, EditorState>();
@@ -196,6 +230,18 @@ export function getNoteScrollPosition(noteId: string): number {
   if (!noteId || closedNoteIds.has(noteId)) return 0;
   if (noteScrollPositionMap.has(noteId)) {
     return noteScrollPositionMap.get(noteId) ?? 0;
+  }
+  try {
+    const saved = sessionStorage.getItem(`luno_scroll_${noteId}`);
+    if (saved) {
+      const parsed = parseFloat(saved);
+      if (!isNaN(parsed) && parsed >= 0) {
+        noteScrollPositionMap.set(noteId, parsed);
+        return parsed;
+      }
+    }
+  } catch {
+    /* ignore */
   }
   return 0;
 }
@@ -223,7 +269,172 @@ export function clearNoteEditorHistory(noteId: string) {
   }
 }
 
+export function TextColorIcon({ color, className = "h-4 w-4" }: { color?: string; className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m6 16 6-12 6 12" />
+      <path d="M8 12h8" />
+      <path
+        d="M4 21h16"
+        stroke={color || "currentColor"}
+        strokeWidth="3"
+      />
+    </svg>
+  );
+}
+
 export const clearNoteEditorState = clearNoteEditorHistory;
+
+export interface MatchedFontOption {
+  id: string;
+  nameKey?: string;
+  displayName?: string;
+  css: string;
+  isCustom?: boolean;
+}
+
+export function findMatchingFontOption(
+  rawFont: string | null | undefined,
+  customFonts?: import("@/lib/customFontStore").CustomFont[]
+): MatchedFontOption | undefined {
+  if (!rawFont || typeof rawFont !== "string") return undefined;
+  const trimmed = rawFont.trim();
+  if (!trimmed) return undefined;
+
+  const clean = (s: string) => s.replace(/['"]/g, "").trim().toLowerCase();
+  const cleanedRaw = clean(trimmed);
+  const rawParts = cleanedRaw.split(",").map((p) => p.trim()).filter(Boolean);
+  const primaryRaw = rawParts[0] || "";
+
+  // 0. Match custom fonts
+  if (customFonts && customFonts.length > 0) {
+    const cfMatch = customFonts.find(
+      (cf) =>
+        cf.id === trimmed ||
+        cf.id.toLowerCase() === cleanedRaw ||
+        clean(cf.name) === cleanedRaw ||
+        clean(cf.name) === primaryRaw ||
+        cf.css === trimmed ||
+        clean(cf.css) === cleanedRaw
+    );
+    if (cfMatch) {
+      return {
+        id: cfMatch.id,
+        displayName: cfMatch.name,
+        css: cfMatch.css,
+        isCustom: true,
+      };
+    }
+  }
+
+  // 1. Exact match on id or css
+  const exact = FONT_OPTIONS.find((f) => f.id === trimmed || f.css === trimmed);
+  if (exact) return exact;
+
+  // 3. Check exact ID match (case-insensitive)
+  const idMatch = FONT_OPTIONS.find((f) => f.id.toLowerCase() === cleanedRaw || f.id.toLowerCase() === primaryRaw);
+  if (idMatch) return idMatch;
+
+  // 4. Known aliases for explicit font names
+  const aliasMap: Record<string, string> = {
+    "noto serif thai": "notoSerifThai",
+    "noto sans thai": "notoSansThai",
+    "ibm plex thai": "ibmPlexThai",
+    "ibm plex sans thai": "ibmPlexThai",
+    "chakra petch": "chakraPetch",
+    "jetbrains mono": "mono",
+    "system-ui": "system",
+    "-apple-system": "system",
+    "segoe ui": "system",
+    "prompt": "prompt",
+    "sarabun": "sarabun",
+    "kanit": "kanit",
+    "mitr": "mitr",
+    "mali": "mali",
+    "itim": "itim",
+    "sriracha": "sriracha",
+    "chonburi": "chonburi",
+    "inter": "inter",
+    "serif": "serif",
+    "mono": "mono",
+    "system": "system",
+  };
+
+  if (aliasMap[cleanedRaw]) {
+    const found = FONT_OPTIONS.find((f) => f.id === aliasMap[cleanedRaw]);
+    if (found) return found;
+  }
+  if (aliasMap[primaryRaw]) {
+    const found = FONT_OPTIONS.find((f) => f.id === aliasMap[primaryRaw]);
+    if (found) return found;
+  }
+
+  // 5. Match by CSS first primary name or full string
+  const matched = FONT_OPTIONS.find((f) => {
+    const fCleanedCss = clean(f.css);
+    if (fCleanedCss === cleanedRaw) return true;
+
+    const fParts = fCleanedCss.split(",").map((p) => p.trim()).filter(Boolean);
+    const fPrimary = fParts[0] || "";
+    if (fPrimary && primaryRaw) {
+      if (fPrimary === primaryRaw) return true;
+      if (primaryRaw.startsWith(fPrimary) || fPrimary.startsWith(primaryRaw)) return true;
+    }
+    return false;
+  });
+  if (matched) return matched;
+
+  for (const part of rawParts) {
+    const targetId = aliasMap[part];
+    if (targetId) {
+      const found = FONT_OPTIONS.find((f) => f.id === targetId);
+      if (found) return found;
+    }
+  }
+
+  return undefined;
+}
+
+export function getActiveFontFamily(editor: TiptapEditor | null | undefined): string | undefined {
+  if (!editor) return undefined;
+  const attrFont = editor.getAttributes("fontFamily")?.fontFamily;
+  if (attrFont) return attrFont;
+
+  try {
+    const { selection, doc } = editor.state;
+    if (selection) {
+      if (selection.empty) {
+        const marks = selection.$from.marks();
+        const fontMark = marks.find((m) => m.type.name === "fontFamily");
+        if (fontMark?.attrs?.fontFamily) return fontMark.attrs.fontFamily;
+      } else {
+        let foundAttr: string | undefined;
+        doc.nodesBetween(selection.from, selection.to, (node) => {
+          if (!foundAttr && node.marks) {
+            const fontMark = node.marks.find((m) => m.type.name === "fontFamily");
+            if (fontMark?.attrs?.fontFamily) {
+              foundAttr = fontMark.attrs.fontFamily;
+              return false;
+            }
+          }
+        });
+        if (foundAttr) return foundAttr;
+      }
+    }
+  } catch {
+    /* ignore selection inspection errors */
+  }
+  return undefined;
+}
 
 export function normalizeSerializedMarkdown(markdown: string): string {
   let clean = markdown.replace(/\r\n?/g, "\n");
@@ -405,6 +616,12 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
       }
     }
 
+    // Normalize broken/unescaped double quotes inside style="..." on HTML tags (e.g. <span style="font-family: "Font Name", sans-serif;">)
+    processedLine = processedLine.replace(/<([a-z0-9]+)\s+([^>]*?)style="([^">]*"[^">]*)"([^>]*)>/gi, (_m, tag, before, styleVal, after) => {
+      const cleanStyle = styleVal.replace(/"/g, "'");
+      return `<${tag} ${before}style="${cleanStyle}"${after}>`;
+    });
+
     // Convert Wikilinks [[Target]] or [[Target|Alias]] outside code blocks into standard HTML links
     processedLine = processedLine.replace(/\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g, (_m, target, alias) => {
       const cleanTarget = (target || "").trim();
@@ -413,7 +630,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     });
 
     // Convert ==highlight== outside code blocks into standard HTML mark tags
-    processedLine = processedLine.replace(/==([^=\r\n]+)==/g, '<mark class="luno-highlight">$1</mark>');
+    processedLine = processedLine.replace(/==((?:\\=|[^\r\n=]|=(?!=))+?)==/g, '<mark class="luno-highlight">$1</mark>');
 
     // Convert sized Markdown images ![alt|300](url) outside code blocks into HTML img tags with width
     processedLine = processedLine.replace(
@@ -579,23 +796,43 @@ export const prepareDomForEditor = (
         }
       }
     }
-    const img = p.querySelector("img");
-    if (img) {
-      if (p.children.length === 1 && !p.textContent?.trim()) {
+    let img = p.querySelector("img");
+    while (img && p.contains(img)) {
+      p.querySelectorAll("br").forEach((br) => {
+        if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
+          br.remove();
+        }
+      });
+      if (!p.textContent?.trim() && p.querySelectorAll("img, audio, input, label").length === 1) {
         p.replaceWith(img);
+        break;
       } else {
-        p.querySelectorAll("br").forEach((br) => {
-          if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
-            br.remove();
-          }
-        });
-        if (p.contains(img)) {
+        const childNodes = Array.from(p.childNodes);
+        const imgIdx = childNodes.indexOf(img);
+        const hasBefore = childNodes.slice(0, imgIdx).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|INPUT|LABEL)$/i.test(n.tagName)));
+        const hasAfter = childNodes.slice(imgIdx + 1).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|INPUT|LABEL)$/i.test(n.tagName)));
+
+        if (!hasBefore && hasAfter) {
+          p.before(img);
+        } else if (hasBefore && !hasAfter) {
           p.after(img);
+        } else if (hasBefore && hasAfter) {
+          const p2 = document.createElement("p");
+          while (img.nextSibling) {
+            p2.appendChild(img.nextSibling);
+          }
+          p.after(p2);
+          p.after(img);
+        } else {
+          p.replaceWith(img);
+          break;
         }
         if (!p.textContent?.trim() && !p.children.length) {
           p.remove();
+          break;
         }
       }
+      img = p.querySelector("img");
     }
   });
 
@@ -680,7 +917,7 @@ export const prepareDomForEditor = (
               }
 
               const badge = document.createElement("span");
-              const colorClass = getTagColorClass(rawTag, options?.theme, undefined, options?.tagColorStyle);
+              const colorClass = getTagColorClass(rawTag, options?.theme as AppTheme | undefined, undefined, options?.tagColorStyle as "multicolor" | "accent" | undefined);
               badge.className = `inline-tag-badge border ${colorClass}`;
               badge.textContent = `#${rawTag}`;
               frag.appendChild(badge);
@@ -932,7 +1169,12 @@ function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
 
 const hashtagPluginKey = new PluginKey("hashtagDecoration");
 
-export const HashtagDecoration = Extension.create({
+export interface HashtagDecorationOptions {
+  theme: AppTheme;
+  tagColorStyle: "multicolor" | "accent";
+}
+
+export const HashtagDecoration = Extension.create<HashtagDecorationOptions>({
   name: "hashtagDecoration",
 
   addOptions() {
@@ -1021,75 +1263,84 @@ const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
 const LATIN_SPELL_REGEX = /[A-Za-z']+/g;
 const THAI_CHAR_TEST = /[\u0E00-\u0E7F]/;
 
+function collectSpellCheckDecorationsForNode(
+  node: any,
+  pos: number,
+  decorations: Decoration[]
+): boolean {
+  if (
+    node.type.name === "codeBlock" ||
+    node.type.name === "codeBlockLowlight" ||
+    node.type.name === "mathBlock" ||
+    node.type.name === "image"
+  ) {
+    return false;
+  }
+
+  if (node.isText && node.text) {
+    const text = node.text;
+    const thaiSpellRegex = getThaiSpellRegex();
+    const thaiAnomalyRegex = getThaiAnomalyRegex();
+    const latinSpellRegex = /[A-Za-z']+/g;
+
+    // 1. Thai Misspellings & Typographical Anomalies check
+    if (THAI_CHAR_TEST.test(text)) {
+      thaiSpellRegex.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = thaiSpellRegex.exec(text)) !== null) {
+        const misspelled = match[0];
+        const from = pos + match.index;
+        const to = from + misspelled.length;
+        decorations.push(
+          Decoration.inline(from, to, {
+            class: "luno-spell-error",
+            "data-spell-word": misspelled,
+          })
+        );
+      }
+
+      thaiAnomalyRegex.lastIndex = 0;
+      while ((match = thaiAnomalyRegex.exec(text)) !== null) {
+        const anomaly = match[0];
+        const from = pos + match.index;
+        const to = from + anomaly.length;
+        decorations.push(
+          Decoration.inline(from, to, {
+            class: "luno-spell-error",
+            "data-spell-word": anomaly,
+          })
+        );
+      }
+    }
+
+    // 2. English words check
+    latinSpellRegex.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = latinSpellRegex.exec(text)) !== null) {
+      const word = match[0];
+      if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
+        if (isWordMisspelled(word)) {
+          const from = pos + match.index;
+          const to = from + word.length;
+          decorations.push(
+            Decoration.inline(from, to, {
+              class: "luno-spell-error",
+              "data-spell-word": word,
+            })
+          );
+        }
+      }
+    }
+  }
+  return true;
+}
+
 function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet {
   if (!enabled) return DecorationSet.empty;
   const decorations: Decoration[] = [];
-  const thaiSpellRegex = getThaiSpellRegex();
-  const thaiAnomalyRegex = getThaiAnomalyRegex();
-  const latinSpellRegex = /[A-Za-z']+/g;
 
   doc.descendants((node: any, pos: number) => {
-    if (
-      node.type.name === "codeBlock" ||
-      node.type.name === "codeBlockLowlight" ||
-      node.type.name === "mathBlock" ||
-      node.type.name === "image"
-    ) {
-      return false;
-    }
-
-    if (node.isText && node.text) {
-      const text = node.text;
-
-      // 1. Thai Misspellings & Typographical Anomalies check
-      if (THAI_CHAR_TEST.test(text)) {
-        thaiSpellRegex.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = thaiSpellRegex.exec(text)) !== null) {
-          const misspelled = match[0];
-          const from = pos + match.index;
-          const to = from + misspelled.length;
-          decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": misspelled,
-            })
-          );
-        }
-
-        thaiAnomalyRegex.lastIndex = 0;
-        while ((match = thaiAnomalyRegex.exec(text)) !== null) {
-          const anomaly = match[0];
-          const from = pos + match.index;
-          const to = from + anomaly.length;
-          decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": anomaly,
-            })
-          );
-        }
-      }
-
-      // 2. English words check
-      latinSpellRegex.lastIndex = 0;
-      let match: RegExpExecArray | null;
-      while ((match = latinSpellRegex.exec(text)) !== null) {
-        const word = match[0];
-        if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
-          if (isWordMisspelled(word)) {
-            const from = pos + match.index;
-            const to = from + word.length;
-            decorations.push(
-              Decoration.inline(from, to, {
-                class: "luno-spell-error",
-                "data-spell-word": word,
-              })
-            );
-          }
-        }
-      }
-    }
+    return collectSpellCheckDecorationsForNode(node, pos, decorations);
   });
 
   return DecorationSet.create(doc, decorations);
@@ -1111,17 +1362,48 @@ export const SpellCheckDecoration = Extension.create({
         key: spellCheckPluginKey,
         state: {
           init(_, { doc }) {
-            return createSpellCheckDecorations(doc, extension.options.enabled);
+            return extension.options.enabled ? createSpellCheckDecorations(doc, true) : DecorationSet.empty;
           },
           apply(tr, oldState) {
             if (!extension.options.enabled) return DecorationSet.empty;
-            if (!tr.docChanged) return oldState;
-            return createSpellCheckDecorations(tr.doc, extension.options.enabled);
+            const meta = tr.getMeta(spellCheckPluginKey);
+            if (meta?.recompute || oldState === DecorationSet.empty) {
+              return createSpellCheckDecorations(tr.doc, true);
+            }
+            if (!tr.docChanged || tr.steps.length === 0) return oldState;
+
+            try {
+              let set = oldState.map(tr.mapping, tr.doc);
+              for (const step of tr.steps) {
+                step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+                  const safeStart = Math.min(newStart, tr.doc.content.size);
+                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const $from = tr.doc.resolve(safeStart);
+                  const $to = tr.doc.resolve(safeEnd);
+                  const start = $from.start();
+                  const end = $to.end();
+                  set = set.remove(set.find(start, end));
+                  const newDecos: Decoration[] = [];
+                  const parentNode = $from.parent;
+                  parentNode.descendants((child: any, childPos: number) => {
+                    const absPos = start + childPos;
+                    collectSpellCheckDecorationsForNode(child, absPos, newDecos);
+                  });
+                  if (newDecos.length > 0) {
+                    set = set.add(tr.doc, newDecos);
+                  }
+                });
+              }
+              return set;
+            } catch {
+              return createSpellCheckDecorations(tr.doc, true);
+            }
           },
         },
         props: {
           decorations(state) {
-            return spellCheckPluginKey.getState(state);
+            if (!extension.options.enabled) return DecorationSet.empty;
+            return spellCheckPluginKey.getState(state) || DecorationSet.empty;
           },
         },
       }),
@@ -1213,7 +1495,43 @@ export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>(
           },
           apply(tr, oldState) {
             if (!extension.options.enabled) return DecorationSet.empty;
-            return tr.docChanged ? createInlineCodeDecorations(tr.doc) : oldState;
+            if (!tr.docChanged || tr.steps.length === 0) return oldState;
+            try {
+              let set = oldState.map(tr.mapping, tr.doc);
+              for (const step of tr.steps) {
+                step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+                  const safeStart = Math.min(newStart, tr.doc.content.size);
+                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const $from = tr.doc.resolve(safeStart);
+                  const $to = tr.doc.resolve(safeEnd);
+                  const start = $from.start();
+                  const end = $to.end();
+                  set = set.remove(set.find(start, end));
+                  const newDecos: Decoration[] = [];
+                  $from.parent.descendants((child: any, childPos: number, parent: any) => {
+                    if (child.isText) {
+                      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
+                      const hasCodeMark = child.marks && child.marks.some((m: any) => m.type.name === "code");
+                      if (!hasCodeMark) return;
+                      const text = child.text || "";
+                      if (!text.trim()) return;
+                      try {
+                        const result = lowlight.highlightAuto(text);
+                        if (result?.children?.length) {
+                          parseLowlightAst(result.children, start + childPos, newDecos, []);
+                        }
+                      } catch {}
+                    }
+                  });
+                  if (newDecos.length > 0) {
+                    set = set.add(tr.doc, newDecos);
+                  }
+                });
+              }
+              return set;
+            } catch {
+              return createInlineCodeDecorations(tr.doc);
+            }
           },
         },
         props: {
@@ -1457,6 +1775,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -1578,7 +1899,21 @@ export const Toggle = TiptapNode.create({
     ];
   },
   addNodeView() {
-    return ReactNodeViewRenderer(ToggleNodeView);
+    return ReactNodeViewRenderer(ToggleNodeView, {
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (newNode.type.name !== oldNode.type.name) {
+          return false;
+        }
+        if (
+          oldNode.attrs.open !== newNode.attrs.open ||
+          oldNode.attrs.title !== newNode.attrs.title ||
+          oldNode.content !== newNode.content
+        ) {
+          updateProps();
+        }
+        return true;
+      },
+    });
   },
 });
 
@@ -1596,6 +1931,8 @@ export type SlashMenuItem = {
       openWorkspaceImageDialog?: () => void;
       triggerImageUpload: () => void;
       openAudioRecorder: () => void;
+      openQrCodeDialog?: () => void;
+      openEmojiPicker?: () => void;
       handleFixLanguage: () => void;
       openTranslator?: () => void;
       openCalculator?: () => void;
@@ -1937,6 +2274,38 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     keywords: ["subscript", "sub", "ตัวห้อย", "ห้อย", "x2"],
     action: (editor) => editor.chain().focus().toggleSubscript().run(),
   },
+  {
+    id: "alignLeft",
+    titleKey: "editor.alignLeft",
+    categoryKey: "settings.toolCategoryAlign",
+    icon: <AlignLeft className="mr-2 h-4 w-4" />,
+    keywords: ["align", "left", "alignleft", "ชิดซ้าย", "จัดซ้าย"],
+    action: (editor) => editor.chain().focus().setTextAlign("left").run(),
+  },
+  {
+    id: "alignCenter",
+    titleKey: "editor.alignCenter",
+    categoryKey: "settings.toolCategoryAlign",
+    icon: <AlignCenter className="mr-2 h-4 w-4" />,
+    keywords: ["align", "center", "aligncenter", "กึ่งกลาง", "จัดกลาง"],
+    action: (editor) => editor.chain().focus().setTextAlign("center").run(),
+  },
+  {
+    id: "alignRight",
+    titleKey: "editor.alignRight",
+    categoryKey: "settings.toolCategoryAlign",
+    icon: <AlignRight className="mr-2 h-4 w-4" />,
+    keywords: ["align", "right", "alignright", "ชิดขวา", "จัดขวา"],
+    action: (editor) => editor.chain().focus().setTextAlign("right").run(),
+  },
+  {
+    id: "alignJustify",
+    titleKey: "editor.alignJustify",
+    categoryKey: "settings.toolCategoryAlign",
+    icon: <AlignJustify className="mr-2 h-4 w-4" />,
+    keywords: ["align", "justify", "alignjustify", "กระจายเท่ากัน", "กระจาย"],
+    action: (editor) => editor.chain().focus().setTextAlign("justify").run(),
+  },
 
   // 4. Lists
   {
@@ -2056,12 +2425,20 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (_editor, helpers) => helpers.triggerImageUpload(),
   },
   {
+    id: "qrCode",
+    titleKey: "editor.qrCode",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <QrCode className="mr-2 h-4 w-4" />,
+    keywords: ["qr", "qrcode", "คิวอาร์", "บาร์โค้ด", "สแกน", "คิวอาร์โค้ด"],
+    action: (_editor, helpers) => helpers.openQrCodeDialog?.(),
+  },
+  {
     id: "emoji",
     titleKey: "editor.insertEmoji",
     categoryKey: "settings.toolCategoryMedia",
     icon: <Smile className="mr-2 h-4 w-4" />,
     keywords: ["emoji", "smile", "อิโมจิ", "ยิ้ม"],
-    action: (editor) => editor.chain().focus().insertContent("😊").run(),
+    action: (_editor, helpers) => helpers.openEmojiPicker?.(),
   },
   {
     id: "audio",
@@ -2291,6 +2668,7 @@ const IndentKeymap = Extension.create({
 
 export interface EditorProps {
   note: Note | null;
+  isVisible?: boolean;
   onUpdate: (id: string, updates: Partial<Note>) => void;
   onDelete: (id: string) => void;
   onDeleteFile?: (note: Note) => void | Promise<void>;
@@ -2320,7 +2698,7 @@ export interface EditorProps {
 }
 
 interface SaveSnapshot {
-  ext: "md" | "txt" | "html";
+  ext: "md" | "txt" | "html" | "css";
   content: string;
 }
 
@@ -2407,8 +2785,8 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
 
   const updatePositions = useCallback(() => {
     if (!editor || editor.isDestroyed || !editor.isActive("table")) {
-      setTableRect(null);
-      setCellRect(null);
+      setTableRect((prev) => (prev !== null ? null : prev));
+      setCellRect((prev) => (prev !== null ? null : prev));
       return;
     }
 
@@ -2422,8 +2800,8 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
       const tableEl = (node as HTMLElement)?.closest?.("table") as HTMLElement | null;
 
       if (!tableEl) {
-        setCellRect(null);
-        setTableRect(null);
+        setCellRect((prev) => (prev !== null ? null : prev));
+        setTableRect((prev) => (prev !== null ? null : prev));
         return;
       }
 
@@ -2452,12 +2830,12 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
         if (cellEl) {
           setCellRect(cellEl.getBoundingClientRect());
         } else {
-          setCellRect(null);
+          setCellRect((prev) => (prev !== null ? null : prev));
         }
       }
     } catch {
-      setCellRect(null);
-      setTableRect(null);
+      setCellRect((prev) => (prev !== null ? null : prev));
+      setTableRect((prev) => (prev !== null ? null : prev));
     }
   }, [editor]);
 
@@ -2465,20 +2843,25 @@ function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
     if (!editor || editor.isDestroyed) return;
     updatePositions();
 
-    const handleUpdate = () => updatePositions();
+    const handleSelectionUpdate = () => updatePositions();
+    const handleTransaction = () => {
+      if (editor.isActive("table")) {
+        updatePositions();
+      }
+    };
 
-    editor.on("selectionUpdate", handleUpdate);
-    editor.on("transaction", handleUpdate);
-    window.addEventListener("scroll", handleUpdate, true);
-    window.addEventListener("resize", handleUpdate);
+    editor.on("selectionUpdate", handleSelectionUpdate);
+    editor.on("transaction", handleTransaction);
+    window.addEventListener("scroll", handleSelectionUpdate, true);
+    window.addEventListener("resize", handleSelectionUpdate);
 
     return () => {
       if (!editor.isDestroyed) {
-        editor.off("selectionUpdate", handleUpdate);
-        editor.off("transaction", handleUpdate);
+        editor.off("selectionUpdate", handleSelectionUpdate);
+        editor.off("transaction", handleTransaction);
       }
-      window.removeEventListener("scroll", handleUpdate, true);
-      window.removeEventListener("resize", handleUpdate);
+      window.removeEventListener("scroll", handleSelectionUpdate, true);
+      window.removeEventListener("resize", handleSelectionUpdate);
     };
   }, [editor, updatePositions]);
 
@@ -3007,7 +3390,12 @@ export const CustomParagraph = Paragraph.extend({
       },
       style: {
         default: null,
-        parseHTML: (element) => element.getAttribute("style"),
+        parseHTML: (element) => {
+          const raw = element.getAttribute("style");
+          if (!raw) return null;
+          const cleaned = raw.replace(/(?:^|;)\s*text-align\s*:[^;]+/gi, "").trim().replace(/^;/, "");
+          return cleaned || null;
+        },
         renderHTML: (attributes) => {
           if (!attributes.style) return {};
           return { style: attributes.style };
@@ -3048,10 +3436,17 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     replacement: (content, node) => {
       const h = node as HTMLElement;
       const level = Number(h.nodeName.charAt(1)) || 1;
-      const prefix = "#".repeat(level);
+      const align = h.style?.textAlign || h.getAttribute("align");
       const prev = h.previousElementSibling;
-      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
-      const leadingNl = isAfterHeading ? "\n" : "\n\n";
+      const isPrevNonEmptyBlock = prev && (
+        /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+      );
+      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
+      if (align && align !== "left") {
+        return `${leadingNl}<h${level} style="text-align: ${align}">\n${content}\n</h${level}>\n\n`;
+      }
+      const prefix = "#".repeat(level);
       return `${leadingNl}${prefix} ${content}\n`;
     },
   });
@@ -3069,8 +3464,12 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     replacement: (content, node) => {
       const el = node as HTMLElement;
       const prev = el.previousElementSibling;
-      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
-      const leadingNl = isAfterHeading ? "\n" : "\n\n";
+      const next = el.nextElementSibling;
+      const isPrevNonEmptyBlock = prev && (
+        /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+      );
+      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
       const rawTag = el.getAttribute("data-raw-tag");
       if (rawTag === "div") {
         return `${leadingNl}<div>\n    ${el.innerHTML}\n</div>\n\n`;
@@ -3079,7 +3478,12 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       if (style) {
         return `${leadingNl}<p style="${style}">\n${content}\n</p>\n\n`;
       }
-      return `${leadingNl}${content}\n\n`;
+      const isNextNonEmptyBlock = next && (
+        /^H[1-6]|IMG|HR$/i.test(next.nodeName) ||
+        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
+      );
+      const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
+      return `${leadingNl}${content}${trailingNl}`;
     },
   });
 
@@ -3156,9 +3560,16 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
   // Convert <mark> or .luno-highlight to ==text== in markdown
   td.addRule("highlight", {
     filter: (node) =>
-      node.nodeName === "MARK" ||
-      (node.nodeName === "SPAN" && (node as HTMLElement).classList?.contains("luno-highlight")),
-    replacement: (content) => `==${content}==`,
+      node.nodeName.toUpperCase() === "MARK" ||
+      (node.nodeName.toUpperCase() === "SPAN" && (node as HTMLElement).classList?.contains("luno-highlight")),
+    replacement: (content) => {
+      if (!content || !content.trim()) return content;
+      const leadingSpace = content.match(/^(\s*)/)?.[1] || "";
+      const trailingSpace = content.match(/(\s*)$/)?.[1] || "";
+      const trimmed = content.slice(leadingSpace.length, content.length - trailingSpace.length);
+      if (!trimmed) return content;
+      return `${leadingSpace}==${trimmed}==${trailingSpace}`;
+    },
   });
 
   // Preserve <kbd> in markdown
@@ -3257,6 +3668,39 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     replacement: (content) => `<sub>${content}</sub>`,
   });
 
+  // Preserve styled spans (font-family, font-size, color) in markdown
+  td.addRule("styledSpan", {
+    filter: (node) => {
+      if (node.nodeName !== "SPAN") return false;
+      const el = node as HTMLElement;
+      if (el.classList?.contains("luno-highlight")) return false;
+      const style = el.getAttribute("style");
+      const color = el.getAttribute("data-color");
+      const fontFamily = el.getAttribute("data-font-family");
+      const fontSize = el.getAttribute("data-font-size");
+      return Boolean(style || color || fontFamily || fontSize);
+    },
+    replacement: (content, node) => {
+      if (!content || !content.trim()) return content;
+      const el = node as HTMLElement;
+      const style = el.getAttribute("style");
+      const color = el.getAttribute("data-color");
+      const fontFamily = el.getAttribute("data-font-family");
+      const fontSize = el.getAttribute("data-font-size");
+      let styleAttr = "";
+      if (style) {
+        styleAttr = ` style="${style.replace(/"/g, "'").trim()}"`;
+      } else {
+        const parts: string[] = [];
+        if (color) parts.push(`color: ${color.replace(/"/g, "'")}`);
+        if (fontFamily) parts.push(`font-family: ${fontFamily.replace(/"/g, "'")}`);
+        if (fontSize) parts.push(`font-size: ${fontSize.replace(/"/g, "'")}`);
+        if (parts.length) styleAttr = ` style="${parts.join("; ")}"`;
+      }
+      return `<span${styleAttr}>${content}</span>`;
+    },
+  });
+
   // Convert HTML images back to Markdown, preserving relative asset paths and width
   td.addRule("relativeImage", {
     filter: "img",
@@ -3278,15 +3722,31 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const titleAttr = title ? ` "${title}"` : "";
       const md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
       const parent = img.parentElement;
+      const parentTag = parent?.nodeName?.toUpperCase() || "";
       const isStandaloneBlock =
         !parent ||
-        parent.nodeName === "DIV" ||
-        parent.nodeName === "BODY" ||
+        parentTag === "X-TURNDOWN" ||
+        parentTag === "DIV" ||
+        parentTag === "BODY" ||
         parent.classList?.contains("ProseMirror") ||
-        (parent.nodeName === "P" && parent.children.length === 1 && !parent.textContent?.trim());
+        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
 
-      if (isStandaloneBlock && parent?.nodeName !== "P") {
-        return `\n\n${md}\n\n`;
+      if (isStandaloneBlock && parentTag !== "P") {
+        const prev = img.previousElementSibling;
+        const next = img.nextElementSibling;
+        const isPrevNonEmptyBlock = prev && (
+          /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+        );
+        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
+
+        const isNextNonEmptyBlock = next && (
+          /^H[1-6]|IMG|HR$/i.test(next.nodeName) ||
+          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
+        );
+        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
+
+        return `${leadingNl}${md}${trailingNl}`;
       }
       return md;
     },
@@ -3349,7 +3809,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       let prefix = options.bulletListMarker + " ";
       if (isOrdered) {
         const start = (parent as HTMLElement).getAttribute("start");
-        const index = Array.from(parent.children).filter((c) => c.nodeName === "LI").indexOf(node) + 1;
+        const index = Array.from((parent as HTMLElement).children).filter((c) => (c as HTMLElement).nodeName === "LI").indexOf(node as HTMLElement) + 1;
         prefix = (start ? Number(start) + index - 1 : index) + ". ";
       }
       return (
@@ -3534,7 +3994,9 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
 }
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
+  const { note, isVisible = true, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
+
+  const { settings, updateSetting, resetSettings, keyboardLanguage, toggleKeyboardLanguage } = useAppSettings();
 
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -3548,6 +4010,120 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   // Version History State
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [comparingVersion, setComparingVersion] = useState<NoteVersionSnapshot | null>(null);
+
+  // Custom Font State & Handlers
+  const { customFonts, refresh: refreshCustomFonts } = useCustomFonts();
+  const fontFileInputRef = useRef<HTMLInputElement>(null);
+  const [fontToRename, setFontToRename] = useState<CustomFont | null>(null);
+  const [fontRenameValue, setFontRenameValue] = useState("");
+  const [fontToDelete, setFontToDelete] = useState<CustomFont | null>(null);
+  const [isUploadingFont, setIsUploadingFont] = useState(false);
+
+  const handleFontFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingFont(true);
+    try {
+      const saved = await saveCustomFont(file);
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontUploadedSuccess") || "Font uploaded successfully",
+        description: (t("settings.fontUploadedSuccessDesc") || 'Added font "{name}" to workspace.').replace("{name}", saved.name),
+      });
+    } catch (err: any) {
+      console.error("[CustomFont] Upload error:", err);
+      toast({
+        title: t("settings.fontUploadFailed") || "Failed to upload font",
+        description: err?.message || t("settings.fontUploadFailedDesc") || "Could not process font file",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingFont(false);
+      if (event.target) event.target.value = "";
+    }
+  };
+
+  const handleConfirmFontRename = async () => {
+    if (!fontToRename) return;
+    const newName = fontRenameValue.trim();
+    if (!newName) return;
+
+    try {
+      await renameCustomFont(fontToRename.id, newName);
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontRenameSuccess") || "Font renamed successfully",
+        description: (t("settings.fontRenameSuccessDesc") || 'Font renamed to "{name}".').replace("{name}", newName),
+      });
+      setFontToRename(null);
+    } catch (err: any) {
+      toast({
+        title: t("settings.fontRenameFailed") || "Failed to rename font",
+        description: err?.message || "Could not rename font",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleConfirmFontDelete = async () => {
+    if (!fontToDelete) return;
+    const deletedName = fontToDelete.name;
+    try {
+      await deleteCustomFont(fontToDelete.id);
+      if (settings.fontFamily === fontToDelete.id) {
+        updateSetting("fontFamily", "inter");
+      }
+      if (settings.editorFontFamily === fontToDelete.id) {
+        updateSetting("editorFontFamily", "inter");
+      }
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontDeletedSuccess") || "Font removed successfully",
+        description: (t("settings.fontDeletedSuccessDesc") || 'Removed font "{name}" from workspace.').replace("{name}", deletedName),
+      });
+      setFontToDelete(null);
+    } catch (err: any) {
+      toast({
+        title: t("settings.fontDeleteFailed") || "Failed to delete font",
+        description: err?.message || "Could not delete font",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // QR Code Generator Dialog State
+  const [qrCodeDialogOpen, setQrCodeDialogOpen] = useState(false);
+
+  // Floating Slash Emoji Picker State
+  const [slashEmojiState, setSlashEmojiState] = useState<{
+    open: boolean;
+    coords: { top: number; left: number } | null;
+  }>({
+    open: false,
+    coords: null,
+  });
+  const slashEmojiRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!slashEmojiState.open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (slashEmojiRef.current && !slashEmojiRef.current.contains(e.target as Node)) {
+        setSlashEmojiState({ open: false, coords: null });
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSlashEmojiState({ open: false, coords: null });
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [slashEmojiState.open]);
 
   // Share via Google Drive State
   const [shareSyncDialogOpen, setShareSyncDialogOpen] = useState(false);
@@ -3606,7 +4182,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       // 2. Switch storageMode to 'gdrive'
-      updateSettings({ storageMode: "gdrive" });
+      updateSetting("storageMode", "gdrive");
 
       const accessToken = await getValidAccessToken();
       if (!accessToken) {
@@ -3638,7 +4214,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       // If we now have a driveFileId:
       if (targetFileId) {
-        const link = await getDriveFileShareLink(tokenInfo.access_token, targetFileId);
+        const link = await getDriveFileShareLink(accessToken, targetFileId);
         setShareLink(link);
         try {
           await navigator.clipboard.writeText(link);
@@ -3657,7 +4233,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const updated = (notes || []).find((n) => n.id === note.id);
         const finalId = updated?.driveFileId || note.driveFileId;
         if (finalId) {
-          const link = await getDriveFileShareLink(tokenInfo.access_token, finalId);
+          const link = await getDriveFileShareLink(accessToken, finalId);
           setShareLink(link);
           try {
             await navigator.clipboard.writeText(link);
@@ -3861,6 +4437,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const loadingNoteIdRef = useRef<string | null>(null);
   const isNoteCurrentlyLocked = Boolean((note?.isLocked && !note?.isDecrypted) || (note?.content && isEncryptedNote(note.content)));
   const editorActiveNoteIdRef = useRef<string | null>(isNoteCurrentlyLocked ? null : (note?.id ?? null));
+  const activeNoteRef = useRef<Note | null>(isNoteCurrentlyLocked ? null : (note ?? null));
   const fileHandleByNoteIdRef = useRef<Record<string, FileSystemFileHandle>>({});
   const deletedNoteIdsRef = useRef<Set<string>>(new Set());
   const editorSelectionRef = useRef<{ from: number; to: number } | null>(null);
@@ -3994,7 +4571,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   }, [bringClockToFront]);
 
-  const { settings, updateSetting, resetSettings, keyboardLanguage, toggleKeyboardLanguage } = useAppSettings();
   const spellCheckEnabled = settings.spellCheck !== false;
   const settingsRef = useRef(settings);
   const keyboardLanguageRef = useRef(keyboardLanguage);
@@ -4026,7 +4602,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isLikelyHtml = (text: string) => /<\/?[a-z][\s\S]*>/i.test(text);
   
   const getContentFormat = (): "plain" | "markdown" | "html" => {
-    if (note?.contentFormat) return note.contentFormat;
+    if (note?.contentFormat && note.contentFormat !== "css") return note.contentFormat;
     return "markdown";
   };
 
@@ -4154,7 +4730,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const blob = await res.blob();
       let pngBlob = blob;
       if (blob.type !== "image/png") {
-        const img = new Image();
+        const img = new window.Image();
         const url = URL.createObjectURL(blob);
         await new Promise((resolve, reject) => {
           img.onload = resolve;
@@ -4379,7 +4955,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       theme: settingsRef.current?.theme || settings.theme,
       tagColorStyle: settingsRef.current?.tagColorStyle || settings.tagColorStyle,
       assetBlobUrlMap: assetBlobUrlMap.current,
-      contentFormat: isTxt ? "plain" : (note?.contentFormat ?? "markdown"),
+      contentFormat: isTxt ? "plain" : (note?.contentFormat === "html" ? "html" : "markdown"),
     });
   };
 
@@ -4401,6 +4977,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     filteredItems: [],
   });
 
+  const [overflowSubmenu, setOverflowSubmenu] = useState<string | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
   const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -4455,6 +5032,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const openWorkspaceImageDialogRef = useRef<(() => void) | null>(null);
   const triggerImageUploadRef = useRef<(() => void) | null>(null);
   const openAudioRecorderRef = useRef<(() => void) | null>(null);
+  const openQrCodeDialogRef = useRef<(() => void) | null>(null);
+  const openEmojiPickerRef = useRef<(() => void) | null>(null);
   const handleFixLanguageRef = useRef<(() => void) | null>(null);
   const openTranslatorRef = useRef<(() => void) | null>(null);
   const openCalculatorRef = useRef<(() => void) | null>(null);
@@ -4472,6 +5051,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const executeSlashCommand = useCallback(
     (editorInstance: TiptapEditor, item: SlashMenuItem) => {
+      const savedCoords = slashMenuStateRef.current.coords;
       if (slashMenuStateRef.current.slashRange) {
         const { from, to } = slashMenuStateRef.current.slashRange;
         editorInstance.chain().focus().deleteRange({ from, to }).run();
@@ -4484,6 +5064,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         openWorkspaceImageDialog: () => openWorkspaceImageDialogRef.current?.(),
         triggerImageUpload: () => triggerImageUploadRef.current?.(),
         openAudioRecorder: () => openAudioRecorderRef.current?.(),
+        openQrCodeDialog: () => openQrCodeDialogRef.current?.(),
+        openEmojiPicker: () => {
+          setSlashEmojiState({
+            open: true,
+            coords: savedCoords || { top: 200, left: 200 },
+          });
+        },
         handleFixLanguage: () => handleFixLanguageRef.current?.(),
         openTranslator: () => openTranslatorRef.current?.(),
         openCalculator: () => openCalculatorRef.current?.(),
@@ -4579,11 +5166,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [editorTick, setEditorTick] = useState(0);
   const tickRafRef = useRef<number | null>(null);
   const lastTickTimeRef = useRef<number>(0);
-  const scheduleEditorTick = useCallback(() => {
+  const scheduleEditorTick = useCallback((immediate = false) => {
     if (tickRafRef.current !== null) return;
     const now = Date.now();
     const elapsed = now - lastTickTimeRef.current;
-    if (elapsed >= 350) {
+    const interval = immediate ? 150 : 600;
+    if (elapsed >= interval) {
       lastTickTimeRef.current = now;
       tickRafRef.current = window.setTimeout(() => {
         tickRafRef.current = null;
@@ -4594,9 +5182,45 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         tickRafRef.current = null;
         lastTickTimeRef.current = Date.now();
         setEditorTick((v) => (v + 1) % 1000000);
-      }, 350 - elapsed);
+      }, interval - elapsed);
     }
   }, []);
+
+  const [cachedCounts, setCachedCounts] = useState<{ charCount: number; wordCount: number; readingTime: number }>({
+    charCount: 0,
+    wordCount: 0,
+    readingTime: 1,
+  });
+  const debouncedCountTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const scheduleCountUpdate = useCallback(() => {
+    if (debouncedCountTimeoutRef.current) {
+      clearTimeout(debouncedCountTimeoutRef.current);
+    }
+    debouncedCountTimeoutRef.current = setTimeout(() => {
+      debouncedCountTimeoutRef.current = null;
+      if (!editorInstanceRef.current || editorInstanceRef.current.isDestroyed) return;
+      const text = editorInstanceRef.current.state.doc.textContent;
+      const chars = countCharacters(text);
+      const words = countWords(text);
+      const rTime = Math.max(1, Math.ceil(words / 200));
+      setCachedCounts((prev) => {
+        if (prev.charCount === chars && prev.wordCount === words && prev.readingTime === rTime) {
+          return prev;
+        }
+        return { charCount: chars, wordCount: words, readingTime: rTime };
+      });
+    }, 600);
+  }, []);
+
+  useEffect(() => {
+    if (!note) return;
+    const initialText = note.content || "";
+    const chars = countCharacters(initialText);
+    const words = countWords(initialText);
+    const rTime = Math.max(1, Math.ceil(words / 200));
+    setCachedCounts({ charCount: chars, wordCount: words, readingTime: rTime });
+  }, [note?.id]);
 
   type ImageFileInput = File | { dataUrl?: string; file?: File; blob?: Blob; fileName?: string };
   const processAndInsertImageFileRef = useRef<((input: ImageFileInput) => Promise<void>) | null>(null);
@@ -4614,6 +5238,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const targetTop = getNoteScrollPosition(noteId);
     
     const applyScroll = () => {
+      if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== noteId) return;
       if (editorScrollContainerRef.current) {
         editorScrollContainerRef.current.scrollTop = targetTop;
       }
@@ -4621,14 +5246,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     applyScroll();
     requestAnimationFrame(applyScroll);
-    setTimeout(applyScroll, 25);
-    setTimeout(applyScroll, 75);
-    setTimeout(applyScroll, 150);
+    setTimeout(applyScroll, 20);
+    setTimeout(applyScroll, 60);
+    setTimeout(applyScroll, 120);
+    setTimeout(applyScroll, 240);
+    setTimeout(applyScroll, 400);
   }, []);
+
+  const prevIsVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    if (prevIsVisibleRef.current === isVisible) return;
+    const wasVisible = prevIsVisibleRef.current;
+    prevIsVisibleRef.current = isVisible;
+
+    if (!isVisible && wasVisible && note?.id && editorScrollContainerRef.current) {
+      const container = editorScrollContainerRef.current;
+      if (container.clientHeight > 0 || container.scrollTop > 0) {
+        setNoteScrollPosition(note.id, container.scrollTop);
+      }
+    } else if (isVisible && !wasVisible && note?.id) {
+      restoreScrollPosition(note.id);
+    }
+  }, [isVisible, note?.id, restoreScrollPosition]);
 
   const handleEditorScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!note?.id) return;
-    const top = e.currentTarget.scrollTop;
+    const target = e.currentTarget;
+    if (
+      target.scrollTop === 0 &&
+      (target.clientHeight === 0 || target.scrollHeight === 0 || target.offsetParent === null)
+    ) {
+      return;
+    }
+    const top = target.scrollTop;
     setNoteScrollPosition(note.id, top);
   }, [note?.id]);
 
@@ -4648,15 +5298,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
   }, [isTxtFile, turndown]);
 
-  const flushDebouncedContentSave = useCallback(() => {
+  const flushDebouncedContentSave = useCallback((targetNote?: Note) => {
     if (debouncedContentSaveTimeoutRef.current) {
       clearTimeout(debouncedContentSaveTimeoutRef.current);
       debouncedContentSaveTimeoutRef.current = null;
     }
-    if (userEditedRef.current && noteRef.current) {
-      const currentNote = noteRef.current;
+    const currentNote = targetNote || activeNoteRef.current || noteRef.current;
+    if (userEditedRef.current && currentNote) {
       let contentToSave = pendingSaveContentRef.current?.content;
-      if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current) {
+      if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current && !editorInstanceRef.current.isDestroyed) {
         try {
           contentToSave = serializeEditorContent(currentNote, editorInstanceRef.current);
         } catch {
@@ -4665,6 +5315,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       pendingSaveContentRef.current = null;
       if (contentToSave !== undefined && contentToSave !== null) {
+        try {
+          localStorage.setItem(`luno_backup_${currentNote.id}`, contentToSave);
+          if (currentNote.fileName) {
+            localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, contentToSave);
+          }
+        } catch {
+          // ignore
+        }
         onUpdate(currentNote.id, { content: contentToSave });
       }
       userEditedRef.current = false;
@@ -4751,7 +5409,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       CustomParagraph,
       CodeBlockLowlight.extend({
         addNodeView() {
-          return ReactNodeViewRenderer(CodeBlockNodeView);
+          return ReactNodeViewRenderer(CodeBlockNodeView, {
+            update: ({ oldNode, newNode, updateProps }) => {
+              if (newNode.type.name !== oldNode.type.name) {
+                return false;
+              }
+              if (
+                oldNode.attrs.language !== newNode.attrs.language ||
+                oldNode.textContent !== newNode.textContent
+              ) {
+                updateProps();
+              }
+              return true;
+            },
+          });
         },
       }).configure({
         lowlight,
@@ -4777,6 +5448,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       Highlight,
       Superscript,
       Subscript,
+      TextColor,
+      FontFamily,
+      FontSize,
+      TextAlign,
       Kbd,
       Toggle,
       TaskList,
@@ -4911,7 +5586,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           };
         },
         addNodeView() {
-          return ReactNodeViewRenderer(ImageNodeView);
+          return ReactNodeViewRenderer(ImageNodeView, {
+            update: ({ oldNode, newNode, updateProps }) => {
+              if (newNode.type.name !== oldNode.type.name) {
+                return false;
+              }
+              const oldAttrs = oldNode.attrs;
+              const newAttrs = newNode.attrs;
+              if (
+                oldAttrs.src !== newAttrs.src ||
+                oldAttrs.width !== newAttrs.width ||
+                oldAttrs["data-relative-src"] !== newAttrs["data-relative-src"] ||
+                oldAttrs.alt !== newAttrs.alt ||
+                oldAttrs.title !== newAttrs.title
+              ) {
+                updateProps();
+              }
+              return true;
+            },
+          });
         },
       }).configure({
         allowBase64: true,
@@ -5028,7 +5721,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
         }
 
-        if (navigateFootnoteOrAnchor(target, (view.dom.closest(".luno-editor-container") || view.dom.parentElement || document) as HTMLElement)) {
+        if (navigateFootnoteOrAnchor(target as HTMLElement, (view.dom.closest(".luno-editor-container") || view.dom.parentElement || document) as HTMLElement)) {
           event.preventDefault();
           event.stopPropagation();
           return true;
@@ -5040,13 +5733,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (href.startsWith("http://") || href.startsWith("https://")) {
             if (onOpenWebTab) {
               onOpenWebTab(href);
-            } else if (window.electronAPI?.openExternal) {
-              void window.electronAPI.openExternal(href);
+            } else if ((window as any).electronAPI?.openExternal) {
+              void (window as any).electronAPI.openExternal(href);
             } else {
               window.open(href, "_blank", "noopener,noreferrer");
             }
-          } else if (window.electronAPI?.openExternal) {
-            void window.electronAPI.openExternal(href);
+          } else if ((window as any).electronAPI?.openExternal) {
+            void (window as any).electronAPI.openExternal(href);
           } else {
             window.open(href, "_blank", "noopener,noreferrer");
           }
@@ -5270,7 +5963,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
-      scheduleEditorTick();
+      scheduleEditorTick(true);
       if (note?.id) {
         noteEditorStateMap.set(note.id, instance.state);
       }
@@ -5281,7 +5974,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
-      scheduleEditorTick();
+      scheduleEditorTick(false);
+      scheduleCountUpdate();
       if (note?.id) {
         noteEditorStateMap.set(note.id, instance.state);
       }
@@ -5613,31 +6307,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const zoom = Math.round((currentFontSize / 15) * 100);
 
     if (note?.contentFormat === "html" || note?.contentFormat === "css" || isCssFile(note) || isHtmlFile(note)) {
-      const textContent = note?.content || "";
-      const charCount = countCharacters(textContent);
-      const wordCount = countWords(textContent);
-      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
       return {
         line: htmlCursor.line,
         col: htmlCursor.col,
-        charCount,
-        wordCount,
-        readingTime,
+        charCount: cachedCounts.charCount,
+        wordCount: cachedCounts.wordCount,
+        readingTime: cachedCounts.readingTime,
         syntaxLabel: (note?.contentFormat === "css" || isCssFile(note)) ? "CSS" : "HTML",
         zoom,
       };
     }
 
     if (!editor) {
-      const charCount = note?.content ? countCharacters(note.content) : 0;
-      const wordCount = note?.content ? countWords(note.content) : 0;
-      const readingTime = Math.max(1, Math.ceil(wordCount / 200));
       return {
         line: 1,
         col: 1,
-        charCount,
-        wordCount,
-        readingTime,
+        charCount: cachedCounts.charCount,
+        wordCount: cachedCounts.wordCount,
+        readingTime: cachedCounts.readingTime,
         syntaxLabel,
         zoom,
       };
@@ -5649,21 +6336,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const lines = textBefore.split("\n");
     const line = lines.length;
     const col = (lines[lines.length - 1]?.length ?? 0) + 1;
-    const textContent = doc?.textContent || "";
-    const charCount = countCharacters(textContent);
-    const wordCount = countWords(textContent);
-    const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
     return {
       line,
       col,
-      charCount,
-      wordCount,
-      readingTime,
+      charCount: cachedCounts.charCount,
+      wordCount: cachedCounts.wordCount,
+      readingTime: cachedCounts.readingTime,
       syntaxLabel,
       zoom,
     };
-  }, [editor, editorTick, note, editorFontSize, settings.editorFontSize, htmlCursor]);
+  }, [editor, editorTick, note, editorFontSize, settings.editorFontSize, htmlCursor, cachedCounts]);
 
   const getFreshFileHandle = useCallback(async (targetNote: Note, allowCreate = false): Promise<FileSystemFileHandle | null> => {
     if (!targetNote || isNoteDeleted(targetNote.id) || deletedNoteIdsRef.current.has(targetNote.id)) {
@@ -5702,19 +6385,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return null;
   }, [rootDirHandle]);
 
-  const saveLinkedFileToDisk = useCallback(async () => {
+  const saveLinkedFileToDisk = useCallback(async (targetNote?: Note) => {
     if (!hasPendingDiskSaveRef.current) return;
-    if (!note || (!editor && !isHtmlFile(note) && !isCssFile(note)) || !settings.autoSave) return;
-    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
-    if (note.fileType === "image" || note.fileType === "binary") return;
-    if (deletedNoteIdsRef.current.has(note.id) || isNoteDeleted(note.id)) return;
-    if (Array.isArray(notes) && !notes.some((n) => n.id === note.id)) return;
-    if (loadingNoteIdRef.current === note.id || syncingFromNote.current) return;
+    const n = targetNote || activeNoteRef.current || note;
+    if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n)) || !settings.autoSave) return;
+    if (!targetNote && editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== n.id) return;
+    if (n.fileType === "image" || n.fileType === "binary") return;
+    if (deletedNoteIdsRef.current.has(n.id) || isNoteDeleted(n.id)) return;
+    if (Array.isArray(notes) && !notes.some((item) => item.id === n.id)) return;
+    if (!targetNote && (loadingNoteIdRef.current === n.id || syncingFromNote.current)) return;
 
     const opId = ++saveOpIdRef.current;
     setSaveStatus("auto_saving");
 
-    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
     if (relPath && isRelativePathDeleted(relPath)) {
       if (saveOpIdRef.current === opId) {
         setSaveStatus("auto_saved");
@@ -5723,9 +6407,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     try {
-      const ext = getPreferredExtension() as "md" | "txt" | "html" | "css";
-      const content = getContentToSave(ext);
-      await performSave(content, ext, true);
+      const ext = getPreferredExtension(n) as "md" | "txt" | "html" | "css";
+      const content = getContentToSave(ext, n);
+      await performSave(content, ext, true, n);
     } catch {
       if (saveOpIdRef.current === opId) {
         setSaveStatus("failed");
@@ -5820,7 +6504,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       flushPendingRename();
-      flushDebouncedContentSave();
+      const currentTarget = activeNoteRef.current || note;
+      flushDebouncedContentSave(currentTarget);
+      if (hasPendingDiskSaveRef.current && currentTarget && settings.autoSave) {
+        void saveLinkedFileToDisk(currentTarget);
+      }
       if (pendingSaveContentRef.current) {
         const { id, content } = pendingSaveContentRef.current;
         pendingSaveContentRef.current = null;
@@ -5829,7 +6517,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [flushPendingRename, flushDebouncedContentSave, onUpdate]);
+  }, [flushPendingRename, flushDebouncedContentSave, saveLinkedFileToDisk, onUpdate, note, settings.autoSave]);
 
   type SaveStatus =
     | "saved"
@@ -5988,12 +6676,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
+    // Save previous active note's state and scroll position into map before switching to new note
     if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) {
       if (debounceRenameTimeoutRef.current) {
         clearTimeout(debounceRenameTimeoutRef.current);
         debounceRenameTimeoutRef.current = null;
       }
       pendingRenameRef.current = null;
+
+      const prevId = editorActiveNoteIdRef.current;
+      const prevNote = activeNoteRef.current;
+      if (userEditedRef.current && prevNote) {
+        flushDebouncedContentSave(prevNote);
+      }
+      if (hasPendingDiskSaveRef.current && prevNote && settings.autoSave) {
+        void saveLinkedFileToDisk(prevNote);
+      }
+      if (!closedNoteIds.has(prevId)) {
+        if (editor?.state) {
+          noteEditorStateMap.set(prevId, editor.state);
+        }
+        if (editorScrollContainerRef.current) {
+          const container = editorScrollContainerRef.current;
+          if (container.clientHeight > 0 || container.scrollTop > 0) {
+            setNoteScrollPosition(prevId, container.scrollTop);
+          }
+        }
+      }
     }
 
     if (isHtmlFile(note) || isCssFile(note)) {
@@ -6006,19 +6715,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    // Save previous active note's state and scroll position into map before switching to new note
-    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) {
-      const prevId = editorActiveNoteIdRef.current;
-      if (!closedNoteIds.has(prevId)) {
-        if (editor.state) {
-          noteEditorStateMap.set(prevId, editor.state);
-        }
-        if (editorScrollContainerRef.current) {
-          setNoteScrollPosition(prevId, editorScrollContainerRef.current.scrollTop);
-        }
-      }
-    }
-
     // Since this note is now active and being viewed/edited, remove it from closedNoteIds
     closedNoteIds.delete(note.id);
 
@@ -6027,6 +6723,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (savedState) {
       syncingFromNote.current = true;
       editorActiveNoteIdRef.current = note.id;
+      activeNoteRef.current = note;
       editor.view.updateState(savedState);
       userEditedRef.current = false;
       hasPendingDiskSaveRef.current = false;
@@ -6063,6 +6760,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
+    activeNoteRef.current = note;
     (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
     void resolveRelativeImagesInEditor(editor);
 
@@ -6106,7 +6804,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = false;
     loadingNoteIdRef.current = null;
     restoreScrollPosition(note.id);
-  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition]);
+  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
 
   useEffect(() => {
     return () => {
@@ -6122,27 +6820,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
         autoSaveDiskTimeoutRef.current = null;
       }
-      if (pendingSaveContentRef.current) {
+      const target = activeNoteRef.current || note;
+      if (userEditedRef.current && target) {
+        flushDebouncedContentSave(target);
+      } else if (pendingSaveContentRef.current) {
         const pending = pendingSaveContentRef.current;
         pendingSaveContentRef.current = null;
-        if (userEditedRef.current && pending.id === note?.id) {
+        if (userEditedRef.current && target && pending.id === target.id) {
           onUpdate(pending.id, { content: pending.content });
         }
         userEditedRef.current = false;
       }
+      if (hasPendingDiskSaveRef.current && target && settings.autoSave) {
+        void saveLinkedFileToDisk(target);
+      }
       hasPendingDiskSaveRef.current = false;
     };
-  }, [note?.id, onUpdate]);
+  }, [note?.id, onUpdate, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
 
   // Save active note state on unmount & flush pending save
   useEffect(() => {
     return () => {
-      if (note?.id && !closedNoteIds.has(note.id)) {
+      const target = activeNoteRef.current || note;
+      if (target?.id && !closedNoteIds.has(target.id)) {
         if (editor && !editor.isDestroyed) {
-          noteEditorStateMap.set(note.id, editor.state);
+          noteEditorStateMap.set(target.id, editor.state);
         }
         if (editorScrollContainerRef.current) {
-          setNoteScrollPosition(note.id, editorScrollContainerRef.current.scrollTop);
+          const container = editorScrollContainerRef.current;
+          if (container.clientHeight > 0 || container.scrollTop > 0) {
+            setNoteScrollPosition(target.id, container.scrollTop);
+          }
         }
       }
       if (debouncedContentSaveTimeoutRef.current) {
@@ -6157,15 +6865,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
         autoSaveDiskTimeoutRef.current = null;
       }
-      if (editorActiveNoteIdRef.current && editor && !editor.isDestroyed) {
-        if (pendingSaveContentRef.current) {
-          const { id, content } = pendingSaveContentRef.current;
-          pendingSaveContentRef.current = null;
-          onUpdate(id, { content });
-        }
+      if (userEditedRef.current && target) {
+        flushDebouncedContentSave(target);
+      }
+      if (hasPendingDiskSaveRef.current && target && settings.autoSave) {
+        void saveLinkedFileToDisk(target);
       }
     };
-  }, [editor, onUpdate, note?.id]);
+  }, [editor, onUpdate, note?.id, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
 
   useEffect(() => {
     if (!editor) return;
@@ -6231,7 +6938,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         ext.options.enabled = settings.wrongLanguageSuggestion !== false;
       }
     });
-    editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
+    const tr = editor.state.tr
+      .setMeta("addToHistory", false)
+      .setMeta(spellCheckPluginKey, { recompute: true });
+    editor.view.dispatch(tr);
   }, [editor, spellCheckEnabled, settings.wrongLanguageSuggestion]);
 
 
@@ -6473,7 +7183,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (editor && !editor.isDestroyed && editor.isFocused) {
           e.preventDefault();
           e.stopPropagation();
-          handleOpenLinkDialog();
+          openLinkDialog();
           return;
         }
       }
@@ -6483,7 +7193,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (editor && !editor.isDestroyed) {
           e.preventDefault();
           e.stopPropagation();
-          editor.chain().focus().unsetAllMarks().clearNodes().run();
+          editor.chain().focus().unsetAllMarks().unsetColor().unsetFontFamily().unsetFontSize().clearNodes().run();
         }
         return;
       }
@@ -6982,6 +7692,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     openWorkspaceImageDialogRef.current = openWorkspaceImageDialog;
     triggerImageUploadRef.current = triggerImageUpload;
     openAudioRecorderRef.current = openAudioRecorder;
+    openQrCodeDialogRef.current = () => setQrCodeDialogOpen(true);
+    openEmojiPickerRef.current = () => setSlashEmojiState({ open: true, coords: { top: 200, left: 200 } });
     handleFixLanguageRef.current = handleFixLanguage;
     openTranslatorRef.current = toggleTranslator;
     openCalculatorRef.current = toggleCalculator;
@@ -7294,10 +8006,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | "css" | null>(null);
 
-  const getPreferredExtension = () => {
+  const getPreferredExtension = (targetNote?: Note) => {
     if (selectedExtension) return selectedExtension;
-    const currentFileName = note?.fileName?.toLowerCase() ?? "";
-    if (currentFileName.endsWith(".css") || note?.contentFormat === "css") return "css";
+    const n = targetNote || activeNoteRef.current || note;
+    const currentFileName = n?.fileName?.toLowerCase() ?? "";
+    if (currentFileName.endsWith(".css") || n?.contentFormat === "css") return "css";
     if (currentFileName.endsWith(".txt")) return "txt";
     if (currentFileName.endsWith(".md") || currentFileName.endsWith(".markdown")) return "md";
     if (currentFileName.endsWith(".html") || currentFileName.endsWith(".htm")) return "html";
@@ -7399,7 +8112,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (saved?.folderPath) {
           const fullPath = `${saved.folderPath}/${resolvedRelPath}`;
           const dataUrl = await electronAPI.readImageDataUrl(fullPath);
-          if (dataUrl) return dataUrl;
+          if (dataUrl) return dataUrlToBlobUrl(dataUrl);
         }
       } catch (err) {
         console.warn("Electron asset resolution failed:", assetPath, err);
@@ -7412,6 +8125,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const handle = await resolveAssetHandle(assetPath);
         if (handle && typeof handle.getFile === "function") {
           const file = await handle.getFile();
+          if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+            return URL.createObjectURL(file);
+          }
           return await fileToDataUrl(file);
         }
       } catch (err) {
@@ -7425,7 +8141,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const resolveRelativeImagesInEditor = useCallback(async (instance: TiptapEditor | null) => {
     if (!instance || instance.isDestroyed || !note) return;
 
-    const { doc, tr } = instance.state;
+    const { doc } = instance.state;
     // Fast check: avoid traversing documents that do not contain any image nodes
     let hasImageNode = false;
     doc.descendants((node) => {
@@ -7437,25 +8153,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
     if (!hasImageNode) return;
 
-    const tasks: Array<{ pos: number; relPath: string }> = [];
+    const tasks: string[] = [];
 
-    doc.descendants((node, pos) => {
+    doc.descendants((node) => {
       if (node.type.name === "image") {
         const src = (node.attrs.src as string) || "";
         const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
         const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
 
         if (relPath && !/^(https?:\/\/|data:|blob:)/i.test(relPath)) {
-          tasks.push({ pos, relPath });
+          if (!tasks.includes(relPath)) {
+            tasks.push(relPath);
+          }
         }
       }
     });
 
     if (tasks.length === 0) return;
 
-    let modified = false;
+    const resolvedMap = new Map<string, string>();
 
-    for (const { pos, relPath } of tasks) {
+    for (const relPath of tasks) {
       let encodedRel = relPath;
       try {
         encodedRel = encodeURI(decodeURI(relPath));
@@ -7487,29 +8205,51 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       if (blobUrl) {
-        const currentNode = instance.state.doc.nodeAt(pos);
-        if (currentNode && currentNode.type.name === "image") {
-          if (currentNode.attrs.src !== blobUrl || currentNode.attrs["data-relative-src"] !== encodedRel) {
+        resolvedMap.set(relPath, blobUrl);
+        resolvedMap.set(encodedRel, blobUrl);
+        resolvedMap.set(decodedRel, blobUrl);
+      }
+    }
+
+    if (resolvedMap.size > 0 && !instance.isDestroyed) {
+      const currentDoc = instance.state.doc;
+      const tr = instance.state.tr;
+      let modified = false;
+
+      currentDoc.descendants((node, pos) => {
+        if (node.type.name === "image") {
+          const src = (node.attrs.src as string) || "";
+          const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
+          const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
+          const blobUrl = resolvedMap.get(relPath) || (src ? resolvedMap.get(src) : undefined);
+
+          if (blobUrl && node.attrs.src !== blobUrl) {
+            let encodedRel = relPath;
+            try {
+              encodedRel = encodeURI(decodeURI(relPath));
+            } catch {
+              encodedRel = relPath.replace(/ /g, "%20");
+            }
             tr.setNodeMarkup(pos, undefined, {
-              ...currentNode.attrs,
+              ...node.attrs,
               src: blobUrl,
               "data-relative-src": encodedRel,
             });
             modified = true;
           }
         }
-      }
-    }
+      });
 
-    if (modified && !instance.isDestroyed) {
-      syncingFromNote.current = true;
-      try {
-        tr.setMeta("addToHistory", false);
-        tr.setMeta("isSync", true);
-        instance.view.dispatch(tr);
-        setEditorTick((v) => v + 1);
-      } finally {
-        syncingFromNote.current = false;
+      if (modified && !instance.isDestroyed) {
+        syncingFromNote.current = true;
+        try {
+          tr.setMeta("addToHistory", false);
+          tr.setMeta("isSync", true);
+          instance.view.dispatch(tr);
+          setEditorTick((v) => v + 1);
+        } finally {
+          syncingFromNote.current = false;
+        }
       }
     }
   }, [rootDirHandle, note?.id]);
@@ -7689,32 +8429,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
   };
 
-  const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css"): string => {
-    if (!note) return "";
-    if (isHtmlFile(note) || isCssFile(note) || targetExt === "css") {
-      return note.content || "";
+  const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css", targetNote?: Note): string => {
+    const n = targetNote || activeNoteRef.current || note;
+    if (!n) return "";
+    if (isHtmlFile(n) || isCssFile(n) || targetExt === "css") {
+      return n.content || "";
     }
-    const format = targetExt === "html" ? "html" : targetExt === "css" ? "css" : targetExt ? (targetExt === "txt" ? "plain" : "markdown") : getContentFormat();
+    const format = targetExt === "html" ? "html" : targetExt === "txt" ? "plain" : targetExt === "md" ? "markdown" : getContentFormat();
 
     let rawHtml = "";
     if (editor && !editor.isDestroyed) {
       rawHtml = editor.getHTML();
     }
 
-    let htmlContent = (!note || isTxtFile(note)) ? rawHtml : stripTopH1FromHtml(rawHtml);
+    let htmlContent = (!n || isTxtFile(n)) ? rawHtml : stripTopH1FromHtml(rawHtml);
 
     const isBlank = !htmlContent || htmlContent.trim() === "<p></p>" || htmlContent.trim() === "<h1></h1><p></p>";
-    if (isBlank && note.content && note.content.trim() !== "<p></p>") {
-      if (isTiptapJson(note.content)) {
+    if (isBlank && n.content && n.content.trim() !== "<p></p>") {
+      if (isTiptapJson(n.content)) {
         try {
-          const parsed = JSON.parse(note.content);
+          const parsed = JSON.parse(n.content);
           const extracted = extractTextFromTiptapJson(parsed);
-          htmlContent = extracted ? `<p>${extracted}</p>` : note.content;
+          htmlContent = extracted ? `<p>${extracted}</p>` : n.content;
         } catch {
-          htmlContent = note.content;
+          htmlContent = n.content;
         }
       } else {
-        htmlContent = note.content;
+        htmlContent = n.content;
       }
     }
 
@@ -7736,20 +8477,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else {
       // For markdown, convert HTML back to markdown using turndown rules
       let mdText = isLikelyHtml(htmlContent) ? getMarkdownFromHtml(htmlContent) : htmlContent;
-      if (isMarkdownNote(note)) {
-        mdText = updateFrontmatterTags(mdText, note.tags || []);
-        if (note.icon !== undefined || note.iconColor !== undefined) {
-          mdText = updateFrontmatterIcon(mdText, note.icon, note.iconColor);
+      if (isMarkdownNote(n)) {
+        mdText = updateFrontmatterTags(mdText, n.tags || []);
+        if (n.icon !== undefined || n.iconColor !== undefined) {
+          mdText = updateFrontmatterIcon(mdText, n.icon, n.iconColor);
         }
-        if (note.isFavorite !== undefined) {
-          mdText = updateFrontmatterFavorite(mdText, note.isFavorite);
+        if (n.isFavorite !== undefined) {
+          mdText = updateFrontmatterFavorite(mdText, n.isFavorite);
         }
       }
       return mdText;
     }
   };
 
-  const setSavedSnapshot = (noteId: string, ext: "md" | "txt" | "html", content: string) => {
+  const setSavedSnapshot = (noteId: string, ext: "md" | "txt" | "html" | "css", content: string) => {
     setSavedSnapshotByNoteId((prev) => ({
       ...prev,
       [noteId]: { ext, content },
@@ -7783,14 +8524,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
-  const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" = "txt") => {
+  const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" | "css" = "txt") => {
     if (!note) return;
 
     const normalizedContent = lineEnding === "CRLF"
       ? markdown.replace(/\r?\n/g, "\r\n")
       : markdown.replace(/\r\n/g, "\n");
 
-    const blobType = ext === "txt" ? "text/plain;charset=utf-8" : ext === "html" ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8";
+    const blobType = ext === "txt" ? "text/plain;charset=utf-8" : ext === "html" ? "text/html;charset=utf-8" : ext === "css" ? "text/css;charset=utf-8" : "text/markdown;charset=utf-8";
     const blob = new Blob([normalizedContent], { type: blobType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -7809,9 +8550,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSavedSnapshot(note.id, ext, normalizedContent);
   };
 
-  const performSave = async (content: string, ext: "md" | "txt" | "html" | "css", isSilent = false) => {
-    if (!note || isNoteDeleted(note.id) || deletedNoteIdsRef.current.has(note.id)) return;
-    if (note.fileType === "image" || note.fileType === "binary") return;
+  const performSave = async (content: string, ext: "md" | "txt" | "html" | "css", isSilent = false, targetNote?: Note) => {
+    const n = targetNote || activeNoteRef.current || note;
+    if (!n || isNoteDeleted(n.id) || deletedNoteIdsRef.current.has(n.id)) return;
+    if (n.fileType === "image" || n.fileType === "binary") return;
 
     const normalizedContent = lineEnding === "CRLF"
       ? content.replace(/\r?\n/g, "\r\n")
@@ -7820,15 +8562,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const currentOpId = ++saveOpIdRef.current;
     if (!isSilent) setSaveStatus("saving");
 
-    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
     if (relPath && isRelativePathDeleted(relPath)) {
       if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
       return;
     }
 
     let finalPayloadToDisk = normalizedContent;
-    if (note.isLocked) {
-      const activePin = onGetActivePin?.(note.id);
+    if (n.isLocked) {
+      const activePin = onGetActivePin?.(n.id);
       if (activePin) {
         try {
           finalPayloadToDisk = await encryptNoteContent(normalizedContent, activePin);
@@ -7842,22 +8584,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
       const saved = await electronAPI.getSavedWorkspace();
-      if (saved?.folderPath && note.fileName) {
-        const fullPath = note.folderPath
-          ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
-          : `${saved.folderPath}/${note.fileName}`;
+      if (saved?.folderPath && n.fileName) {
+        const fullPath = n.folderPath
+          ? `${saved.folderPath}/${n.folderPath}/${n.fileName}`
+          : `${saved.folderPath}/${n.fileName}`;
 
         const ok = await electronAPI.writeFileContent({ fullPath, content: finalPayloadToDisk });
         if (ok) {
           hasPendingDiskSaveRef.current = false;
-          setSavedSnapshot(note.id, ext, normalizedContent);
+          onUpdate(n.id, { content: normalizedContent });
+          setSavedSnapshot(n.id, ext, normalizedContent);
           if (saveOpIdRef.current === currentOpId) {
             setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
           }
           if (!isSilent) {
             toast({
               title: t("editor.saveToastTitle") || "Saved",
-              description: note.fileName,
+              description: n.fileName,
             });
           }
           return;
@@ -7865,15 +8608,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    const existingHandle = await getFreshFileHandle(note, true);
+    const existingHandle = await getFreshFileHandle(n, true);
     if (!existingHandle?.createWritable) {
       if (saveOpIdRef.current === currentOpId) {
-        setSavedSnapshot(note.id, ext, normalizedContent);
+        hasPendingDiskSaveRef.current = false;
+        onUpdate(n.id, { content: normalizedContent });
+        setSavedSnapshot(n.id, ext, normalizedContent);
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
         if (!isSilent) {
           toast({
             title: t("editor.saveToastTitle") || "Saved",
-            description: note.fileName || note.title || "Note",
+            description: n.fileName || n.title || "Note",
           });
         }
       }
@@ -7896,16 +8641,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       await writable.close();
       writable = null;
       hasPendingDiskSaveRef.current = false;
-      await setStoredFileHandle(note.id, existingHandle);
+      onUpdate(n.id, { content: normalizedContent });
+      await setStoredFileHandle(n.id, existingHandle);
       const savedFile = await existingHandle.getFile();
-      updateLinkedMetadata(note.id, savedFile.name);
+      updateLinkedMetadata(n.id, savedFile.name);
       if (!isSilent) {
         toast({
           title: t("editor.saveToastTitle"),
           description: t("editor.saveToastSuccess", { file: savedFile.name }),
         });
       }
-      setSavedSnapshot(note.id, ext, normalizedContent);
+      setSavedSnapshot(n.id, ext, normalizedContent);
       if (saveOpIdRef.current === currentOpId) {
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
       }
@@ -8390,7 +9136,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note) return;
     let src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
 
-    const electronAPI = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+    const electronAPI = (window as any).electronAPI;
 
     if (electronAPI?.readFileBase64 && (!src || src.startsWith("blob:"))) {
       try {
@@ -8511,7 +9257,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         `</style>` +
         `</head><body>${titleHeader}${content}</body></html>`;
 
-    const electronAPI = (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
+    const electronAPI = (window as any).electronAPI;
     if (electronAPI?.exportPdf) {
       try {
         const res = await electronAPI.exportPdf({
@@ -8590,6 +9336,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         const ok = await electronAPI.writeFileContent({ fullPath, content });
         if (ok) {
+          hasPendingDiskSaveRef.current = false;
+          onUpdate(note.id, { content });
           setSaveStatus("manually_saved");
           setSavedSnapshot(note.id, ext, content);
           toast({
@@ -9350,30 +10098,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
-              group: "history" | "heading" | "inline" | "list" | "block" | "media" | "ai";
+              group: "history" | "heading" | "typography" | "inline" | "block" | "media" | "ai";
               labelKey: string;
             }> = [
               { id: "undo", group: "history", labelKey: "editor.undo" },
               { id: "redo", group: "history", labelKey: "editor.redo" },
-              { id: "h1", group: "heading", labelKey: "editor.heading1" },
-              { id: "h2", group: "heading", labelKey: "editor.heading2" },
-              { id: "h3", group: "heading", labelKey: "editor.heading3" },
-              { id: "h4", group: "heading", labelKey: "editor.heading4" },
-              { id: "h5", group: "heading", labelKey: "editor.heading5" },
-              { id: "h6", group: "heading", labelKey: "editor.heading6" },
+              { id: "heading", group: "heading", labelKey: "editor.headings" },
+              { id: "fontFamily", group: "typography", labelKey: "editor.fontFamily" },
+              { id: "fontSize", group: "typography", labelKey: "editor.fontSize" },
               { id: "bold", group: "inline", labelKey: "editor.bold" },
               { id: "italic", group: "inline", labelKey: "editor.italic" },
               { id: "underline", group: "inline", labelKey: "editor.underline" },
               { id: "strike", group: "inline", labelKey: "editor.strikethrough" },
               { id: "highlight", group: "inline", labelKey: "editor.highlight" },
+              { id: "textColor", group: "inline", labelKey: "editor.textColor" },
+              { id: "align", group: "inline", labelKey: "editor.textAlign" },
               { id: "superscript", group: "inline", labelKey: "editor.superscript" },
               { id: "subscript", group: "inline", labelKey: "editor.subscript" },
-              { id: "bulletList", group: "list", labelKey: "editor.bulletList" },
-              { id: "orderedList", group: "list", labelKey: "editor.numberedList" },
-              { id: "taskList", group: "list", labelKey: "editor.checkbox" },
+              { id: "list", group: "block", labelKey: "editor.list" },
               { id: "toggle", group: "block", labelKey: "editor.toggle" },
-              { id: "code", group: "block", labelKey: "editor.inlineCode" },
-              { id: "codeBlock", group: "block", labelKey: "editor.codeBlock" },
+              { id: "code", group: "block", labelKey: "editor.code" },
               { id: "blockquote", group: "block", labelKey: "editor.blockquote" },
               { id: "horizontalRule", group: "block", labelKey: "editor.horizontalRule" },
               { id: "footnote", group: "block", labelKey: "editor.footnote" },
@@ -9384,6 +10128,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "clock", group: "media", labelKey: "editor.clock" },
               { id: "link", group: "media", labelKey: "editor.link" },
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
+              { id: "qrCode", group: "media", labelKey: "editor.qrCode" },
               { id: "audio", group: "media", labelKey: "editor.recordAudio" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
               { id: "aiAssistant", group: "ai", labelKey: "settings.aiAssistant" },
@@ -9418,13 +10163,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             const THREE_DOTS_WIDTH = 36;
             const CONTAINER_PADDING = 12;
 
+            const getItemWidth = (id: string) => {
+              if (id === "fontFamily") return 105;
+              if (id === "fontSize") return 44;
+              if (id === "heading") return 42;
+              if (id === "align") return 42;
+              if (id === "list" || id === "bulletList" || id === "orderedList" || id === "taskList") return 42;
+              if (id === "code" || id === "codeBlock") return 42;
+              return BUTTON_WIDTH;
+            };
+
             const totalAvailable = mobileToolbarWidth > 0 ? mobileToolbarWidth - CONTAINER_PADDING : 1000;
 
             let fullWidthNeeded = 0;
             let lastGroup = "";
             for (const item of TOOLBAR_ITEMS) {
               if (lastGroup && item.group !== lastGroup) fullWidthNeeded += SEP_WIDTH;
-              fullWidthNeeded += BUTTON_WIDTH;
+              fullWidthNeeded += getItemWidth(item.id);
               lastGroup = item.group;
             }
 
@@ -9439,7 +10194,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
               for (let i = 0; i < TOOLBAR_ITEMS.length; i++) {
                 const item = TOOLBAR_ITEMS[i];
-                let cost = BUTTON_WIDTH;
+                let cost = getItemWidth(item.id);
                 if (lastGroup && item.group !== lastGroup) cost += SEP_WIDTH;
 
                 if (accumulated + cost > budget) break;
@@ -9568,127 +10323,560 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   );
-                case "h1":
+                case "heading": {
+                  const isH1Active = editor?.isActive("heading", { level: 1 });
+                  const isH2Active = editor?.isActive("heading", { level: 2 });
+                  const isH3Active = editor?.isActive("heading", { level: 3 });
+                  const isH4Active = editor?.isActive("heading", { level: 4 });
+                  const isH5Active = editor?.isActive("heading", { level: 5 });
+                  const isH6Active = editor?.isActive("heading", { level: 6 });
+                  const isHeadingActive = isH1Active || isH2Active || isH3Active || isH4Active || isH5Active || isH6Active;
+
+                  let currentHeadingIcon = "heading";
+                  if (isH1Active) currentHeadingIcon = "h1";
+                  else if (isH2Active) currentHeadingIcon = "h2";
+                  else if (isH3Active) currentHeadingIcon = "h3";
+                  else if (isH4Active) currentHeadingIcon = "h4";
+                  else if (isH5Active) currentHeadingIcon = "h5";
+                  else if (isH6Active) currentHeadingIcon = "h6";
+
                   return (
-                    <Tooltip key="h1">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                    <DropdownMenu key="heading">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm ${
+                                isHeadingActive ? "text-primary font-medium" : "font-normal text-foreground"
+                              }`}
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {renderToolIcon(currentHeadingIcon)}
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.headings") || "Headings"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.headings") || "Headings"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH1Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h1")}
-                          <span className="sr-only">{t("editor.heading1")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading1")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "h2":
-                  return (
-                    <Tooltip key="h2">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h1")}
+                            <span>{t("editor.heading1") || "Heading 1"}</span>
+                          </div>
+                          {isH1Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH2Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h2")}
-                          <span className="sr-only">{t("editor.heading2")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading2")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "h3":
-                  return (
-                    <Tooltip key="h3">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 3 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h2")}
+                            <span>{t("editor.heading2") || "Heading 2"}</span>
+                          </div>
+                          {isH2Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH3Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h3")}
-                          <span className="sr-only">{t("editor.heading3")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading3")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "h4":
-                  return (
-                    <Tooltip key="h4">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 4 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h3")}
+                            <span>{t("editor.heading3") || "Heading 3"}</span>
+                          </div>
+                          {isH3Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH4Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h4")}
-                          <span className="sr-only">{t("editor.heading4")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading4")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "h5":
-                  return (
-                    <Tooltip key="h5">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 5 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h4")}
+                            <span>{t("editor.heading4") || "Heading 4"}</span>
+                          </div>
+                          {isH4Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH5Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h5")}
-                          <span className="sr-only">{t("editor.heading5")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading5")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "h6":
-                  return (
-                    <Tooltip key="h6">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("heading", { level: 6 }) ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h5")}
+                            <span>{t("editor.heading5") || "Heading 5"}</span>
+                          </div>
+                          {isH5Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isH6Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("h6")}
-                          <span className="sr-only">{t("editor.heading6")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.heading6")}</TooltipContent>
-                    </Tooltip>
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("h6")}
+                            <span>{t("editor.heading6") || "Heading 6"}</span>
+                          </div>
+                          {isH6Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   );
-                case "bold":
+                }
+                case "fontFamily": {
+                  const activeFont = getActiveFontFamily(editor);
+                  const isFontActive = Boolean(activeFont);
+                  const activeSettingFontId = settings?.editorFontFamily || settings?.fontFamily || "inter";
+                  const settingFont = findMatchingFontOption(activeSettingFontId, customFonts) || FONT_OPTIONS[0];
+                  const settingFontName = settingFont
+                    ? (settingFont.isCustom ? settingFont.displayName : (t(settingFont.nameKey as any) || settingFont.id))
+                    : (t("editor.defaultFont") || "Default");
+
+                  const foundFont = findMatchingFontOption(activeFont, customFonts);
+                  const displayFontName = foundFont
+                    ? (foundFont.isCustom ? foundFont.displayName : (t(foundFont.nameKey as any) || foundFont.id))
+                    : activeFont
+                      ? activeFont.replace(/['"]/g, "").split(",")[0].trim()
+                      : settingFontName;
+
+                  const displayFontCss = foundFont
+                    ? foundFont.css
+                    : activeFont
+                      ? activeFont
+                      : settingFont?.css;
+
+                  const currentFontId = isFontActive && foundFont ? foundFont.id : settingFont?.id;
+
+                  return (
+                    <DropdownMenu key="fontFamily">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-8 w-[105px] shrink-0 px-2 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm font-normal text-foreground"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <span
+                                className="truncate max-w-[72px]"
+                                style={displayFontCss ? { fontFamily: displayFontCss } : undefined}
+                              >
+                                {displayFontName}
+                              </span>
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.fontFamily") || "Font Family"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.fontFamily") || "Font Family"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-56 max-h-80 overflow-y-auto rounded-xl p-1.5 shadow-md">
+                        {/* Custom Fonts Group */}
+                        {customFonts && customFonts.length > 0 && (
+                          <div className="mb-1.5 pb-1.5 border-b border-border/60">
+                            <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              {t("settings.customFonts") || "Workspace Fonts"}
+                            </div>
+                            {customFonts.map((font) => {
+                              const isCurrent = font.id === currentFontId;
+                              return (
+                                <ContextMenu key={font.id}>
+                                  <ContextMenuTrigger asChild>
+                                    <div
+                                      role="menuitem"
+                                      className={`cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between outline-none transition-colors select-none ${
+                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/18 focus:bg-primary/18" : "hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary"
+                                      }`}
+                                      onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
+                                      style={{ fontFamily: font.css }}
+                                    >
+                                      <span className="truncate flex-1">{font.name}</span>
+                                      {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
+                                    </div>
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent className="w-40 rounded-xl p-1 shadow-md z-[999999]">
+                                    <ContextMenuItem
+                                      onClick={() => {
+                                        setFontToRename(font);
+                                        setFontRenameValue(font.name);
+                                      }}
+                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg cursor-pointer text-[13px]"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                      <span>{t("settings.renameFont") || "Rename"}</span>
+                                    </ContextMenuItem>
+                                    <ContextMenuItem
+                                      variant="destructive"
+                                      onClick={() => {
+                                        setFontToDelete(font);
+                                      }}
+                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                      <span>{t("settings.deleteFont") || "Delete"}</span>
+                                    </ContextMenuItem>
+                                  </ContextMenuContent>
+                                </ContextMenu>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* System Fonts Group */}
+                        <div>
+                          {customFonts && customFonts.length > 0 && (
+                            <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              {t("settings.systemFonts") || "System Fonts"}
+                            </div>
+                          )}
+                          {FONT_OPTIONS.map((font) => {
+                            const isCurrent = font.id === currentFontId;
+                            return (
+                              <DropdownMenuItem
+                                key={font.id}
+                                onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
+                                style={{ fontFamily: font.css }}
+                                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                }`}
+                              >
+                                <span className="truncate">{t(font.nameKey as any) || font.id}</span>
+                                {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </div>
+
+                        {/* Upload Font Button */}
+                        <div className="mt-1.5 pt-1.5 border-t border-border/60">
+                          <DropdownMenuItem
+                            className="w-full gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center text-muted-foreground hover:text-primary focus:text-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              fontFileInputRef.current?.click();
+                            }}
+                          >
+                            <Upload className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate font-medium">{t("settings.uploadFont") || "Upload Font"}</span>
+                          </DropdownMenuItem>
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                }
+                case "fontSize": {
+                  const activeFontSize = editor?.getAttributes("fontSize")?.fontSize;
+                  const isSizeActive = Boolean(activeFontSize);
+                  const baseSizeNum = settings?.editorFontSize || editorFontSize || 15;
+                  const baseSizeStr = String(baseSizeNum);
+                  const baseSizePx = `${baseSizeNum}px`;
+                  const displaySize = activeFontSize ? activeFontSize.replace(/px$/i, "") : baseSizeStr;
+                  const currentSize = activeFontSize || baseSizePx;
+                  const appFontCss = FONT_FAMILY_CSS[settings?.fontFamily || "inter"] || "var(--app-font-family)";
+                  const FONT_SIZES = [
+                    "10px",
+                    "12px",
+                    "13px",
+                    "14px",
+                    "15px",
+                    "16px",
+                    "17px",
+                    "18px",
+                    "19px",
+                    "20px",
+                    "21px",
+                    "22px",
+                    "24px",
+                    "28px",
+                    "32px",
+                    "36px",
+                    "48px",
+                    "64px",
+                  ];
+
+                  return (
+                    <DropdownMenu key="fontSize">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-8 w-[44px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm font-normal text-foreground"
+                              style={{ fontFamily: appFontCss }}
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <span
+                                className="text-xs md:text-sm font-normal"
+                                style={{ fontFamily: appFontCss }}
+                              >
+                                {displaySize}
+                              </span>
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.fontSize") || "Font Size"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.fontSize") || "Font Size"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-40 max-h-72 overflow-y-auto rounded-xl p-1.5 shadow-md" style={{ fontFamily: appFontCss }}>
+                        {FONT_SIZES.map((size) => {
+                          const isCurrent = size === currentSize;
+                          return (
+                            <DropdownMenuItem
+                              key={size}
+                              onClick={() => editor?.chain().focus().setFontSize(size).run()}
+                              style={{ fontFamily: appFontCss }}
+                              className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                              }`}
+                            >
+                              <span style={{ fontFamily: appFontCss }}>{size}</span>
+                              {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                }
+                case "textColor": {
+                  const activeColor = editor?.getAttributes("textColor")?.color;
+                  const PRESET_TEXT_COLORS = [
+                    "#26A295",
+                    "#0ea5e9",
+                    "#3b82f6",
+                    "#6366f1",
+                    "#8b5cf6",
+                    "#d946ef",
+                    "#ec4899",
+                    "#f43f5e",
+                    "#f97316",
+                    "#eab308",
+                    "#84cc16",
+                    "#10b981",
+                    "#14b8a6",
+                    "#64748b",
+                    "#000000",
+                    "#ffffff",
+                  ];
+
+                  return (
+                    <Popover key="textColor">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              <TextColorIcon color={activeColor} className="h-4 w-4" />
+                              <span className="sr-only">{t("editor.textColor") || "Text Color"}</span>
+                            </Button>
+                          </PopoverTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.textColor") || "Text Color"}</TooltipContent>
+                      </Tooltip>
+                      <PopoverContent align="start" className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                              <Palette className="w-3.5 h-3.5 text-primary" />
+                              {t("editor.textColor") || "Text Color"}
+                            </span>
+                            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                              {activeColor || t("editor.defaultColor") || "Default"}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                              <input
+                                type="color"
+                                value={activeColor && /^#[0-9A-Fa-f]{6}$/.test(activeColor) ? activeColor : "#000000"}
+                                onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+                                className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                              />
+                            </div>
+                            <Input
+                              value={activeColor || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) {
+                                   editor?.chain().focus().unsetColor().run();
+                                } else {
+                                  editor?.chain().focus().setColor(val).run();
+                                }
+                              }}
+                              placeholder={t("editor.defaultColor") || "Default"}
+                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                              maxLength={7}
+                            />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => editor?.chain().focus().unsetColor().run()}
+                                  className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                            </Tooltip>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                              {t("settings.quickPresets") || "Presets"}
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {PRESET_TEXT_COLORS.map((color) => {
+                                const isSelected = activeColor?.toLowerCase() === color.toLowerCase();
+                                return (
+                                  <button
+                                    key={color}
+                                    type="button"
+                                    style={{
+                                      backgroundColor: color,
+                                      borderColor: color === "#ffffff" ? "var(--border)" : "transparent",
+                                    }}
+                                    onClick={() => editor?.chain().focus().setColor(color).run()}
+                                    className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                                      isSelected
+                                        ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                        : "hover:scale-115 opacity-85 hover:opacity-100"
+                                    }`}
+                                    aria-label={color}
+                                  >
+                                    {isSelected && (
+                                      <Check className={`w-3 h-3 ${color === "#ffffff" ? "text-foreground" : "text-white"}`} />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  );
+                }
+                case "align": {
+                  const isLeft = editor?.isActive({ textAlign: "left" }) || (!editor?.isActive({ textAlign: "center" }) && !editor?.isActive({ textAlign: "right" }) && !editor?.isActive({ textAlign: "justify" }));
+                  const isCenter = editor?.isActive({ textAlign: "center" });
+                  const isRight = editor?.isActive({ textAlign: "right" });
+                  const isJustify = editor?.isActive({ textAlign: "justify" });
+                  const isNonDefaultAlign = isCenter || isRight || isJustify;
+
+                  let currentAlignIcon = "alignLeft";
+                  if (isCenter) currentAlignIcon = "alignCenter";
+                  else if (isRight) currentAlignIcon = "alignRight";
+                  else if (isJustify) currentAlignIcon = "alignJustify";
+
+                  return (
+                    <DropdownMenu key="align">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm ${
+                                isNonDefaultAlign ? "text-primary font-medium" : "font-normal text-foreground"
+                              }`}
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {renderToolIcon(currentAlignIcon)}
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.textAlign") || "Text Align"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.textAlign") || "Text Align"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("left").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("alignLeft")}
+                            <span>{t("editor.alignLeft") || "Align Left"}</span>
+                          </div>
+                          {isLeft && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("center").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("alignCenter")}
+                            <span>{t("editor.alignCenter") || "Align Center"}</span>
+                          </div>
+                          {isCenter && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("right").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("alignRight")}
+                            <span>{t("editor.alignRight") || "Align Right"}</span>
+                          </div>
+                          {isRight && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("alignJustify")}
+                            <span>{t("editor.alignJustify") || "Justify"}</span>
+                          </div>
+                          {isJustify && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                }
+                case "bold": {
+                  const isActive = editor?.isActive("bold");
                   return (
                     <Tooltip key="bold">
                       <TooltipTrigger asChild>
@@ -9696,7 +10884,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bold") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleBold().run()}
@@ -9708,7 +10896,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.bold")}</TooltipContent>
                     </Tooltip>
                   );
-                case "italic":
+                }
+                case "italic": {
+                  const isActive = editor?.isActive("italic");
                   return (
                     <Tooltip key="italic">
                       <TooltipTrigger asChild>
@@ -9716,7 +10906,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("italic") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleItalic().run()}
@@ -9728,7 +10918,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.italic")}</TooltipContent>
                     </Tooltip>
                   );
-                case "underline":
+                }
+                case "underline": {
+                  const isActive = editor?.isActive("underline");
                   return (
                     <Tooltip key="underline">
                       <TooltipTrigger asChild>
@@ -9736,7 +10928,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("underline") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleUnderline().run()}
@@ -9748,7 +10940,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.underline")}</TooltipContent>
                     </Tooltip>
                   );
-                case "strike":
+                }
+                case "strike": {
+                  const isActive = editor?.isActive("strike");
                   return (
                     <Tooltip key="strike">
                       <TooltipTrigger asChild>
@@ -9756,7 +10950,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("strike") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleStrike().run()}
@@ -9768,7 +10962,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.strikethrough")}</TooltipContent>
                     </Tooltip>
                   );
-                case "highlight":
+                }
+                case "highlight": {
+                  const isActive = editor?.isActive("highlight");
                   return (
                     <Tooltip key="highlight">
                       <TooltipTrigger asChild>
@@ -9776,7 +10972,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("highlight") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleHighlight().run()}
@@ -9788,7 +10984,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.highlight")}</TooltipContent>
                     </Tooltip>
                   );
-                case "superscript":
+                }
+                case "superscript": {
+                  const isActive = editor?.isActive("superscript");
                   return (
                     <Tooltip key="superscript">
                       <TooltipTrigger asChild>
@@ -9796,7 +10994,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("superscript") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleSuperscript().run()}
@@ -9808,7 +11006,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.superscript")}</TooltipContent>
                     </Tooltip>
                   );
-                case "subscript":
+                }
+                case "subscript": {
+                  const isActive = editor?.isActive("subscript");
                   return (
                     <Tooltip key="subscript">
                       <TooltipTrigger asChild>
@@ -9816,7 +11016,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("subscript") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleSubscript().run()}
@@ -9828,66 +11028,83 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.subscript")}</TooltipContent>
                     </Tooltip>
                   );
+                }
+                case "list":
                 case "bulletList":
-                  return (
-                    <Tooltip key="bulletList">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("bulletList") ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => editor?.chain().focus().toggleBulletList().run()}
-                        >
-                          {renderToolIcon("bulletList")}
-                          <span className="sr-only">{t("editor.bulletList")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.bulletList")}</TooltipContent>
-                    </Tooltip>
-                  );
                 case "orderedList":
+                case "taskList": {
+                  const isBullet = editor?.isActive("bulletList");
+                  const isOrdered = editor?.isActive("orderedList");
+                  const isTask = editor?.isActive("taskList");
+                  const isAnyListActive = isBullet || isOrdered || isTask;
+
+                  let currentListIcon = "bulletList";
+                  if (isOrdered) currentListIcon = "orderedList";
+                  else if (isTask) currentListIcon = "taskList";
+
                   return (
-                    <Tooltip key="orderedList">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("orderedList") ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                    <DropdownMenu key={id}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm ${
+                                isAnyListActive ? "text-primary font-medium" : "font-normal text-foreground"
+                              }`}
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {renderToolIcon(currentListIcon)}
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.list") || "Lists"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.list") || "Lists"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("bulletList")}
+                            <span>{t("editor.bulletList") || "Bullet List"}</span>
+                          </div>
+                          {isBullet && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("orderedList")}
-                          <span className="sr-only">{t("editor.orderedList")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.orderedList")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "taskList":
-                  return (
-                    <Tooltip key="taskList">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("taskList") ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("orderedList")}
+                            <span>{t("editor.orderedList") || t("editor.numberedList") || "Numbered List"}</span>
+                          </div>
+                          {isOrdered && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleTaskList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("taskList")}
-                          <span className="sr-only">{t("editor.checkbox")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.checkbox")}</TooltipContent>
-                    </Tooltip>
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("taskList")}
+                            <span>{t("editor.checkbox") || t("editor.taskList") || "Task List"}</span>
+                          </div>
+                          {isTask && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   );
+                }
                 case "toggle":
                   return (
                     <Tooltip key="toggle">
@@ -9896,7 +11113,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("toggle") ? "bg-primary/15 text-primary" : ""}`}
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => handleToggleClick(editor)}
@@ -9909,46 +11126,65 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </Tooltip>
                   );
                 case "code":
+                case "codeBlock": {
+                  const isInlineCode = editor?.isActive("code");
+                  const isCodeBlock = editor?.isActive("codeBlock");
+                  const isAnyCodeActive = isInlineCode || isCodeBlock;
+                  const currentCodeIcon = isCodeBlock ? "codeBlock" : "code";
+
                   return (
-                    <Tooltip key="code">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("code") ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                    <DropdownMenu key={id}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm ${
+                                isAnyCodeActive ? "text-primary font-medium" : "font-normal text-foreground"
+                              }`}
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {renderToolIcon(currentCodeIcon)}
+                              <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                              <span className="sr-only">{t("editor.code") || "Code"}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.code") || "Code"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCode().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("code")}
-                          <span className="sr-only">{t("editor.code")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.code")}</TooltipContent>
-                    </Tooltip>
-                  );
-                case "codeBlock":
-                  return (
-                    <Tooltip key="codeBlock">
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("codeBlock") ? "bg-primary/15 text-primary" : ""}`}
-                          disabled={!editor}
-                          onMouseDown={(e) => e.preventDefault()}
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("code")}
+                            <span>{t("editor.inlineCode") || t("editor.code") || "Inline Code"}</span>
+                          </div>
+                          {isInlineCode && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
                         >
-                          {renderToolIcon("codeBlock")}
-                          <span className="sr-only">{t("editor.codeBlock")}</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("editor.codeBlock")}</TooltipContent>
-                    </Tooltip>
+                          <div className="flex items-center gap-2.5">
+                            {renderToolIcon("codeBlock")}
+                            <span>{t("editor.codeBlock") || "Code Block"}</span>
+                          </div>
+                          {isCodeBlock && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   );
-                case "blockquote":
+                }
+                case "blockquote": {
+                  const isActive = editor?.isActive("blockquote");
                   return (
                     <Tooltip key="blockquote">
                       <TooltipTrigger asChild>
@@ -9956,7 +11192,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("blockquote") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().toggleBlockquote().run()}
@@ -9968,6 +11204,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.blockquote")}</TooltipContent>
                     </Tooltip>
                   );
+                }
                 case "horizontalRule":
                   return (
                     <Tooltip key="horizontalRule">
@@ -9976,7 +11213,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => editor?.chain().focus().setHorizontalRule().run()}
@@ -9996,7 +11233,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
@@ -10011,9 +11248,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.footnote")}</TooltipContent>
                     </Tooltip>
                   );
-                case "table":
+                case "table": {
                   if (!editor) return null;
-                  if (!editor.isActive("table")) {
+                  const isTableActive = editor.isActive("table");
+                  if (!isTableActive) {
                     return (
                       <Tooltip key="table">
                         <TooltipTrigger asChild>
@@ -10021,7 +11259,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                            className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
                           >
@@ -10042,7 +11280,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full bg-primary/15 text-primary"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-primary font-medium"
                               onMouseDown={(e) => e.preventDefault()}
                             >
                               {renderToolIcon("table")}
@@ -10105,6 +11343,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   );
+                }
                 case "emoji":
                   return (
                     <Popover key="emoji">
@@ -10158,7 +11397,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${calculatorOpen ? "bg-primary/15 text-primary" : ""}`}
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleCalculator}
                         >
@@ -10177,7 +11416,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${translatorOpen ? "bg-primary/15 text-primary" : ""}`}
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleTranslator}
                         >
@@ -10196,7 +11435,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${clockOpen ? "bg-primary/15 text-primary" : ""}`}
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={toggleClock}
                         >
@@ -10207,7 +11446,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.clock")}</TooltipContent>
                     </Tooltip>
                   );
-                case "link":
+                case "link": {
+                  const isActive = editor?.isActive("link");
                   return (
                     <Tooltip key="link">
                       <TooltipTrigger asChild>
@@ -10215,7 +11455,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${editor?.isActive("link") ? "bg-primary/15 text-primary" : ""}`}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={openLinkDialog}
@@ -10227,6 +11467,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.link")}</TooltipContent>
                     </Tooltip>
                   );
+                }
                 case "image":
                   return (
                     <DropdownMenu key="image">
@@ -10269,6 +11510,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   );
+                case "qrCode":
+                  return (
+                    <Tooltip key="qrCode">
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                          disabled={!editor}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setQrCodeDialogOpen(true)}
+                        >
+                          {renderToolIcon("qrCode")}
+                          <span className="sr-only">{t("editor.qrCode")}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.qrCode")}</TooltipContent>
+                    </Tooltip>
+                  );
                 case "audio":
                   return (
                     <Tooltip key="audio">
@@ -10277,7 +11538,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${audioRecorderOpen ? "bg-primary/15 text-primary" : ""}`}
+                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={openAudioRecorder}
@@ -10335,118 +11596,589 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.redo")}</span>
                     </DropdownMenuItem>
                   );
-                case "h1":
+                case "heading":
                   return (
-                    <DropdownMenuItem key="h1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
-                      {renderDropdownIcon("h1")}
-                      <span>{t("editor.heading1")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="heading" open={overflowSubmenu === "heading"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "heading" ? null : "heading")}>
+                        {renderDropdownIcon("heading")}
+                        <span>{t("editor.headings") || "Headings"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h1")}
+                            <span>{t("editor.heading1") || "Heading 1"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 1 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h2")}
+                            <span>{t("editor.heading2") || "Heading 2"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 2 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 3 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h3")}
+                            <span>{t("editor.heading3") || "Heading 3"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 3 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 4 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h4")}
+                            <span>{t("editor.heading4") || "Heading 4"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 4 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 5 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h5")}
+                            <span>{t("editor.heading5") || "Heading 5"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 5 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            editor?.isActive("heading", { level: 6 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("h6")}
+                            <span>{t("editor.heading6") || "Heading 6"}</span>
+                          </div>
+                          {editor?.isActive("heading", { level: 6 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "h2":
+                case "fontFamily": {
+                  const activeFont = getActiveFontFamily(editor);
+                  const isFontActive = Boolean(activeFont);
+                  const activeSettingFontId = settings?.editorFontFamily || settings?.fontFamily || "inter";
+                  const settingFont = findMatchingFontOption(activeSettingFontId, customFonts) || FONT_OPTIONS[0];
+                  const foundFont = findMatchingFontOption(activeFont, customFonts);
+                  const currentFontId = isFontActive && foundFont ? foundFont.id : settingFont?.id;
                   return (
-                    <DropdownMenuItem key="h2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
-                      {renderDropdownIcon("h2")}
-                      <span>{t("editor.heading2")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="fontFamily" open={overflowSubmenu === "fontFamily"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "fontFamily" ? null : "fontFamily")}>
+                        {renderDropdownIcon("fontFamily")}
+                        <span>{t("editor.fontFamily") || "Font Family"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56 max-h-80 overflow-y-auto rounded-xl p-1.5 shadow-md">
+                        {/* Custom Fonts Group */}
+                        {customFonts && customFonts.length > 0 && (
+                          <div className="mb-1.5 pb-1.5 border-b border-border/60">
+                            <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              {t("settings.customFonts") || "Workspace Fonts"}
+                            </div>
+                            {customFonts.map((font) => {
+                              const isCurrent = font.id === currentFontId;
+                              return (
+                                <ContextMenu key={font.id}>
+                                  <ContextMenuTrigger asChild>
+                                    <div
+                                      role="menuitem"
+                                      className={`cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between outline-none transition-colors select-none ${
+                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/18 focus:bg-primary/18" : "hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary"
+                                      }`}
+                                      onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
+                                      style={{ fontFamily: font.css }}
+                                    >
+                                      <span className="truncate flex-1">{font.name}</span>
+                                      {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
+                                    </div>
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent className="w-40 rounded-xl p-1 shadow-md z-[999999]">
+                                    <ContextMenuItem
+                                      onClick={() => {
+                                        setFontToRename(font);
+                                        setFontRenameValue(font.name);
+                                      }}
+                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg cursor-pointer text-[13px]"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                      <span>{t("settings.renameFont") || "Rename"}</span>
+                                    </ContextMenuItem>
+                                    <ContextMenuItem
+                                      variant="destructive"
+                                      onClick={() => {
+                                        setFontToDelete(font);
+                                      }}
+                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                      <span>{t("settings.deleteFont") || "Delete"}</span>
+                                    </ContextMenuItem>
+                                  </ContextMenuContent>
+                                </ContextMenu>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* System Fonts Group */}
+                        <div>
+                          {customFonts && customFonts.length > 0 && (
+                            <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              {t("settings.systemFonts") || "System Fonts"}
+                            </div>
+                          )}
+                          {FONT_OPTIONS.map((font) => {
+                            const isCurrent = font.id === currentFontId;
+                            return (
+                              <DropdownMenuItem
+                                key={font.id}
+                                onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
+                                style={{ fontFamily: font.css }}
+                                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                }`}
+                              >
+                                <span className="truncate">{t(font.nameKey as any) || font.id}</span>
+                                {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </div>
+
+                        {/* Upload Font Button */}
+                        <div className="mt-1.5 pt-1.5 border-t border-border/60">
+                          <DropdownMenuItem
+                            className="w-full gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center text-muted-foreground hover:text-primary focus:text-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              fontFileInputRef.current?.click();
+                            }}
+                          >
+                            <Upload className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate font-medium">{t("settings.uploadFont") || "Upload Font"}</span>
+                          </DropdownMenuItem>
+                        </div>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "h3":
+                }
+                case "fontSize": {
+                  const activeFontSize = editor?.getAttributes("fontSize")?.fontSize;
+                  const baseSizeNum = settings?.editorFontSize || editorFontSize || 15;
+                  const baseSizePx = `${baseSizeNum}px`;
+                  const currentSize = activeFontSize || baseSizePx;
+                  const appFontCss = FONT_FAMILY_CSS[settings?.fontFamily || "inter"] || "var(--app-font-family)";
+                  const FONT_SIZES = [
+                    "10px",
+                    "12px",
+                    "13px",
+                    "14px",
+                    "15px",
+                    "16px",
+                    "17px",
+                    "18px",
+                    "19px",
+                    "20px",
+                    "21px",
+                    "22px",
+                    "24px",
+                    "28px",
+                    "32px",
+                    "36px",
+                    "48px",
+                    "64px",
+                  ];
                   return (
-                    <DropdownMenuItem key="h3" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}>
-                      {renderDropdownIcon("h3")}
-                      <span>{t("editor.heading3")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="fontSize" open={overflowSubmenu === "fontSize"}>
+                      <DropdownMenuSubTrigger style={{ fontFamily: appFontCss }} onClick={() => setOverflowSubmenu((prev) => prev === "fontSize" ? null : "fontSize")}>
+                        {renderDropdownIcon("fontSize")}
+                        <span style={{ fontFamily: appFontCss }}>{t("editor.fontSize") || "Font Size"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-40 max-h-72 overflow-y-auto rounded-xl p-1.5 shadow-md" style={{ fontFamily: appFontCss }}>
+                        {FONT_SIZES.map((size) => {
+                          const isCurrent = size === currentSize;
+                          return (
+                            <DropdownMenuItem
+                              key={size}
+                              onClick={() => editor?.chain().focus().setFontSize(size).run()}
+                              style={{ fontFamily: appFontCss }}
+                              className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                              }`}
+                            >
+                              <span style={{ fontFamily: appFontCss }}>{size}</span>
+                              {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "h4":
+                }
+                case "textColor": {
+                  const PRESET_TEXT_COLORS = [
+                    "#26A295",
+                    "#0ea5e9",
+                    "#3b82f6",
+                    "#6366f1",
+                    "#8b5cf6",
+                    "#d946ef",
+                    "#ec4899",
+                    "#f43f5e",
+                    "#f97316",
+                    "#eab308",
+                    "#84cc16",
+                    "#10b981",
+                    "#14b8a6",
+                    "#64748b",
+                    "#000000",
+                    "#ffffff",
+                  ];
+                  const activeColor = editor?.getAttributes("textColor")?.color;
                   return (
-                    <DropdownMenuItem key="h4" onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}>
-                      {renderDropdownIcon("h4")}
-                      <span>{t("editor.heading4")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="textColor" open={overflowSubmenu === "textColor"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "textColor" ? null : "textColor")}>
+                        <TextColorIcon color={activeColor} className="h-4 w-4" />
+                        <span>{t("editor.textColor") || "Text Color"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                              <Palette className="w-3.5 h-3.5 text-primary" />
+                              {t("editor.textColor") || "Text Color"}
+                            </span>
+                            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                              {activeColor || t("editor.defaultColor") || "Default"}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                              <input
+                                type="color"
+                                value={activeColor && /^#[0-9A-Fa-f]{6}$/.test(activeColor) ? activeColor : "#000000"}
+                                onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+                                className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                              />
+                            </div>
+                            <Input
+                              value={activeColor || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) {
+                                  editor?.chain().focus().unsetColor().run();
+                                } else {
+                                  editor?.chain().focus().setColor(val).run();
+                                }
+                              }}
+                              placeholder={t("editor.defaultColor") || "Default"}
+                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                              maxLength={7}
+                            />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => editor?.chain().focus().unsetColor().run()}
+                                  className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                            </Tooltip>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                              {t("settings.quickPresets") || "Presets"}
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {PRESET_TEXT_COLORS.map((color) => {
+                                const isSelected = activeColor?.toLowerCase() === color.toLowerCase();
+                                return (
+                                  <button
+                                    key={color}
+                                    type="button"
+                                    style={{
+                                      backgroundColor: color,
+                                      borderColor: color === "#ffffff" ? "var(--border)" : "transparent",
+                                    }}
+                                    onClick={() => editor?.chain().focus().setColor(color).run()}
+                                    className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                                      isSelected
+                                        ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                        : "hover:scale-115 opacity-85 hover:opacity-100"
+                                    }`}
+                                    aria-label={color}
+                                  >
+                                    {isSelected && (
+                                      <Check className={`w-3 h-3 ${color === "#ffffff" ? "text-foreground" : "text-white"}`} />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "h5":
+                }
+                case "align": {
+                  const isLeft = editor?.isActive({ textAlign: "left" }) || (!editor?.isActive({ textAlign: "center" }) && !editor?.isActive({ textAlign: "right" }) && !editor?.isActive({ textAlign: "justify" }));
+                  const isCenter = editor?.isActive({ textAlign: "center" });
+                  const isRight = editor?.isActive({ textAlign: "right" });
+                  const isJustify = editor?.isActive({ textAlign: "justify" });
+
+                  let currentAlignIcon = "alignLeft";
+                  if (isCenter) currentAlignIcon = "alignCenter";
+                  else if (isRight) currentAlignIcon = "alignRight";
+                  else if (isJustify) currentAlignIcon = "alignJustify";
+
                   return (
-                    <DropdownMenuItem key="h5" onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}>
-                      {renderDropdownIcon("h5")}
-                      <span>{t("editor.heading5")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="align" open={overflowSubmenu === "align"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "align" ? null : "align")}>
+                        {renderDropdownIcon(currentAlignIcon)}
+                        <span>{t("editor.textAlign") || "Text Align"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("left").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("alignLeft")}
+                            <span>{t("editor.alignLeft") || "Align Left"}</span>
+                          </div>
+                          {isLeft && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("center").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("alignCenter")}
+                            <span>{t("editor.alignCenter") || "Align Center"}</span>
+                          </div>
+                          {isCenter && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("right").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("alignRight")}
+                            <span>{t("editor.alignRight") || "Align Right"}</span>
+                          </div>
+                          {isRight && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("alignJustify")}
+                            <span>{t("editor.alignJustify") || "Justify"}</span>
+                          </div>
+                          {isJustify && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "h6":
+                }
+                case "bold": {
+                  const isActive = editor?.isActive("bold");
                   return (
-                    <DropdownMenuItem key="h6" onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}>
-                      {renderDropdownIcon("h6")}
-                      <span>{t("editor.heading6")}</span>
-                    </DropdownMenuItem>
-                  );
-                case "bold":
-                  return (
-                    <DropdownMenuItem key="bold" onClick={() => editor?.chain().focus().toggleBold().run()}>
+                    <DropdownMenuItem
+                      key="bold"
+                      onClick={() => editor?.chain().focus().toggleBold().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("bold")}
-                      <span>{t("editor.bold")}</span>
+                      <span className="flex-1">{t("editor.bold")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "italic":
+                }
+                case "italic": {
+                  const isActive = editor?.isActive("italic");
                   return (
-                    <DropdownMenuItem key="italic" onClick={() => editor?.chain().focus().toggleItalic().run()}>
+                    <DropdownMenuItem
+                      key="italic"
+                      onClick={() => editor?.chain().focus().toggleItalic().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("italic")}
-                      <span>{t("editor.italic")}</span>
+                      <span className="flex-1">{t("editor.italic")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "underline":
+                }
+                case "underline": {
+                  const isActive = editor?.isActive("underline");
                   return (
-                    <DropdownMenuItem key="underline" onClick={() => editor?.chain().focus().toggleUnderline().run()}>
+                    <DropdownMenuItem
+                      key="underline"
+                      onClick={() => editor?.chain().focus().toggleUnderline().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("underline")}
-                      <span>{t("editor.underline")}</span>
+                      <span className="flex-1">{t("editor.underline")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "strike":
+                }
+                case "strike": {
+                  const isActive = editor?.isActive("strike");
                   return (
-                    <DropdownMenuItem key="strike" onClick={() => editor?.chain().focus().toggleStrike().run()}>
+                    <DropdownMenuItem
+                      key="strike"
+                      onClick={() => editor?.chain().focus().toggleStrike().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("strike")}
-                      <span>{t("editor.strikethrough")}</span>
+                      <span className="flex-1">{t("editor.strikethrough")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "highlight":
+                }
+                case "highlight": {
+                  const isActive = editor?.isActive("highlight");
                   return (
-                    <DropdownMenuItem key="highlight" onClick={() => editor?.chain().focus().toggleHighlight().run()}>
+                    <DropdownMenuItem
+                      key="highlight"
+                      onClick={() => editor?.chain().focus().toggleHighlight().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("highlight")}
-                      <span>{t("editor.highlight")}</span>
+                      <span className="flex-1">{t("editor.highlight")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "superscript":
+                }
+                case "superscript": {
+                  const isActive = editor?.isActive("superscript");
                   return (
-                    <DropdownMenuItem key="superscript" onClick={() => editor?.chain().focus().toggleSuperscript().run()}>
+                    <DropdownMenuItem
+                      key="superscript"
+                      onClick={() => editor?.chain().focus().toggleSuperscript().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("superscript")}
-                      <span>{t("editor.superscript")}</span>
+                      <span className="flex-1">{t("editor.superscript")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
-                case "subscript":
+                }
+                case "subscript": {
+                  const isActive = editor?.isActive("subscript");
                   return (
-                    <DropdownMenuItem key="subscript" onClick={() => editor?.chain().focus().toggleSubscript().run()}>
+                    <DropdownMenuItem
+                      key="subscript"
+                      onClick={() => editor?.chain().focus().toggleSubscript().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("subscript")}
-                      <span>{t("editor.subscript")}</span>
+                      <span className="flex-1">{t("editor.subscript")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
+                }
+                case "list":
                 case "bulletList":
-                  return (
-                    <DropdownMenuItem key="bulletList" onClick={() => editor?.chain().focus().toggleBulletList().run()}>
-                      {renderDropdownIcon("bulletList")}
-                      <span>{t("editor.bulletList")}</span>
-                    </DropdownMenuItem>
-                  );
                 case "orderedList":
+                case "taskList": {
+                  const isBullet = editor?.isActive("bulletList");
+                  const isOrdered = editor?.isActive("orderedList");
+                  const isTask = editor?.isActive("taskList");
+                  let currentListIcon = "bulletList";
+                  if (isOrdered) currentListIcon = "orderedList";
+                  else if (isTask) currentListIcon = "taskList";
+
                   return (
-                    <DropdownMenuItem key="orderedList" onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
-                      {renderDropdownIcon("orderedList")}
-                      <span>{t("editor.numberedList")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="list" open={overflowSubmenu === "list"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "list" ? null : "list")}>
+                        {renderDropdownIcon(currentListIcon)}
+                        <span>{t("editor.list") || t("editor.bulletList") || "Lists"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("bulletList")}
+                            <span>{t("editor.bulletList") || "Bullet List"}</span>
+                          </div>
+                          {isBullet && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("orderedList")}
+                            <span>{t("editor.orderedList") || t("editor.numberedList") || "Numbered List"}</span>
+                          </div>
+                          {isOrdered && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleTaskList().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("taskList")}
+                            <span>{t("editor.checkbox") || t("editor.taskList") || "Task List"}</span>
+                          </div>
+                          {isTask && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "taskList":
-                  return (
-                    <DropdownMenuItem key="taskList" onClick={() => editor?.chain().focus().toggleTaskList().run()}>
-                      {renderDropdownIcon("taskList")}
-                      <span>{t("editor.checkbox")}</span>
-                    </DropdownMenuItem>
-                  );
+                }
                 case "toggle":
                   return (
                     <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)}>
@@ -10455,42 +12187,174 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </DropdownMenuItem>
                   );
                 case "code":
+                case "codeBlock": {
+                  const isInlineCode = editor?.isActive("code");
+                  const isCodeBlock = editor?.isActive("codeBlock");
+                  const currentCodeIcon = isCodeBlock ? "codeBlock" : "code";
+
                   return (
-                    <DropdownMenuItem key="code" onClick={() => editor?.chain().focus().toggleCode().run()}>
-                      {renderDropdownIcon("code")}
-                      <span>{t("editor.inlineCode")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="code" open={overflowSubmenu === "code"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "code" ? null : "code")}>
+                        {renderDropdownIcon(currentCodeIcon)}
+                        <span>{t("editor.code") || "Code"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleCode().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("code")}
+                            <span>{t("editor.inlineCode") || t("editor.code") || "Inline Code"}</span>
+                          </div>
+                          {isInlineCode && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+                          className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {renderDropdownIcon("codeBlock")}
+                            <span>{t("editor.codeBlock") || "Code Block"}</span>
+                          </div>
+                          {isCodeBlock && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
-                case "blockquote":
-                  return (
-                    <DropdownMenuItem key="blockquote" onClick={() => editor?.chain().focus().toggleBlockquote().run()}>
-                      {renderDropdownIcon("blockquote")}
-                      <span>{t("editor.blockquote")}</span>
-                    </DropdownMenuItem>
-                  );
-                case "table":
+                }
+                case "blockquote": {
+                  const isActive = editor?.isActive("blockquote");
                   return (
                     <DropdownMenuItem
-                      key="table"
-                      onClick={() => {
-                        if (editor) {
-                          if (editor.isActive("table")) {
-                            editor.chain().focus().deleteTable().run();
-                          } else {
-                            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-                          }
-                        }
-                      }}
+                      key="blockquote"
+                      onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
                     >
-                      {renderDropdownIcon("table")}
-                      <span>{t("editor.insertTable")}</span>
+                      {renderDropdownIcon("blockquote")}
+                      <span className="flex-1">{t("editor.blockquote")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
+                }
+                case "horizontalRule":
+                  return (
+                    <DropdownMenuItem
+                      key="horizontalRule"
+                      onClick={() => editor?.chain().focus().setHorizontalRule().run()}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      {renderDropdownIcon("horizontalRule")}
+                      <span className="flex-1">{t("editor.horizontalRule")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "footnote":
+                  return (
+                    <DropdownMenuItem
+                      key="footnote"
+                      onClick={() => {
+                        if (!editor) return;
+                        insertFootnoteAtSelection(editor);
+                      }}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      {renderDropdownIcon("footnote")}
+                      <span className="flex-1">{t("editor.footnote")}</span>
+                    </DropdownMenuItem>
+                  );
+                case "table": {
+                  const isTableActive = editor?.isActive("table");
+                  if (!isTableActive) {
+                    return (
+                      <DropdownMenuItem
+                        key="table"
+                        className="flex items-center gap-2 cursor-pointer"
+                        onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+                      >
+                        {renderDropdownIcon("table")}
+                        <span className="flex-1">{t("editor.insertTable")}</span>
+                      </DropdownMenuItem>
+                    );
+                  }
+                  return (
+                    <DropdownMenuSub key="table" open={overflowSubmenu === "table"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "table" ? null : "table")}>
+                        {renderDropdownIcon("table")}
+                        <span>{t("editor.tableOptions") || t("editor.insertTable") || "Table Options"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-60 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem onClick={() => editor?.chain().focus().addRowBefore().run()}>
+                          <Plus className="h-4 w-4" />
+                          <span>{t("editor.addRowAbove")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor?.chain().focus().addRowAfter().run()}>
+                          <Plus className="h-4 w-4" />
+                          <span>{t("editor.addRowBelow")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem variant="destructive" onClick={() => editor?.chain().focus().deleteRow().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteRow")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => editor?.chain().focus().addColumnBefore().run()}>
+                          <Plus className="h-4 w-4" />
+                          <span>{t("editor.addColumnLeft")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor?.chain().focus().addColumnAfter().run()}>
+                          <Plus className="h-4 w-4" />
+                          <span>{t("editor.addColumnRight")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem variant="destructive" onClick={() => editor?.chain().focus().deleteColumn().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteColumn")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().mergeCells().run()}
+                          disabled={!editor?.can().mergeCells()}
+                        >
+                          {renderDropdownIcon("table")}
+                          <span>{t("editor.mergeCells")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => editor?.chain().focus().splitCell().run()}
+                          disabled={!editor?.can().splitCell()}
+                        >
+                          {renderDropdownIcon("table")}
+                          <span>{t("editor.splitCell")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => editor?.chain().focus().toggleHeaderRow().run()}>
+                          {renderDropdownIcon("table")}
+                          <span>{t("editor.toggleHeaderRow")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onClick={() => editor?.chain().focus().deleteTable().run()} className="text-destructive focus:text-destructive">
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <span>{t("editor.deleteTable")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  );
+                }
                 case "emoji":
                   return (
-                    <DropdownMenuItem key="emoji" onClick={() => {}}>
+                    <DropdownMenuItem
+                      key="emoji"
+                      onSelect={(e) => {
+                        const target = e.currentTarget as HTMLElement;
+                        const rect = target?.getBoundingClientRect?.();
+                        const top = rect ? Math.min(rect.top, window.innerHeight - 280) : 200;
+                        const left = rect ? Math.max(12, rect.left - 295) : 200;
+                        setSlashEmojiState({ open: true, coords: { top, left } });
+                      }}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
                       {renderDropdownIcon("emoji")}
-                      <span>{t("editor.insertEmoji")}</span>
+                      <span className="flex-1">{t("editor.insertEmoji")}</span>
                     </DropdownMenuItem>
                   );
                 case "calculator":
@@ -10514,34 +12378,55 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <span>{t("editor.clock")}</span>
                     </DropdownMenuItem>
                   );
-                case "link":
+                case "link": {
+                  const isActive = editor?.isActive("link");
                   return (
-                    <DropdownMenuItem key="link" onClick={openLinkDialog}>
+                    <DropdownMenuItem
+                      key="link"
+                      onClick={openLinkDialog}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("link")}
-                      <span>{t("editor.link")}</span>
+                      <span className="flex-1">{t("editor.link")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
+                }
                 case "image":
                   return (
-                    <Fragment key="image">
-                      <DropdownMenuItem onClick={openImageDialog}>
+                    <DropdownMenuSub key="image" open={overflowSubmenu === "image"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "image" ? null : "image")}>
                         {renderDropdownIcon("image")}
-                        <span>{t("editor.insertImageByUrl")}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={openWorkspaceImageDialog}>
-                        <Images className="h-4 w-4" />
-                        <span>{t("editor.insertImageFromWorkspace")}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          rememberSelection();
-                          imageInputRef.current?.click();
-                        }}
-                      >
-                        <Upload className="h-4 w-4" />
-                        <span>{t("editor.uploadImage")}</span>
-                      </DropdownMenuItem>
-                    </Fragment>
+                        <span>{t("editor.image") || "Image"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem onClick={openImageDialog} className="flex items-center gap-2 cursor-pointer">
+                          <ImagePlus className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.insertImageByUrl")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={openWorkspaceImageDialog} className="flex items-center gap-2 cursor-pointer">
+                          <Images className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.insertImageFromWorkspace")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            rememberSelection();
+                            imageInputRef.current?.click();
+                          }}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <Upload className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.uploadImage")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  );
+                case "qrCode":
+                  return (
+                    <DropdownMenuItem key="qrCode" onClick={() => setQrCodeDialogOpen(true)}>
+                      {renderDropdownIcon("qrCode")}
+                      <span>{t("editor.qrCode")}</span>
+                    </DropdownMenuItem>
                   );
                 case "audio":
                   return (
@@ -10562,10 +12447,54 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   );
                 case "aiAssistant":
                   return (
-                    <DropdownMenuItem key="aiAssistant" onClick={() => {}}>
-                      {renderDropdownIcon("aiAssistant")}
-                      <span>{t("settings.aiAssistant")}</span>
-                    </DropdownMenuItem>
+                    <DropdownMenuSub key="aiAssistant" open={overflowSubmenu === "aiAssistant"}>
+                      <DropdownMenuSubTrigger disabled={!editor || aiGenerating} onClick={() => setOverflowSubmenu((prev) => prev === "aiAssistant" ? null : "aiAssistant")}>
+                        {aiGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : renderDropdownIcon("aiAssistant")}
+                        <span>{t("settings.aiAssistant")}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-60 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem onClick={() => handleAiAction("improve")}>
+                          <WandSparklesIcon className="h-4 w-4" />
+                          <span>{t("settings.aiImprove")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("fix_grammar")}>
+                          <SpellCheckIcon className="h-4 w-4" />
+                          <span>{t("settings.aiFixGrammar")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_shorter")}>
+                          <Minimize2 className="h-4 w-4" />
+                          <span>{t("settings.aiMakeShorter")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_longer")}>
+                          <Maximize2 className="h-4 w-4" />
+                          <span>{t("settings.aiMakeLonger")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("simplify")}>
+                          <BookOpen className="h-4 w-4" />
+                          <span>{t("settings.aiSimplify")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("formalize")}>
+                          <BriefcaseBusinessIcon className="h-4 w-4" />
+                          <span>{t("settings.aiFormalize")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("make_casual")}>
+                          <MessageCircle className="h-4 w-4" />
+                          <span>{t("settings.aiMakeCasual")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("translate")}>
+                          <Languages className="h-4 w-4" />
+                          <span>{t("settings.aiTranslate")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("continue_writing")}>
+                          <ArrowRight className="h-4 w-4" />
+                          <span>{t("settings.aiContinueWriting")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAiAction("rewrite")}>
+                          <PenLineIcon className="h-4 w-4" />
+                          <span>{t("settings.aiRewrite")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   );
                 default:
                   return null;
@@ -10587,7 +12516,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 {hasOverflow && (
                   <>
                     <div className="h-4 w-px shrink-0 bg-border" />
-                    <DropdownMenu>
+                    <DropdownMenu onOpenChange={(open) => { if (!open) setOverflowSubmenu(null); }}>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <DropdownMenuTrigger asChild>
@@ -10868,6 +12797,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               spellCheck={spellCheckEnabled}
               noteId={note.id}
               language="css"
+              isVisible={isVisible}
             />
           ) : note.contentFormat === "html" ? (
             htmlPreviewOpen ? (
@@ -10922,6 +12852,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 onCursorChange={(line, col) => setHtmlCursor({ line, col })}
                 spellCheck={spellCheckEnabled}
                 noteId={note.id}
+                isVisible={isVisible}
               />
             )
           ) : (
@@ -11035,13 +12966,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         if (href.startsWith("http://") || href.startsWith("https://")) {
                           if (onOpenWebTab) {
                             onOpenWebTab(href);
-                          } else if (window.electronAPI?.openExternal) {
-                            void window.electronAPI.openExternal(href);
+                          } else if ((window as any).electronAPI?.openExternal) {
+                            void (window as any).electronAPI.openExternal(href);
                           } else {
                             window.open(href, "_blank", "noopener,noreferrer");
                           }
-                        } else if (window.electronAPI?.openExternal) {
-                          void window.electronAPI.openExternal(href);
+                        } else if ((window as any).electronAPI?.openExternal) {
+                          void (window as any).electronAPI.openExternal(href);
                         } else {
                           window.open(href, "_blank", "noopener,noreferrer");
                         }
@@ -11064,7 +12995,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </div>
               </ContextMenuTrigger>
 
-              <ContextMenuContent className="w-60 rounded-xl">
+              <ContextMenuContent className={editor && !editor.state.selection.empty ? "w-68 min-w-[17rem] rounded-xl" : "w-56 rounded-xl"}>
                 {contextSpellData && contextSpellData.suggestions.length > 0 && (
                   <>
                     <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1">
@@ -11086,7 +13017,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         }}
                         className="gap-2.5 font-medium text-primary focus:text-primary focus:bg-primary/10"
                       >
-                        <Check className="h-4 w-4 shrink-0" />
+                        <Check className="h-4 w-4 shrink-0 text-primary stroke-[2.5]" />
                         <span>{suggestion}</span>
                       </ContextMenuItem>
                     ))}
@@ -11100,7 +13031,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Undo2 className="h-4 w-4" />
-                  <span>{t("editor.undo") || "Undo"}</span>
+                  <span className="whitespace-nowrap">{t("editor.undo") || "Undo"}</span>
                   <ContextMenuShortcut>Ctrl+Z</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11110,7 +13041,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Redo2 className="h-4 w-4" />
-                  <span>{t("editor.redo") || "Redo"}</span>
+                  <span className="whitespace-nowrap">{t("editor.redo") || "Redo"}</span>
                   <ContextMenuShortcut>Ctrl+Y</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11130,7 +13061,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Scissors className="h-4 w-4" />
-                  <span>{t("editor.cut") || "Cut"}</span>
+                  <span className="whitespace-nowrap">{t("editor.cut") || "Cut"}</span>
                   <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11147,7 +13078,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Copy className="h-4 w-4" />
-                  <span>{t("editor.copy") || "Copy"}</span>
+                  <span className="whitespace-nowrap">{t("editor.copy") || "Copy"}</span>
                   <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11202,7 +13133,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <ClipboardList className="h-4 w-4" />
-                  <span>{t("editor.paste") || "Paste"}</span>
+                  <span className="whitespace-nowrap">{t("editor.paste") || "Paste"}</span>
                   <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11213,7 +13144,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <FileText className="h-4 w-4" />
-                  <span>{t("editor.selectAll") || "Select All"}</span>
+                  <span className="whitespace-nowrap">{t("editor.selectAll") || "Select All"}</span>
                   <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -11221,18 +13152,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <>
                     <ContextMenuSeparator />
                     <ContextMenuItem
+                      onClick={() => {
+                        if (!editor) return;
+                        editor
+                          .chain()
+                          .focus()
+                          .unsetAllMarks()
+                          .unsetColor()
+                          .unsetFontFamily()
+                          .unsetFontSize()
+                          .clearNodes()
+                          .run();
+                      }}
+                      className="gap-2.5"
+                    >
+                      <Eraser className="h-4 w-4" />
+                      <span className="whitespace-nowrap">{t("editor.clearFormatting") || "Clear Formatting"}</span>
+                      <ContextMenuShortcut>Ctrl+Shift+N</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    <ContextMenuItem
                       onClick={openTranslatorWithSelection}
                       className="gap-2.5"
                     >
                       <Languages className="h-4 w-4" />
-                      <span>{t("editor.translateSelection") || "Translate"}</span>
+                      <span className="whitespace-nowrap">{t("editor.translateSelection") || "Translate"}</span>
                     </ContextMenuItem>
                     <ContextMenuItem
                       onClick={handleFixLanguage}
                       className="gap-2.5"
                     >
                       <Wrench className="h-4 w-4" />
-                      <span>{t("editor.fixLanguage") || "Fix Language (TH/EN)"}</span>
+                      <span className="whitespace-nowrap">{t("editor.fixLanguage") || "Fix Language (TH/EN)"}</span>
                     </ContextMenuItem>
                   </>
                 )}
@@ -11481,53 +13431,55 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   </Tooltip>
                 </div>
 
-                {/* Right side: 100% - + UTF-8 LF | (Spell if not HTML/Code) */}
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Right side: ZoomOut | 100% | ZoomIn | UTF-8 LF | (Spell if not HTML/Code) */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Zoom out button */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => updateSetting("editorFontSize", Math.max(13, (settings.editorFontSize || 15) - 1))}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
+                      >
+                        <ZoomOut className="h-3.5 w-3.5" />
+                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomOut") || "Zoom Out"}
+                    </TooltipContent>
+                  </Tooltip>
+
                   {/* Clickable % to reset zoom to 100% */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         onClick={() => updateSetting("editorFontSize", 15)}
-                        className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1 py-0.5 hover:bg-muted/60"
+                        className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                       >
                         {`${editorStats.zoom}%`}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomReset")}
+                      {t("editor.zoomReset") || "Reset Zoom (100%)"}
                     </TooltipContent>
                   </Tooltip>
 
-                  {/* Zoom out button - */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => updateSetting("editorFontSize", Math.max(13, (settings.editorFontSize || 15) - 1))}
-                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
-                      >
-                        -
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {t("editor.zoomOut")}
-                    </TooltipContent>
-                  </Tooltip>
-
-                  {/* Zoom in button + */}
+                  {/* Zoom in button */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         onClick={() => updateSetting("editorFontSize", Math.min(22, (settings.editorFontSize || 15) + 1))}
-                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer text-xs font-semibold leading-none"
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       >
-                        +
+                        <ZoomIn className="h-3.5 w-3.5" />
+                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomIn")}
+                      {t("editor.zoomIn") || "Zoom In"}
                     </TooltipContent>
                   </Tooltip>
 
@@ -11657,9 +13609,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     : `${baseName} copy`;
                   onCreate(target.folderPath || "", {
                     fileName: newName,
-                    title: target.title ? `${target.title} copy` : "Untitled",
-                    content: target.content,
-                    tags: target.tags,
+                    initialContent: target.content,
                     contentFormat: target.contentFormat || "markdown",
                   });
                 }
@@ -12368,6 +14318,125 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* QR Code Dialog */}
+      <QrCodeDialog
+        open={qrCodeDialogOpen}
+        onOpenChange={setQrCodeDialogOpen}
+        onInsertQrCode={(dataUrl) => {
+          if (editor) {
+            editor.chain().focus().setImage({ src: dataUrl, alt: "QR Code" }).run();
+          }
+        }}
+      />
+
+      {/* Slash Emoji Picker Popover */}
+      {slashEmojiState.open && slashEmojiState.coords && (
+        <div
+          ref={slashEmojiRef}
+          style={{
+            position: "fixed",
+            top: Math.min(slashEmojiState.coords.top, window.innerHeight - 280),
+            left: Math.min(Math.max(12, slashEmojiState.coords.left), window.innerWidth - 300),
+            zIndex: 9999,
+          }}
+          className="w-72 rounded-xl p-2.5 shadow-xl border border-border/80 bg-popover text-popover-foreground animate-in fade-in-0 zoom-in-95"
+        >
+          <div className="text-xs font-semibold text-muted-foreground mb-1.5 px-1">
+            {t("editor.insertEmoji")}
+          </div>
+          <div className="grid grid-cols-7 gap-1 max-h-56 overflow-y-auto pr-1 select-none no-scrollbar">
+            {EMOJI_LIST.map((emoji, index) => (
+              <button
+                key={`${emoji}-${index}`}
+                type="button"
+                className="h-8 w-8 text-lg rounded-lg hover:bg-primary/8 focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (editor) {
+                    editor.chain().focus().insertContent(emoji).run();
+                  }
+                  setSlashEmojiState({ open: false, coords: null });
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Font File Input */}
+      <input
+        ref={fontFileInputRef}
+        type="file"
+        accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+        className="hidden"
+        onChange={handleFontFileUpload}
+      />
+
+      {/* Rename Font Dialog */}
+      <Dialog open={Boolean(fontToRename)} onOpenChange={(open) => !open && setFontToRename(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("settings.renameFont") || "Rename Font"}</DialogTitle>
+            <DialogDescription>
+              {fontToRename?.fileName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-1">
+            <label htmlFor="rename-font-name" className="mb-2 block text-sm font-medium text-foreground">
+              {t("sidebar.fileNameLabel") || "Font Name"}
+            </label>
+            <input
+              id="rename-font-name"
+              type="text"
+              value={fontRenameValue}
+              onChange={(e) => setFontRenameValue(e.target.value)}
+              placeholder="Font name"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleConfirmFontRename();
+                }
+              }}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setFontToRename(null)}>
+              {t("common.cancel") || "Cancel"}
+            </Button>
+            <Button type="button" onClick={() => void handleConfirmFontRename()} disabled={!fontRenameValue.trim()}>
+              {t("sidebar.renameAction") || t("common.save") || "Rename"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Font Confirmation Dialog */}
+      <AlertDialog open={Boolean(fontToDelete)} onOpenChange={(open) => !open && setFontToDelete(null)}>
+        <AlertDialogContent className="sm:max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.deleteFont") || "Delete Font"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(t("settings.deleteFontConfirm") || 'Are you sure you want to delete font "{name}"?').replace("{name}", fontToDelete?.name || "")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setFontToDelete(null)}>
+              {t("common.cancel") || "Cancel"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleConfirmFontDelete()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("settings.deleteFont") || "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </TooltipProvider>
     </>
   );

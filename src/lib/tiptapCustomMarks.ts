@@ -1,4 +1,46 @@
-import { Mark, mergeAttributes } from "@tiptap/core";
+import { Extension, Mark, mergeAttributes, markInputRule, markPasteRule } from "@tiptap/core";
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    underline: {
+      setUnderline: () => ReturnType;
+      toggleUnderline: () => ReturnType;
+      unsetUnderline: () => ReturnType;
+    };
+    highlight: {
+      setHighlight: () => ReturnType;
+      toggleHighlight: () => ReturnType;
+      unsetHighlight: () => ReturnType;
+    };
+    superscript: {
+      setSuperscript: () => ReturnType;
+      toggleSuperscript: () => ReturnType;
+      unsetSuperscript: () => ReturnType;
+    };
+    subscript: {
+      setSubscript: () => ReturnType;
+      toggleSubscript: () => ReturnType;
+      unsetSubscript: () => ReturnType;
+    };
+    textColor: {
+      setColor: (color: string) => ReturnType;
+      unsetColor: () => ReturnType;
+    };
+    fontFamily: {
+      setFontFamily: (fontFamily: string) => ReturnType;
+      unsetFontFamily: () => ReturnType;
+    };
+    fontSize: {
+      setFontSize: (fontSize: string) => ReturnType;
+      unsetFontSize: () => ReturnType;
+    };
+    textAlign: {
+      setTextAlign: (alignment: string) => ReturnType;
+      unsetTextAlign: () => ReturnType;
+    };
+  }
+}
+
 
 export const Underline = Mark.create({
   name: "underline",
@@ -55,7 +97,12 @@ export const Highlight = Mark.create({
       { tag: "mark" },
       {
         tag: "span",
-        getAttrs: (element) => (element as HTMLElement).classList?.contains("luno-highlight") ? {} : false,
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          if (el.classList?.contains("luno-highlight")) return {};
+          if (el.style?.backgroundColor && el.style.backgroundColor !== "transparent" && el.style.backgroundColor !== "inherit") return {};
+          return false;
+        },
       },
     ];
   },
@@ -77,6 +124,24 @@ export const Highlight = Mark.create({
       "Mod-Shift-h": () => this.editor.commands.toggleHighlight(),
       "Mod-Shift-H": () => this.editor.commands.toggleHighlight(),
     };
+  },
+
+  addInputRules() {
+    return [
+      markInputRule({
+        find: /(?:^|[^=])(==(?!\s+)([^=\r\n]+)(?<!\s)==)$/,
+        type: this.type,
+      }),
+    ];
+  },
+
+  addPasteRules() {
+    return [
+      markPasteRule({
+        find: /(?:^|[^=])(==(?!\s+)([^=\r\n]+)(?<!\s)==)/g,
+        type: this.type,
+      }),
+    ];
   },
 });
 
@@ -162,4 +227,267 @@ export const Kbd = Mark.create({
     return ["kbd", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
   },
 });
+
+export const TextColor = Mark.create({
+  name: "textColor",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  addAttributes() {
+    return {
+      color: {
+        default: null,
+        parseHTML: (element) => element.style?.color || element.getAttribute("data-color") || null,
+        renderHTML: (attributes) => {
+          if (!attributes.color) return {};
+          return {
+            style: `color: ${attributes.color}`,
+            "data-color": attributes.color,
+          };
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "span",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const color = el.style?.color || el.getAttribute("data-color");
+          return color ? { color } : false;
+        },
+      },
+      {
+        style: "color",
+        getAttrs: (value) => (typeof value === "string" && value ? { color: value } : false),
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setColor:
+        (color: string) =>
+        ({ commands }) =>
+          commands.setMark(this.name, { color }),
+      unsetColor:
+        () =>
+        ({ commands }) =>
+          commands.unsetMark(this.name),
+    };
+  },
+});
+
+export const FontFamily = Mark.create({
+  name: "fontFamily",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  addAttributes() {
+    return {
+      fontFamily: {
+        default: null,
+        parseHTML: (element) => {
+          const val = element.style?.fontFamily || element.getAttribute("data-font-family");
+          return val ? val.replace(/"/g, "'") : null;
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.fontFamily) return {};
+          const cleanFont = String(attributes.fontFamily).replace(/"/g, "'");
+          return {
+            style: `font-family: ${cleanFont}`,
+            "data-font-family": cleanFont,
+          };
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "span",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const fontFamily = el.style?.fontFamily || el.getAttribute("data-font-family");
+          return fontFamily ? { fontFamily: fontFamily.replace(/"/g, "'") } : false;
+        },
+      },
+      {
+        style: "font-family",
+        getAttrs: (value) => (typeof value === "string" && value ? { fontFamily: value.replace(/"/g, "'") } : false),
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setFontFamily:
+        (fontFamily: string) =>
+        ({ commands }) =>
+          commands.setMark(this.name, { fontFamily }),
+      unsetFontFamily:
+        () =>
+        ({ commands }) =>
+          commands.unsetMark(this.name),
+    };
+  },
+});
+
+export const FontSize = Mark.create({
+  name: "fontSize",
+
+  addOptions() {
+    return {
+      HTMLAttributes: {},
+    };
+  },
+
+  addAttributes() {
+    return {
+      fontSize: {
+        default: null,
+        parseHTML: (element) => element.style?.fontSize || element.getAttribute("data-font-size") || null,
+        renderHTML: (attributes) => {
+          if (!attributes.fontSize) return {};
+          return {
+            style: `font-size: ${attributes.fontSize}`,
+            "data-font-size": attributes.fontSize,
+          };
+        },
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "span",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const fontSize = el.style?.fontSize || el.getAttribute("data-font-size");
+          return fontSize ? { fontSize } : false;
+        },
+      },
+      {
+        style: "font-size",
+        getAttrs: (value) => (typeof value === "string" && value ? { fontSize: value } : false),
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+
+  addCommands() {
+    return {
+      setFontSize:
+        (fontSize: string) =>
+        ({ commands }) =>
+          commands.setMark(this.name, { fontSize }),
+      unsetFontSize:
+        () =>
+        ({ commands }) =>
+          commands.unsetMark(this.name),
+    };
+  },
+});
+
+export interface TextAlignOptions {
+  types: string[];
+  alignments: string[];
+  defaultAlignment: string;
+}
+
+export const TextAlign = Extension.create<TextAlignOptions>({
+  name: "textAlign",
+
+  addOptions() {
+    return {
+      types: ["heading", "paragraph"],
+      alignments: ["left", "center", "right", "justify"],
+      defaultAlignment: "left",
+    };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          textAlign: {
+            default: this.options.defaultAlignment,
+            parseHTML: (element) => {
+              const align = (element.style?.textAlign || element.getAttribute("align") || "").toLowerCase();
+              return this.options.alignments.includes(align) ? align : this.options.defaultAlignment;
+            },
+            renderHTML: (attributes) => {
+              if (!attributes.textAlign || attributes.textAlign === this.options.defaultAlignment) {
+                return {};
+              }
+              return {
+                style: `text-align: ${attributes.textAlign}`,
+              };
+            },
+          },
+        },
+      },
+    ];
+  },
+
+  addCommands() {
+    return {
+      setTextAlign:
+        (alignment: string) =>
+        ({ commands }) => {
+          if (!this.options.alignments.includes(alignment)) {
+            return false;
+          }
+          return this.options.types.some((type) =>
+            commands.updateAttributes(type, { textAlign: alignment })
+          );
+        },
+      unsetTextAlign:
+        () =>
+        ({ commands }) => {
+          return this.options.types.some((type) =>
+            commands.resetAttributes(type, "textAlign")
+          );
+        },
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      "Mod-Shift-l": () => this.editor.commands.setTextAlign("left"),
+      "Mod-Shift-L": () => this.editor.commands.setTextAlign("left"),
+      "Mod-Shift-e": () => this.editor.commands.setTextAlign("center"),
+      "Mod-Shift-E": () => this.editor.commands.setTextAlign("center"),
+      "Mod-Shift-r": () => this.editor.commands.setTextAlign("right"),
+      "Mod-Shift-R": () => this.editor.commands.setTextAlign("right"),
+      "Mod-Shift-j": () => this.editor.commands.setTextAlign("justify"),
+      "Mod-Shift-J": () => this.editor.commands.setTextAlign("justify"),
+    };
+  },
+});
+
 

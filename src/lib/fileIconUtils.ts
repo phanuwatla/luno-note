@@ -6,6 +6,7 @@ import { Note } from "@/hooks/useNotes";
 export function getDefaultFileIconKey(fileName?: string, fileType?: string, contentFormat?: string): string {
   if (fileType === "image") return "fileImage";
   if (fileType === "web-viewer") return "globe";
+  if (fileType === "relations" || fileType === "graph") return "relations";
 
   const name = (fileName || "").toLowerCase();
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";

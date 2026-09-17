@@ -115,6 +115,18 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #17756b;
 }
 
+:root[data-app-theme='teal'] {
+  --primary: 166 72% 36%;
+  --accent: 166 72% 36%;
+  --ring: 166 72% 36%;
+  --sidebar-primary: 166 72% 36%;
+  --sidebar-ring: 166 72% 36%;
+  --hl-tag: #0f766e;
+  --hl-attr: #6366f1;
+  --hl-string: #059669;
+  --hl-keyword: #0f766e;
+}
+
 :root[data-app-theme='cyan'] {
   --primary: 189 94% 43%;
   --accent: 189 94% 43%;
@@ -125,6 +137,18 @@ aside [role="button"]:focus-visible {
   --hl-attr: #7c3aed;
   --hl-string: #059669;
   --hl-keyword: #0891b2;
+}
+
+:root[data-app-theme='sky'] {
+  --primary: 199 89% 48%;
+  --accent: 199 89% 48%;
+  --ring: 199 89% 48%;
+  --sidebar-primary: 199 89% 48%;
+  --sidebar-ring: 199 89% 48%;
+  --hl-tag: #0284c7;
+  --hl-attr: #8b5cf6;
+  --hl-string: #059669;
+  --hl-keyword: #0284c7;
 }
 
 :root[data-app-theme='blue'] {
@@ -163,6 +187,18 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #6d28d9;
 }
 
+:root[data-app-theme='lavender'] {
+  --primary: 255 92% 76%;
+  --accent: 255 92% 76%;
+  --ring: 255 92% 76%;
+  --sidebar-primary: 255 92% 76%;
+  --sidebar-ring: 255 92% 76%;
+  --hl-tag: #7c3aed;
+  --hl-attr: #0284c7;
+  --hl-string: #059669;
+  --hl-keyword: #7c3aed;
+}
+
 :root[data-app-theme='fuchsia'] {
   --primary: 292 84% 61%;
   --accent: 292 84% 61%;
@@ -199,6 +235,30 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #e11d48;
 }
 
+:root[data-app-theme='crimson'] {
+  --primary: 350 89% 60%;
+  --accent: 350 89% 60%;
+  --ring: 350 89% 60%;
+  --sidebar-primary: 350 89% 60%;
+  --sidebar-ring: 350 89% 60%;
+  --hl-tag: #dc2626;
+  --hl-attr: #7c3aed;
+  --hl-string: #059669;
+  --hl-keyword: #dc2626;
+}
+
+:root[data-app-theme='coral'] {
+  --primary: 14 90% 63%;
+  --accent: 14 90% 63%;
+  --ring: 14 90% 63%;
+  --sidebar-primary: 14 90% 63%;
+  --sidebar-ring: 14 90% 63%;
+  --hl-tag: #ea580c;
+  --hl-attr: #4f46e5;
+  --hl-string: #059669;
+  --hl-keyword: #ea580c;
+}
+
 :root[data-app-theme='orange'] {
   --primary: 25 95% 60%;
   --accent: 25 95% 60%;
@@ -223,6 +283,18 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #d97706;
 }
 
+:root[data-app-theme='gold'] {
+  --primary: 45 93% 47%;
+  --accent: 45 93% 47%;
+  --ring: 45 93% 47%;
+  --sidebar-primary: 45 93% 47%;
+  --sidebar-ring: 45 93% 47%;
+  --hl-tag: #ca8a04;
+  --hl-attr: #4f46e5;
+  --hl-string: #059669;
+  --hl-keyword: #ca8a04;
+}
+
 :root[data-app-theme='lime'] {
   --primary: 84 81% 44%;
   --accent: 84 81% 44%;
@@ -233,6 +305,18 @@ aside [role="button"]:focus-visible {
   --hl-attr: #7c3aed;
   --hl-string: #0d9488;
   --hl-keyword: #65a30d;
+}
+
+:root[data-app-theme='mint'] {
+  --primary: 158 64% 52%;
+  --accent: 158 64% 52%;
+  --ring: 158 64% 52%;
+  --sidebar-primary: 158 64% 52%;
+  --sidebar-ring: 158 64% 52%;
+  --hl-tag: #059669;
+  --hl-attr: #7c3aed;
+  --hl-string: #0d9488;
+  --hl-keyword: #059669;
 }
 
 :root[data-app-theme='slate'] {
@@ -391,130 +475,82 @@ aside [role="button"]:focus-visible {
   --sidebar-border: 216 16% 83%;
 }
 
-:root[data-app-font='inter'],
-:root[data-app-font='inter'] ::marker,
-:root[data-app-font='inter'] ol,
-:root[data-app-font='inter'] li {
+:root[data-app-font='inter'] {
   --app-font-family: 'Inter', sans-serif;
   font-family: 'Inter', sans-serif;
 }
 
-:root[data-app-font='sarabun'],
-:root[data-app-font='sarabun'] ::marker,
-:root[data-app-font='sarabun'] ol,
-:root[data-app-font='sarabun'] li {
+:root[data-app-font='sarabun'] {
   --app-font-family: 'Sarabun', 'Inter', sans-serif;
   font-family: 'Sarabun', 'Inter', sans-serif;
 }
 
-:root[data-app-font='prompt'],
-:root[data-app-font='prompt'] ::marker,
-:root[data-app-font='prompt'] ol,
-:root[data-app-font='prompt'] li {
+:root[data-app-font='prompt'] {
   --app-font-family: 'Prompt', 'Inter', sans-serif;
   font-family: 'Prompt', 'Inter', sans-serif;
 }
 
-:root[data-app-font='kanit'],
-:root[data-app-font='kanit'] ::marker,
-:root[data-app-font='kanit'] ol,
-:root[data-app-font='kanit'] li {
+:root[data-app-font='kanit'] {
   --app-font-family: 'Kanit', 'Inter', sans-serif;
   font-family: 'Kanit', 'Inter', sans-serif;
 }
 
-:root[data-app-font='mitr'],
-:root[data-app-font='mitr'] ::marker,
-:root[data-app-font='mitr'] ol,
-:root[data-app-font='mitr'] li {
+:root[data-app-font='mitr'] {
   --app-font-family: 'Mitr', 'Inter', sans-serif;
   font-family: 'Mitr', 'Inter', sans-serif;
 }
 
-:root[data-app-font='ibmPlexThai'],
-:root[data-app-font='ibmPlexThai'] ::marker,
-:root[data-app-font='ibmPlexThai'] ol,
-:root[data-app-font='ibmPlexThai'] li {
+:root[data-app-font='ibmPlexThai'] {
   --app-font-family: 'IBM Plex Sans Thai', 'Inter', sans-serif;
   font-family: 'IBM Plex Sans Thai', 'Inter', sans-serif;
 }
 
-:root[data-app-font='notoSansThai'],
-:root[data-app-font='notoSansThai'] ::marker,
-:root[data-app-font='notoSansThai'] ol,
-:root[data-app-font='notoSansThai'] li {
+:root[data-app-font='notoSansThai'] {
   --app-font-family: 'Noto Sans Thai', 'Inter', sans-serif;
   font-family: 'Noto Sans Thai', 'Inter', sans-serif;
 }
 
-:root[data-app-font='notoSerifThai'],
-:root[data-app-font='notoSerifThai'] ::marker,
-:root[data-app-font='notoSerifThai'] ol,
-:root[data-app-font='notoSerifThai'] li {
+:root[data-app-font='notoSerifThai'] {
   --app-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
   font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
 }
 
-:root[data-app-font='chakraPetch'],
-:root[data-app-font='chakraPetch'] ::marker,
-:root[data-app-font='chakraPetch'] ol,
-:root[data-app-font='chakraPetch'] li {
+:root[data-app-font='chakraPetch'] {
   --app-font-family: 'Chakra Petch', 'Inter', sans-serif;
   font-family: 'Chakra Petch', 'Inter', sans-serif;
 }
 
-:root[data-app-font='mali'],
-:root[data-app-font='mali'] ::marker,
-:root[data-app-font='mali'] ol,
-:root[data-app-font='mali'] li {
+:root[data-app-font='mali'] {
   --app-font-family: 'Mali', cursive, sans-serif;
   font-family: 'Mali', cursive, sans-serif;
 }
 
-:root[data-app-font='itim'],
-:root[data-app-font='itim'] ::marker,
-:root[data-app-font='itim'] ol,
-:root[data-app-font='itim'] li {
+:root[data-app-font='itim'] {
   --app-font-family: 'Itim', cursive, sans-serif;
   font-family: 'Itim', cursive, sans-serif;
 }
 
-:root[data-app-font='sriracha'],
-:root[data-app-font='sriracha'] ::marker,
-:root[data-app-font='sriracha'] ol,
-:root[data-app-font='sriracha'] li {
+:root[data-app-font='sriracha'] {
   --app-font-family: 'Sriracha', cursive, sans-serif;
   font-family: 'Sriracha', cursive, sans-serif;
 }
 
-:root[data-app-font='chonburi'],
-:root[data-app-font='chonburi'] ::marker,
-:root[data-app-font='chonburi'] ol,
-:root[data-app-font='chonburi'] li {
+:root[data-app-font='chonburi'] {
   --app-font-family: 'Chonburi', cursive, serif;
   font-family: 'Chonburi', cursive, serif;
 }
 
-:root[data-app-font='system'],
-:root[data-app-font='system'] ::marker,
-:root[data-app-font='system'] ol,
-:root[data-app-font='system'] li {
+:root[data-app-font='system'] {
   --app-font-family: system-ui, -apple-system, 'Segoe UI', 'Leelawadee UI', 'Thonburi', sans-serif;
   font-family: system-ui, -apple-system, 'Segoe UI', 'Leelawadee UI', 'Thonburi', sans-serif;
 }
 
-:root[data-app-font='serif'],
-:root[data-app-font='serif'] ::marker,
-:root[data-app-font='serif'] ol,
-:root[data-app-font='serif'] li {
+:root[data-app-font='serif'] {
   --app-font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
   font-family: 'Noto Serif Thai', Georgia, 'Times New Roman', serif;
 }
 
-:root[data-app-font='mono'],
-:root[data-app-font='mono'] ::marker,
-:root[data-app-font='mono'] ol,
-:root[data-app-font='mono'] li {
+:root[data-app-font='mono'] {
   --app-font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -576,21 +612,25 @@ aside [role="button"]:focus-visible {
     @apply bg-background text-foreground;
     font-family: var(--app-font-family);
   }
-  ::marker,
-  ol::marker,
-  ul::marker,
-  li::marker,
-  ol,
-  ul,
-  li {
-    font-family: var(--app-font-family);
-  }
   .ProseMirror,
-  .ProseMirror *,
+  .ProseMirror ol,
+  .ProseMirror ul,
+  .ProseMirror li,
+  .ProseMirror ::marker,
+  .ProseMirror [data-type="taskList"],
+  .ProseMirror [data-type="taskItem"],
   .editor-content-area,
+  .editor-content-area ol,
+  .editor-content-area ul,
+  .editor-content-area li,
+  .editor-content-area ::marker,
   .editor-content-area input,
   .editor-content-area textarea {
-    font-family: var(--editor-font-family, var(--app-font-family)) !important;
+    font-family: var(--editor-font-family, var(--app-font-family));
+  }
+  .ProseMirror [data-font-family],
+  .ProseMirror [data-font-family] * {
+    font-family: inherit;
   }
   .ProseMirror code,
   .ProseMirror code *,
@@ -647,6 +687,54 @@ aside [role="button"]:focus-visible {
   --sidebar-ring: 174 62% 44%;
 }
 
+.dark:root[data-app-theme='emerald'] {
+  --primary: 174 62% 44%;
+  --accent: 174 62% 44%;
+  --ring: 174 62% 44%;
+  --sidebar-primary: 174 62% 44%;
+  --sidebar-ring: 174 62% 44%;
+  --hl-tag: #36c6b6;
+  --hl-attr: #c084fc;
+  --hl-string: #34d399;
+  --hl-keyword: #36c6b6;
+}
+
+.dark:root[data-app-theme='teal'] {
+  --primary: 166 72% 44%;
+  --accent: 166 72% 44%;
+  --ring: 166 72% 44%;
+  --sidebar-primary: 166 72% 44%;
+  --sidebar-ring: 166 72% 44%;
+  --hl-tag: #2dd4bf;
+  --hl-attr: #a78bfa;
+  --hl-string: #34d399;
+  --hl-keyword: #2dd4bf;
+}
+
+.dark:root[data-app-theme='cyan'] {
+  --primary: 189 94% 52%;
+  --accent: 189 94% 52%;
+  --ring: 189 94% 52%;
+  --sidebar-primary: 189 94% 52%;
+  --sidebar-ring: 189 94% 52%;
+  --hl-tag: #22d3ee;
+  --hl-attr: #c084fc;
+  --hl-string: #34d399;
+  --hl-keyword: #22d3ee;
+}
+
+.dark:root[data-app-theme='sky'] {
+  --primary: 199 89% 60%;
+  --accent: 199 89% 60%;
+  --ring: 199 89% 60%;
+  --sidebar-primary: 199 89% 60%;
+  --sidebar-ring: 199 89% 60%;
+  --hl-tag: #38bdf8;
+  --hl-attr: #c084fc;
+  --hl-string: #34d399;
+  --hl-keyword: #38bdf8;
+}
+
 .dark:root[data-app-theme='blue'] {
   --primary: 217 91% 65%;
   --accent: 217 91% 65%;
@@ -657,6 +745,18 @@ aside [role="button"]:focus-visible {
   --hl-attr: #c084fc;
   --hl-string: #34d399;
   --hl-keyword: #60a5fa;
+}
+
+.dark:root[data-app-theme='indigo'] {
+  --primary: 239 84% 72%;
+  --accent: 239 84% 72%;
+  --ring: 239 84% 72%;
+  --sidebar-primary: 239 84% 72%;
+  --sidebar-ring: 239 84% 72%;
+  --hl-tag: #818cf8;
+  --hl-attr: #38bdf8;
+  --hl-string: #34d399;
+  --hl-keyword: #818cf8;
 }
 
 .dark:root[data-app-theme='violet'] {
@@ -671,16 +771,28 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #c084fc;
 }
 
-.dark:root[data-app-theme='emerald'] {
-  --primary: 174 62% 44%;
-  --accent: 174 62% 44%;
-  --ring: 174 62% 44%;
-  --sidebar-primary: 174 62% 44%;
-  --sidebar-ring: 174 62% 44%;
-  --hl-tag: #36c6b6;
-  --hl-attr: #c084fc;
+.dark:root[data-app-theme='lavender'] {
+  --primary: 255 92% 80%;
+  --accent: 255 92% 80%;
+  --ring: 255 92% 80%;
+  --sidebar-primary: 255 92% 80%;
+  --sidebar-ring: 255 92% 80%;
+  --hl-tag: #c4b5fd;
+  --hl-attr: #38bdf8;
   --hl-string: #34d399;
-  --hl-keyword: #36c6b6;
+  --hl-keyword: #c4b5fd;
+}
+
+.dark:root[data-app-theme='fuchsia'] {
+  --primary: 292 84% 70%;
+  --accent: 292 84% 70%;
+  --ring: 292 84% 70%;
+  --sidebar-primary: 292 84% 70%;
+  --sidebar-ring: 292 84% 70%;
+  --hl-tag: #e879f9;
+  --hl-attr: #60a5fa;
+  --hl-string: #34d399;
+  --hl-keyword: #e879f9;
 }
 
 .dark:root[data-app-theme='rose'] {
@@ -695,6 +807,42 @@ aside [role="button"]:focus-visible {
   --hl-keyword: #fb7185;
 }
 
+.dark:root[data-app-theme='ruby'] {
+  --primary: 346 84% 60%;
+  --accent: 346 84% 60%;
+  --ring: 346 84% 60%;
+  --sidebar-primary: 346 84% 60%;
+  --sidebar-ring: 346 84% 60%;
+  --hl-tag: #f43f5e;
+  --hl-attr: #818cf8;
+  --hl-string: #34d399;
+  --hl-keyword: #f43f5e;
+}
+
+.dark:root[data-app-theme='crimson'] {
+  --primary: 350 89% 65%;
+  --accent: 350 89% 65%;
+  --ring: 350 89% 65%;
+  --sidebar-primary: 350 89% 65%;
+  --sidebar-ring: 350 89% 65%;
+  --hl-tag: #fb7185;
+  --hl-attr: #c084fc;
+  --hl-string: #34d399;
+  --hl-keyword: #fb7185;
+}
+
+.dark:root[data-app-theme='coral'] {
+  --primary: 14 90% 68%;
+  --accent: 14 90% 68%;
+  --ring: 14 90% 68%;
+  --sidebar-primary: 14 90% 68%;
+  --sidebar-ring: 14 90% 68%;
+  --hl-tag: #fb923c;
+  --hl-attr: #818cf8;
+  --hl-string: #34d399;
+  --hl-keyword: #fb923c;
+}
+
 .dark:root[data-app-theme='orange'] {
   --primary: 25 95% 65%;
   --accent: 25 95% 65%;
@@ -705,6 +853,54 @@ aside [role="button"]:focus-visible {
   --hl-attr: #2dd4bf;
   --hl-string: #c084fc;
   --hl-keyword: #fb923c;
+}
+
+.dark:root[data-app-theme='amber'] {
+  --primary: 38 92% 58%;
+  --accent: 38 92% 58%;
+  --ring: 38 92% 58%;
+  --sidebar-primary: 38 92% 58%;
+  --sidebar-ring: 38 92% 58%;
+  --hl-tag: #fbbf24;
+  --hl-attr: #818cf8;
+  --hl-string: #34d399;
+  --hl-keyword: #fbbf24;
+}
+
+.dark:root[data-app-theme='gold'] {
+  --primary: 45 93% 54%;
+  --accent: 45 93% 54%;
+  --ring: 45 93% 54%;
+  --sidebar-primary: 45 93% 54%;
+  --sidebar-ring: 45 93% 54%;
+  --hl-tag: #facc15;
+  --hl-attr: #818cf8;
+  --hl-string: #34d399;
+  --hl-keyword: #facc15;
+}
+
+.dark:root[data-app-theme='lime'] {
+  --primary: 84 81% 54%;
+  --accent: 84 81% 54%;
+  --ring: 84 81% 54%;
+  --sidebar-primary: 84 81% 54%;
+  --sidebar-ring: 84 81% 54%;
+  --hl-tag: #a3e635;
+  --hl-attr: #c084fc;
+  --hl-string: #2dd4bf;
+  --hl-keyword: #a3e635;
+}
+
+.dark:root[data-app-theme='mint'] {
+  --primary: 158 64% 58%;
+  --accent: 158 64% 58%;
+  --ring: 158 64% 58%;
+  --sidebar-primary: 158 64% 58%;
+  --sidebar-ring: 158 64% 58%;
+  --hl-tag: #4ade80;
+  --hl-attr: #c084fc;
+  --hl-string: #2dd4bf;
+  --hl-keyword: #4ade80;
 }
 
 .dark:root[data-app-theme='slate'] {
@@ -1241,6 +1437,30 @@ aside [role="button"]:focus-visible {
 /* =========================================================================
    Theme-Specific Toolbar Styling (Main Editor Toolbar & Floating Toolbars)
    ========================================================================= */
+
+/* Editor Toolbar Button Hover & Focus Styling:
+   - Hover uses primary accent tint (bg-primary/15 & text-primary)
+   - Focus / focus-visible states have no visible change from normal */
+[data-editor-toolbar="true"] button {
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-editor-toolbar="true"] button:hover:not(:disabled) {
+  background-color: hsl(var(--primary) / 0.15) !important;
+  color: hsl(var(--primary)) !important;
+}
+
+[data-editor-toolbar="true"] button:focus,
+[data-editor-toolbar="true"] button:focus-visible,
+[data-editor-toolbar="true"] button:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-offset-width: 0px !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-color: transparent !important;
+  --tw-ring-shadow: none !important;
+  --tw-ring-offset-shadow: none !important;
+}
 
 /* Paper / Warm Sepia: Classic stationery wooden desk box */
 :root[data-app-style='paper'] [data-editor-toolbar="true"],
@@ -2520,17 +2740,25 @@ html:not([data-animations="false"]) .animate-in {
   transition: filter 0.25s ease;
 }
 [data-app-theme="emerald"] .luno-app-logo { filter: none; }
+[data-app-theme="teal"] .luno-app-logo { filter: hue-rotate(352deg) saturate(1.1); }
 [data-app-theme="cyan"] .luno-app-logo { filter: hue-rotate(15deg) saturate(1.1); }
+[data-app-theme="sky"] .luno-app-logo { filter: hue-rotate(25deg) saturate(1.15); }
 [data-app-theme="blue"] .luno-app-logo { filter: hue-rotate(43deg) saturate(1.15); }
 [data-app-theme="indigo"] .luno-app-logo { filter: hue-rotate(65deg) saturate(1.2); }
 [data-app-theme="violet"] .luno-app-logo { filter: hue-rotate(88deg) saturate(1.2); }
+[data-app-theme="lavender"] .luno-app-logo { filter: hue-rotate(81deg) saturate(1.1); }
 [data-app-theme="fuchsia"] .luno-app-logo { filter: hue-rotate(118deg) saturate(1.2); }
 [data-app-theme="rose"] .luno-app-logo { filter: hue-rotate(173deg) saturate(1.1); }
 [data-app-theme="ruby"] .luno-app-logo { filter: hue-rotate(172deg) saturate(1.25); }
+[data-app-theme="crimson"] .luno-app-logo { filter: hue-rotate(176deg) saturate(1.3); }
+[data-app-theme="coral"] .luno-app-logo { filter: hue-rotate(200deg) saturate(1.25); }
 [data-app-theme="orange"] .luno-app-logo { filter: hue-rotate(211deg) saturate(1.3); }
 [data-app-theme="amber"] .luno-app-logo { filter: hue-rotate(224deg) saturate(1.3); }
+[data-app-theme="gold"] .luno-app-logo { filter: hue-rotate(231deg) saturate(1.3); }
 [data-app-theme="lime"] .luno-app-logo { filter: hue-rotate(270deg) saturate(1.2); }
+[data-app-theme="mint"] .luno-app-logo { filter: hue-rotate(344deg) saturate(1.15); }
 [data-app-theme="slate"] .luno-app-logo { filter: grayscale(0.85) brightness(1.1); }
+[data-app-theme="custom"] .luno-app-logo { filter: var(--logo-filter, none); }
 
 /* ==========================================================================
    System-Wide Menu, Popover, Floating Menu & Context Menu Hover/Focus Styling
@@ -2585,6 +2813,24 @@ html:not([data-animations="false"]) .animate-in {
 [data-flat-index]:hover:not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg,
 [data-flat-index][data-selected="true"]:not(.text-destructive):not([class*="text-rose"]):not([class*="text-red"]):not([class*="text-destructive"]):not([class*="text-danger"]) svg {
   color: hsl(var(--primary)) !important;
+}
+
+/* Prevent overriding custom colored icons (like starred items) in menu items */
+[role="menuitem"] svg.text-amber-500,
+[role="menuitem"] svg.fill-amber-500,
+[role="menuitem"] svg[class*="text-amber"],
+[role="menuitem"] svg[class*="fill-amber"],
+[role="menuitem"]:hover svg.text-amber-500,
+[role="menuitem"]:hover svg.fill-amber-500,
+[role="menuitem"]:hover svg[class*="text-amber"],
+[role="menuitem"]:hover svg[class*="fill-amber"],
+[role="menuitem"][data-highlighted] svg.text-amber-500,
+[role="menuitem"][data-highlighted] svg.fill-amber-500,
+[role="menuitem"][data-highlighted] svg[class*="text-amber"],
+[role="menuitem"][data-highlighted] svg[class*="fill-amber"] {
+  color: #f59e0b !important;
+  fill: #f59e0b !important;
+  stroke: #f59e0b !important;
 }
 
 /* Destructive / Danger Menu Items & Buttons: Red icon, text, and soft red background on hover/focus */

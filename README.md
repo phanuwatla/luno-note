@@ -6,29 +6,30 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.2.7-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.2.7)
+[![Version](https://img.shields.io/badge/version-1.3.0-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.2.7-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.3.0-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.2.7](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.2.7](#what-is-new-in-version-127) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.3.0](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.0](#what-is-new-in-version-130) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.2.7
+## What Is New in Version 1.3.0
 
-- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Native OS-Level Google OAuth Tab Closer**: Automated completion tab closing powered by a native Windows helper executable (`electron/closeTab.exe`) utilizing `SendInput` API, bypassing Chrome's restrictive tab-close security sandbox and refocusing Luno Note seamlessly.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Omni-Channel Image Pasting & Explorer File Support**: Full clipboard image support handling screenshots (`Win+Shift+S`), PrintScreen, browser image copies, and image files copied from Windows File Explorer (`Ctrl+C`).
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Multi-Layer Editor Insertion Fallback**: 8-tier insertion waterfall guaranteeing reliable image placement even when selection is positioned inside title headings (`H1`), code blocks, empty paragraphs, or container background padding.
-- <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Synchronized Attachment Pre-Resolution**: Pre-calculates unique attachment filenames against the workspace `attachments/` directory before document insertion, ensuring zero path mismatch.
-- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Refined UI Typography**: Replaced monospace styling on in-app update download progress percentages with the standard interface font for visual consistency.
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Background Cloud Attachment Sync**: Images pasted under Google Drive storage mode render immediately without UI blocking, syncing asynchronously in the background.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **RFC 8252 Loopback Authentication**: Uses local HTTP loopback authentication (`127.0.0.1`) in the default system browser, adhering to modern security standards.
+- <img src="./assets/icons/git-fork.svg" width="16" height="16" align="center" /> **Interactive Knowledge Graph (Relations View)**: Canvas-based force-directed node-link network mapping bi-directional links, wikilinks (`[[...]]`), and Markdown references with drag-and-drop physics, tag filtering, live search, and direct note navigation.
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Workspace Custom Font Management**: Direct local font installation (`.ttf`, `.otf`, `.woff`, `.woff2`) with persistent workspace storage (`.luno/fonts/`), dynamic `@font-face` registration, and integration across App, Editor, and Toolbar font pickers.
+- <img src="./assets/icons/qr-code.svg" width="16" height="16" align="center" /> **Integrated QR Code Generator**: ISO/IEC 18004 compliant QR Code tool supporting error correction levels (L, M, Q, H), color customization, transparency, clipboard copying, file download, and one-click editor insertion.
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Custom Accent Color Theming**: User-defined accent themes with a full hex color picker, real-time HSL palette computation, dynamic CSS variables, and adaptive branding filters for logo and favicon.
+- <img src="./assets/icons/sidebar.svg" width="16" height="16" align="center" /> **Compact Activity Bar Layout (VS Code Style)**: Optional modern layout featuring a 52px left activity bar with an independent collapsible workspace explorer panel.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Luno AI History Redesign & Search**: Real-time thread search filtering for past AI conversations with streamlined drawer and tab synchronization.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Workspace Persistence Across Updates**: Desktop application now safely preserves the active workspace directory across version updates.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Enhanced Snippet Extraction**: Clean plain-text generation stripping Markdown syntax, tables, wikilinks, and HTML for card previews.
 
 ---
 
@@ -42,7 +43,7 @@ Luno Note is a robust, lightweight, and modern note-taking application engineere
 - <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
 - <img src="./assets/icons/eye.svg" width="16" height="16" align="center" /> **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
 - <img src="./assets/icons/template.svg" width="16" height="16" align="center" /> **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
-- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Customization and Visual Themes**: Select from Dark, Light, Sepia, and Minimal themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Customization and Visual Themes**: Select from Dark, Light, Sepia, Minimal, and Custom themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
 - <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
 
 ---
@@ -55,7 +56,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.2.7.exe`** | Automated Windows installer with differential update support | [![Download v1.2.7](https://img.shields.io/badge/Download-v1.2.7-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.2.7/luno-note-setup-1.2.7.exe) |
+| **`luno-note-setup-1.3.0.exe`** | Automated Windows installer with differential update support | [![Download v1.3.0](https://img.shields.io/badge/Download-v1.3.0-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.0/luno-note-setup-1.3.0.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

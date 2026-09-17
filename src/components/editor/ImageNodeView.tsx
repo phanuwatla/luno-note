@@ -5,6 +5,32 @@ import { Maximize2, RotateCcw, X, ImageOff } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
 
+// Global in-memory cache for resolved local image Data URLs to avoid repetitive disk reads and IPC calls
+const imageLocalCache = new Map<string, string>();
+
+export function dataUrlToBlobUrl(dataUrl: string): string {
+  if (!dataUrl || !dataUrl.startsWith("data:")) return dataUrl;
+  try {
+    const parts = dataUrl.split(",");
+    if (parts.length !== 2) return dataUrl;
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const byteString = atob(parts[1]);
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const blob = new Blob([ab], { type: mime });
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      return URL.createObjectURL(blob);
+    }
+    return dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
 const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   node,
   updateAttributes,
@@ -38,10 +64,30 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   // Automatically resolve relative attachment paths from disk (essential for packaged production app)
   useEffect(() => {
     let isCancelled = false;
+
+    // If src is already a valid loaded image (blob:, data:, https:), no disk reading is needed!
+    if (src && /^(https?:|data:|blob:)/i.test(src)) {
+      setLocalResolvedSrc(null);
+      return;
+    }
+
     const effectiveSrc = (!/^(https?:|data:|blob:)/i.test(src) ? src : null) || dataRelativeSrc;
 
     if (!effectiveSrc || /^(https?:|data:)/i.test(effectiveSrc)) {
       setLocalResolvedSrc(null);
+      return;
+    }
+
+    let cleanRel = decodeURIComponent(effectiveSrc);
+    while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
+      cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
+    }
+
+    // Fast check in memory cache
+    const cached = imageLocalCache.get(cleanRel);
+    if (cached) {
+      setLocalResolvedSrc(cached);
+      setHasError(false);
       return;
     }
 
@@ -51,14 +97,22 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
         if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath) {
-            let cleanRel = decodeURIComponent(effectiveSrc);
-            while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
-              cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
-            }
             const fullPath = `${saved.folderPath}/${cleanRel}`;
+            const cachedByFull = imageLocalCache.get(fullPath);
+            if (cachedByFull) {
+              if (!isCancelled) {
+                setLocalResolvedSrc(cachedByFull);
+                setHasError(false);
+              }
+              return;
+            }
+
             const dataUrl = await electronAPI.readImageDataUrl(fullPath);
             if (!isCancelled && dataUrl) {
-              setLocalResolvedSrc(dataUrl);
+              const blobUrl = dataUrlToBlobUrl(dataUrl);
+              imageLocalCache.set(cleanRel, blobUrl);
+              imageLocalCache.set(fullPath, blobUrl);
+              setLocalResolvedSrc(blobUrl);
               setHasError(false);
               return;
             }
@@ -153,6 +207,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       <NodeViewWrapper
         as="div"
         className="my-2 inline-flex max-w-full clear-both select-none align-middle"
+        contentEditable={false}
       >
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-dashed border-border/80 bg-muted/40 text-muted-foreground text-xs select-none max-w-full">
           <ImageOff className="w-3.5 h-3.5 opacity-60 shrink-0" />
@@ -170,8 +225,15 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
     <NodeViewWrapper
       as="div"
       className="my-3 block max-w-full clear-both select-none leading-none"
+      contentEditable={false}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      style={{
+        contain: "paint layout",
+        transform: "translateZ(0)",
+        contentVisibility: "auto",
+        containIntrinsicSize: "300px",
+      }}
     >
       <div
         ref={containerRef}
@@ -194,20 +256,37 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           onError={() => {
             const rel = dataRelativeSrc || (!/^(https?:|data:)/i.test(src) ? src : null);
             if (!localResolvedSrc && rel) {
+              let cleanRel = decodeURIComponent(rel);
+              while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
+                cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
+              }
+              const cached = imageLocalCache.get(cleanRel);
+              if (cached) {
+                setLocalResolvedSrc(cached);
+                setHasError(false);
+                return;
+              }
+
               const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
               if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
                 void (async () => {
                   try {
                     const saved = await electronAPI.getSavedWorkspace();
                     if (saved?.folderPath) {
-                      let cleanRel = decodeURIComponent(rel);
-                      while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
-                        cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
-                      }
                       const fullPath = `${saved.folderPath}/${cleanRel}`;
+                      const cachedByFull = imageLocalCache.get(fullPath);
+                      if (cachedByFull) {
+                        setLocalResolvedSrc(cachedByFull);
+                        setHasError(false);
+                        return;
+                      }
+
                       const dataUrl = await electronAPI.readImageDataUrl(fullPath);
                       if (dataUrl) {
-                        setLocalResolvedSrc(dataUrl);
+                        const blobUrl = dataUrlToBlobUrl(dataUrl);
+                        imageLocalCache.set(cleanRel, blobUrl);
+                        imageLocalCache.set(fullPath, blobUrl);
+                        setLocalResolvedSrc(blobUrl);
                         setHasError(false);
                         return;
                       }

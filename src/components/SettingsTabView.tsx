@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   SlidersHorizontal,
   Palette,
@@ -24,6 +24,7 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  Upload,
   Plug,
   Unplug,
   ChevronUp,
@@ -59,6 +60,12 @@ import {
   LayoutGrid,
   Superscript as SuperscriptIcon,
   Subscript as SubscriptIcon,
+  QrCode,
+  Heading,
+  Baseline,
+  Type,
+  ALargeSmall,
+  AlignLeft,
 } from "lucide-react";
 import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
@@ -74,10 +81,14 @@ import { ensureWorkspacesRootOnly } from "@/lib/googleDriveApi";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_HIDDEN_TOOLBAR_ITEMS, DEFAULT_TOOLBAR_ORDER, TOOLBAR_PRESETS, FONT_OPTIONS, useAppSettings } from "@/hooks/useAppSettings";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_HIDDEN_TOOLBAR_ITEMS, DEFAULT_TOOLBAR_ORDER, TOOLBAR_PRESETS, FONT_OPTIONS, useAppSettings, useCustomFonts } from "@/hooks/useAppSettings";
+import { saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/lib/customFontStore";
 import { ICON_PACK_OPTIONS, IconPackId, TOOLBAR_ICON_MAP, getToolbarIcon } from "@/lib/iconPacks";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -94,25 +105,21 @@ const TOOLBAR_TOOL_DEFS: Record<
 > = {
   undo: { labelKey: "editor.undo", icon: Undo2, categoryKey: "settings.toolCategoryHistory", locked: true },
   redo: { labelKey: "editor.redo", icon: Redo2, categoryKey: "settings.toolCategoryHistory", locked: true },
-  h1: { labelKey: "editor.heading1", icon: Heading1Icon, categoryKey: "settings.toolCategoryHeading" },
-  h2: { labelKey: "editor.heading2", icon: Heading2Icon, categoryKey: "settings.toolCategoryHeading" },
-  h3: { labelKey: "editor.heading3", icon: Heading3Icon, categoryKey: "settings.toolCategoryHeading" },
-  h4: { labelKey: "editor.heading4", icon: Heading4Icon, categoryKey: "settings.toolCategoryHeading" },
-  h5: { labelKey: "editor.heading5", icon: Heading5Icon, categoryKey: "settings.toolCategoryHeading" },
-  h6: { labelKey: "editor.heading6", icon: Heading6Icon, categoryKey: "settings.toolCategoryHeading" },
+  heading: { labelKey: "editor.headings", icon: Heading, categoryKey: "settings.toolCategoryHeading" },
+  fontFamily: { labelKey: "editor.fontFamily", icon: Type, categoryKey: "settings.toolCategoryInline" },
+  fontSize: { labelKey: "editor.fontSize", icon: ALargeSmall, categoryKey: "settings.toolCategoryInline" },
   bold: { labelKey: "editor.bold", icon: Bold, categoryKey: "settings.toolCategoryInline" },
   italic: { labelKey: "editor.italic", icon: Italic, categoryKey: "settings.toolCategoryInline" },
   underline: { labelKey: "editor.underline", icon: UnderlineIcon, categoryKey: "settings.toolCategoryInline" },
   strike: { labelKey: "editor.strikethrough", icon: Strikethrough, categoryKey: "settings.toolCategoryInline" },
   highlight: { labelKey: "editor.highlight", icon: Highlighter, categoryKey: "settings.toolCategoryInline" },
+  textColor: { labelKey: "editor.textColor", icon: Baseline, categoryKey: "settings.toolCategoryInline" },
+  align: { labelKey: "editor.textAlign", icon: AlignLeft, categoryKey: "settings.toolCategoryInline" },
   superscript: { labelKey: "editor.superscript", icon: SuperscriptIcon, categoryKey: "settings.toolCategoryInline" },
   subscript: { labelKey: "editor.subscript", icon: SubscriptIcon, categoryKey: "settings.toolCategoryInline" },
-  bulletList: { labelKey: "editor.bulletList", icon: List, categoryKey: "settings.toolCategoryList" },
-  orderedList: { labelKey: "editor.orderedList", icon: ListOrdered, categoryKey: "settings.toolCategoryList" },
-  taskList: { labelKey: "editor.checkbox", icon: ListTodoIcon, categoryKey: "settings.toolCategoryList" },
+  list: { labelKey: "editor.list", icon: List, categoryKey: "settings.toolCategoryList" },
   toggle: { labelKey: "editor.toggle", icon: ChevronsDownUp, categoryKey: "settings.toolCategoryBlock" },
-  code: { labelKey: "editor.inlineCode", icon: CodeXml, categoryKey: "settings.toolCategoryBlock" },
-  codeBlock: { labelKey: "editor.codeBlock", icon: SquareCode, categoryKey: "settings.toolCategoryBlock" },
+  code: { labelKey: "editor.code", icon: CodeXml, categoryKey: "settings.toolCategoryBlock" },
   blockquote: { labelKey: "editor.blockquote", icon: Quote, categoryKey: "settings.toolCategoryBlock" },
   horizontalRule: { labelKey: "editor.horizontalRule", icon: Minus, categoryKey: "settings.toolCategoryBlock" },
   footnote: { labelKey: "editor.footnote", icon: FootnoteIcon, categoryKey: "settings.toolCategoryBlock" },
@@ -123,6 +130,7 @@ const TOOLBAR_TOOL_DEFS: Record<
   clock: { labelKey: "editor.clock", icon: Clock, categoryKey: "settings.toolCategoryMedia" },
   link: { labelKey: "editor.link", icon: Link2, categoryKey: "settings.toolCategoryMedia" },
   image: { labelKey: "editor.image", icon: ImagePlus, categoryKey: "settings.toolCategoryMedia" },
+  qrCode: { labelKey: "editor.qrCode", icon: QrCode, categoryKey: "settings.toolCategoryMedia" },
   audio: { labelKey: "editor.recordAudio", icon: Mic, categoryKey: "settings.toolCategoryMedia" },
   fixLanguage: { labelKey: "editor.fixLanguage", icon: Wrench, categoryKey: "settings.toolCategoryMedia" },
   aiAssistant: { labelKey: "settings.aiAssistant", icon: SparklesIcon, categoryKey: "settings.toolCategoryAi" },
@@ -199,6 +207,85 @@ export default function SettingsTabView({
   onOpenWebTab,
 }: SettingsTabViewProps) {
   const { settings, updateSetting, applyAppearanceStyle, resetSettings } = useAppSettings();
+  const { customFonts, refresh: refreshCustomFonts } = useCustomFonts();
+  const fontFileInputRef = useRef<HTMLInputElement>(null);
+  const [fontToRename, setFontToRename] = useState<CustomFont | null>(null);
+  const [fontRenameValue, setFontRenameValue] = useState("");
+  const [fontToDelete, setFontToDelete] = useState<CustomFont | null>(null);
+  const [isUploadingFont, setIsUploadingFont] = useState(false);
+
+  const handleFontFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingFont(true);
+    try {
+      const saved = await saveCustomFont(file);
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontUploadedSuccess") || "Font uploaded successfully",
+        description: (t("settings.fontUploadedSuccessDesc") || 'Added font "{name}" to workspace.').replace("{name}", saved.name),
+      });
+    } catch (err: any) {
+      console.error("[CustomFont] Upload error:", err);
+      toast({
+        title: t("settings.fontUploadFailed") || "Failed to upload font",
+        description: err?.message || t("settings.fontUploadFailedDesc") || "Could not process font file",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingFont(false);
+      if (event.target) event.target.value = "";
+    }
+  };
+
+  const handleConfirmFontRename = async () => {
+    if (!fontToRename) return;
+    const newName = fontRenameValue.trim();
+    if (!newName) return;
+
+    try {
+      await renameCustomFont(fontToRename.id, newName);
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontRenameSuccess") || "Font renamed successfully",
+        description: (t("settings.fontRenameSuccessDesc") || 'Font renamed to "{name}".').replace("{name}", newName),
+      });
+      setFontToRename(null);
+    } catch (err: any) {
+      toast({
+        title: t("settings.fontRenameFailed") || "Failed to rename font",
+        description: err?.message || "Could not rename font",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleConfirmFontDelete = async () => {
+    if (!fontToDelete) return;
+    const deletedName = fontToDelete.name;
+    try {
+      await deleteCustomFont(fontToDelete.id);
+      if (settings.fontFamily === fontToDelete.id) {
+        updateSetting("fontFamily", "inter");
+      }
+      if (settings.editorFontFamily === fontToDelete.id) {
+        updateSetting("editorFontFamily", "inter");
+      }
+      await refreshCustomFonts();
+      toast({
+        title: t("settings.fontDeletedSuccess") || "Font removed successfully",
+        description: (t("settings.fontDeletedSuccessDesc") || 'Removed font "{name}" from workspace.').replace("{name}", deletedName),
+      });
+      setFontToDelete(null);
+    } catch (err: any) {
+      toast({
+        title: t("settings.fontDeleteFailed") || "Failed to delete font",
+        description: err?.message || "Could not delete font",
+        variant: "destructive",
+      });
+    }
+  };
   const { t } = useTranslation();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(() => {
     if (isValidSettingsCategory(initialCategory) && initialCategory !== "general") return initialCategory;
@@ -456,7 +543,11 @@ export default function SettingsTabView({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="home">{t("settings.optOpenHome")}</SelectItem>
+                          <SelectItem value="home" disabled={settings.appLayout === "compact"}>
+                            <span className={settings.appLayout === "compact" ? "line-through opacity-60 text-muted-foreground" : ""}>
+                              {t("settings.optOpenHome")}
+                            </span>
+                          </SelectItem>
                           <SelectItem value="lastNote">{t("settings.optOpenLastNote")}</SelectItem>
                           <SelectItem value="blank">{t("settings.optBlankPage")}</SelectItem>
                         </SelectContent>
@@ -784,7 +875,7 @@ export default function SettingsTabView({
 
                     <div className="pt-2 border-t border-border/30">
                       <label className="text-xs font-semibold text-foreground mb-2 block">{t("settings.accentTheme")}</label>
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         {APP_THEMES.map((th) => (
                           <Tooltip key={th.id}>
                             <TooltipTrigger asChild>
@@ -795,13 +886,128 @@ export default function SettingsTabView({
                                 className={`h-8 w-8 rounded-full transition-all cursor-pointer ${
                                   settings.theme === th.id
                                     ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110 shadow-xs"
-                                    : "opacity-75 hover:opacity-100"
+                                    : "opacity-75 hover:opacity-100 hover:scale-105"
                                 }`}
                               />
                             </TooltipTrigger>
                             <TooltipContent>{t(`settings.theme${th.id.charAt(0).toUpperCase() + th.id.slice(1)}` as any) || th.label}</TooltipContent>
                           </Tooltip>
                         ))}
+
+                        {/* Custom Accent Color Picker */}
+                        <Popover>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  style={{
+                                    backgroundColor: settings.theme === "custom" ? (settings.customAccentColor || "#26A295") : undefined,
+                                    backgroundImage: settings.theme !== "custom" ? "conic-gradient(from 0deg, #f43f5e, #fb923c, #facc15, #4ade80, #38bdf8, #818cf8, #c084fc, #f43f5e)" : undefined,
+                                  }}
+                                  onClick={() => {
+                                    if (settings.theme !== "custom") {
+                                      updateSetting("theme", "custom");
+                                    }
+                                  }}
+                                  className={`h-8 w-8 rounded-full transition-all cursor-pointer flex items-center justify-center relative shadow-xs ${
+                                    settings.theme === "custom"
+                                      ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
+                                      : "opacity-80 hover:opacity-100 hover:scale-105"
+                                  }`}
+                                >
+                                  <Palette className="w-3.5 h-3.5 text-white drop-shadow-md" />
+                                </button>
+                              </PopoverTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("settings.themeCustom")}</TooltipContent>
+                          </Tooltip>
+                          <PopoverContent align="start" className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                                  <Palette className="w-3.5 h-3.5 text-primary" />
+                                  {t("settings.customAccentColor")}
+                                </span>
+                                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                                  {settings.customAccentColor || "#26A295"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                                  <input
+                                    type="color"
+                                    value={settings.customAccentColor || "#26A295"}
+                                    onChange={(e) => {
+                                      updateSetting("customAccentColor", e.target.value);
+                                      if (settings.theme !== "custom") updateSetting("theme", "custom");
+                                    }}
+                                    className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                                  />
+                                </div>
+                                <Input
+                                  value={settings.customAccentColor || "#26A295"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    updateSetting("customAccentColor", val);
+                                    if (/^#[0-9A-Fa-f]{6}$/.test(val) && settings.theme !== "custom") {
+                                      updateSetting("theme", "custom");
+                                    }
+                                  }}
+                                  placeholder="#26A295"
+                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                                  maxLength={7}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                                  {t("settings.quickPresets")}
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {[
+                                    "#26A295", "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6",
+                                    "#d946ef", "#ec4899", "#f43f5e", "#f97316", "#eab308",
+                                    "#84cc16", "#10b981", "#14b8a6", "#64748b"
+                                  ].map((color) => (
+                                    <button
+                                      key={color}
+                                      type="button"
+                                      style={{ backgroundColor: color }}
+                                      onClick={() => {
+                                        updateSetting("customAccentColor", color);
+                                        updateSetting("theme", "custom");
+                                      }}
+                                      className={`h-5 w-5 rounded-full transition-transform cursor-pointer ${
+                                        settings.customAccentColor?.toLowerCase() === color.toLowerCase() && settings.theme === "custom"
+                                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                                      }`}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="pt-2.5 border-t border-border/40">
+                                <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                                  {t("settings.previewExample")}
+                                </span>
+                                <div className="flex items-center justify-between text-xs px-3 py-2 rounded-xl bg-muted/40 border border-border/40">
+                                  <span className="font-medium text-primary text-xs">
+                                    {t("settings.previewAccentText")}
+                                  </span>
+                                  <span
+                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-xs transition-colors"
+                                    style={{ backgroundColor: settings.customAccentColor || "#26A295" }}
+                                  >
+                                    {t("settings.previewActive")}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
 
@@ -887,7 +1093,18 @@ export default function SettingsTabView({
 
                     {/* Typography */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.typographyGroup")}</h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.typographyGroup")}</h3>
+                      <button
+                        type="button"
+                        onClick={() => fontFileInputRef.current?.click()}
+                        disabled={isUploadingFont}
+                        className="h-8 flex items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-[10px] transition-colors cursor-pointer border border-border/40 disabled:opacity-50"
+                      >
+                        {isUploadingFont ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                        <span>{t("settings.uploadFont") || "Upload Font"}</span>
+                      </button>
+                    </div>
 
                     {/* Interface Font */}
                     <div className="flex items-center justify-between gap-4">
@@ -900,11 +1117,26 @@ export default function SettingsTabView({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="max-h-64">
-                          {FONT_OPTIONS.map((font) => (
-                            <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
-                              <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
-                            </SelectItem>
-                          ))}
+                          {customFonts && customFonts.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel>{t("settings.customFonts") || "Workspace Fonts"}</SelectLabel>
+                              {customFonts.map((font) => (
+                                <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                                  <span style={{ fontFamily: font.css }}>{font.name}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+                          <SelectGroup>
+                            {customFonts && customFonts.length > 0 && (
+                              <SelectLabel>{t("settings.systemFonts") || "System Fonts"}</SelectLabel>
+                            )}
+                            {FONT_OPTIONS.map((font) => (
+                              <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                                <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                     </div>
@@ -920,11 +1152,26 @@ export default function SettingsTabView({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="max-h-64">
-                          {FONT_OPTIONS.map((font) => (
-                            <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
-                              <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
-                            </SelectItem>
-                          ))}
+                          {customFonts && customFonts.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel>{t("settings.customFonts") || "Workspace Fonts"}</SelectLabel>
+                              {customFonts.map((font) => (
+                                <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                                  <span style={{ fontFamily: font.css }}>{font.name}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+                          <SelectGroup>
+                            {customFonts && customFonts.length > 0 && (
+                              <SelectLabel>{t("settings.systemFonts") || "System Fonts"}</SelectLabel>
+                            )}
+                            {FONT_OPTIONS.map((font) => (
+                              <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
+                                <span style={{ fontFamily: font.css }}>{t(font.nameKey)}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                     </div>
@@ -947,6 +1194,69 @@ export default function SettingsTabView({
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {/* Custom Workspace Fonts Management */}
+                    {customFonts && customFonts.length > 0 && (
+                      <div className="pt-3 border-t border-border/30 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-xs font-semibold text-foreground">{t("settings.customFonts") || "Workspace Fonts"}</label>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{t("settings.manageFontsDesc") || "Manage uploaded custom fonts for current workspace"}</p>
+                          </div>
+                          <span className="text-[11px] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                            {customFonts.length}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {customFonts.map((font) => (
+                            <div
+                              key={font.id}
+                              className="flex items-center justify-between p-2.5 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
+                            >
+                              <div className="min-w-0 flex-1 mr-2">
+                                <p className="text-xs font-medium truncate text-foreground" style={{ fontFamily: font.css }}>
+                                  {font.name}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                  {font.format.toUpperCase()} · {(font.fileSize / 1024).toFixed(1)} KB
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/5 cursor-pointer transition-colors"
+                                      onClick={() => {
+                                        setFontToRename(font);
+                                        setFontRenameValue(font.name);
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                      <span className="sr-only">{t("settings.renameFont") || "Rename"}</span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{t("settings.renameFont") || "Rename font"}</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"
+                                      onClick={() => setFontToDelete(font)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      <span className="sr-only">{t("settings.deleteFont") || "Delete"}</span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{t("settings.deleteFont") || "Delete font"}</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Layout Density */}
@@ -1019,6 +1329,22 @@ export default function SettingsTabView({
                         <SelectContent>
                           <SelectItem value="comfortable">{t("settings.densityComfortable")}</SelectItem>
                           <SelectItem value="compact">{t("settings.densityCompact")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.appLayout")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.appLayoutDesc")}</p>
+                      </div>
+                      <Select value={settings.appLayout || "default"} onValueChange={(v) => updateSetting("appLayout", v as any)}>
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">{t("settings.layoutDefault")}</SelectItem>
+                          <SelectItem value="compact">{t("settings.layoutCompact")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1127,7 +1453,7 @@ export default function SettingsTabView({
                             description: "Toolbar layout and order restored to defaults",
                           });
                         }}
-                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-lg transition-colors cursor-pointer border border-border/40"
+                        className="h-8 flex items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-[10px] transition-colors cursor-pointer border border-border/40"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         <span>{t("settings.resetToolbarDefaults")}</span>
@@ -1709,16 +2035,9 @@ export default function SettingsTabView({
                           </SelectItem>
                           {availableModels.map((m) => (
                             <SelectItem key={m.id} value={m.id} disabled={m.isExhausted}>
-                              <div className="flex items-center justify-between w-full gap-2">
-                                <span className={m.isExhausted ? "line-through opacity-60 text-muted-foreground" : ""}>
-                                  {m.name}
-                                </span>
-                                {m.isExhausted && (
-                                  <span className="text-[10px] text-destructive font-medium shrink-0">
-                                    ({t("settings.aiModelQuotaExceeded")})
-                                  </span>
-                                )}
-                              </div>
+                              <span className={m.isExhausted ? "line-through opacity-60 text-muted-foreground" : ""}>
+                                {m.name}
+                              </span>
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -2254,6 +2573,87 @@ export default function SettingsTabView({
           </div>
         </div>
       </div>
+
+      {/* Custom Font File Input */}
+      <input
+        ref={fontFileInputRef}
+        type="file"
+        accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+        className="hidden"
+        onChange={handleFontFileUpload}
+      />
+
+      {/* Rename Font Dialog */}
+      <Dialog open={Boolean(fontToRename)} onOpenChange={(open) => !open && setFontToRename(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("settings.renameFont") || "Rename Font"}</DialogTitle>
+            <DialogDescription>
+              {fontToRename?.fileName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-1">
+            <label htmlFor="settings-tab-rename-font-name" className="mb-2 block text-sm font-medium text-foreground">
+              {t("sidebar.fileNameLabel") || "Font Name"}
+            </label>
+            <input
+              id="settings-tab-rename-font-name"
+              type="text"
+              value={fontRenameValue}
+              onChange={(e) => setFontRenameValue(e.target.value)}
+              placeholder="Font name"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleConfirmFontRename();
+                }
+              }}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              className="h-9 px-4 rounded-xl border border-border/60 hover:bg-foreground/5 text-xs font-semibold transition-all cursor-pointer text-muted-foreground hover:text-foreground"
+              onClick={() => setFontToRename(null)}
+            >
+              {t("common.cancel") || "Cancel"}
+            </button>
+            <button
+              type="button"
+              className="h-9 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() => void handleConfirmFontRename()}
+              disabled={!fontRenameValue.trim()}
+            >
+              {t("sidebar.renameAction") || t("common.save") || "Rename"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Font Confirmation Dialog */}
+      <AlertDialog open={Boolean(fontToDelete)} onOpenChange={(open) => !open && setFontToDelete(null)}>
+        <AlertDialogContent className="sm:max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.deleteFont") || "Delete Font"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(t("settings.deleteFontConfirm") || 'Are you sure you want to delete font "{name}"?').replace("{name}", fontToDelete?.name || "")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setFontToDelete(null)} className="rounded-xl">
+              {t("common.cancel") || "Cancel"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleConfirmFontDelete()}
+              className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("settings.deleteFont") || "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 }

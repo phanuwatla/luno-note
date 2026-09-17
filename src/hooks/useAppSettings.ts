@@ -4,17 +4,25 @@ import type { IconPackId } from "@/lib/iconPacks";
 
 export type AppTheme =
   | "emerald"
+  | "teal"
+  | "cyan"
+  | "sky"
   | "blue"
   | "indigo"
   | "violet"
+  | "lavender"
   | "fuchsia"
   | "rose"
   | "ruby"
+  | "crimson"
+  | "coral"
   | "orange"
   | "amber"
+  | "gold"
   | "lime"
-  | "cyan"
-  | "slate";
+  | "mint"
+  | "slate"
+  | "custom";
 export type ColorScheme = "light" | "dark" | "system";
 
 export interface AppThemeConfig {
@@ -24,44 +32,116 @@ export interface AppThemeConfig {
 }
 
 export const APP_THEMES: AppThemeConfig[] = [
-  { id: "emerald", color: "#26A295", label: "Emerald" },
-  { id: "cyan",    color: "hsl(189 94% 43%)", label: "Cyan" },
-  { id: "blue",    color: "hsl(217 91% 53%)", label: "Blue" },
-  { id: "indigo",  color: "hsl(239 84% 67%)", label: "Indigo" },
-  { id: "violet",  color: "hsl(262 83% 58%)", label: "Violet" },
-  { id: "fuchsia", color: "hsl(292 84% 61%)", label: "Fuchsia" },
-  { id: "rose",    color: "hsl(347 77% 50%)", label: "Rose" },
-  { id: "ruby",    color: "hsl(346 84% 50%)", label: "Ruby" },
-  { id: "orange",  color: "hsl(25 95% 60%)", label: "Orange" },
-  { id: "amber",   color: "hsl(38 92% 50%)", label: "Amber" },
-  { id: "lime",    color: "hsl(84 81% 44%)", label: "Lime" },
-  { id: "slate",   color: "hsl(215 16% 40%)", label: "Slate" },
+  { id: "emerald",  color: "#26A295", label: "Emerald" },
+  { id: "teal",     color: "hsl(166 72% 36%)", label: "Teal" },
+  { id: "cyan",     color: "hsl(189 94% 43%)", label: "Cyan" },
+  { id: "sky",      color: "hsl(199 89% 48%)", label: "Sky Blue" },
+  { id: "blue",     color: "hsl(217 91% 53%)", label: "Blue" },
+  { id: "indigo",   color: "hsl(239 84% 67%)", label: "Indigo" },
+  { id: "violet",   color: "hsl(262 83% 58%)", label: "Violet" },
+  { id: "lavender", color: "hsl(255 92% 76%)", label: "Lavender" },
+  { id: "fuchsia",  color: "hsl(292 84% 61%)", label: "Fuchsia" },
+  { id: "rose",     color: "hsl(347 77% 50%)", label: "Rose" },
+  { id: "ruby",     color: "hsl(346 84% 50%)", label: "Ruby" },
+  { id: "crimson",  color: "hsl(350 89% 60%)", label: "Crimson" },
+  { id: "coral",    color: "hsl(14 90% 63%)", label: "Coral" },
+  { id: "orange",   color: "hsl(25 95% 60%)", label: "Orange" },
+  { id: "amber",    color: "hsl(38 92% 50%)", label: "Amber" },
+  { id: "gold",     color: "hsl(45 93% 47%)", label: "Gold" },
+  { id: "lime",     color: "hsl(84 81% 44%)", label: "Lime" },
+  { id: "mint",     color: "hsl(158 64% 52%)", label: "Mint" },
+  { id: "slate",    color: "hsl(215 16% 40%)", label: "Slate" },
 ];
 
-export function getThemeLogoFilter(theme: AppTheme = "emerald"): string {
+export function hexToHsl(hex: string): { h: number; s: number; l: number; hslString: string } {
+  let cleanHex = hex.replace("#", "").trim();
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex.split("").map((c) => c + c).join("");
+  }
+  if (cleanHex.length !== 6) {
+    return { h: 174, s: 62, l: 39, hslString: "174 62% 39%" };
+  }
+  const r = parseInt(cleanHex.substring(0, 2), 16) / 255;
+  const g = parseInt(cleanHex.substring(2, 4), 16) / 255;
+  const b = parseInt(cleanHex.substring(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      case b:
+        h = (r - g) / d + 4;
+        break;
+    }
+    h = Math.round(h * 60);
+  }
+  const sPct = Math.round(s * 100);
+  const lPct = Math.round(l * 100);
+  return { h, s: sPct, l: lPct, hslString: `${h} ${sPct}% ${lPct}%` };
+}
+
+export function getThemeLogoFilter(theme: AppTheme = "emerald", customAccentColor?: string): string {
   switch (theme) {
+    case "teal":
+      return "hue-rotate(352deg) saturate(1.1)";
     case "cyan":
       return "hue-rotate(15deg) saturate(1.1)";
+    case "sky":
+      return "hue-rotate(25deg) saturate(1.15)";
     case "blue":
       return "hue-rotate(43deg) saturate(1.15)";
     case "indigo":
       return "hue-rotate(65deg) saturate(1.2)";
     case "violet":
       return "hue-rotate(88deg) saturate(1.2)";
+    case "lavender":
+      return "hue-rotate(81deg) saturate(1.1)";
     case "fuchsia":
       return "hue-rotate(118deg) saturate(1.2)";
     case "rose":
       return "hue-rotate(173deg) saturate(1.1)";
     case "ruby":
       return "hue-rotate(172deg) saturate(1.25)";
+    case "crimson":
+      return "hue-rotate(176deg) saturate(1.3)";
+    case "coral":
+      return "hue-rotate(200deg) saturate(1.25)";
     case "orange":
       return "hue-rotate(211deg) saturate(1.3)";
     case "amber":
       return "hue-rotate(224deg) saturate(1.3)";
+    case "gold":
+      return "hue-rotate(231deg) saturate(1.3)";
     case "lime":
       return "hue-rotate(270deg) saturate(1.2)";
+    case "mint":
+      return "hue-rotate(344deg) saturate(1.15)";
     case "slate":
       return "grayscale(0.85) brightness(1.1)";
+    case "custom": {
+      if (customAccentColor) {
+        const { h, s } = hexToHsl(customAccentColor);
+        if (s < 18) {
+          return "grayscale(0.85) brightness(1.1)";
+        }
+        const hueDiff = ((h - 174) % 360 + 360) % 360;
+        const sat = Math.max(0.85, Math.min(1.4, s / 65)).toFixed(2);
+        return `hue-rotate(${hueDiff}deg) saturate(${sat})`;
+      }
+      return "none";
+    }
     case "emerald":
     default:
       return "none";
@@ -71,31 +151,28 @@ export function getThemeLogoFilter(theme: AppTheme = "emerald"): string {
 export const DEFAULT_TOOLBAR_ORDER: string[] = [
   "undo",
   "redo",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
+  "heading",
+  "fontFamily",
+  "fontSize",
   "bold",
   "italic",
   "underline",
   "strike",
   "highlight",
+  "textColor",
+  "align",
   "superscript",
   "subscript",
-  "bulletList",
-  "orderedList",
-  "taskList",
+  "list",
   "toggle",
   "code",
-  "codeBlock",
   "blockquote",
   "horizontalRule",
   "footnote",
   "table",
   "link",
   "image",
+  "qrCode",
   "emoji",
   "audio",
   "calculator",
@@ -106,13 +183,10 @@ export const DEFAULT_TOOLBAR_ORDER: string[] = [
 ];
 
 export const DEFAULT_HIDDEN_TOOLBAR_ITEMS: string[] = [
-  "h3",
-  "h4",
-  "h5",
-  "h6",
   "superscript",
   "subscript",
   "footnote",
+  "qrCode",
   "calculator",
   "translator",
   "clock",
@@ -141,32 +215,29 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
     order: [
       "undo",
       "redo",
-      "h1",
-      "h2",
+      "heading",
       "bold",
       "italic",
       "highlight",
-      "bulletList",
-      "taskList",
+      "textColor",
+      "list",
       "aiAssistant",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
       "underline",
       "strike",
+      "align",
       "superscript",
       "subscript",
-      "orderedList",
       "toggle",
       "code",
-      "codeBlock",
       "blockquote",
       "horizontalRule",
       "footnote",
       "table",
       "link",
       "image",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -175,24 +246,22 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "fixLanguage",
     ],
     hidden: [
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
       "underline",
       "strike",
+      "align",
       "superscript",
       "subscript",
-      "orderedList",
       "toggle",
       "code",
-      "codeBlock",
       "blockquote",
       "horizontalRule",
       "footnote",
       "table",
       "link",
       "image",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -207,13 +276,10 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
     order: [
       "undo",
       "redo",
-      "h1",
-      "h2",
+      "heading",
       "bold",
       "highlight",
-      "taskList",
-      "bulletList",
-      "orderedList",
+      "list",
       "toggle",
       "table",
       "horizontalRule",
@@ -221,41 +287,41 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "calculator",
       "audio",
       "aiAssistant",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
+      "textColor",
+      "align",
       "italic",
       "underline",
       "strike",
       "superscript",
       "subscript",
       "code",
-      "codeBlock",
       "blockquote",
       "footnote",
       "link",
       "image",
+      "qrCode",
       "emoji",
       "translator",
       "fixLanguage",
     ],
     hidden: [
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
+      "textColor",
+      "align",
       "italic",
       "underline",
       "strike",
       "superscript",
       "subscript",
       "code",
-      "codeBlock",
       "blockquote",
       "footnote",
       "link",
       "image",
+      "qrCode",
       "emoji",
       "translator",
       "fixLanguage",
@@ -267,17 +333,18 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
     order: [
       "undo",
       "redo",
-      "h1",
-      "h2",
-      "h3",
+      "heading",
+      "fontFamily",
+      "fontSize",
       "bold",
       "italic",
       "underline",
       "highlight",
+      "textColor",
+      "align",
       "superscript",
       "subscript",
-      "orderedList",
-      "bulletList",
+      "list",
       "blockquote",
       "footnote",
       "table",
@@ -286,14 +353,10 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "image",
       "translator",
       "aiAssistant",
-      "h4",
-      "h5",
-      "h6",
       "strike",
-      "taskList",
       "code",
-      "codeBlock",
       "horizontalRule",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -301,14 +364,10 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "fixLanguage",
     ],
     hidden: [
-      "h4",
-      "h5",
-      "h6",
       "strike",
-      "taskList",
       "code",
-      "codeBlock",
       "horizontalRule",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -322,12 +381,9 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
     order: [
       "undo",
       "redo",
-      "h1",
-      "h2",
+      "heading",
       "code",
-      "codeBlock",
-      "taskList",
-      "bulletList",
+      "list",
       "toggle",
       "table",
       "horizontalRule",
@@ -335,10 +391,10 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "image",
       "fixLanguage",
       "aiAssistant",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
+      "textColor",
+      "align",
       "bold",
       "italic",
       "underline",
@@ -346,9 +402,9 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "highlight",
       "superscript",
       "subscript",
-      "orderedList",
       "blockquote",
       "footnote",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -356,10 +412,10 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "clock",
     ],
     hidden: [
-      "h3",
-      "h4",
-      "h5",
-      "h6",
+      "fontFamily",
+      "fontSize",
+      "textColor",
+      "align",
       "bold",
       "italic",
       "underline",
@@ -367,9 +423,9 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "highlight",
       "superscript",
       "subscript",
-      "orderedList",
       "blockquote",
       "footnote",
+      "qrCode",
       "emoji",
       "audio",
       "calculator",
@@ -385,7 +441,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
   },
 ];
 
-export type FontFamilyOption =
+export type BuiltInFontOption =
   | "inter"
   | "system"
   | "serif"
@@ -402,6 +458,8 @@ export type FontFamilyOption =
   | "itim"
   | "sriracha"
   | "chonburi";
+
+export type FontFamilyOption = BuiltInFontOption | (string & {});
 
 export type AppearanceStyle = "default" | "paper" | "midnight" | "nord" | "glass" | "cyberpunk" | "catppuccin" | "neumorphism";
 
@@ -546,6 +604,8 @@ export const APPEARANCE_STYLE_OPTIONS: AppearanceStyleOption[] = [
   },
 ];
 
+export type AppLayout = "default" | "compact";
+
 export interface AppSettings {
   editorFontSize: number;
   sidebarWidth: number;
@@ -558,6 +618,7 @@ export interface AppSettings {
   colorScheme: ColorScheme;
   autoSave: boolean;
   reopenTabs: boolean;
+  appLayout: AppLayout;
 
   // General Settings
   onStartup: string;
@@ -591,6 +652,7 @@ export interface AppSettings {
   showGuideLines: boolean;
   tagColorStyle: "multicolor" | "accent";
   accentHeadings: boolean;
+  customAccentColor?: string;
 
   // Editor Settings
   showWordCount: boolean;
@@ -615,7 +677,28 @@ export interface AppSettings {
 const STORAGE_KEY = "notes-app-settings";
 const FIXED_SIDEBAR_WIDTH = 280;
 
-const VALID_THEMES: AppTheme[] = ["emerald", "cyan", "blue", "indigo", "violet", "fuchsia", "rose", "ruby", "orange", "amber", "lime", "slate"];
+const VALID_THEMES: AppTheme[] = [
+  "emerald",
+  "teal",
+  "cyan",
+  "sky",
+  "blue",
+  "indigo",
+  "violet",
+  "lavender",
+  "fuchsia",
+  "rose",
+  "ruby",
+  "crimson",
+  "coral",
+  "orange",
+  "amber",
+  "gold",
+  "lime",
+  "mint",
+  "slate",
+  "custom",
+];
 const VALID_COLOR_SCHEMES: ColorScheme[] = ["light", "dark", "system"];
 export const VALID_FONT_FAMILIES: FontFamilyOption[] = [
   "inter",
@@ -698,6 +781,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   colorScheme: "system",
   autoSave: true,
   reopenTabs: true,
+  appLayout: "default",
 
   onStartup: "home",
   checkUpdates: true,
@@ -728,6 +812,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showGuideLines: true,
   tagColorStyle: "multicolor",
   accentHeadings: false,
+  customAccentColor: "#26A295",
 
   showWordCount: true,
   autoPairBrackets: true,
@@ -754,12 +839,12 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const defaultLang = detectSystemLanguage();
   const language = raw?.language === "th" || raw?.language === "en" ? raw.language : defaultLang;
   const fontFamily: FontFamilyOption =
-    raw?.fontFamily && VALID_FONT_FAMILIES.includes(raw.fontFamily as FontFamilyOption)
+    raw?.fontFamily && (VALID_FONT_FAMILIES.includes(raw.fontFamily as any) || typeof raw.fontFamily === "string")
       ? (raw.fontFamily as FontFamilyOption)
       : "inter";
 
   const editorFontFamily: FontFamilyOption =
-    raw?.editorFontFamily && VALID_FONT_FAMILIES.includes(raw.editorFontFamily as FontFamilyOption)
+    raw?.editorFontFamily && (VALID_FONT_FAMILIES.includes(raw.editorFontFamily as any) || typeof raw.editorFontFamily === "string")
       ? (raw.editorFontFamily as FontFamilyOption)
       : fontFamily;
 
@@ -787,6 +872,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const defaultNoteTemplate = defaultTemplateMd;
 
   const interfaceScale = [80, 90, 100, 110, 125, 150].includes(Number(raw?.interfaceScale)) ? Number(raw?.interfaceScale) : 100;
+  const appLayout: AppLayout = raw?.appLayout === "compact" ? "compact" : "default";
   const editorWidth = raw?.editorWidth === "compact" || raw?.editorWidth === "full" ? raw.editorWidth : "standard";
   const lineHeight = raw?.lineHeight === "1.4" || raw?.lineHeight === "1.8" ? raw.lineHeight : "1.6";
   const sidebarDensity = raw?.sidebarDensity === "compact" ? "compact" : "comfortable";
@@ -799,9 +885,17 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const showCodeLineNumbers = raw?.showCodeLineNumbers === true;
   const highlightInlineCode = raw?.highlightInlineCode === true;
 
+  const mapLegacyToolId = (id: string) => {
+    if (/^h[1-6]$/.test(id)) return "heading";
+    if (id === "bulletList" || id === "orderedList" || id === "taskList") return "list";
+    if (id === "codeBlock") return "code";
+    return id;
+  };
+
   let toolbarItemsOrder: string[];
   if (Array.isArray(raw?.toolbarItemsOrder) && raw.toolbarItemsOrder.length > 0) {
-    const validRaw = raw.toolbarItemsOrder.filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id));
+    const mappedRaw = raw.toolbarItemsOrder.map(mapLegacyToolId);
+    const validRaw = Array.from(new Set(mappedRaw.filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id))));
     const existing = new Set(validRaw);
     toolbarItemsOrder = [...validRaw];
     for (const defaultItem of DEFAULT_TOOLBAR_ORDER) {
@@ -827,18 +921,46 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   }
 
   const rawHidden = Array.isArray(raw?.hiddenToolbarItems)
-    ? raw.hiddenToolbarItems.filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id) && id !== "undo" && id !== "redo")
+    ? Array.from(
+        new Set(
+          raw.hiddenToolbarItems
+            .map(mapLegacyToolId)
+            .filter((id) => DEFAULT_TOOLBAR_ORDER.includes(id) && id !== "undo" && id !== "redo")
+        )
+      )
     : null;
 
   let hiddenToolbarItems: string[];
   if (rawHidden) {
     hiddenToolbarItems = [...rawHidden];
+    // If heading was derived from legacy hidden items, only keep heading hidden if h1 AND h2 were both explicitly hidden
+    const rawHiddenSet = new Set(raw.hiddenToolbarItems);
+    if (!rawHiddenSet.has("h1") && !rawHiddenSet.has("heading")) {
+      hiddenToolbarItems = hiddenToolbarItems.filter((id) => id !== "heading");
+    }
     const rawOrderSet = new Set(Array.isArray(raw?.toolbarItemsOrder) ? raw.toolbarItemsOrder : []);
+    if (
+      (rawHiddenSet.has("bulletList") || rawHiddenSet.has("orderedList") || rawHiddenSet.has("taskList")) &&
+      (!rawHiddenSet.has("bulletList") || !rawHiddenSet.has("orderedList") || !rawHiddenSet.has("taskList")) &&
+      !rawHiddenSet.has("list")
+    ) {
+      hiddenToolbarItems = hiddenToolbarItems.filter((id) => id !== "list");
+    }
+    if (
+      (rawHiddenSet.has("code") || rawHiddenSet.has("codeBlock")) &&
+      (!rawHiddenSet.has("code") || !rawHiddenSet.has("codeBlock")) &&
+      !rawHiddenSet.has("code")
+    ) {
+      hiddenToolbarItems = hiddenToolbarItems.filter((id) => id !== "code");
+    }
     if (!rawOrderSet.has("superscript") && !hiddenToolbarItems.includes("superscript")) {
       hiddenToolbarItems.push("superscript");
     }
     if (!rawOrderSet.has("subscript") && !hiddenToolbarItems.includes("subscript")) {
       hiddenToolbarItems.push("subscript");
+    }
+    if (!rawOrderSet.has("qrCode") && !hiddenToolbarItems.includes("qrCode")) {
+      hiddenToolbarItems.push("qrCode");
     }
   } else {
     hiddenToolbarItems = DEFAULT_HIDDEN_TOOLBAR_ITEMS;
@@ -853,6 +975,10 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     : "lucide";
   const folderIcons = typeof raw?.folderIcons === "object" && raw?.folderIcons !== null ? raw.folderIcons : {};
   const fileIcons = typeof raw?.fileIcons === "object" && raw?.fileIcons !== null ? raw.fileIcons : {};
+  const customAccentColor =
+    typeof raw?.customAccentColor === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(raw.customAccentColor.trim())
+      ? raw.customAccentColor.trim()
+      : "#26A295";
 
   return {
     editorFontSize: clamp(Number(raw?.editorFontSize ?? DEFAULT_SETTINGS.editorFontSize), 13, 22),
@@ -867,7 +993,12 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     autoSave: typeof raw?.autoSave === "boolean" ? raw.autoSave : DEFAULT_SETTINGS.autoSave,
     reopenTabs: typeof raw?.reopenTabs === "boolean" ? raw.reopenTabs : DEFAULT_SETTINGS.reopenTabs,
 
-    onStartup: raw?.onStartup === "lastNote" || raw?.onStartup === "blank" ? raw.onStartup : "home",
+    onStartup:
+      appLayout === "compact" && (raw?.onStartup === "home" || !raw?.onStartup)
+        ? "lastNote"
+        : raw?.onStartup === "lastNote" || raw?.onStartup === "blank"
+        ? raw.onStartup
+        : "home",
     checkUpdates: raw?.checkUpdates !== false,
     dateFormat: raw?.dateFormat === "DD/MM/YYYY" || raw?.dateFormat === "MM/DD/YYYY" ? raw.dateFormat : "YYYY-MM-DD",
     timeFormat: raw?.timeFormat === "12h" ? "12h" : "24h",
@@ -887,6 +1018,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     autoFolderIcons: raw?.autoFolderIcons !== false,
 
     interfaceScale,
+    appLayout,
     iconPack,
     folderIcons,
     fileIcons,
@@ -896,6 +1028,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     showGuideLines,
     tagColorStyle,
     accentHeadings,
+    customAccentColor,
 
     showWordCount,
     autoPairBrackets,
@@ -1292,7 +1425,37 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("data-app-style", settings.appearanceStyle || "default");
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
     document.documentElement.setAttribute("data-editor-font", settings.editorFontFamily || settings.fontFamily);
-  }, [settings.theme, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily]);
+
+    const logoFilter = getThemeLogoFilter(settings.theme, settings.customAccentColor);
+    document.documentElement.style.setProperty("--logo-filter", logoFilter);
+
+    if (settings.theme === "custom") {
+      const hex = settings.customAccentColor || "#26A295";
+      document.documentElement.setAttribute("data-custom-accent-color", hex);
+      const { h, s, l, hslString } = hexToHsl(hex);
+      const isDark = document.documentElement.classList.contains("dark");
+      const effectiveHsl = isDark
+        ? `${h} ${Math.min(s + 5, 100)}% ${Math.min(Math.max(l, 55), 70)}%`
+        : hslString;
+
+      document.documentElement.style.setProperty("--primary", effectiveHsl);
+      document.documentElement.style.setProperty("--accent", effectiveHsl);
+      document.documentElement.style.setProperty("--ring", effectiveHsl);
+      document.documentElement.style.setProperty("--sidebar-primary", effectiveHsl);
+      document.documentElement.style.setProperty("--sidebar-ring", effectiveHsl);
+      document.documentElement.style.setProperty("--hl-tag", hex);
+      document.documentElement.style.setProperty("--hl-keyword", hex);
+    } else {
+      document.documentElement.removeAttribute("data-custom-accent-color");
+      document.documentElement.style.removeProperty("--primary");
+      document.documentElement.style.removeProperty("--accent");
+      document.documentElement.style.removeProperty("--ring");
+      document.documentElement.style.removeProperty("--sidebar-primary");
+      document.documentElement.style.removeProperty("--sidebar-ring");
+      document.documentElement.style.removeProperty("--hl-tag");
+      document.documentElement.style.removeProperty("--hl-keyword");
+    }
+  }, [settings.theme, settings.customAccentColor, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily, settings.colorScheme]);
 
   // Dynamically update document favicon to match theme accent color
   useEffect(() => {
@@ -1307,7 +1470,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         canvas.height = img.naturalHeight || img.height || 64;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        const filter = getThemeLogoFilter(settings.theme);
+        const filter = getThemeLogoFilter(settings.theme, settings.customAccentColor);
         if (filter && filter !== "none") {
           ctx.filter = filter;
         }
@@ -1315,7 +1478,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         link.href = canvas.toDataURL("image/png");
       };
     } catch {}
-  }, [settings.theme]);
+  }, [settings.theme, settings.customAccentColor]);
 
   useEffect(() => {
     const scale = settings.interfaceScale || 100;
@@ -1423,4 +1586,32 @@ export function useAppSettings() {
   }
 
   return context;
+}
+
+export { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont } from "@/lib/customFontStore";
+
+export function useCustomFonts() {
+  const [customFonts, setCustomFonts] = useState<import("@/lib/customFontStore").CustomFont[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const { loadCustomFonts } = await import("@/lib/customFontStore");
+      const fonts = await loadCustomFonts();
+      setCustomFonts(fonts);
+    } catch (e) {
+      console.warn("Failed to load custom fonts:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const handleChanged = () => refresh();
+    window.addEventListener("luno:custom-fonts-changed", handleChanged);
+    return () => window.removeEventListener("luno:custom-fonts-changed", handleChanged);
+  }, [refresh]);
+
+  return { customFonts, isLoading, refresh };
 }

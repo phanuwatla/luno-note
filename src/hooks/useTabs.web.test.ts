@@ -117,4 +117,59 @@ describe("useTabs with web viewer tabs", () => {
     expect(result.current.openTabIds).toHaveLength(0);
     expect(result.current.activeTabId).toBeNull();
   });
+
+  it("should sanitize and close tabs not allowed in compact (Activity Bar) layout", () => {
+    const notesRef = { current: [{ id: "note-1", title: "Note 1" }] as Note[] };
+    const { result } = renderHook(() => useTabs(notesRef));
+
+    act(() => {
+      result.current.openTab("home");
+      result.current.openTab("favorites");
+      result.current.openTab("tags");
+      result.current.openTab("trash");
+      result.current.openTab("luno-ai");
+      result.current.openTab("settings");
+      result.current.openTab("help");
+      result.current.openTab("templates");
+      result.current.openTab("note-1");
+      result.current.openTab("web:https://google.com");
+    });
+
+    expect(result.current.openTabIds).toContain("home");
+    expect(result.current.openTabIds).toContain("favorites");
+    expect(result.current.openTabIds).toContain("tags");
+    expect(result.current.openTabIds).toContain("trash");
+    expect(result.current.openTabIds).toContain("luno-ai");
+
+    act(() => {
+      result.current.sanitizeTabsForLayout("compact");
+    });
+
+    expect(result.current.openTabIds).not.toContain("home");
+    expect(result.current.openTabIds).not.toContain("favorites");
+    expect(result.current.openTabIds).not.toContain("tags");
+    expect(result.current.openTabIds).not.toContain("trash");
+    expect(result.current.openTabIds).not.toContain("luno-ai");
+
+    // Allowed tabs remain intact
+    expect(result.current.openTabIds).toContain("settings");
+    expect(result.current.openTabIds).toContain("help");
+    expect(result.current.openTabIds).toContain("templates");
+    expect(result.current.openTabIds).toContain("note-1");
+    expect(result.current.openTabIds).toContain("web:https://google.com");
+  });
+
+  it("should not restore home tab when appLayout is compact on startup", async () => {
+    const notesRef = { current: [{ id: "note-1", title: "Note 1" }] as Note[] };
+    localStorageMock.setItem("notes-app-settings", JSON.stringify({ appLayout: "compact" }));
+    const { result } = renderHook(() => useTabs(notesRef));
+
+    await act(async () => {
+      await result.current.restoreTabsFromSession(notesRef.current, true, "home");
+    });
+
+    expect(result.current.openTabIds).not.toContain("home");
+    expect(result.current.openTabIds).toContain("note-1");
+    expect(result.current.activeTabId).toBe("note-1");
+  });
 });

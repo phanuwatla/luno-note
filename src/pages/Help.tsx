@@ -7,7 +7,8 @@ export default function Help() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
-  }, [settings.fontFamily]);
+    document.documentElement.setAttribute("data-editor-font", settings.editorFontFamily || settings.fontFamily);
+  }, [settings.fontFamily, settings.editorFontFamily]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-app-theme", settings.theme);

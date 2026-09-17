@@ -148,11 +148,16 @@ function RightPanelComponent({
 
   useEffect(() => {
     if (!editor) return;
+    let timer: NodeJS.Timeout | null = null;
     const handleEditorUpdate = () => {
-      setEditorDocVersion((v) => v + 1);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        setEditorDocVersion((v) => v + 1);
+      }, 350);
     };
     editor.on("update", handleEditorUpdate);
     return () => {
+      if (timer) clearTimeout(timer);
       editor.off("update", handleEditorUpdate);
     };
   }, [editor]);
@@ -277,7 +282,7 @@ function RightPanelComponent({
       readTime,
       lines,
     };
-  }, [isNonTextMedia, fileCategory, note?.contentFormat, note?.content, editor?.state.doc, settings.language]);
+  }, [isNonTextMedia, fileCategory, note?.contentFormat, note?.content, editorDocVersion, settings.language]);
 
   // Format Dates with localization & user settings
   const formattedDates = useMemo(() => {

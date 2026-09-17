@@ -13,11 +13,24 @@ import {
   Sparkles,
   ArrowRight,
   Plus,
+  Filter,
+  ArrowUpDown,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Check,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { parseFrontmatterAndTags, isMarkdownNote } from "@/lib/frontmatter";
+import { getNotePreviewSnippet } from "@/lib/snippetUtils";
 import { getTagColorClass } from "@/lib/tagColors";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
@@ -30,6 +43,16 @@ interface FavoritesTabViewProps {
   onToggleFavorite: (noteId: string) => void;
   onCreateBlankNote?: () => void;
 }
+
+export type FavoritesSortBy =
+  | "name-asc"
+  | "name-desc"
+  | "modified-desc"
+  | "modified-asc"
+  | "created-desc"
+  | "created-asc";
+
+const FAVORITES_SORT_STORAGE_KEY = "notes-app-favorites-sort";
 
 export default function FavoritesTabView({
   notes,
@@ -44,6 +67,41 @@ export default function FavoritesTabView({
 
   const [query, setQuery] = useState("");
   const [selectedFormat, setSelectedFormat] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<FavoritesSortBy>(() => {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const saved = window.localStorage.getItem(FAVORITES_SORT_STORAGE_KEY) as FavoritesSortBy;
+        if (
+          saved &&
+          [
+            "name-asc",
+            "name-desc",
+            "modified-desc",
+            "modified-asc",
+            "created-desc",
+            "created-asc",
+          ].includes(saved)
+        ) {
+          return saved;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return "name-asc";
+  });
+
+  const handleSortChange = (newSort: FavoritesSortBy) => {
+    setSortBy(newSort);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(FAVORITES_SORT_STORAGE_KEY, newSort);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const renderIcon = (key: string, cls = "h-4 w-4") => {
@@ -131,7 +189,7 @@ export default function FavoritesTabView({
   }, [favoriteNotes]);
 
   const filteredNotes = useMemo(() => {
-    return favoriteNotes.filter((note) => {
+    const list = favoriteNotes.filter((note) => {
       const name = note.fileName?.toLowerCase() || "";
       const isMd = name.endsWith(".md") || name.endsWith(".markdown") || note.contentFormat === "markdown";
       const isHtml = name.endsWith(".html") || name.endsWith(".htm") || note.contentFormat === "html";
@@ -153,22 +211,44 @@ export default function FavoritesTabView({
       }
       return true;
     });
-  }, [favoriteNotes, selectedFormat, query]);
+
+    return [...list].sort((a, b) => {
+      if (sortBy === "name-asc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (sortBy === "name-desc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (sortBy === "modified-desc") {
+        const modA = a.updatedAt || a.createdAt || 0;
+        const modB = b.updatedAt || b.createdAt || 0;
+        return modB - modA;
+      }
+      if (sortBy === "modified-asc") {
+        const modA = a.updatedAt || a.createdAt || 0;
+        const modB = b.updatedAt || b.createdAt || 0;
+        return modA - modB;
+      }
+      if (sortBy === "created-desc") {
+        const creA = a.createdAt || 0;
+        const creB = b.createdAt || 0;
+        return creB - creA;
+      }
+      if (sortBy === "created-asc") {
+        const creA = a.createdAt || 0;
+        const creB = b.createdAt || 0;
+        return creA - creB;
+      }
+      return 0;
+    });
+  }, [favoriteNotes, selectedFormat, query, sortBy]);
 
   const getCleanSnippet = (note: Note) => {
-    if (!note.content) return "";
-    if (note.fileType === "image") return isTh ? "ไฟล์รูปภาพ" : "Image file";
-    try {
-      const parsed = parseFrontmatterAndTags(note.content);
-      const text = (parsed.bodyContent || note.content)
-        .replace(/^[#\s*>-]+/gm, "")
-        .replace(/\[\[([^\]]+)\]\]/g, "$1")
-        .replace(/`{1,3}[^`]*`{1,3}/g, "")
-        .trim();
-      return text.slice(0, 160);
-    } catch {
-      return note.content.slice(0, 160);
-    }
+    return getNotePreviewSnippet(note, 160, isTh);
   };
 
   const getFormatBadge = (note: Note) => {
@@ -199,37 +279,220 @@ export default function FavoritesTabView({
               </p>
             </div>
 
-            {/* Search Box */}
-            <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3.5 py-2 border border-sidebar-border/40 hover:border-primary/60 focus-within:border-primary w-full md:w-64 transition-all shadow-none group">
-              {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground group-focus-within:text-primary transition-colors")}
-              <input
-                ref={searchInputRef}
-                data-favorites-search="true"
-                type="text"
-                placeholder={isTh ? "ค้นหาในรายการโปรด..." : "Search favorites..."}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setQuery("");
-                    searchInputRef.current?.blur();
-                  }
-                }}
-                className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
-              />
-              {query && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuery("");
-                    searchInputRef.current?.focus();
+            {/* Functional Search Input Box & Controls */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3.5 py-2 border border-sidebar-border/40 hover:border-primary/60 focus-within:border-primary w-full sm:w-56 md:w-64 transition-all shadow-none group">
+                {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground group-focus-within:text-primary transition-colors")}
+                <input
+                  ref={searchInputRef}
+                  data-favorites-search="true"
+                  type="text"
+                  placeholder={isTh ? "ค้นหาในรายการโปรด..." : "Search favorites..."}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setQuery("");
+                      searchInputRef.current?.blur();
+                    }
                   }}
-                  className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                  aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
+                  className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                    aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons Group (Filter + Sort) */}
+              <div className="flex items-center gap-1">
+                {/* Filter Dropdown */}
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-6 w-6 rounded-md shrink-0 transition-colors bg-transparent focus:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-transparent ${
+                            selectedFormat !== "all"
+                              ? "text-primary hover:text-primary hover:bg-sidebar-accent/50"
+                              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                          }`}
+                        >
+                          <Filter className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
+                    <DropdownMenuItem
+                      onClick={() => setSelectedFormat("all")}
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        selectedFormat === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                      }`}
+                    >
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {selectedFormat === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+                      </span>
+                      <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedFormat("md")}
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        selectedFormat === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                      }`}
+                    >
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {selectedFormat === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+                      </span>
+                      <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedFormat("txt")}
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        selectedFormat === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                      }`}
+                    >
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {selectedFormat === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+                      </span>
+                      <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedFormat("html")}
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        selectedFormat === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                      }`}
+                    >
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {selectedFormat === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+                      </span>
+                      <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSelectedFormat("image")}
+                      className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+                        selectedFormat === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                      }`}
+                    >
+                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                        {selectedFormat === "image" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+                      </span>
+                      <span>{isTh ? "รูปภาพ" : "Images"}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Sort Dropdown */}
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent bg-transparent focus:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-transparent shrink-0 transition-colors"
+                        >
+                          <ArrowUpDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebar.sort") || (isTh ? "เรียงลำดับ" : "Sort by")}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("name-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ArrowDownAZ className="h-4 w-4" />
+                        <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+                      </div>
+                      {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("name-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ArrowUpAZ className="h-4 w-4" />
+                        <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+                      </div>
+                      {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("modified-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4" />
+                        <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+                      </div>
+                      {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("modified-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4 opacity-60" />
+                        <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+                      </div>
+                      {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("created-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Calendar className="h-4 w-4" />
+                        <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+                      </div>
+                      {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("created-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Calendar className="h-4 w-4 opacity-60" />
+                        <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+                      </div>
+                      {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           </div>
 

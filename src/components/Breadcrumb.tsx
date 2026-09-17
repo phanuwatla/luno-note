@@ -313,8 +313,8 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
   const isSplitPane = paneId !== "main";
 
   return (
-    <div className="flex items-center justify-between bg-background px-3.5 pt-2 pb-1.5 h-9 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40">
-      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
+    <div className="flex items-center justify-between bg-background px-3.5 h-[34px] text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40">
+      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-0.5">
         {isSplitPane ? (
           <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none flex items-center gap-1.5">
             <NoteIcon note={note} active={false} />

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webFrame, clipboard } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, clipboard, nativeImage } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   isElectron: true,
@@ -58,6 +58,49 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveGdriveAuth: (data) => ipcRenderer.invoke("save-gdrive-auth", data),
   clearGdriveAuth: () => ipcRenderer.invoke("clear-gdrive-auth"),
   googleFetchProfile: (token) => ipcRenderer.invoke("google-fetch-profile", token),
+  readClipboardText: async () => {
+    try {
+      if (clipboard && typeof clipboard.readText === "function") {
+        const val = clipboard.readText();
+        if (val) return val;
+      }
+    } catch {}
+    try {
+      return await ipcRenderer.invoke("read-clipboard-text");
+    } catch (e) {
+      console.warn("readClipboardText error:", e);
+      return "";
+    }
+  },
+  writeClipboardText: async (text) => {
+    try {
+      if (clipboard && typeof clipboard.writeText === "function") {
+        clipboard.writeText(text || "");
+      }
+    } catch {}
+    try {
+      return await ipcRenderer.invoke("write-clipboard-text", text);
+    } catch (e) {
+      console.warn("writeClipboardText error:", e);
+      return false;
+    }
+  },
+  writeClipboardImage: async (dataUrl) => {
+    try {
+      if (clipboard && typeof clipboard.writeImage === "function" && nativeImage) {
+        const img = nativeImage.createFromDataURL(dataUrl);
+        if (!img.isEmpty()) {
+          clipboard.writeImage(img);
+        }
+      }
+    } catch {}
+    try {
+      return await ipcRenderer.invoke("write-clipboard-image", dataUrl);
+    } catch (e) {
+      console.warn("writeClipboardImage error:", e);
+      return false;
+    }
+  },
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
   hasClipboardImage: () => {
     try {

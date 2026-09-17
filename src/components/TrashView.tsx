@@ -15,6 +15,10 @@ import {
   Check,
   X,
   Settings,
+  ArrowUpDown,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -27,6 +31,7 @@ import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import { formatDate } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
+import { stripHtmlAndMarkdown } from "@/lib/snippetUtils";
 
 interface TrashViewProps {
   trashedNotes: TrashedNote[];
@@ -37,7 +42,7 @@ interface TrashViewProps {
 }
 
 // Custom Editor Checkbox - Matches Editor TaskList Checkbox exactly (14px, 1.5px border, rounded-[3px], checkmark/minus)
-function EditorCheckbox({
+export function EditorCheckbox({
   checked,
   onChange,
   className = "",
@@ -93,6 +98,16 @@ function EditorCheckbox({
   );
 }
 
+export type TrashSortBy =
+  | "name-asc"
+  | "name-desc"
+  | "modified-desc"
+  | "modified-asc"
+  | "created-desc"
+  | "created-asc";
+
+const TRASH_SORT_STORAGE_KEY = "notes-app-trash-sort";
+
 export default function TrashView({
   trashedNotes,
   onRestore,
@@ -107,6 +122,40 @@ export default function TrashView({
   const [query, setQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "md" | "txt" | "html" | "other">("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<TrashSortBy>(() => {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const saved = window.localStorage.getItem(TRASH_SORT_STORAGE_KEY) as TrashSortBy;
+        if (
+          saved &&
+          [
+            "name-asc",
+            "name-desc",
+            "modified-desc",
+            "modified-asc",
+            "created-desc",
+            "created-asc",
+          ].includes(saved)
+        ) {
+          return saved;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return "name-asc";
+  });
+
+  const handleSortChange = (newSort: TrashSortBy) => {
+    setSortBy(newSort);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(TRASH_SORT_STORAGE_KEY, newSort);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
   const [deletePermanentDialogOpen, setDeletePermanentDialogOpen] = useState(false);
@@ -179,9 +228,9 @@ export default function TrashView({
     return `${formatDate(date, settings.dateFormat)} ${timeStr}`;
   };
 
-  // Filter and search notes/files
+  // Filter, search and sort notes/files
   const filteredNotes = useMemo(() => {
-    return trashedNotes.filter((note) => {
+    const list = trashedNotes.filter((note) => {
       // Type filter
       if (filterType !== "all") {
         const name = (note.fileName || "").toLowerCase();
@@ -205,7 +254,41 @@ export default function TrashView({
 
       return titleMatch || fileMatch || folderMatch || tagMatch || contentMatch;
     });
-  }, [trashedNotes, filterType, query]);
+
+    return [...list].sort((a, b) => {
+      if (sortBy === "name-asc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (sortBy === "name-desc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (sortBy === "modified-desc") {
+        const modA = a.updatedAt || a.deletedAt || a.createdAt || 0;
+        const modB = b.updatedAt || b.deletedAt || b.createdAt || 0;
+        return modB - modA;
+      }
+      if (sortBy === "modified-asc") {
+        const modA = a.updatedAt || a.deletedAt || a.createdAt || 0;
+        const modB = b.updatedAt || b.deletedAt || b.createdAt || 0;
+        return modA - modB;
+      }
+      if (sortBy === "created-desc") {
+        const creA = a.createdAt || a.deletedAt || 0;
+        const creB = b.createdAt || b.deletedAt || 0;
+        return creB - creA;
+      }
+      if (sortBy === "created-asc") {
+        const creA = a.createdAt || a.deletedAt || 0;
+        const creB = b.createdAt || b.deletedAt || 0;
+        return creA - creB;
+      }
+      return 0;
+    });
+  }, [trashedNotes, filterType, query, sortBy]);
 
   // Total storage metrics
   const totalStorageBytes = useMemo(() => {
@@ -272,12 +355,7 @@ export default function TrashView({
 
   const getNoteSnippet = (content?: string) => {
     if (!content) return "";
-    const clean = content
-      .replace(/^---[\s\S]*?---/, "")
-      .replace(/[#*`_~>[\]()!-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return clean.slice(0, 90);
+    return stripHtmlAndMarkdown(content).slice(0, 90);
   };
 
   return (
@@ -406,6 +484,104 @@ export default function TrashView({
                         {filterType === "other" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
                       <span>{t("trash.filterOther") || (isTh ? "ไฟล์อื่นๆ" : "Other files")}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Sort Dropdown */}
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent bg-transparent focus:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-transparent shrink-0 transition-colors"
+                        >
+                          <ArrowUpDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebar.sort") || (isTh ? "เรียงลำดับ" : "Sort by")}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("name-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ArrowDownAZ className="h-4 w-4" />
+                        <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+                      </div>
+                      {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("name-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ArrowUpAZ className="h-4 w-4" />
+                        <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+                      </div>
+                      {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("modified-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4" />
+                        <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+                      </div>
+                      {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("modified-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4 opacity-60" />
+                        <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+                      </div>
+                      {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("created-desc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Calendar className="h-4 w-4" />
+                        <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+                      </div>
+                      {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onClick={() => handleSortChange("created-asc")}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Calendar className="h-4 w-4 opacity-60" />
+                        <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+                      </div>
+                      {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -628,7 +804,7 @@ export default function TrashView({
                       <button
                         type="button"
                         onClick={handleRestoreSelected}
-                        className="px-4 py-2.5 rounded-xl border border-border/80 bg-background hover:bg-accent hover:text-white text-foreground text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
+                        className="px-4 py-2 rounded-[10px] border border-border/80 bg-background hover:bg-accent hover:text-white text-foreground text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
                       >
                         <RotateCcw className="h-4 w-4" />
                         <span>{isTh ? "กู้คืน" : "Restore"}</span>
@@ -637,7 +813,7 @@ export default function TrashView({
                       <button
                         type="button"
                         onClick={handlePromptDeleteSelected}
-                        className="px-4 py-2.5 rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
+                        className="px-4 py-2 rounded-[10px] bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
                       >
                         <Trash2 className="h-4 w-4" />
                         <span>{isTh ? "ลบถาวร" : "Delete permanently"}</span>

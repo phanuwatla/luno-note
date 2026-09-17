@@ -105,10 +105,20 @@ export function isSystemOrWebTab(id: string): boolean {
     id === "help" || id.startsWith("help:") ||
     id === "trash" || id.startsWith("trash:") ||
     id === "templates" || id.startsWith("templates:") ||
+    id === "relations" || id.startsWith("relations:") ||
     id === "favorites" || id.startsWith("favorites:") ||
     id === "tags" || id.startsWith("tags:") ||
     id.startsWith("web:")
   );
+}
+
+export function isTabAllowedInCompactLayout(id: string): boolean {
+  if (id === "home" || id.startsWith("home:")) return false;
+  if (id === "favorites" || id.startsWith("favorites:")) return false;
+  if (id === "tags" || id.startsWith("tags:")) return false;
+  if (id === "trash" || id.startsWith("trash:")) return false;
+  if (id === "luno-ai" || id.startsWith("luno-ai:")) return false;
+  return true;
 }
 
 function getTabPath(id: string, notes?: Note[]): string {
@@ -124,19 +134,33 @@ function getTabPath(id: string, notes?: Note[]): string {
 function loadSavedTabs(): { openTabIds: string[]; activeTabId: string | null } {
   try {
     const rawSettings = localStorage.getItem("notes-app-settings");
+    let isCompact = false;
     if (rawSettings) {
       const parsedSettings = JSON.parse(rawSettings);
       if (parsedSettings && parsedSettings.reopenTabs === false) {
         return { openTabIds: [], activeTabId: null };
       }
+      if (parsedSettings && parsedSettings.appLayout === "compact") {
+        isCompact = true;
+      }
     }
     const rawTabs = localStorage.getItem(TABS_STORAGE_KEY);
     const rawActive = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
-    const openTabIds = rawTabs ? JSON.parse(rawTabs) : [];
-    const activeTabId = rawActive ? JSON.parse(rawActive) : null;
+    let openTabIds = rawTabs ? JSON.parse(rawTabs) : [];
+    let activeTabId = rawActive ? JSON.parse(rawActive) : null;
+    if (!Array.isArray(openTabIds)) openTabIds = [];
+    if (typeof activeTabId !== "string") activeTabId = null;
+
+    if (isCompact) {
+      openTabIds = openTabIds.filter((id: string) => isTabAllowedInCompactLayout(id));
+      if (activeTabId && !isTabAllowedInCompactLayout(activeTabId)) {
+        activeTabId = openTabIds[0] ?? null;
+      }
+    }
+
     return {
-      openTabIds: Array.isArray(openTabIds) ? openTabIds : [],
-      activeTabId: typeof activeTabId === "string" ? activeTabId : null,
+      openTabIds,
+      activeTabId,
     };
   } catch {
     return { openTabIds: [], activeTabId: null };
@@ -293,6 +317,18 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     });
   }, [syncedSetOpenTabIds]);
 
+  const sanitizeTabsForLayout = useCallback((appLayout?: string) => {
+    if (appLayout !== "compact") return;
+    const currentTabs = openTabIdsRef.current;
+    const next = currentTabs.filter((id) => isTabAllowedInCompactLayout(id));
+    if (next.length !== currentTabs.length) {
+      syncedSetOpenTabIds(() => next);
+    }
+    if (activeTabIdRef.current && !isTabAllowedInCompactLayout(activeTabIdRef.current)) {
+      syncedSetActiveTabId(next[0] ?? null);
+    }
+  }, [syncedSetOpenTabIds, syncedSetActiveTabId]);
+
   const resetTabs = useCallback((clearStorage: boolean = false) => {
     openTabIdsRef.current = [];
     activeTabIdRef.current = null;
@@ -349,7 +385,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
       }
 
       if (reopenTabs && savedPaths.length > 0) {
-        const resolvedTabIds: string[] = [];
+        let resolvedTabIds: string[] = [];
         for (const item of savedPaths) {
           if (!item) continue;
           if (isSystemOrWebTab(item)) {
@@ -367,8 +403,14 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
           }
         }
 
+        const rawSettings = typeof window !== "undefined" ? localStorage.getItem("notes-app-settings") : null;
+        const isCompact = rawSettings ? JSON.parse(rawSettings)?.appLayout === "compact" : false;
+        if (isCompact) {
+          resolvedTabIds = resolvedTabIds.filter((id) => isTabAllowedInCompactLayout(id));
+        }
+
         if (resolvedTabIds.length > 0) {
-          if (onStartup === "home") {
+          if (onStartup === "home" && !isCompact) {
             if (!resolvedTabIds.includes("home")) {
               resolvedTabIds.unshift("home");
             }
@@ -380,10 +422,12 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
             return;
           }
 
-          // onStartup === "lastNote"
+          // onStartup === "lastNote" or isCompact
           let resolvedActiveId: string | null = null;
           if (savedActivePath && isSystemOrWebTab(savedActivePath)) {
-            resolvedActiveId = savedActivePath;
+            if (!isCompact || isTabAllowedInCompactLayout(savedActivePath)) {
+              resolvedActiveId = savedActivePath;
+            }
           } else if (savedActivePath) {
             const matchedActive = notes.find((n) => {
               const rel = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
@@ -394,7 +438,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
             }
           }
           if (!resolvedActiveId || !resolvedTabIds.includes(resolvedActiveId)) {
-            resolvedActiveId = resolvedTabIds.find((id) => id !== "home") || resolvedTabIds[0];
+            resolvedActiveId = resolvedTabIds.find((id) => !isCompact ? id !== "home" : true) || resolvedTabIds[0];
           }
 
           openTabIdsRef.current = resolvedTabIds;
@@ -409,7 +453,10 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
       console.warn("Failed to restore tabs from session:", e);
     }
 
-    if (onStartup === "home") {
+    const rawSettings = typeof window !== "undefined" ? localStorage.getItem("notes-app-settings") : null;
+    const isCompact = rawSettings ? JSON.parse(rawSettings)?.appLayout === "compact" : false;
+
+    if (onStartup === "home" && !isCompact) {
       openTabIdsRef.current = ["home"];
       activeTabIdRef.current = "home";
       setOpenTabIds(["home"]);
@@ -418,7 +465,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
       return;
     }
 
-    if (onStartup === "lastNote" && notes.length > 0) {
+    if (notes.length > 0) {
       openTabIdsRef.current = [notes[0].id];
       activeTabIdRef.current = notes[0].id;
       setOpenTabIds([notes[0].id]);
@@ -442,6 +489,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     removeTabsForDeletedNotes,
     reorderTabs,
     resetTabs,
+    sanitizeTabsForLayout,
     restoreTabsFromSession,
     setActiveTabId: syncedSetActiveTabId,
   };

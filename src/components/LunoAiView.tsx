@@ -129,6 +129,7 @@ interface LunoAiViewProps {
   onCreateNewNote?: (fileName: string, content: string, folderPath?: string) => void;
   onOpenSettings?: (category?: string) => void;
   onOpenWebTab?: (url: string) => void;
+  isSidebar?: boolean;
 }
 
 const CHAT_SESSIONS_STORAGE_KEY = "luno-ai-chat-sessions-v2";
@@ -635,6 +636,7 @@ export default function LunoAiView({
   onCreateNewNote,
   onOpenSettings,
   onOpenWebTab,
+  isSidebar = false,
 }: LunoAiViewProps) {
   const { t, language } = useTranslation();
   const lang = (language as "th" | "en") || "th";
@@ -925,7 +927,7 @@ export default function LunoAiView({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const [isListening, setIsListening] = useState(false);
@@ -1348,6 +1350,27 @@ export default function LunoAiView({
     }
   }, [isHistoryRightPanelOpen]);
 
+  // Focus history search input when search shortcut is pressed and history is open
+  useEffect(() => {
+    if (!isHistoryRightPanelOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (isCmdOrCtrl && (key === "k" || key === "f" || key === "า" || key === "ด")) {
+        const historyInput = document.querySelector<HTMLInputElement>('input[data-luno-ai-history-search="true"]');
+        if (historyInput && (historyInput.offsetParent !== null || historyInput.getBoundingClientRect().width > 0)) {
+          e.preventDefault();
+          e.stopPropagation();
+          historyInput.focus();
+          historyInput.select();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isHistoryRightPanelOpen]);
+
   // Sync messages into active session or create new session when messages change
   useEffect(() => {
     if (messages.length === 0) return;
@@ -1442,6 +1465,35 @@ export default function LunoAiView({
       description: t("lunoAi.clearAllSuccessDesc") || "All previous chat history has been deleted.",
     });
   };
+
+  useEffect(() => {
+    const handleNewChatEvent = () => {
+      handleNewChat();
+      setIsHistoryRightPanelOpen(false);
+    };
+    const handleToggleHistoryEvent = () => {
+      setIsHistoryRightPanelOpen((prev) => !prev);
+    };
+    const handleClearHistoryEvent = () => {
+      handleClearAllHistory();
+    };
+    window.addEventListener("luno-ai:new-chat", handleNewChatEvent);
+    window.addEventListener("luno-ai:toggle-history", handleToggleHistoryEvent);
+    window.addEventListener("luno-ai:clear-history", handleClearHistoryEvent);
+    return () => {
+      window.removeEventListener("luno-ai:new-chat", handleNewChatEvent);
+      window.removeEventListener("luno-ai:toggle-history", handleToggleHistoryEvent);
+      window.removeEventListener("luno-ai:clear-history", handleClearHistoryEvent);
+    };
+  }, []);
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("luno-ai:history-state-changed", {
+        detail: { isOpen: isHistoryRightPanelOpen },
+      })
+    );
+  }, [isHistoryRightPanelOpen]);
 
   const handleAttachWorkspaceNote = (note: Note) => {
     const fileName = note.fileName || note.title || "Untitled.md";
@@ -1760,402 +1812,531 @@ export default function LunoAiView({
 
   return (
     <div data-luno-ai-view="true" className="w-full flex-1 flex h-full overflow-hidden bg-background text-foreground">
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        {/* Top Header Bar */}
-        <div className="w-full h-11 shrink-0 px-4 bg-background flex items-center justify-between z-10">
-          <div className="flex items-center gap-2 min-w-0">
-            {messages.length > 0 && (
-              <span className="text-xs font-bold text-foreground truncate">
-                {messages.find((m) => m.role === "user")?.content.slice(0, 45) || "Luno AI Chat"}
-              </span>
-            )}
-            {attachedFiles.length > 0 && (
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium truncate max-w-[180px]">
-                <FileCode className="h-3 w-3 shrink-0" />
-                <span className="truncate">{attachedFiles.map((f) => f.name).join(", ")}</span>
-              </span>
+      {/* If in sidebar mode and history is open, render history view inside panel */}
+      {isSidebar && isHistoryRightPanelOpen ? (
+        <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
+          {/* Search History Filter */}
+          <div className="px-3 py-1 space-y-1.5 shrink-0">
+            <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-2.5 py-1.5 border border-sidebar-border/40 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
+              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                data-luno-ai-history-search="true"
+                type="text"
+                value={searchHistoryQuery}
+                onChange={(e) => setSearchHistoryQuery(e.target.value)}
+                placeholder={t("lunoAi.searchHistory") || "Search chat history..."}
+                className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+              />
+              {searchHistoryQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchHistoryQuery("")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {sessions.length > 0 && (
+              <div className="flex items-center justify-between px-0.5 pt-0.5 text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider select-none">
+                <span>{t("lunoAi.recentChats") || "Recent Chats"}</span>
+              </div>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsHistoryRightPanelOpen((prev) => !prev)}
-                  className={`flex items-center gap-1.5 text-xs transition-colors px-2 py-1 rounded-lg font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer ${
-                    isHistoryRightPanelOpen
-                      ? "bg-muted text-foreground font-semibold"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  }`}
-                >
-                  <History className="h-3.5 w-3.5" />
-                  <span>{t("lunoAi.chatHistory") || "History"}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("lunoAi.chatHistory") || "Chat History"}</TooltipContent>
-            </Tooltip>
+          {/* History List */}
+          <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4 space-y-1.5">
+            {filteredSessions.length === 0 ? (
+              <div className="py-12 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
+                <Clock className="h-6 w-6 opacity-40 text-muted-foreground" />
+                <span>{t("lunoAi.noHistory") || "No chat history yet"}</span>
+              </div>
+            ) : (
+              filteredSessions.map((session) => {
+                const isActive = session.id === currentSessionId;
+                const timeStr = formatRelativeDateTime(
+                  session.createdAt || (session as any).updatedAt || Date.now(),
+                  settings.dateFormat,
+                  settings.timeFormat,
+                  settings.language
+                );
+                const lastMsgContent = [...(session.messages || [])].reverse().find((m) => (m?.content || "").trim())?.content || "";
+                const previewText = stripMarkdownSyntax(lastMsgContent) || "No messages";
 
-            {messages.length > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleNewChat}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-muted font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+                return (
+                  <div
+                    key={session.id}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleSelectSession(session);
+                        setIsHistoryRightPanelOpen(false);
+                      }
+                    }}
+                    onClick={() => {
+                      handleSelectSession(session);
+                      setIsHistoryRightPanelOpen(false);
+                    }}
+                    className={`group relative rounded-xl border p-2.5 transition-all cursor-pointer select-none outline-none ${
+                      isActive
+                        ? "bg-primary/10 border-primary/40 text-primary shadow-2xs"
+                        : "border-border/40 hover:border-primary/40 hover:bg-sidebar-accent/50 text-foreground"
+                    }`}
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>{t("lunoAi.newChat") || "New chat"}</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("lunoAi.newChat") || "New Chat"}</TooltipContent>
-              </Tooltip>
+                    <div className="flex items-center justify-between gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <MessageSquare
+                          className={`h-3.5 w-3.5 shrink-0 transition-colors ${
+                            isActive ? "text-primary font-semibold" : "text-muted-foreground"
+                          }`}
+                        />
+                        <span
+                          className={`truncate text-xs ${
+                            isActive ? "font-bold text-primary" : "font-semibold text-foreground"
+                          }`}
+                        >
+                          {session.title || "Luno AI Chat"}
+                        </span>
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {timeStr}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <p className="line-clamp-1 text-[11px] leading-relaxed text-muted-foreground flex-1">
+                        {previewText}
+                      </p>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSession(session.id, e);
+                            }}
+                            className="h-5 w-5 shrink-0 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer [&_svg]:size-3"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("lunoAi.deleteChat") || "Delete chat"}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
-
-        {/* Upper Container / Messages Stream */}
-        <div className="flex-1 overflow-y-auto w-full no-scrollbar flex flex-col justify-between">
-          {messages.length === 0 ? (
-            /* Centered Hero Content in Hero Mode */
-            <div className="w-full max-w-3xl mx-auto px-4 py-8 flex-1 flex flex-col items-center justify-center -mt-8 sm:-mt-12 space-y-6">
-              {/* Hero Logo & Header */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center text-center space-y-2.5 mb-6 sm:mb-8"
-              >
-                <Sparkles className="h-7 w-7 text-primary mb-1 shrink-0" />
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground font-krona">
-                  Luno AI
-                </h1>
-                <p className="text-xs text-muted-foreground max-w-sm text-center">
-                  {t("lunoAi.subtitle") || "Ask anything. Get ideas. Write better."}
-                </p>
-              </motion.div>
-
-              {/* Main Input Box Card in Hero Mode */}
-              <div className="w-full space-y-3">
-                {editingUserMsgId && (
-                  <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-2xs text-foreground font-medium">
-                    <div className="flex items-center gap-2">
-                      <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingUserMsgId(null);
-                            setPrompt("");
-                          }}
-                          className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
-                          aria-label="Cancel edit"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" sideOffset={4}>
-                        Cancel edit
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
+      ) : (
+        /* Main Chat Area */
+        <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
+          {/* Top Header Bar (Only in full tab mode) */}
+          {!isSidebar && (
+            <div className="w-full h-11 shrink-0 px-4 bg-background flex items-center justify-between z-10">
+              <div className="flex items-center gap-2 min-w-0">
+                {messages.length > 0 && (
+                  <span className="text-xs font-bold text-foreground truncate">
+                    {messages.find((m) => m.role === "user")?.content.slice(0, 45) || "Luno AI Chat"}
+                  </span>
                 )}
                 {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 px-0.5">
-                    {attachedFiles.map((file, idx) => (
-                      <Tooltip key={idx}>
-                        <TooltipTrigger asChild>
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                            <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
-                            <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>{file.name}</TooltipContent>
-                      </Tooltip>
-                    ))}
-                  </div>
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium truncate max-w-[180px]">
+                    <FileCode className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{attachedFiles.map((f) => f.name).join(", ")}</span>
+                  </span>
                 )}
+              </div>
 
-                <div className="relative w-full rounded-2xl border border-border/80 bg-card p-3.5 shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all space-y-2.5">
-                  <div className="flex flex-wrap items-baseline gap-1 min-h-[56px] max-h-[160px]">
-                    {activePrefix && (
+              <div className="flex items-center gap-1.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setIsHistoryRightPanelOpen((prev) => !prev)}
+                      className={`flex items-center gap-1.5 text-xs transition-colors px-2 py-1 rounded-lg font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer ${
+                        isHistoryRightPanelOpen
+                          ? "bg-muted text-foreground font-semibold"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      <History className="h-3.5 w-3.5" />
+                      <span>{t("lunoAi.chatHistory") || "History"}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("lunoAi.chatHistory") || "Chat History"}</TooltipContent>
+                </Tooltip>
+
+                {messages.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={handleNewChat}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-muted font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>{t("lunoAi.newChat") || "New chat"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("lunoAi.newChat") || "New Chat"}</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Upper Container / Messages Stream */}
+          <div className="flex-1 overflow-y-auto w-full no-scrollbar flex flex-col justify-between">
+            {messages.length === 0 ? (
+              /* Hero Content in Hero Mode */
+              <div className={`w-full max-w-3xl mx-auto ${isSidebar ? "px-2 py-2 h-full flex-1 flex flex-col justify-between" : "px-4 py-8 -mt-8 sm:-mt-12 space-y-6 flex-1 flex flex-col items-center justify-center"}`}>
+                {/* Hero Logo & Header - Centered */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex flex-col items-center text-center ${isSidebar ? "flex-1 justify-center space-y-1.5" : "space-y-2.5 mb-6 sm:mb-8"}`}
+                >
+                  <Sparkles className={`${isSidebar ? "h-6 w-6" : "h-7 w-7"} text-primary mb-1 shrink-0`} />
+                  <h1 className={`${isSidebar ? "text-base" : "text-xl sm:text-2xl"} font-bold tracking-tight text-foreground font-krona`}>
+                    Luno AI
+                  </h1>
+                  <p className="text-xs text-muted-foreground max-w-sm text-center px-2">
+                    {t("lunoAi.subtitle") || "Ask anything. Get ideas. Write better."}
+                  </p>
+                </motion.div>
+
+                {/* Main Input Box Card in Hero Mode - Bottom Docked */}
+                <div className={`w-full ${isSidebar ? "shrink-0 space-y-2" : "space-y-3"}`}>
+                  {editingUserMsgId && (
+                    <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-2xs text-foreground font-medium">
+                      <div className="flex items-center gap-2">
+                        <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
+                      </div>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span
-                            onClick={() => setActivePrefix(null)}
-                            className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
-                            aria-label="Click or Backspace to remove"
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingUserMsgId(null);
+                              setPrompt("");
+                            }}
+                            className="text-muted-foreground hover:text-foreground p-0.5 rounded-md hover:bg-muted/60 cursor-pointer transition-colors"
+                            aria-label="Cancel edit"
                           >
-                            {activePrefix}
-                          </span>
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         </TooltipTrigger>
                         <TooltipContent side="top" sideOffset={4}>
-                          Click or Backspace to remove
+                          Cancel edit
                         </TooltipContent>
                       </Tooltip>
-                    )}
-                    <textarea
-                      ref={textareaRef}
-                      value={prompt}
-                      onChange={(e) => handleInputChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (isSlashMenuOpen && filteredTools.length > 0) {
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setSelectedSlashIndex((prev) => (prev + 1) % filteredTools.length);
-                            return;
-                          }
-                          if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setSelectedSlashIndex((prev) => (prev - 1 + filteredTools.length) % filteredTools.length);
-                            return;
-                          }
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            applySlashTool(filteredTools[selectedSlashIndex]);
-                            return;
-                          }
-                          if (e.key === "Escape") {
-                            e.preventDefault();
-                            setIsSlashMenuOpen(false);
-                            return;
-                          }
-                        }
+                    </div>
+                  )}
+                  {attachedFiles.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 px-0.5">
+                      {attachedFiles.map((file, idx) => (
+                        <Tooltip key={idx}>
+                          <TooltipTrigger asChild>
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
+                              <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
+                              <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-md hover:bg-muted cursor-pointer ml-0.5"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>{file.name}</TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  )}
 
-                        if (e.key === "Backspace" && activePrefix) {
-                          const target = e.currentTarget as HTMLTextAreaElement;
-                          if (!prompt || target.selectionStart === 0) {
-                            e.preventDefault();
-                            setActivePrefix(null);
-                          }
-                        } else if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          void handleSendPrompt();
-                        }
-                      }}
-                      placeholder={dynamicPlaceholder}
-                      className="flex-1 min-w-[200px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none resize-none min-h-[56px] max-h-[160px] leading-relaxed py-0.5"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                    <div className="flex items-center gap-1.5">
-                      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
-                      <DropdownMenu>
+                  <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
+                    <div className="flex flex-wrap items-baseline gap-1 min-h-[44px] max-h-[160px]">
+                      {activePrefix && (
                         <Tooltip>
-                        <TooltipTrigger asChild>
+                          <TooltipTrigger asChild>
+                            <span
+                              onClick={() => setActivePrefix(null)}
+                              className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
+                              aria-label="Click or Backspace to remove"
+                            >
+                              {activePrefix}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4}>
+                            Click or Backspace to remove
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                      <textarea
+                        ref={textareaRef}
+                        value={prompt}
+                        onChange={(e) => handleInputChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (isSlashMenuOpen && filteredTools.length > 0) {
+                            if (e.key === "ArrowDown") {
+                              e.preventDefault();
+                              setSelectedSlashIndex((prev) => (prev + 1) % filteredTools.length);
+                              return;
+                            }
+                            if (e.key === "ArrowUp") {
+                              e.preventDefault();
+                              setSelectedSlashIndex((prev) => (prev - 1 + filteredTools.length) % filteredTools.length);
+                              return;
+                            }
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              applySlashTool(filteredTools[selectedSlashIndex]);
+                              return;
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setIsSlashMenuOpen(false);
+                              return;
+                            }
+                          }
+
+                          if (e.key === "Backspace" && activePrefix) {
+                            const target = e.currentTarget as HTMLTextAreaElement;
+                            if (!prompt || target.selectionStart === 0) {
+                              e.preventDefault();
+                              setActivePrefix(null);
+                            }
+                          } else if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            void handleSendPrompt();
+                          }
+                        }}
+                        placeholder={dynamicPlaceholder}
+                        className={`flex-1 min-w-[140px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none resize-none ${isSidebar ? "min-h-[44px] max-h-[120px]" : "min-h-[56px] max-h-[160px]"} leading-relaxed py-0.5`}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-border/40 gap-1 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
+                        <DropdownMenu>
+                          <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer`}
+                              >
+                                <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                                {!isSidebar && <span>{t("lunoAi.attachFile") || "Attach file"}</span>}
+                              </button>
+                            </DropdownMenuTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                        </Tooltip>
+                          <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSearchWorkspaceQuery("");
+                                setIsWorkspacePickerOpen(true);
+                              }}
+                              className="whitespace-nowrap"
+                            >
+                              <Folder className="h-4 w-4 text-primary shrink-0" />
+                              <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
+                              <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                              <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={handleToggleVoiceInput}
+                              disabled={!isListening && isTranscribing}
+                              className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+                                isListening
+                                  ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse font-semibold"
+                                  : isTranscribing
+                                  ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
+                              }`}
+                            >
+                              {isListening ? (
+                                <Square className="h-3 w-3 text-red-500 fill-red-500 shrink-0" />
+                              ) : isTranscribing ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                              ) : (
+                                <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
+                              )}
+                              {!isSidebar && (
+                                <span>
+                                  {isListening
+                                    ? (t("lunoAi.stopListening") || "Stop listening")
+                                    : isTranscribing
+                                    ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
+                                    : (t("lunoAi.voiceInput") || "Voice input")}
+                                </span>
+                              )}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {isListening
+                              ? (t("lunoAi.stopListening") || "Stop listening")
+                              : isTranscribing
+                              ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
+                              : (t("lunoAi.voiceInput") || "Voice input")}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button
                               type="button"
-                              className="h-8 px-3 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer"
+                              className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-2xs`}
                             >
-                              <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
-                              <span>{t("lunoAi.attachFile") || "Attach file"}</span>
+                              {renderModelIcon(model)}
+                              {!isSidebar && <span>{modelLabels[model]}</span>}
+                              <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                             </button>
                           </DropdownMenuTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
-                      </Tooltip>
-                        <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSearchWorkspaceQuery("");
-                              setIsWorkspacePickerOpen(true);
-                            }}
-                            className="whitespace-nowrap"
-                          >
-                            <Folder className="h-4 w-4 text-primary shrink-0" />
-                            <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
-                            <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                            {(["smart", "fast", "creative"] as const).map((mKey) => {
+                              const isSelected = model === mKey;
+                              return (
+                                <DropdownMenuItem
+                                  key={mKey}
+                                  onClick={() => setModel(mKey)}
+                                  className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                    isSelected
+                                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                      : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    {renderModelIcon(mKey)}
+                                    <span>{modelLabels[mKey]}</span>
+                                  </div>
+                                  {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={handleToggleVoiceInput}
-                            disabled={!isListening && isTranscribing}
-                            className={`h-8 px-3 rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
-                              isListening
-                                ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse font-semibold"
-                                : isTranscribing
-                                ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
-                            }`}
-                          >
-                            {isListening ? (
-                              <Square className="h-3 w-3 text-red-500 fill-red-500 shrink-0" />
-                            ) : isTranscribing ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-                            ) : (
-                              <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
-                            )}
-                            <span>
-                              {isListening
-                                ? (t("lunoAi.stopListening") || "Stop listening")
-                                : isTranscribing
-                                ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                                : (t("lunoAi.voiceInput") || "Voice input")}
-                            </span>
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {isListening
-                            ? (t("lunoAi.stopListening") || "Stop listening")
-                            : isTranscribing
-                            ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                            : (t("lunoAi.voiceInput") || "Voice input")}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="h-8 pl-2.5 pr-2 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none shadow-2xs"
-                          >
-                            {renderModelIcon(model)}
-                            <span>{modelLabels[model]}</span>
-                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
-                          {(["smart", "fast", "creative"] as const).map((mKey) => {
-                            const isSelected = model === mKey;
-                            return (
-                              <DropdownMenuItem
-                                key={mKey}
-                                onClick={() => setModel(mKey)}
-                                className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                                  isSelected
-                                    ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
-                                    : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  {renderModelIcon(mKey)}
-                                  <span>{modelLabels[mKey]}</span>
-                                </div>
-                                {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
-                              </DropdownMenuItem>
-                            );
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            disabled={!prompt.trim() || isGenerating}
-                            onClick={() => void handleSendPrompt()}
-                            className="h-8 px-3.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer"
-                          >
-                            <span>{t("lunoAi.send") || "Send"}</span>
-                            <Send className="h-3.5 w-3.5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              disabled={!prompt.trim() || isGenerating}
+                              onClick={() => void handleSendPrompt()}
+                              className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer`}
+                            >
+                              {!isSidebar && <span>{t("lunoAi.send") || "Send"}</span>}
+                              <Send className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* 5 Quick Action Cards Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 w-full pt-1">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction("summarize")}
-                    className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
-                  >
-                    <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                      {t("lunoAi.summarizeTitle") || "Summarize"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                      {t("lunoAi.summarizeDesc") || "Summarize this note"}
-                    </span>
-                  </button>
+                  {/* 5 Quick Action Cards Grid (Only in full tab mode, hidden in sidebar mode) */}
+                  {!isSidebar && (
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 w-full pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("summarize")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                      >
+                        <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.summarizeTitle") || "Summarize"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.summarizeDesc") || "Summarize this note"}
+                        </span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction("improve")}
-                    className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
-                  >
-                    <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                      {t("lunoAi.improveTitle") || "Improve writing"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                      {t("lunoAi.improveDesc") || "Make this better"}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("improve")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                      >
+                        <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.improveTitle") || "Improve writing"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.improveDesc") || "Make this better"}
+                        </span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction("brainstorm")}
-                    className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
-                  >
-                    <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                      {t("lunoAi.brainstormTitle") || "Brainstorm"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                      {t("lunoAi.brainstormDesc") || "Give me ideas"}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("brainstorm")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                      >
+                        <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.brainstormTitle") || "Brainstorm"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.brainstormDesc") || "Give me ideas"}
+                        </span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction("outline")}
-                    className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
-                  >
-                    <ListOrdered className="h-4 w-4 text-blue-600 dark:text-blue-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                      {t("lunoAi.outlineTitle") || "Create outline"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                      {t("lunoAi.outlineDesc") || "Make an outline"}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("outline")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                      >
+                        <ListOrdered className="h-4 w-4 text-blue-600 dark:text-blue-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.outlineTitle") || "Create outline"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.outlineDesc") || "Make an outline"}
+                        </span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAction("translate")}
-                    className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
-                  >
-                    <Languages className="h-4 w-4 text-teal-600 dark:text-teal-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
-                    <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                      {t("lunoAi.translateTitle") || "Translate"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                      {t("lunoAi.translateDesc") || "Translate to English"}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("translate")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                      >
+                        <Languages className="h-4 w-4 text-teal-600 dark:text-teal-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.translateTitle") || "Translate"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.translateDesc") || "Translate to English"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ) : (
-            /* Messages Stream View in Chat Mode */
-            <div className="w-full max-w-3xl mx-auto px-4 py-6">
-              <div className="w-full space-y-6 mb-4 pt-2">
+            ) : (
+              /* Messages Stream View in Chat Mode */
+              <div className={`w-full max-w-3xl mx-auto ${isSidebar ? "px-2 py-3" : "px-4 py-6"}`}>
+                <div className="w-full space-y-6 mb-4 pt-2">
                 {messages.map((msg) => (
                   <motion.div
                     key={msg.id}
@@ -2330,9 +2511,9 @@ export default function LunoAiView({
 
           {/* Footer Disclaimer in Hero Mode */}
           {messages.length === 0 && (
-            <div className="w-full shrink-0 py-2.5 text-center flex items-center justify-center gap-1.5 text-[10.5px] text-muted-foreground select-none">
-              <Lock className="h-3 w-3 shrink-0 opacity-70" />
-              <span>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
+            <div className={`w-full shrink-0 ${isSidebar ? "px-2 py-1 text-[10px]" : "py-2.5 text-[10.5px]"} text-center flex items-center justify-center gap-1.5 text-muted-foreground select-none overflow-hidden`}>
+              <Lock className={`${isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} shrink-0 opacity-70`} />
+              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
             </div>
           )}
         </div>
@@ -2390,80 +2571,14 @@ export default function LunoAiView({
                 </div>
               )}
 
-              <div className="relative w-full rounded-2xl border border-border/80 bg-card px-3.5 py-2 flex items-center gap-2 shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
-                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
-                <DropdownMenu>
-                  <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all border border-border/40 flex items-center justify-center shrink-0 cursor-pointer"
-                      >
-                        <Plus className="h-4 w-4 text-primary shrink-0" />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
-                </Tooltip>
-                  <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setSearchWorkspaceQuery("");
-                        setIsWorkspacePickerOpen(true);
-                      }}
-                      className="whitespace-nowrap"
-                    >
-                      <Folder className="h-4 w-4 text-primary shrink-0" />
-                      <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
-                      <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleToggleVoiceInput}
-                      disabled={!isListening && isTranscribing}
-                      className={`h-8 w-8 rounded-xl transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
-                        isListening
-                          ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse"
-                          : isTranscribing
-                          ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground border-border/40"
-                      }`}
-                    >
-                      {isListening ? (
-                        <Square className="h-3.5 w-3.5 text-red-500 fill-red-500 shrink-0" />
-                      ) : isTranscribing ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                      ) : (
-                        <Mic className="h-4 w-4 text-primary shrink-0" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isListening
-                      ? (t("lunoAi.stopListening") || "Stop listening")
-                      : isTranscribing
-                      ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                      : (t("lunoAi.voiceInput") || "Voice input")}
-                  </TooltipContent>
-                </Tooltip>
-
-                <div className="flex-1 flex items-center gap-1.5 min-w-0 relative">
-
+              <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
+                <div className="flex flex-wrap items-baseline gap-1 min-h-[44px] max-h-[160px]">
                   {activePrefix && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span
                           onClick={() => setActivePrefix(null)}
-                          className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0 whitespace-nowrap"
+                          className="text-primary font-bold text-xs sm:text-sm select-none cursor-pointer hover:opacity-80 shrink-0"
                           aria-label="Click or Backspace to remove"
                         >
                           {activePrefix}
@@ -2474,13 +2589,10 @@ export default function LunoAiView({
                       </TooltipContent>
                     </Tooltip>
                   )}
-                  <input
+                  <textarea
                     ref={chatInputRef}
-                    type="text"
                     value={prompt}
                     onChange={(e) => handleInputChange(e.target.value)}
-                    placeholder={dynamicPlaceholder}
-                    className="flex-1 bg-transparent border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none text-xs sm:text-sm text-foreground placeholder:text-muted-foreground min-w-0 py-1"
                     onKeyDown={(e) => {
                       if (isSlashMenuOpen && filteredTools.length > 0) {
                         if (e.key === "ArrowDown") {
@@ -2506,82 +2618,163 @@ export default function LunoAiView({
                       }
 
                       if (e.key === "Backspace" && activePrefix) {
-                        const target = e.currentTarget as HTMLInputElement;
+                        const target = e.currentTarget as HTMLTextAreaElement;
                         if (!prompt || target.selectionStart === 0) {
                           e.preventDefault();
                           setActivePrefix(null);
                         }
-                      } else if (e.key === "Enter") {
+                      } else if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         void handleSendPrompt();
                       }
                     }}
                     placeholder={dynamicPlaceholder}
-                    className="flex-1 min-w-0 bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground outline-none py-1 px-1"
+                    className={`flex-1 min-w-[140px] bg-transparent text-xs sm:text-sm text-foreground font-normal placeholder:text-muted-foreground border-0 border-none outline-none ring-0 shadow-none focus:border-0 focus:border-none focus:outline-none focus:ring-0 focus:shadow-none resize-none ${isSidebar ? "min-h-[44px] max-h-[120px]" : "min-h-[56px] max-h-[160px]"} leading-relaxed py-0.5`}
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="h-8 pl-2.5 pr-2 rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer outline-none shadow-2xs"
-                      >
-                        {renderModelIcon(model)}
-                        <span>{modelLabels[model]}</span>
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
-                      {(["smart", "fast", "creative"] as const).map((mKey) => {
-                        const isSelected = model === mKey;
-                        return (
-                          <DropdownMenuItem
-                            key={mKey}
-                            onClick={() => setModel(mKey)}
-                            className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                              isSelected
-                                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
-                                : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              {renderModelIcon(mKey)}
-                              <span>{modelLabels[mKey]}</span>
-                            </div>
-                            {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
-                          </DropdownMenuItem>
-                        );
-                      })}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <div className="flex items-center justify-between pt-2 border-t border-border/40 gap-1 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer`}
+                            >
+                              <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                              {!isSidebar && <span>{t("lunoAi.attachFile") || "Attach file"}</span>}
+                            </button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setSearchWorkspaceQuery("");
+                            setIsWorkspacePickerOpen(true);
+                          }}
+                          className="whitespace-nowrap"
+                        >
+                          <Folder className="h-4 w-4 text-primary shrink-0" />
+                          <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
+                          <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={!prompt.trim() || isGenerating}
-                        onClick={() => void handleSendPrompt()}
-                        className="h-8 w-8 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs flex items-center justify-center disabled:opacity-50 transition-all cursor-pointer"
-                      >
-                        <Send className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
-                  </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={handleToggleVoiceInput}
+                          disabled={!isListening && isTranscribing}
+                          className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+                            isListening
+                              ? "bg-red-500/10 text-red-500 border-red-500/30 animate-pulse font-semibold"
+                              : isTranscribing
+                              ? "bg-primary/10 text-primary border-primary/30 cursor-wait"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
+                          }`}
+                        >
+                          {isListening ? (
+                            <Square className="h-3 w-3 text-red-500 fill-red-500 shrink-0" />
+                          ) : isTranscribing ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                          ) : (
+                            <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
+                          )}
+                          {!isSidebar && (
+                            <span>
+                              {isListening
+                                ? (t("lunoAi.stopListening") || "Stop listening")
+                                : isTranscribing
+                                ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
+                                : (t("lunoAi.voiceInput") || "Voice input")}
+                            </span>
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {isListening
+                          ? (t("lunoAi.stopListening") || "Stop listening")
+                          : isTranscribing
+                          ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
+                          : (t("lunoAi.voiceInput") || "Voice input")}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-2xs`}
+                        >
+                          {renderModelIcon(model)}
+                          {!isSidebar && <span>{modelLabels[model]}</span>}
+                          <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                        {(["smart", "fast", "creative"] as const).map((mKey) => {
+                          const isSelected = model === mKey;
+                          return (
+                            <DropdownMenuItem
+                              key={mKey}
+                              onClick={() => setModel(mKey)}
+                              className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                isSelected
+                                  ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                  : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                {renderModelIcon(mKey)}
+                                <span>{modelLabels[mKey]}</span>
+                              </div>
+                              {isSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={!prompt.trim() || isGenerating}
+                          onClick={() => void handleSendPrompt()}
+                          className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer`}
+                        >
+                          {!isSidebar && <span>{t("lunoAi.send") || "Send"}</span>}
+                          <Send className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Footer Disclaimer in Chat Mode - Below Input Box */}
-            <div className="w-full pt-1 text-center flex items-center justify-center gap-1.5 text-[10.5px] text-muted-foreground select-none">
-              <Lock className="h-3 w-3 shrink-0 opacity-70" />
-              <span>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
+            <div className={`w-full pt-1 text-center flex items-center justify-center gap-1.5 ${isSidebar ? "px-2 text-[10px]" : "text-[10.5px]"} text-muted-foreground select-none overflow-hidden`}>
+              <Lock className={`${isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} shrink-0 opacity-70`} />
+              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
             </div>
           </div>
         )}
       </div>
+      )}
 
       {/* Modal Dialog: Create New Note File from Luno AI */}
       <Dialog open={isCreateNoteModalOpen} onOpenChange={setIsCreateNoteModalOpen}>
@@ -2765,7 +2958,7 @@ export default function LunoAiView({
 
       {/* Right Panel: Chat History Panel (Matches RightPanel.tsx 100%) */}
       <AnimatePresence>
-        {isHistoryRightPanelOpen && (
+        {!isSidebar && isHistoryRightPanelOpen && (
           <motion.aside
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 280, opacity: 1 }}
@@ -2821,6 +3014,7 @@ export default function LunoAiView({
               <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 border border-border/50 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
                 <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <input
+                  data-luno-ai-history-search="true"
                   type="text"
                   value={searchHistoryQuery}
                   onChange={(e) => setSearchHistoryQuery(e.target.value)}

@@ -266,6 +266,7 @@ const DEFAULT_WORKSPACE_SETTINGS = {
   showGuideLines: true,
   tagColorStyle: "multicolor",
   accentHeadings: false,
+  customAccentColor: "#26A295",
   showWordCount: true,
   autoPairBrackets: true,
   showCodeLineNumbers: false,
@@ -319,22 +320,21 @@ function getSavedWorkspaceData() {
       const data = JSON.parse(raw);
       const currentVersion = app.getVersion();
 
-      // If version changed (e.g. fresh install or update over old version), do not auto-open previous workspace
-      if (data?.lastAppVersion && data.lastAppVersion !== currentVersion) {
-        data.folderPath = null;
-        data.folderName = null;
-        data.lastAppVersion = currentVersion;
-        fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf8");
-        return null;
-      }
-
-      if (!data?.lastAppVersion) {
+      // Keep lastAppVersion updated across updates while preserving the open workspace
+      if (data?.lastAppVersion !== currentVersion) {
         data.lastAppVersion = currentVersion;
         fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf8");
       }
 
       if (data?.folderPath) {
-        ensureDefaultWorkspaceFolders(data.folderPath);
+        if (fs.existsSync(data.folderPath)) {
+          ensureDefaultWorkspaceFolders(data.folderPath);
+        } else {
+          // Only reset if the directory no longer exists on local disk
+          data.folderPath = null;
+          data.folderName = null;
+          fs.writeFileSync(configPath, JSON.stringify(data, null, 2), "utf8");
+        }
       }
       return data;
     }
@@ -749,7 +749,12 @@ function createWindow(initialWorkspacePath = null) {
   return win;
 }
 
+let ipcHandlersInitialized = false;
+
 function setupIpcHandlers() {
+  if (ipcHandlersInitialized) return;
+  ipcHandlersInitialized = true;
+
   ipcMain.handle("get-gdrive-auth", () => {
     return getSavedGdriveAuth();
   });
@@ -847,6 +852,33 @@ function setupIpcHandlers() {
 
   ipcMain.on("read-clipboard-image-sync", (event) => {
     event.returnValue = getClipboardImagePayload();
+  });
+
+  ipcMain.handle("read-clipboard-text", async () => {
+    try {
+      return clipboard.readText();
+    } catch {
+      return "";
+    }
+  });
+
+  ipcMain.handle("write-clipboard-text", async (_, text) => {
+    try {
+      clipboard.writeText(text || "");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("write-clipboard-image", async (_, dataUrl) => {
+    try {
+      const img = nativeImage.createFromDataURL(dataUrl);
+      clipboard.writeImage(img);
+      return true;
+    } catch {
+      return false;
+    }
   });
 
   const unpackCredential = (bytes, key = 42) => {
@@ -2569,6 +2601,55 @@ function setupIpcHandlers() {
 
   ipcMain.handle("get-native-keyboard-language", async () => {
     return currentNativeKeyboardLang;
+  });
+
+  try { ipcMain.removeHandler("read-clipboard-text"); } catch {}
+  ipcMain.handle("read-clipboard-text", async () => {
+    try {
+      const text = clipboard.readText();
+      if (text && text.trim()) return text.trim();
+      const bookmark = clipboard.readBookmark();
+      if (bookmark?.url) return bookmark.url.trim();
+      const html = clipboard.readHTML();
+      if (html) {
+        const clean = html.replace(/<[^>]+>/g, "").trim();
+        if (clean) return clean;
+      }
+      return "";
+    } catch (e) {
+      console.warn("read-clipboard-text error:", e);
+      return "";
+    }
+  });
+
+  try { ipcMain.removeHandler("write-clipboard-text"); } catch {}
+  ipcMain.handle("write-clipboard-text", async (_event, text) => {
+    try {
+      clipboard.writeText(text || "");
+      return true;
+    } catch (e) {
+      console.warn("write-clipboard-text error:", e);
+      return false;
+    }
+  });
+
+  try { ipcMain.removeHandler("write-clipboard-image"); } catch {}
+  ipcMain.handle("write-clipboard-image", async (_event, dataUrl) => {
+    try {
+      if (!dataUrl) return false;
+      const img = nativeImage.createFromDataURL(dataUrl);
+      if (!img.isEmpty()) {
+        clipboard.write({
+          image: img,
+          html: `<img src="${dataUrl}" alt="QR Code" />`,
+        });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn("write-clipboard-image error:", e);
+      return false;
+    }
   });
 
   ipcMain.handle("get-app-version", () => {

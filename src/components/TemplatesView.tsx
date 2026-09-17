@@ -35,7 +35,15 @@ export interface TemplateItemDef {
   color?: string;
 }
 
-const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
+export const TEMPLATE_CATEGORIES = [
+  { id: "work", labelEn: "Work & Business", labelTh: "งาน & ธุรกิจ", icon: "briefcase" },
+  { id: "daily", labelEn: "Daily & Wellness", labelTh: "สุขภาพ & ส่วนตัว", icon: "calendar" },
+  { id: "study", labelEn: "Study & Research", labelTh: "การเรียน & วิจัย", icon: "graduationCap" },
+  { id: "dev", labelEn: "Dev & Tech", labelTh: "พัฒนาโปรแกรม & IT", icon: "code" },
+  { id: "web", labelEn: "Web & UI", labelTh: "เว็บไซต์ & โค้ด", icon: "globe" },
+] as const;
+
+export const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
   // 1. Markdown (.md)
   {
     type: "daily",
@@ -615,6 +623,27 @@ export default function TemplatesView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Listen to template preview selection from sidebar or other components
+  useEffect(() => {
+    const handleOpenPreview = (e: Event) => {
+      const custom = e as CustomEvent<{ type?: string; format?: string; formatExt?: string }>;
+      const { type, formatExt } = custom.detail || {};
+      if (!type) return;
+      const found =
+        TEMPLATE_DEFINITIONS.find((item) => item.type === type && (!formatExt || item.formatExt === formatExt)) ||
+        TEMPLATE_DEFINITIONS.find((item) => item.type === type);
+      if (found) {
+        setPreviewItem(found);
+        setSelectedCategory("all");
+        setSearchQuery("");
+      }
+    };
+    window.addEventListener("luno:open-template-preview", handleOpenPreview);
+    return () => {
+      window.removeEventListener("luno:open-template-preview", handleOpenPreview);
+    };
+  }, []);
+
   const categories = useMemo(
     () => [
       { id: "all", label: isTh ? "ทั้งหมด" : "All" },
@@ -808,7 +837,7 @@ export default function TemplatesView({
 
   // Escape key to exit in-tab preview
   useEffect(() => {
-    if (!previewItem) return;
+    if (!previewItem || settings.appLayout === "compact") return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPreviewItem(null);
@@ -816,7 +845,7 @@ export default function TemplatesView({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewItem]);
+  }, [previewItem, settings.appLayout]);
 
   const relatedTemplates = useMemo(() => {
     if (!previewItem) return [];
@@ -929,27 +958,33 @@ export default function TemplatesView({
             <div className="sticky top-0 z-30 flex items-center justify-between bg-background px-3.5 h-10 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
               {/* Left: ArrowLeft (replaces home icon) + Templates > Template Name */}
               <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewItem(null);
-                        mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
-                      }}
-                      className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
-                    >
-                      {(() => {
-                        const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
-                        return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
-                      })()}
-                      <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}>
-                    {isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
-                  </TooltipContent>
-                </Tooltip>
+                {settings.appLayout === "compact" ? (
+                  <span className="font-normal truncate text-muted-foreground/90 px-1 py-0.5 select-none">
+                    {isTh ? "เทมเพลต" : "Templates"}
+                  </span>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewItem(null);
+                          mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
+                        }}
+                        className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
+                      >
+                        {(() => {
+                          const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
+                          return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
+                        })()}
+                        <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
+                      {isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 {(() => {
                   const ChevRightIcon = getToolbarIcon("chevronRight", pack);
                   return <ChevRightIcon className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />;

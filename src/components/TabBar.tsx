@@ -113,6 +113,10 @@ function NoteIcon({ note, isActive, pack, settings }: { note: Note; isActive: bo
     const TemplatesIcon = getToolbarIcon("templates", pack);
     return <TemplatesIcon className={cls} />;
   }
+  if (note.id === "relations" || note.id.startsWith("relations:") || note.fileType === "relations") {
+    const RelationsIcon = getToolbarIcon("relations", pack);
+    return <RelationsIcon className={cls} />;
+  }
   if (note.id === "favorites" || note.id.startsWith("favorites:") || note.fileType === "favorites") {
     const StarIcon = getToolbarIcon("star", pack);
     return <StarIcon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-amber-500 fill-amber-500" : "text-amber-500/70"}`} />;
@@ -198,6 +202,9 @@ const TabItem = React.memo(function TabItem({
     note.id === "templates" ||
     note.id.startsWith("templates:") ||
     note.fileType === "templates" ||
+    note.id === "relations" ||
+    note.id.startsWith("relations:") ||
+    note.fileType === "relations" ||
     note.id === "favorites" ||
     note.id.startsWith("favorites:") ||
     note.fileType === "favorites" ||
@@ -506,6 +513,7 @@ function TabBarComponent({
               const isHelp = note.id === "help" || note.id.startsWith("help:") || note.fileType === "help";
               const isLunoAi = note.id === "luno-ai" || note.id.startsWith("luno-ai:") || note.fileType === "luno-ai";
               const isTemplates = note.id === "templates" || note.id.startsWith("templates:") || note.fileType === "templates";
+              const isRelations = note.id === "relations" || note.id.startsWith("relations:") || note.fileType === "relations";
               const isFavorites = note.id === "favorites" || note.id.startsWith("favorites:") || note.fileType === "favorites";
               const isTags = note.id === "tags" || note.id.startsWith("tags:") || note.fileType === "tags";
               const isWebViewer = note.fileType === "web-viewer" || note.id.startsWith("web:");
@@ -521,6 +529,8 @@ function TabBarComponent({
                 ? "Luno AI"
                 : isTemplates
                 ? (t("sidebar.templates") || (settings?.language === "th" ? "เทมเพลต" : "Templates"))
+                : isRelations
+                ? (t("relations.title") || (settings?.language === "th" ? "ความสัมพันธ์" : "Relations"))
                 : isFavorites
                 ? (t("sidebar.favorites") || (settings?.language === "th" ? "ที่ติดดาว" : "Favorites"))
                 : isTags

@@ -1,4 +1,4 @@
-import type { AppTheme } from "@/hooks/useAppSettings";
+import { hexToHsl, type AppTheme } from "@/hooks/useAppSettings";
 
 function getHash(str: string): number {
   let hash = 0;
@@ -98,6 +98,62 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
     "bg-lime-600/15 text-lime-700 dark:text-lime-300 border-lime-600/30",
   ],
+  teal: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
+    "bg-teal-600/15 text-teal-700 dark:text-teal-300 border-teal-600/30",
+    "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
+    "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30",
+  ],
+  sky: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
+    "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
+    "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
+    "bg-sky-600/15 text-sky-700 dark:text-sky-300 border-sky-600/30",
+  ],
+  lavender: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
+    "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
+    "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
+    "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30",
+    "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
+  ],
+  crimson: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    "bg-red-600/15 text-red-700 dark:text-red-300 border-red-600/30",
+    "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    "bg-amber-600/15 text-amber-700 dark:text-amber-300 border-amber-600/30",
+    "bg-pink-600/15 text-pink-700 dark:text-pink-300 border-pink-600/30",
+  ],
+  coral: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    "bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30",
+  ],
+  gold: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300 border-yellow-500/30",
+    "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30",
+    "bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30",
+    "bg-amber-600/15 text-amber-700 dark:text-amber-300 border-amber-600/30",
+  ],
+  mint: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
+    "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
+    "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30",
+    "bg-lime-500/15 text-lime-700 dark:text-lime-300 border-lime-500/30",
+  ],
   slate: [
     "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
     "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
@@ -106,15 +162,74 @@ const THEME_PALETTES: Record<AppTheme, string[]> = {
     "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
     "bg-neutral-500/15 text-neutral-700 dark:text-neutral-300 border-neutral-500/30",
   ],
+  custom: [
+    "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))] border-[hsl(var(--accent))]/25",
+    "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+  ],
 };
+
+export function getClosestThemeForCustom(hex?: string): AppTheme {
+  if (!hex) return "emerald";
+  const { h, s } = hexToHsl(hex);
+  if (s < 18) return "slate";
+
+  const themeHues: { theme: AppTheme; h: number }[] = [
+    { theme: "coral", h: 14 },
+    { theme: "orange", h: 25 },
+    { theme: "amber", h: 38 },
+    { theme: "gold", h: 45 },
+    { theme: "lime", h: 84 },
+    { theme: "mint", h: 158 },
+    { theme: "teal", h: 166 },
+    { theme: "emerald", h: 174 },
+    { theme: "cyan", h: 189 },
+    { theme: "sky", h: 199 },
+    { theme: "blue", h: 217 },
+    { theme: "indigo", h: 239 },
+    { theme: "lavender", h: 255 },
+    { theme: "violet", h: 262 },
+    { theme: "fuchsia", h: 292 },
+    { theme: "ruby", h: 346 },
+    { theme: "rose", h: 347 },
+    { theme: "crimson", h: 350 },
+  ];
+
+  let closestTheme: AppTheme = "emerald";
+  let minDiff = 360;
+
+  for (const item of themeHues) {
+    const diff = Math.min(Math.abs(h - item.h), 360 - Math.abs(h - item.h));
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestTheme = item.theme;
+    }
+  }
+
+  return closestTheme;
+}
 
 export function getTagColorClass(
   tag: string,
   theme: AppTheme = "emerald",
   _index?: number,
-  style: "multicolor" | "accent" = "multicolor"
+  style: "multicolor" | "accent" = "multicolor",
+  customAccentColor?: string
 ): string {
-  const palette = THEME_PALETTES[theme] || THEME_PALETTES.emerald;
+  let effectiveTheme = theme;
+  if (effectiveTheme === "custom") {
+    const customHex =
+      customAccentColor ||
+      (typeof document !== "undefined"
+        ? document.documentElement.getAttribute("data-custom-accent-color") || undefined
+        : undefined);
+    effectiveTheme = getClosestThemeForCustom(customHex);
+  }
+
+  const palette = THEME_PALETTES[effectiveTheme] || THEME_PALETTES.emerald;
   if (style === "accent") {
     return palette[0];
   }

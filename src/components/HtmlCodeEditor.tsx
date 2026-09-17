@@ -8,6 +8,7 @@ interface HtmlCodeEditorProps {
   spellCheck?: boolean;
   noteId?: string;
   language?: "html" | "css";
+  isVisible?: boolean;
 }
 
 const INDENT = "  "; // 2 spaces
@@ -38,7 +39,11 @@ function highlightAttrs(raw: string): string {
       result += `<span style="color:var(--hl-attr)">${escHtml(m[4])}</span>`;
     } else {
       result += `<span style="color:var(--hl-attr)">${escHtml(m[1])}</span>`;
-      result += `<span style="color:var(--hl-punct)">${escHtml(m[2])}</span>`;
+    }
+    if (m[2]) {
+      result += escHtml(m[2]);
+    }
+    if (m[3]) {
       result += `<span style="color:var(--hl-string)">${escHtml(m[3])}</span>`;
     }
   }
@@ -46,6 +51,7 @@ function highlightAttrs(raw: string): string {
   return result;
 }
 
+// Very fast, zero-dependency HTML highlighter
 function highlightHtml(code: string): string {
   const TOKEN_RE = /<!--[\s\S]*?-->|<!\w[^>]*>|<\/[\w-]+\s*>|<[\w-][^>]*\/?>|[^<]+/g;
   let result = "";
@@ -138,7 +144,7 @@ function highlightCss(code: string): string {
   return result;
 }
 
-export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId, language = "html" }: HtmlCodeEditorProps) {
+export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId, language = "html", isVisible = true }: HtmlCodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
@@ -155,6 +161,12 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
       preRef.current.scrollLeft = ta.scrollLeft;
     }
     if (noteId) {
+      if (
+        ta.scrollTop === 0 &&
+        (ta.clientHeight === 0 || ta.scrollHeight === 0 || ta.offsetParent === null)
+      ) {
+        return;
+      }
       try {
         sessionStorage.setItem(`luno_scroll_${noteId}`, String(ta.scrollTop));
       } catch {
@@ -176,6 +188,26 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
       /* ignore */
     }
   }, [noteId]);
+
+  const prevIsVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    if (prevIsVisibleRef.current === isVisible) return;
+    const wasVisible = prevIsVisibleRef.current;
+    prevIsVisibleRef.current = isVisible;
+
+    if (isVisible && !wasVisible && noteId) {
+      try {
+        const saved = sessionStorage.getItem(`luno_scroll_${noteId}`);
+        if (textareaRef.current) {
+          const top = saved ? parseFloat(saved) : 0;
+          textareaRef.current.scrollTop = !isNaN(top) ? top : 0;
+          syncScroll();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [isVisible, noteId]);
 
   const updateCursorPos = useCallback(() => {
     const ta = textareaRef.current;

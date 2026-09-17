@@ -43,7 +43,7 @@ export function useAppUpdate() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>("1.2.7");
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>("1.3.0");
   const manualCheckRef = useRef<boolean>(false);
 
   useEffect(() => {

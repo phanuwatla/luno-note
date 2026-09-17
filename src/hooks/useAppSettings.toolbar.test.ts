@@ -14,13 +14,17 @@ describe("Toolbar Configuration - Superscript & Subscript", () => {
     expect(DEFAULT_TOOLBAR_ORDER).toContain("subscript");
 
     const highlightIdx = DEFAULT_TOOLBAR_ORDER.indexOf("highlight");
+    const textColorIdx = DEFAULT_TOOLBAR_ORDER.indexOf("textColor");
+    const alignIdx = DEFAULT_TOOLBAR_ORDER.indexOf("align");
     const superIdx = DEFAULT_TOOLBAR_ORDER.indexOf("superscript");
     const subIdx = DEFAULT_TOOLBAR_ORDER.indexOf("subscript");
-    const bulletIdx = DEFAULT_TOOLBAR_ORDER.indexOf("bulletList");
+    const listIdx = DEFAULT_TOOLBAR_ORDER.indexOf("list");
 
-    expect(superIdx).toBe(highlightIdx + 1);
+    expect(textColorIdx).toBe(highlightIdx + 1);
+    expect(alignIdx).toBe(textColorIdx + 1);
+    expect(superIdx).toBe(alignIdx + 1);
     expect(subIdx).toBe(superIdx + 1);
-    expect(bulletIdx).toBe(subIdx + 1);
+    expect(listIdx).toBe(subIdx + 1);
   });
 
   it("includes superscript and subscript in DEFAULT_HIDDEN_TOOLBAR_ITEMS by default", () => {
@@ -94,14 +98,128 @@ describe("Toolbar Configuration - Superscript & Subscript", () => {
     expect(loaded.hiddenToolbarItems).toContain("subscript");
   });
 
-  it("resolves superscript and subscript icons across all icon packs", () => {
+  it("includes qrCode in DEFAULT_TOOLBAR_ORDER and DEFAULT_HIDDEN_TOOLBAR_ITEMS", () => {
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("qrCode");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).toContain("qrCode");
+  });
+
+  it("migrates existing user settings so qrCode defaults to hidden", () => {
+    const oldSavedSettings = {
+      toolbarItemsOrder: [
+        "undo",
+        "redo",
+        "h1",
+        "h2",
+        "bold",
+        "italic",
+        "underline",
+      ],
+      hiddenToolbarItems: ["h3", "h4"],
+    };
+
+    const loaded = normalizeSettings(oldSavedSettings as any);
+
+    expect(loaded.toolbarItemsOrder).toContain("qrCode");
+    expect(loaded.hiddenToolbarItems).toContain("qrCode");
+  });
+
+  it("resolves qrCode icon across all icon packs", () => {
     const packs = ["lucide", "tabler", "phosphor"] as const;
     for (const pack of packs) {
-      const SuperIcon = getToolbarIcon("superscript", pack);
-      const SubIcon = getToolbarIcon("subscript", pack);
+      const QrIcon = getToolbarIcon("qrCode", pack);
+      expect(QrIcon).toBeDefined();
+    }
+  });
 
-      expect(SuperIcon).toBeDefined();
-      expect(SubIcon).toBeDefined();
+  it("includes heading in DEFAULT_TOOLBAR_ORDER and resolves icons", () => {
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("heading");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).not.toContain("heading");
+
+    const packs = ["lucide", "tabler", "phosphor"] as const;
+    for (const pack of packs) {
+      const HeadingIcon = getToolbarIcon("heading", pack);
+      expect(HeadingIcon).toBeDefined();
+    }
+  });
+
+  it("migrates legacy h1-h6 items into single heading tool in user settings", () => {
+    const legacySettings = {
+      toolbarItemsOrder: [
+        "undo",
+        "redo",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "bold",
+      ],
+      hiddenToolbarItems: ["h3", "h4", "h5", "h6"],
+    };
+
+    const loaded = normalizeSettings(legacySettings as any);
+    expect(loaded.toolbarItemsOrder).toContain("heading");
+    expect(loaded.toolbarItemsOrder).not.toContain("h1");
+    expect(loaded.toolbarItemsOrder).not.toContain("h2");
+    expect(loaded.toolbarItemsOrder).not.toContain("h3");
+    expect(loaded.hiddenToolbarItems).not.toContain("heading");
+  });
+
+  it("includes fontFamily, fontSize, textColor, and align in DEFAULT_TOOLBAR_ORDER and resolves icons", () => {
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("fontFamily");
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("fontSize");
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("textColor");
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("align");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).not.toContain("fontFamily");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).not.toContain("fontSize");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).not.toContain("textColor");
+    expect(DEFAULT_HIDDEN_TOOLBAR_ITEMS).not.toContain("align");
+
+    const packs = ["lucide", "tabler", "phosphor"] as const;
+    for (const pack of packs) {
+      expect(getToolbarIcon("fontFamily", pack)).toBeDefined();
+      expect(getToolbarIcon("fontSize", pack)).toBeDefined();
+      expect(getToolbarIcon("textColor", pack)).toBeDefined();
+      expect(getToolbarIcon("align", pack)).toBeDefined();
+      expect(getToolbarIcon("alignLeft", pack)).toBeDefined();
+      expect(getToolbarIcon("alignCenter", pack)).toBeDefined();
+      expect(getToolbarIcon("alignRight", pack)).toBeDefined();
+      expect(getToolbarIcon("alignJustify", pack)).toBeDefined();
+    }
+  });
+
+  it("migrates legacy bulletList/orderedList/taskList into list and codeBlock into code", () => {
+    const legacySettings = {
+      toolbarItemsOrder: [
+        "undo",
+        "redo",
+        "bulletList",
+        "orderedList",
+        "taskList",
+        "code",
+        "codeBlock",
+      ],
+      hiddenToolbarItems: [],
+    };
+
+    const loaded = normalizeSettings(legacySettings as any);
+    expect(loaded.toolbarItemsOrder).toContain("list");
+    expect(loaded.toolbarItemsOrder).toContain("code");
+    expect(loaded.toolbarItemsOrder).not.toContain("bulletList");
+    expect(loaded.toolbarItemsOrder).not.toContain("orderedList");
+    expect(loaded.toolbarItemsOrder).not.toContain("taskList");
+    expect(loaded.toolbarItemsOrder).not.toContain("codeBlock");
+
+    const packs = ["lucide", "tabler", "phosphor"] as const;
+    for (const pack of packs) {
+      expect(getToolbarIcon("list", pack)).toBeDefined();
+      expect(getToolbarIcon("bulletList", pack)).toBeDefined();
+      expect(getToolbarIcon("orderedList", pack)).toBeDefined();
+      expect(getToolbarIcon("taskList", pack)).toBeDefined();
+      expect(getToolbarIcon("code", pack)).toBeDefined();
+      expect(getToolbarIcon("codeBlock", pack)).toBeDefined();
     }
   });
 });
+

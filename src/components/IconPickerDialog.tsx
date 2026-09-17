@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   EMOJI_CATEGORIES,
   ICON_COLOR_PALETTE,
@@ -10,7 +11,7 @@ import {
   PHOSPHOR_ICON_CATEGORIES,
   renderCustomIcon,
 } from "@/lib/iconPacks";
-import { Search, X, Check, Trash2, Smile } from "lucide-react";
+import { Search, X, Check, Trash2, Smile, Palette, ChevronLeft, ChevronRight } from "lucide-react";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -41,14 +42,55 @@ export default function IconPickerDialog({
   const [selectedIcon, setSelectedIcon] = useState<string>(initialIcon);
   const [selectedColor, setSelectedColor] = useState<string>(initialColor);
 
+  // Color Pagination items (20 items: 19 from ICON_COLOR_PALETTE + 1 Custom Palette button)
+  const allColorItems = useMemo(() => {
+    const items: Array<
+      | { type: "preset"; id: string; label: string; color: string }
+      | { type: "custom" }
+    > = ICON_COLOR_PALETTE.map((pal) => ({
+      type: "preset",
+      id: pal.id,
+      label: pal.label,
+      color: pal.color,
+    }));
+    items.push({ type: "custom" });
+    return items;
+  }, []);
+
+  const COLOR_ITEMS_PER_PAGE = 10;
+  const totalColorPages = Math.ceil(allColorItems.length / COLOR_ITEMS_PER_PAGE);
+  const [colorPage, setColorPage] = useState(0);
+
   // Sync initial state when modal opens
   React.useEffect(() => {
     if (open) {
       setSelectedIcon(initialIcon || "");
       setSelectedColor(initialColor || "");
       setSearchQuery("");
+
+      const foundIdx = allColorItems.findIndex((item) => {
+        if (item.type === "preset") {
+          return item.color.toLowerCase() === (initialColor || "").toLowerCase();
+        }
+        return Boolean(
+          initialColor &&
+            !ICON_COLOR_PALETTE.some(
+              (p) => p.color.toLowerCase() === (initialColor || "").toLowerCase()
+            )
+        );
+      });
+      if (foundIdx >= 0) {
+        setColorPage(Math.floor(foundIdx / COLOR_ITEMS_PER_PAGE));
+      } else {
+        setColorPage(0);
+      }
     }
-  }, [open, initialIcon, initialColor]);
+  }, [open, initialIcon, initialColor, allColorItems]);
+
+  const currentColors = useMemo(() => {
+    const start = colorPage * COLOR_ITEMS_PER_PAGE;
+    return allColorItems.slice(start, start + COLOR_ITEMS_PER_PAGE);
+  }, [allColorItems, colorPage]);
 
   // Filtered Emojis
   const filteredEmojiCategories = useMemo(() => {
@@ -175,36 +217,224 @@ export default function IconPickerDialog({
               </div>
             </div>
 
-            {/* Color swatches under preview (hidden for emojis) */}
+            {/* Color swatches single-row carousel under preview (hidden for emojis) */}
             {!isEmojiMode && (
-              <div className="flex items-center gap-2.5 flex-wrap py-1 px-1 border-t border-border/40 pt-2.5">
-                {ICON_COLOR_PALETTE.map((pal) => {
-                  const isSelected = selectedColor === pal.color;
-                  return (
-                    <Tooltip key={pal.id}>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedColor(pal.color)}
-                          className={`w-5 h-5 rounded-full border transition-all cursor-pointer shrink-0 flex items-center justify-center relative ${
-                            isSelected
-                              ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
-                              : "opacity-80 hover:opacity-100 hover:scale-105 hover:border-primary"
-                          }`}
-                          style={{
-                            backgroundColor: pal.color || "var(--foreground)",
-                            borderColor: pal.color ? "transparent" : "var(--border)",
-                          }}
-                        >
-                          {isSelected && <Check className="w-3 h-3 text-white drop-shadow-xs" />}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">
-                        {pal.label}
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })}
+              <div className="border-t border-border/40 pt-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-1 px-0.5">
+                  {/* Left Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => setColorPage((p) => Math.max(0, p - 1))}
+                    disabled={colorPage === 0}
+                    className="h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-20 disabled:pointer-events-none transition-all cursor-pointer shrink-0"
+                    aria-label="Previous color page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  {/* 11 Color Swatches filling full row width */}
+                  <div className="flex items-center justify-between gap-1 flex-1 min-w-0 px-1">
+                    {currentColors.map((item) => {
+                      if (item.type === "preset") {
+                        const isSelected = selectedColor === item.color;
+                        const themeKey = `settings.theme${item.id.charAt(0).toUpperCase() + item.id.slice(1)}`;
+                        const translated = t(themeKey as any);
+                        const label = translated && translated !== themeKey ? translated : item.label;
+                        return (
+                          <Tooltip key={item.id}>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedColor(item.color)}
+                                className={`w-5 h-5 rounded-full border transition-all cursor-pointer shrink-0 flex items-center justify-center relative ${
+                                  isSelected
+                                    ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
+                                    : "opacity-80 hover:opacity-100 hover:scale-105 hover:border-primary"
+                                }`}
+                                style={{
+                                  backgroundColor: item.color || "var(--foreground)",
+                                  borderColor: item.color ? "transparent" : "var(--border)",
+                                }}
+                              >
+                                {isSelected && <Check className="w-3 h-3 text-white drop-shadow-xs" />}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {label}
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      }
+
+                      // Custom Color Picker Button Popover
+                      const isCustomSelected = Boolean(
+                        selectedColor &&
+                          !ICON_COLOR_PALETTE.some(
+                            (pal) => pal.color.toLowerCase() === selectedColor.toLowerCase()
+                          )
+                      );
+
+                      return (
+                        <Popover key="custom-picker">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  style={{
+                                    backgroundColor: isCustomSelected ? selectedColor : undefined,
+                                    backgroundImage: !isCustomSelected
+                                      ? "conic-gradient(from 0deg, #f43f5e, #fb923c, #facc15, #4ade80, #38bdf8, #818cf8, #c084fc, #f43f5e)"
+                                      : undefined,
+                                  }}
+                                  className={`w-5 h-5 rounded-full border border-transparent transition-all cursor-pointer shrink-0 flex items-center justify-center relative shadow-2xs ${
+                                    isCustomSelected
+                                      ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
+                                      : "opacity-80 hover:opacity-100 hover:scale-105"
+                                  }`}
+                                >
+                                  <Palette className="w-2.5 h-2.5 text-white drop-shadow-md" />
+                                </button>
+                              </PopoverTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {t("settings.themeCustom")}
+                            </TooltipContent>
+                          </Tooltip>
+                          <PopoverContent
+                            align="start"
+                            className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                                  <Palette className="w-3.5 h-3.5 text-primary" />
+                                  {t("settings.customAccentColor")}
+                                </span>
+                                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                                  {selectedColor || "#26A295"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                                  <input
+                                    type="color"
+                                    value={
+                                      selectedColor && /^#[0-9A-Fa-f]{6}$/.test(selectedColor)
+                                        ? selectedColor
+                                        : "#26A295"
+                                    }
+                                    onChange={(e) => setSelectedColor(e.target.value)}
+                                    className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                                  />
+                                </div>
+                                <Input
+                                  value={selectedColor || "#26A295"}
+                                  onChange={(e) => setSelectedColor(e.target.value)}
+                                  placeholder="#26A295"
+                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                                  maxLength={7}
+                                />
+                              </div>
+
+                              <div>
+                                <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                                  {t("settings.quickPresets")}
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {[
+                                    "#26A295",
+                                    "#0ea5e9",
+                                    "#3b82f6",
+                                    "#6366f1",
+                                    "#8b5cf6",
+                                    "#d946ef",
+                                    "#ec4899",
+                                    "#f43f5e",
+                                    "#f97316",
+                                    "#eab308",
+                                    "#84cc16",
+                                    "#10b981",
+                                    "#14b8a6",
+                                    "#64748b",
+                                  ].map((color) => (
+                                    <button
+                                      key={color}
+                                      type="button"
+                                      style={{ backgroundColor: color }}
+                                      onClick={() => setSelectedColor(color)}
+                                      className={`h-5 w-5 rounded-full transition-transform cursor-pointer ${
+                                        selectedColor?.toLowerCase() === color.toLowerCase()
+                                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                                      }`}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="pt-2.5 border-t border-border/40">
+                                <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                                  {t("settings.previewExample")}
+                                </span>
+                                <div className="flex items-center justify-between text-xs px-3 py-2 rounded-xl bg-muted/40 border border-border/40">
+                                  <span
+                                    className="font-medium text-xs flex items-center gap-1.5"
+                                    style={{ color: selectedColor || "inherit" }}
+                                  >
+                                    {selectedIcon ? (
+                                      renderCustomIcon(selectedIcon, "w-4 h-4", {
+                                        color: selectedColor || undefined,
+                                      })
+                                    ) : (
+                                      <Smile className="w-4 h-4" />
+                                    )}
+                                    <span>{t("settings.previewAccentText")}</span>
+                                  </span>
+                                  <span
+                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-xs transition-colors"
+                                    style={{ backgroundColor: selectedColor || "#26A295" }}
+                                  >
+                                    {t("settings.previewActive")}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      );
+                    })}
+                  </div>
+
+                  {/* Right Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => setColorPage((p) => Math.min(totalColorPages - 1, p + 1))}
+                    disabled={colorPage === totalColorPages - 1}
+                    className="h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-20 disabled:pointer-events-none transition-all cursor-pointer shrink-0"
+                    aria-label="Next color page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Pagination Indicators (Image 2 style: pill capsule for active, round dots for inactive) */}
+                <div className="flex items-center justify-center gap-1.5 pt-0.5">
+                  {Array.from({ length: totalColorPages }).map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setColorPage(idx)}
+                      className={`h-1.5 transition-all duration-300 rounded-full cursor-pointer ${
+                        colorPage === idx
+                          ? "w-5 bg-primary"
+                          : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                      }`}
+                      aria-label={`Color page ${idx + 1}`}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>

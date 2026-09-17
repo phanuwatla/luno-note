@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { Note } from "@/hooks/useNotes";
 import { isEncryptedNote } from "@/lib/noteCrypto";
-import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import {
   Plus,
   Search,
@@ -37,11 +37,15 @@ import {
   Clock,
   Calendar,
   Check,
-  ListFilter,
   Globe,
   Lock,
   Unlock,
   Key,
+  RotateCcw,
+  History,
+  Filter,
+  MoreHorizontal,
+  LayoutTemplate,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
@@ -49,20 +53,26 @@ import lunoLogo from "@/assets/luno-logo.png";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
 import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useTrash, type TrashedNote } from "@/hooks/useTrash";
+import { EditorCheckbox } from "@/components/TrashView";
+import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { isMarkdownNote } from "@/lib/frontmatter";
+import { stripHtmlAndMarkdown } from "@/lib/snippetUtils";
 import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 import { renderCustomIcon, getToolbarIcon, getAutoFolderIconAndColor } from "@/lib/iconPacks";
 import IconPickerDialog from "@/components/IconPickerDialog";
+import LunoAiView from "@/components/LunoAiView";
+import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES } from "@/components/TemplatesView";
 
 interface SidebarProps {
   notes: Note[];
@@ -108,6 +118,10 @@ interface SidebarProps {
   isLoadingWorkspace?: boolean;
   onOpenWebTab?: (url: string, initialTitle?: string) => void;
   trashCount?: number;
+  onRestoreTrash?: (ids: string[]) => void;
+  onDeleteTrashPermanently?: (ids: string[]) => void;
+  onEmptyTrash?: () => void;
+  trashedNotes?: TrashedNote[];
 }
 
 interface FolderNode {
@@ -149,6 +163,42 @@ function getInitialOpenFolders(openedFolderName?: string | null): Set<string> {
   return new Set(["__opened_root__"]);
 }
 
+const OPEN_TEMPLATE_FOLDERS_STORAGE_KEY = "luno_open_template_folders";
+const OPEN_TAGS_STORAGE_PREFIX = "luno_open_tags_";
+
+function getInitialOpenTemplateFolders(): Set<string> {
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      const raw = storage.getItem(OPEN_TEMPLATE_FOLDERS_STORAGE_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          return new Set(arr);
+        }
+      }
+    }
+  } catch {}
+  return new Set(["work", "daily", "study", "dev", "web"]);
+}
+
+function getInitialOpenTags(openedFolderName?: string | null): Set<string> {
+  const wsKey = openedFolderName || "__global__";
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      const raw = storage.getItem(OPEN_TAGS_STORAGE_PREFIX + wsKey);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          return new Set(arr);
+        }
+      }
+    }
+  } catch {}
+  return new Set();
+}
+
 function isHiddenFolderPath(folderPath?: string): boolean {
   if (!folderPath) return false;
   const parts = folderPath.toLowerCase().split("/");
@@ -164,6 +214,11 @@ export type WorkspaceSortBy =
   | "created-asc";
 
 const WORKSPACE_SORT_STORAGE_KEY = "luno_workspace_sort_by";
+const FAVORITES_SORT_STORAGE_KEY = "notes-app-favorites-sort";
+const TAGS_SORT_STORAGE_KEY = "notes-app-tags-sort";
+const TRASH_SORT_STORAGE_KEY = "notes-app-trash-sort";
+const SEARCH_SORT_STORAGE_KEY = "notes-app-search-sort";
+const TEMPLATES_SORT_STORAGE_KEY = "notes-app-templates-sort";
 
 function sortNotesList(list: Note[], sortBy: WorkspaceSortBy): Note[] {
   return [...list].sort((a, b) => {
@@ -263,47 +318,7 @@ function decodeHtmlEntities(str: string): string {
 }
 
 function stripMarkdownAndFrontmatter(content: string): string {
-  if (!content) return "";
-
-  let text = content;
-
-  // 1. Strip YAML frontmatter at top of file (--- ... ---)
-  text = text.replace(/^---[\s\S]*?---\s*/g, "");
-
-  // 2. Strip HTML tags
-  if (/<\/?[a-z][\s\S]*>/i.test(text)) {
-    text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
-    text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
-    text = text.replace(/<[^>]+>/g, " ");
-  }
-
-  // 3. Decode HTML entities (e.g. &#39; -> ', &quot; -> ", &amp; -> &)
-  text = decodeHtmlEntities(text);
-
-  // 3. Strip Markdown headings (#, ##, etc.)
-  text = text.replace(/^#{1,6}\s+/gm, "");
-
-  // 4. Strip Markdown blockquotes (>)
-  text = text.replace(/^\s*>\s*/gm, "");
-
-  // 5. Strip Markdown list markers and checkboxes (- [ ], 1., -, *, +)
-  text = text.replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, "");
-  text = text.replace(/^\s*[-*+]\s+/gm, "");
-  text = text.replace(/^\s*\d+\.\s+/gm, "");
-
-  // 6. Strip Markdown code blocks & inline code
-  text = text.replace(/```[\s\S]*?```/g, " ");
-  text = text.replace(/`([^`]+)`/g, "$1");
-
-  // 7. Strip Markdown links and images
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
-  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-
-  // 8. Strip Markdown formatting (*, **, _, __, ~~)
-  text = text.replace(/(\*\*|__|[*_~]{1,2})/g, "");
-
-  // 9. Normalize multiple spaces & linebreaks to single space
-  return text.replace(/\s+/g, " ").trim();
+  return stripHtmlAndMarkdown(content);
 }
 
 function getThemeHighlightStyles(theme: string): React.CSSProperties {
@@ -474,12 +489,436 @@ function MarkdownIndicator({ active, className = "" }: { active: boolean; classN
   );
 }
 
-function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderName, pendingReconnectFolder = false, onReconnectFolder, onSelect, onUpdateNote, onCreate, onCreateFolder, onCopyFile, onCopyFiles, onCopyFolder, onPasteToFolder, onDuplicateFile, onDuplicateFiles, onDuplicateFolder, onRenameFile, onRenameFolder, onMoveFile, onMoveFolder, canPaste = false, onDeleteFile, onDeleteFiles, onDeleteFolder, onOpenFolder, onCloseWorkspace, confirmBeforeDelete = false, sidebarWidth = 280, isMobile = false, sidebarOpen = true, onOpenSidebar, onClose, onOpenSettings, onOpenHelp, onRenameTagGlobally, onDeleteTagGlobally, onToggleFavorite, onOpenPinModal, isCloudWorkspace = false, isLoadingWorkspace = false, onOpenWebTab, trashCount = 0 }: SidebarProps) {
+function SidebarComponent({
+  notes,
+  folderPaths = [],
+  activeNoteId,
+  openedFolderName,
+  pendingReconnectFolder = false,
+  onReconnectFolder,
+  onSelect,
+  onUpdateNote,
+  onCreate,
+  onCreateFolder,
+  onCopyFile,
+  onCopyFiles,
+  onCopyFolder,
+  onPasteToFolder,
+  onDuplicateFile,
+  onDuplicateFiles,
+  onDuplicateFolder,
+  onRenameFile,
+  onRenameFolder,
+  onMoveFile,
+  onMoveFolder,
+  canPaste = false,
+  onDeleteFile,
+  onDeleteFiles,
+  onDeleteFolder,
+  onOpenFolder,
+  onCloseWorkspace,
+  confirmBeforeDelete = false,
+  sidebarWidth = 280,
+  isMobile = false,
+  sidebarOpen = true,
+  onOpenSidebar,
+  onClose,
+  onOpenSettings,
+  onOpenHelp,
+  onRenameTagGlobally,
+  onDeleteTagGlobally,
+  onToggleFavorite,
+  onOpenPinModal,
+  isCloudWorkspace = false,
+  isLoadingWorkspace = false,
+  onOpenWebTab,
+  trashCount = 0,
+  onRestoreTrash,
+  onDeleteTrashPermanently,
+  onEmptyTrash,
+  trashedNotes,
+}: SidebarProps) {
   const { settings, updateSetting, setFolderIcon, removeFolderIcon, moveFolderIcons, setFileIcon, removeFileIcon } = useAppSettings();
   const [iconPickerTarget, setIconPickerTarget] = useState<{ type: "folder"; path: string } | { type: "note"; note: Note } | null>(null);
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<"workspace" | "search" | "templates" | "luno-ai" | "favorites" | "tags" | "trash">("workspace");
+  const [openTemplateFolders, setOpenTemplateFolders] = useState<Set<string>>(
+    () => getInitialOpenTemplateFolders()
+  );
+  const toggleTemplateFolder = (catId: string) => {
+    setOpenTemplateFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) {
+        next.delete(catId);
+      } else {
+        next.add(catId);
+      }
+      try {
+        const storage = getLocalStorage();
+        storage?.setItem(OPEN_TEMPLATE_FOLDERS_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+  };
+
+  const [openTags, setOpenTags] = useState<Set<string>>(() =>
+    getInitialOpenTags(openedFolderName)
+  );
+
+  // Sync openTags when workspace changes
+  useEffect(() => {
+    setOpenTags(getInitialOpenTags(openedFolderName));
+  }, [openedFolderName]);
+
+  const toggleTag = (tagKey: string) => {
+    setOpenTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagKey)) {
+        next.delete(tagKey);
+      } else {
+        next.add(tagKey);
+      }
+      try {
+        const storage = getLocalStorage();
+        const wsKey = openedFolderName || "__global__";
+        storage?.setItem(OPEN_TAGS_STORAGE_PREFIX + wsKey, JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+  };
+
+  const [lunoAiHistoryOpen, setLunoAiHistoryOpen] = useState(false);
+  useEffect(() => {
+    const handleHistoryState = (e: Event) => {
+      const custom = e as CustomEvent<{ isOpen?: boolean }>;
+      if (typeof custom.detail?.isOpen === "boolean") {
+        setLunoAiHistoryOpen(custom.detail.isOpen);
+      }
+    };
+    window.addEventListener("luno-ai:history-state-changed", handleHistoryState);
+    return () => {
+      window.removeEventListener("luno-ai:history-state-changed", handleHistoryState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFocusSidebarSearch = () => {
+      if (settings?.appLayout === "compact") {
+        setActiveSection("search");
+        if (!sidebarOpen) onOpenSidebar?.();
+      } else {
+        if (!sidebarOpen) onOpenSidebar?.();
+      }
+      setTimeout(() => {
+        if (searchInputRef.current) {
+          searchInputRef.current.focus();
+          searchInputRef.current.select();
+        } else {
+          const input = document.querySelector<HTMLInputElement>('input[data-sidebar-search="true"]');
+          input?.focus();
+          input?.select();
+        }
+      }, 50);
+    };
+
+    window.addEventListener("luno:focus-sidebar-search", handleFocusSidebarSearch);
+    return () => {
+      window.removeEventListener("luno:focus-sidebar-search", handleFocusSidebarSearch);
+    };
+  }, [settings?.appLayout, sidebarOpen, onOpenSidebar]);
+
+  useEffect(() => {
+    const handleOpenSection = (e: Event) => {
+      const custom = e as CustomEvent<"workspace" | "search" | "templates" | "luno-ai" | "favorites" | "tags" | "trash">;
+      if (custom.detail) {
+        setActiveSection(custom.detail);
+        if (!sidebarOpen) onOpenSidebar?.();
+      }
+    };
+    window.addEventListener("luno:open-sidebar-section", handleOpenSection);
+    return () => {
+      window.removeEventListener("luno:open-sidebar-section", handleOpenSection);
+    };
+  }, [sidebarOpen, onOpenSidebar]);
+
+  const trashHook = useTrash();
+  const currentTrashList = trashedNotes ?? trashHook.trashedNotes;
+  const restoreFromTrash = onRestoreTrash ?? trashHook.restoreFromTrash;
+  const deletePermanently = onDeleteTrashPermanently ?? trashHook.deletePermanently;
+  const emptyTrash = onEmptyTrash ?? trashHook.emptyTrash;
+
+  const [trashFilterType, setTrashFilterType] = useState<"all" | "md" | "txt" | "html" | "other">("all");
+  const [trashSortBy, setTrashSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(TRASH_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (
+        saved &&
+        [
+          "name-asc",
+          "name-desc",
+          "modified-desc",
+          "modified-asc",
+          "created-desc",
+          "created-asc",
+        ].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleTrashSortChange = (newSort: WorkspaceSortBy) => {
+    setTrashSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(TRASH_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
+
+  const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
+  const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
+  const [deletePermanentDialogOpen, setDeletePermanentDialogOpen] = useState(false);
+  const [pendingDeleteTrashIds, setPendingDeleteTrashIds] = useState<string[]>([]);
+
+  const filteredTrashList = useMemo(() => {
+    const filtered = currentTrashList.filter((note) => {
+      if (trashFilterType !== "all") {
+        const name = (note.fileName || "").toLowerCase();
+        if (trashFilterType === "md" && !name.endsWith(".md") && !name.endsWith(".markdown")) return false;
+        if (trashFilterType === "txt" && !name.endsWith(".txt")) return false;
+        if (trashFilterType === "html" && !name.endsWith(".html") && !name.endsWith(".htm")) return false;
+        if (trashFilterType === "other") {
+          const isDoc = name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".txt") || name.endsWith(".html") || name.endsWith(".htm");
+          if (isDoc) return false;
+        }
+      }
+      return true;
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (trashSortBy === "name-asc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (trashSortBy === "name-desc") {
+        const nameA = a.fileName || a.title || "";
+        const nameB = b.fileName || b.title || "";
+        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: "base" });
+      }
+      if (trashSortBy === "modified-desc") {
+        const modA = a.updatedAt || (a as any).deletedAt || a.createdAt || 0;
+        const modB = b.updatedAt || (b as any).deletedAt || b.createdAt || 0;
+        return modB - modA;
+      }
+      if (trashSortBy === "modified-asc") {
+        const modA = a.updatedAt || (a as any).deletedAt || a.createdAt || 0;
+        const modB = b.updatedAt || (b as any).deletedAt || b.createdAt || 0;
+        return modA - modB;
+      }
+      if (trashSortBy === "created-desc") {
+        const creA = a.createdAt || (a as any).deletedAt || 0;
+        const creB = b.createdAt || (b as any).deletedAt || 0;
+        return creB - creA;
+      }
+      if (trashSortBy === "created-asc") {
+        const creA = a.createdAt || (a as any).deletedAt || 0;
+        const creB = b.createdAt || (b as any).deletedAt || 0;
+        return creA - creB;
+      }
+      return 0;
+    });
+  }, [currentTrashList, trashFilterType, trashSortBy]);
+
+  const [favoritesFilterType, setFavoritesFilterType] = useState<"all" | "md" | "txt" | "html" | "image">("all");
+  const [favoritesSortBy, setFavoritesSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(FAVORITES_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (
+        saved &&
+        [
+          "name-asc",
+          "name-desc",
+          "modified-desc",
+          "modified-asc",
+          "created-desc",
+          "created-asc",
+        ].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleFavoritesSortChange = (newSort: WorkspaceSortBy) => {
+    setFavoritesSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(FAVORITES_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
+
+  const [tagsFilterType, setTagsFilterType] = useState<"all" | "md" | "txt" | "html" | "image">("all");
+  const [tagsSortBy, setTagsSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(TAGS_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (
+        saved &&
+        [
+          "name-asc",
+          "name-desc",
+          "modified-desc",
+          "modified-asc",
+          "created-desc",
+          "created-asc",
+        ].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleTagsSortChange = (newSort: WorkspaceSortBy) => {
+    setTagsSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(TAGS_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
+
+  const [searchFilterType, setSearchFilterType] = useState<"all" | "md" | "txt" | "html" | "image" | "other">("all");
+  const [searchSortBy, setSearchSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(SEARCH_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (
+        saved &&
+        [
+          "name-asc",
+          "name-desc",
+          "modified-desc",
+          "modified-asc",
+          "created-desc",
+          "created-asc",
+        ].includes(saved)
+      ) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleSearchSortChange = (newSort: WorkspaceSortBy) => {
+    setSearchSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(SEARCH_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
+
+  const [templatesFilterType, setTemplatesFilterType] = useState<"all" | "md" | "txt" | "html" | "image" | "other">("all");
+  const [templatesSortBy, setTemplatesSortBy] = useState<WorkspaceSortBy>(() => {
+    try {
+      const storage = getLocalStorage();
+      const saved = storage?.getItem(TEMPLATES_SORT_STORAGE_KEY) as WorkspaceSortBy;
+      if (saved && ["name-asc", "name-desc"].includes(saved)) {
+        return saved;
+      }
+    } catch {
+      // fallback
+    }
+    return "name-asc";
+  });
+
+  const handleTemplatesSortChange = (newSort: WorkspaceSortBy) => {
+    setTemplatesSortBy(newSort);
+    try {
+      const storage = getLocalStorage();
+      storage?.setItem(TEMPLATES_SORT_STORAGE_KEY, newSort);
+    } catch {
+      // ignore
+    }
+  };
+
+  const allFilteredTrashSelected = filteredTrashList.length > 0 && filteredTrashList.every((n) => selectedTrashIds.includes(n.id));
+  const someFilteredTrashSelected = filteredTrashList.some((n) => selectedTrashIds.includes(n.id)) && !allFilteredTrashSelected;
+
+  const handleToggleSelectAllTrash = () => {
+    if (allFilteredTrashSelected) {
+      const filteredIdSet = new Set(filteredTrashList.map((n) => n.id));
+      setSelectedTrashIds((prev) => prev.filter((id) => !filteredIdSet.has(id)));
+    } else {
+      const filteredIdSet = new Set(filteredTrashList.map((n) => n.id));
+      setSelectedTrashIds((prev) => Array.from(new Set([...prev, ...filteredIdSet])));
+    }
+  };
+
+  const handleToggleSelectTrashRow = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedTrashIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const handleRestoreSelectedTrash = () => {
+    if (selectedTrashIds.length === 0) return;
+    restoreFromTrash(selectedTrashIds);
+    setSelectedTrashIds([]);
+  };
+
+  const handleRestoreAllTrash = () => {
+    if (currentTrashList.length === 0) return;
+    restoreFromTrash(currentTrashList.map((n) => n.id));
+    setSelectedTrashIds([]);
+  };
+
+  const handlePromptDeleteSelectedTrash = (ids?: string[]) => {
+    const targetIds = ids ?? selectedTrashIds;
+    if (targetIds.length === 0) return;
+    setPendingDeleteTrashIds(targetIds);
+    setDeletePermanentDialogOpen(true);
+  };
+
+  const handleConfirmPermanentDeleteTrash = () => {
+    if (pendingDeleteTrashIds.length > 0) {
+      deletePermanently(pendingDeleteTrashIds);
+      setSelectedTrashIds((prev) => prev.filter((id) => !pendingDeleteTrashIds.includes(id)));
+      setPendingDeleteTrashIds([]);
+    }
+    setDeletePermanentDialogOpen(false);
+  };
+
+  const renderTrashedNoteIcon = (note: TrashedNote, cls = "h-3.5 w-3.5 shrink-0") => {
+    if (note.icon) {
+      const custom = renderCustomIcon(note.icon, cls, { color: note.iconColor });
+      if (custom) return custom;
+    }
+    const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
+    const IconComp = getToolbarIcon(defaultKey, settings?.iconPack || "lucide");
+    return <IconComp className={`${cls} text-muted-foreground/80`} />;
+  };
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -492,6 +931,12 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
       }
     };
     const handleFocusSearch = () => {
+      if (settings?.appLayout === "compact") {
+        setActiveSection("search");
+        if (!sidebarOpen) {
+          onOpenSidebar?.();
+        }
+      }
       setTimeout(() => {
         if (searchInputRef.current) {
           searchInputRef.current.focus();
@@ -509,7 +954,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
       window.removeEventListener("luno:filter-notes", handleFilterEvent);
       window.removeEventListener("luno:focus-sidebar-search", handleFocusSearch);
     };
-  }, []);
+  }, [settings?.appLayout, sidebarOpen, onOpenSidebar]);
 
   const [renameTagModalOpen, setRenameTagModalOpen] = useState(false);
   const [renameTagOldName, setRenameTagOldName] = useState("");
@@ -666,6 +1111,26 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
 
   const effectiveNotes = useMemo(() => (openedFolderName ? notes : []), [openedFolderName, notes]);
 
+  const filteredFavoriteNotes = useMemo(() => {
+    const favs = effectiveNotes.filter((n) => n.isFavorite);
+    const filtered = favs.filter((note) => {
+      if (favoritesFilterType !== "all") {
+        const name = (note.fileName || "").toLowerCase();
+        const isMd = name.endsWith(".md") || name.endsWith(".markdown") || note.contentFormat === "markdown";
+        const isHtml = name.endsWith(".html") || name.endsWith(".htm") || note.contentFormat === "html";
+        const isTxt = name.endsWith(".txt") || note.contentFormat === "plain";
+        const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(name);
+
+        if (favoritesFilterType === "md" && !isMd) return false;
+        if (favoritesFilterType === "txt" && !isTxt) return false;
+        if (favoritesFilterType === "html" && !isHtml) return false;
+        if (favoritesFilterType === "image" && !isImg) return false;
+      }
+      return true;
+    });
+    return sortNotesList(filtered, favoritesSortBy);
+  }, [effectiveNotes, favoritesFilterType, favoritesSortBy]);
+
   const vaultTagCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of effectiveNotes) {
@@ -734,6 +1199,56 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
     },
     [effectiveNotes, query, navFilter, selectedTagFilter, sortBy],
   );
+
+  const searchFilteredNotes = useMemo(() => {
+    let list = effectiveNotes;
+
+    if (query) {
+      const q = query.trim().toLowerCase();
+      if (q.startsWith("#")) {
+        const tagQ = q.slice(1);
+        list = list.filter((n) => n.tags?.some((t) => t.toLowerCase().includes(tagQ)));
+      } else {
+        list = list.filter((n) => {
+          const titleMatch = n.title?.toLowerCase().includes(q);
+          const fileNameMatch = n.fileName?.toLowerCase().includes(q);
+          const contentMatch = n.content?.toLowerCase().includes(q);
+          const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
+          return titleMatch || fileNameMatch || contentMatch || tagMatch;
+        });
+      }
+    }
+
+    if (searchFilterType !== "all") {
+      list = list.filter((note) => {
+        const name = (note.fileName || note.title || "").toLowerCase();
+        const ext = getNoteExtension(name);
+        const isMd = ext === "md" || ext === "markdown" || note.contentFormat === "markdown";
+        const isTxt = ext === "txt" || note.contentFormat === "plain";
+        const isHtml = ext === "html" || ext === "htm" || note.contentFormat === "html";
+        const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(name);
+
+        if (searchFilterType === "md") return isMd;
+        if (searchFilterType === "txt") return isTxt;
+        if (searchFilterType === "html") return isHtml;
+        if (searchFilterType === "image") return isImg;
+        if (searchFilterType === "other") return !isMd && !isTxt && !isHtml && !isImg;
+        return true;
+      });
+    }
+
+    return sortNotesList(list, searchSortBy);
+  }, [effectiveNotes, query, searchFilterType, searchSortBy]);
+
+  const totalFilteredTemplates = useMemo(() => {
+    return TEMPLATE_DEFINITIONS.filter((item) => {
+      if (templatesFilterType === "all") return true;
+      if (templatesFilterType === "md") return item.formatExt === "md";
+      if (templatesFilterType === "txt") return item.formatExt === "txt";
+      if (templatesFilterType === "html") return item.formatExt === "html";
+      return false;
+    }).length;
+  }, [templatesFilterType]);
 
   const folderTree = useMemo(
     () => buildFolderTree(effectiveNotes, folderPaths, openedFolderName, sortBy),
@@ -1104,7 +1619,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
     setRenameFolderName("");
   };
 
-  const renderNote = (note: Note, depth = 0) => {
+  const renderNote = (note: Note, depth = 0, hasSpacer = true) => {
     // In directory mode, show actual file name to match folder structure.
     const noteLabel = hasTreeView ? (note.fileName?.trim() || t("editor.untitled")) : (note.title || t("editor.untitled"));
     const isMarkdownNote = Boolean(
@@ -1158,7 +1673,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                   style={{ left: `${18 + i * 14}px` }}
                 />
               ))}
-              <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {hasSpacer && <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
               <NoteIcon note={note} active={activeNoteId === note.id} />
               <span className={`truncate ${activeNoteId === note.id ? "font-semibold text-primary" : "font-normal"}`}>{noteLabel}</span>
               <div className="ml-auto flex items-center gap-1.5 shrink-0">
@@ -1201,7 +1716,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               }}
               className="gap-2"
             >
-              <Star className={`h-4 w-4 ${allFavorited ? "text-amber-500 fill-amber-500" : ""}`} />
+              <Star className={`h-4 w-4 ${allFavorited ? "!text-amber-500 fill-amber-500 stroke-amber-500" : ""}`} />
               <span>
                 {isMultiSelected
                   ? allFavorited
@@ -1362,7 +1877,7 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             }}
             className="gap-2"
           >
-            <Star className={`h-4 w-4 ${allFavorited ? "text-amber-500 fill-amber-500" : ""}`} />
+            <Star className={`h-4 w-4 ${allFavorited ? "!text-amber-500 fill-amber-500 stroke-amber-500" : ""}`} />
             <span>
               {isMultiSelected
                 ? allFavorited
@@ -1631,19 +2146,187 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
     );
   };
 
-  const isCollapsed = sidebarOpen === false && !isMobile;
-  const currentWidth = isMobile ? undefined : (isCollapsed ? 52 : (sidebarWidth || 280));
+  const isCompactLayout = settings?.appLayout === "compact";
+  const isCollapsed = !isCompactLayout && sidebarOpen === false && !isMobile;
+  const explorerWidth = sidebarWidth || 280;
+  const currentWidth = isMobile ? undefined : (isCompactLayout ? (sidebarOpen ? 52 + explorerWidth : 52) : (isCollapsed ? 52 : explorerWidth));
   const pack = settings?.iconPack || "lucide";
   const renderIcon = (toolId: string, className = "h-4 w-4") => {
     const IconComp = getToolbarIcon(toolId, pack);
     return <IconComp className={className} />;
   };
 
+  const renderSortMenuContent = (
+    activeSort: WorkspaceSortBy,
+    onSortChange: (newSort: WorkspaceSortBy) => void,
+    hideTimeSort = false
+  ) => (
+    <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
+      <DropdownMenuItem
+        onClick={() => onSortChange("name-asc")}
+        className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+          activeSort === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <ArrowDownAZ className="h-4 w-4" />
+          <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+        </div>
+        {activeSort === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+      </DropdownMenuItem>
+
+      <DropdownMenuItem
+        onClick={() => onSortChange("name-desc")}
+        className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+          activeSort === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <ArrowUpAZ className="h-4 w-4" />
+          <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+        </div>
+        {activeSort === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+      </DropdownMenuItem>
+
+      {!hideTimeSort && (
+        <>
+          <DropdownMenuItem
+            onClick={() => onSortChange("modified-desc")}
+            className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+              activeSort === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Clock className="h-4 w-4" />
+              <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+            </div>
+            {activeSort === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => onSortChange("modified-asc")}
+            className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+              activeSort === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Clock className="h-4 w-4 opacity-60" />
+              <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+            </div>
+            {activeSort === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => onSortChange("created-desc")}
+            className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+              activeSort === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Calendar className="h-4 w-4" />
+              <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+            </div>
+            {activeSort === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={() => onSortChange("created-asc")}
+            className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+              activeSort === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Calendar className="h-4 w-4 opacity-60" />
+              <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+            </div>
+            {activeSort === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+          </DropdownMenuItem>
+        </>
+      )}
+    </DropdownMenuContent>
+  );
+
+  const sortDropdownMenuContent = renderSortMenuContent(sortBy, handleSortChange);
+
+  const renderFilterMenuContent = (
+    currentFilter: string,
+    onFilterChange: (newFilter: any) => void
+  ) => (
+    <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
+      <DropdownMenuItem
+        onClick={() => onFilterChange("all")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => onFilterChange("md")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => onFilterChange("txt")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => onFilterChange("html")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => onFilterChange("image")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "image" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{isTh ? "รูปภาพ" : "Images"}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => onFilterChange("other")}
+        className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
+          currentFilter === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+        }`}
+      >
+        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+          {currentFilter === "other" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
+        </span>
+        <span>{t("trash.filterOther") || (isTh ? "ไฟล์อื่นๆ" : "Other files")}</span>
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
       <aside
         className={
-          `flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full shrink-0 select-none overflow-hidden ` +
+          `flex ${isCompactLayout ? "flex-row" : "flex-col"} border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-full shrink-0 select-none overflow-hidden ` +
           (isMobile ? 'fixed left-0 top-0 z-50 w-[90vw] max-w-[320px] shadow-2xl' : 'relative')
         }
         style={!isMobile ? {
@@ -1652,7 +2335,1246 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
           willChange: 'width',
         } : undefined}
       >
-        {isCollapsed ? (
+        {isCompactLayout ? (
+          /* =========================================================================
+             COMPACT / VS CODE ACTIVITY BAR LAYOUT
+             - Left 52px Navigation Bar is ALWAYS visible
+             - Document (Workspace) icon placed below Home
+             - Open Folder & Plus (+) are hidden from nav rail
+             - Workspace Explorer Panel is shown adjacent when sidebarOpen is true
+             ========================================================================= */
+          <>
+            {/* 1. Permanent Left Icon Rail (52px) */}
+            <div className="flex flex-col items-center h-full w-[52px] min-w-[52px] py-3 justify-between shrink-0 border-r border-sidebar-border/30 animate-in fade-in duration-150">
+              <div className="flex flex-col items-center gap-2.5 w-full px-1.5">
+                {/* Top Logo */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl">
+                      <img src={lunoLogo} alt="Luno Logo" className="h-5 w-5 object-contain shrink-0 luno-app-logo" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    Luno
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Top Divider */}
+                <div className="w-5 h-[1px] bg-sidebar-border/60 my-0.5 shrink-0" />
+
+                {/* Workspace Document Icon (Files) - First Item */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "workspace") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("workspace");
+                          if (!sidebarOpen) {
+                            onOpenSidebar?.();
+                          }
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "workspace"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("files", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.workspace") || "Workspace"}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Search */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "search") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("search");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                          setTimeout(() => {
+                            if (searchInputRef.current) {
+                              searchInputRef.current.focus();
+                              searchInputRef.current.select();
+                            } else {
+                              const input = document.querySelector<HTMLInputElement>('input[data-sidebar-search="true"]');
+                              input?.focus();
+                              input?.select();
+                            }
+                          }, 50);
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "search"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("search", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Templates */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "templates") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("templates");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "templates"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("templates", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Luno AI */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "luno-ai") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("luno-ai");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "luno-ai"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("ai", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.lunoAi") || "Luno AI"}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Favorites */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "favorites") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("favorites");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "favorites"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("star", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.favorites") || (isTh ? "รายการโปรด" : "Favorites")}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Tags */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "tags") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("tags");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "tags"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("tag", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.tags") || (isTh ? "แท็ก" : "Tags")}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Trash */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (sidebarOpen && activeSection === "trash") {
+                          onClose?.();
+                        } else {
+                          setActiveSection("trash");
+                          if (!sidebarOpen) onOpenSidebar?.();
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                        sidebarOpen && activeSection === "trash"
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                      }`}
+                    >
+                      {renderIcon("trash", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.trash") || (isTh ? "ถังขยะ" : "Trash")}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+
+              {/* Bottom Nav Items: Help, Settings, Theme */}
+              <div className="flex flex-col items-center w-full px-1.5 shrink-0 gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={onOpenHelp}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                    >
+                      {renderIcon("helpCircle", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.help") || "Help"}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={onOpenSettings}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                    >
+                      {renderIcon("settings", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("settings.title") || "Settings"}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                    >
+                      {settings.colorScheme === "dark" ? renderIcon("sun", "h-4 w-4") : renderIcon("moon", "h-4 w-4")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {t("sidebar.toggleTheme") || "Toggle Theme"}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+
+            {/* 2. Workspace / Search / Favorites / Tags / Trash Panel (Rendered when sidebarOpen is true) */}
+            {sidebarOpen && (
+              <div
+                className="flex flex-col h-full overflow-hidden animate-in fade-in duration-150"
+                style={{ width: `${explorerWidth}px`, minWidth: `${explorerWidth}px` }}
+              >
+                {activeSection === "workspace" ? (
+                  <>
+                    {/* Workspace Header */}
+                    <div
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDropTargetFolderPath("__opened_root__");
+                      }}
+                      onDragLeave={() => {
+                        if (dropTargetFolderPath === "__opened_root__") {
+                          setDropTargetFolderPath(null);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        handleDropToFolder("__opened_root__");
+                      }}
+                      className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
+                        dropTargetFolderPath === "__opened_root__" ? "bg-sidebar-accent/50 text-foreground" : ""
+                      }`}
+                    >
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.workspace")}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0 h-6">
+                        {/* Sort Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {sortDropdownMenuContent}
+                        </DropdownMenu>
+
+                        {/* Open Folder */}
+                        {onOpenFolder && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                onClick={() => void onOpenFolder()}
+                              >
+                                {renderIcon("folder", "h-3.5 w-3.5")}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.openFolder")}</TooltipContent>
+                          </Tooltip>
+                        )}
+
+                        {/* New Note / Folder Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  {renderIcon("plus", "h-3.5 w-3.5")}
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuItem onClick={openCreateFileDialog}>
+                              {renderIcon("fileText", "h-4 w-4")}
+                              <span>{t("sidebar.createFileAction")}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={openCreateFolderDialog}>
+                              {renderIcon("folderPlus", "h-4 w-4")}
+                              <span>{t("sidebar.createFolderAction")}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                if (onOpenWebTab) {
+                                  onOpenWebTab("https://www.google.com", "Google");
+                                }
+                                if (isMobile) onClose?.();
+                              }}
+                            >
+                              <Globe className="h-4 w-4" />
+                              <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                onSelect("relations");
+                                if (isMobile) onClose?.();
+                              }}
+                            >
+                              {renderIcon("relations", "h-4 w-4")}
+                              <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Workspace File/Folder List */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+                      {effectiveNotes.length === 0 && !hasTreeView ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+                          <Folder size={24} className="mb-2 opacity-30 text-primary" />
+                          <p className="text-xs">{t("sidebar.noNotes")}</p>
+                        </div>
+                      ) : hasTreeView ? (
+                        renderFolderNode(folderTree)
+                      ) : (
+                        effectiveNotes.map((note) => renderNote(note))
+                      )}
+                    </div>
+                  </>
+                ) : activeSection === "search" ? (
+                  <>
+                    {/* Search Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "SEARCH")} ({searchFilteredNotes.length})
+                      </span>
+                      <div className="flex items-center gap-1 h-6">
+                        {/* Filter Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-6 w-6 rounded-md shrink-0 transition-colors ${
+                                    searchFilterType !== "all"
+                                      ? "text-primary hover:text-primary hover:bg-sidebar-accent"
+                                      : "text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <Filter className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                          </Tooltip>
+                          {renderFilterMenuContent(searchFilterType, setSearchFilterType)}
+                        </DropdownMenu>
+
+                        {/* Sort Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {renderSortMenuContent(searchSortBy, handleSearchSortChange)}
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Search Input Box */}
+                    <div className="px-3 py-1">
+                      <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-2.5 py-1.5 border border-sidebar-border/40 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
+                        {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground")}
+                        <input
+                          ref={searchInputRef}
+                          data-sidebar-search="true"
+                          type="text"
+                          placeholder={isMobile ? t("sidebar.searchShortPlaceholder") : t("sidebar.searchPlaceholder")}
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                          className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Search Results */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+                      {searchFilteredNotes.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+                          <FileText size={22} className="mb-2 opacity-40" />
+                          <p className="text-xs">{query || searchFilterType !== "all" ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
+                        </div>
+                      ) : (
+                        searchFilteredNotes.map((note) => renderNote(note, 0, false))
+                      )}
+                    </div>
+                  </>
+                ) : activeSection === "templates" ? (
+                  <>
+                    {/* Templates Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.templates") || (isTh ? "เทมเพลต" : "TEMPLATES")} ({totalFilteredTemplates})
+                      </span>
+                      <div className="flex items-center gap-1 h-6">
+                        {/* Filter Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-6 w-6 rounded-md shrink-0 transition-colors ${
+                                    templatesFilterType !== "all"
+                                      ? "text-primary hover:text-primary hover:bg-sidebar-accent"
+                                      : "text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <Filter className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                          </Tooltip>
+                          {renderFilterMenuContent(templatesFilterType, setTemplatesFilterType)}
+                        </DropdownMenu>
+
+                        {/* Sort Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {renderSortMenuContent(templatesSortBy, handleTemplatesSortChange, true)}
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Templates Category Folders & Items */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+                      {totalFilteredTemplates === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+                          <LayoutTemplate size={24} className="mb-2 opacity-30 text-primary" />
+                          <p className="text-xs">{isTh ? "ไม่พบเทมเพลตที่ตรงกับตัวกรอง" : "No templates match filter"}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {TEMPLATE_CATEGORIES.map((cat) => {
+                            const isOpen = openTemplateFolders.has(cat.id);
+                            let catItems = TEMPLATE_DEFINITIONS.filter((item) => item.category === cat.id);
+                            if (templatesFilterType !== "all") {
+                              catItems = catItems.filter((item) => {
+                                if (templatesFilterType === "md") return item.formatExt === "md";
+                                if (templatesFilterType === "txt") return item.formatExt === "txt";
+                                if (templatesFilterType === "html") return item.formatExt === "html";
+                                return false;
+                              });
+                            }
+                            if (catItems.length === 0) return null;
+
+                            catItems = [...catItems].sort((a, b) => {
+                              const titleA = isTh ? a.titleTh : a.titleEn;
+                              const titleB = isTh ? b.titleTh : b.titleEn;
+                              if (templatesSortBy === "name-desc") {
+                                return titleB.localeCompare(titleA, isTh ? "th" : "en", { numeric: true, sensitivity: "base" });
+                              }
+                              if (templatesSortBy === "name-asc") {
+                                return titleA.localeCompare(titleB, isTh ? "th" : "en", { numeric: true, sensitivity: "base" });
+                              }
+                              return 0;
+                            });
+
+                            const label = isTh ? cat.labelTh : cat.labelEn;
+
+                            return (
+                              <div key={cat.id} className="group/tree-item relative w-full">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleTemplateFolder(cat.id)}
+                                  className={`flex w-full items-center gap-1.5 px-3 ${
+                                    settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"
+                                  } font-medium transition-colors rounded-lg outline-none select-none text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40`}
+                                  style={{ paddingLeft: "12px" }}
+                                >
+                                  {isOpen ? (
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  )}
+                                  <LayoutTemplate className="h-3.5 w-3.5 shrink-0 text-primary" />
+                                  <span className="truncate">{label}</span>
+                                  <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">
+                                    {catItems.length}
+                                  </span>
+                                </button>
+                                {isOpen && (
+                                  <div className="relative w-full space-y-0.5 mt-0.5">
+                                    {catItems.map((template) => {
+                                      const templateTitle = isTh ? template.titleTh : template.titleEn;
+                                      const templateDesc = isTh ? template.descTh : template.descEn;
+                                      return (
+                                        <Tooltip key={`${template.type}-${template.formatExt}`}>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                onSelect("templates");
+                                                window.dispatchEvent(
+                                                  new CustomEvent("luno:open-template-preview", {
+                                                    detail: {
+                                                      type: template.type,
+                                                      format: template.format,
+                                                      formatExt: template.formatExt,
+                                                    },
+                                                  })
+                                                );
+                                                if (isMobile) onClose?.();
+                                              }}
+                                              className={`relative flex w-full items-center gap-1.5 px-3 ${
+                                                settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"
+                                              } text-left transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground`}
+                                              style={{ paddingLeft: "26px" }}
+                                            >
+                                              {settings.showGuideLines && (
+                                                <span
+                                                  className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+                                                  style={{ left: "18px" }}
+                                                />
+                                              )}
+                                              <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                              {renderCustomIcon(template.icon, "h-3.5 w-3.5 shrink-0", { color: template.color })}
+                                              <span className="truncate font-normal">{templateTitle}</span>
+                                              <div className="ml-auto flex items-center gap-1 shrink-0">
+                                                <span className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/80 px-1 py-0.2 rounded bg-sidebar-accent/50">
+                                                  .{template.formatExt}
+                                                </span>
+                                              </div>
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="right" align="center" className="max-w-[200px] text-xs">
+                                            <p className="font-semibold">{templateTitle}</p>
+                                            <p className="text-muted-foreground text-[11px]">{templateDesc}</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : activeSection === "luno-ai" ? (
+                  <>
+                    {/* Luno AI Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {lunoAiHistoryOpen
+                          ? (t("lunoAi.chatHistory") || "Chat History")
+                          : (t("sidebar.lunoAi") || "Luno AI")}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0 h-6">
+                        {lunoAiHistoryOpen ? (
+                          <>
+                            {/* Clear All History Button */}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-red-500 hover:bg-sidebar-accent cursor-pointer"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent("luno-ai:clear-history"));
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("lunoAi.clearAll") || "Clear all history"}</TooltipContent>
+                            </Tooltip>
+
+                            {/* Close History Button */}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent("luno-ai:toggle-history"));
+                                  }}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("lunoAi.closePanel") || "Close history"}</TooltipContent>
+                            </Tooltip>
+                          </>
+                        ) : (
+                          <>
+                            {/* New Chat Button */}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent("luno-ai:new-chat"));
+                                  }}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("lunoAi.newChat") || "New Chat"}</TooltipContent>
+                            </Tooltip>
+
+                            {/* History Button */}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent("luno-ai:toggle-history"));
+                                  }}
+                                >
+                                  <History className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t("lunoAi.chatHistory") || "Chat History"}</TooltipContent>
+                            </Tooltip>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Luno AI View Body */}
+                    <div className="flex-1 overflow-hidden min-h-0">
+                      <LunoAiView
+                        isSidebar={true}
+                        notes={notes}
+                        openedFolderName={openedFolderName}
+                        activeNote={notes.find((n) => n.id === activeNoteId) ?? null}
+                        onInsertToActiveNote={(text) => {
+                          const targetNote = notes.find((n) => n.id === activeNoteId) ?? notes[0];
+                          if (targetNote && onUpdateNote) {
+                            const existingContent = targetNote.content || "";
+                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                            onUpdateNote(targetNote.id, { content: updatedContent });
+                          }
+                        }}
+                        onInsertToSelectedNote={(targetNoteId, text) => {
+                          const targetNote = notes.find((n) => n.id === targetNoteId);
+                          if (targetNote && onUpdateNote) {
+                            const existingContent = targetNote.content || "";
+                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                            onUpdateNote(targetNote.id, { content: updatedContent });
+                          }
+                        }}
+                        onCreateNewNote={(fileName, content, folderPath) => {
+                          void onCreate(folderPath, { initialName: fileName, initialContent: content });
+                        }}
+                        onOpenSettings={onOpenSettings}
+                        onOpenWebTab={onOpenWebTab}
+                      />
+                    </div>
+                  </>
+                ) : activeSection === "favorites" ? (
+                  <>
+                    {/* Favorites Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.favorites")} ({filteredFavoriteNotes.length})
+                      </span>
+                      <div className="flex items-center gap-1 h-6">
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-6 w-6 rounded-md shrink-0 transition-colors ${
+                                    favoritesFilterType !== "all"
+                                      ? "text-primary hover:text-primary hover:bg-sidebar-accent"
+                                      : "text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <Filter className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                          </Tooltip>
+                          {renderFilterMenuContent(favoritesFilterType, setFavoritesFilterType)}
+                        </DropdownMenu>
+
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {renderSortMenuContent(favoritesSortBy, handleFavoritesSortChange)}
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Favorites List */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+                      {filteredFavoriteNotes.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+                          <Star size={24} className="mb-2 opacity-30 text-amber-500" />
+                          <p className="text-xs">{t("sidebar.noFavorites") || "No favorites yet"}</p>
+                        </div>
+                      ) : (
+                        filteredFavoriteNotes.map((note) => renderNote(note, 0, false))
+                      )}
+                    </div>
+                  </>
+                ) : activeSection === "tags" ? (
+                  <>
+                    {/* Tags Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.tags")} ({vaultTagCounts.length})
+                      </span>
+                      <div className="flex items-center gap-1 h-6">
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-6 w-6 rounded-md shrink-0 transition-colors ${
+                                    tagsFilterType !== "all"
+                                      ? "text-primary hover:text-primary hover:bg-sidebar-accent"
+                                      : "text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <Filter className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                          </Tooltip>
+                          {renderFilterMenuContent(tagsFilterType, setTagsFilterType)}
+                        </DropdownMenu>
+
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {renderSortMenuContent(tagsSortBy, handleTagsSortChange)}
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Tags List / Expandable Tree */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+                      {vaultTagCounts.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+                          <Tag size={24} className="mb-2 opacity-30 text-primary" />
+                          <p className="text-xs">{t("sidebar.noTags") || "No tags yet"}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {vaultTagCounts.map(({ tag, count: _count, lower }) => {
+                            const isOpen = openTags.has(lower);
+                            const tagNotes = effectiveNotes.filter((n) =>
+                              n.tags?.some((t) => t.toLowerCase() === lower)
+                            );
+                            const filteredTagNotes = tagNotes.filter((note) => {
+                              if (tagsFilterType === "all") return true;
+                              const ext = getNoteExtension(note.title);
+                              if (tagsFilterType === "md") return ext === "md";
+                              if (tagsFilterType === "txt") return ext === "txt";
+                              if (tagsFilterType === "html") return ext === "html";
+                              if (tagsFilterType === "other") return !["md", "txt", "html"].includes(ext);
+                              return true;
+                            });
+                            const sortedTagNotes = sortNotesList(filteredTagNotes, tagsSortBy);
+
+                            return (
+                              <div key={lower} className="group/tree-item relative w-full">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleTag(lower)}
+                                  className={`flex w-full items-center gap-1.5 px-3 ${
+                                    settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"
+                                  } font-medium transition-colors rounded-lg outline-none select-none text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40`}
+                                  style={{ paddingLeft: "12px" }}
+                                >
+                                  {isOpen ? (
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  )}
+                                  <Tag className="h-3.5 w-3.5 shrink-0 text-primary" />
+                                  <span className="truncate">{tag}</span>
+                                  <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">
+                                    {sortedTagNotes.length}
+                                  </span>
+                                </button>
+                                {isOpen && (
+                                  <div className="relative w-full">
+                                    {sortedTagNotes.length === 0 ? (
+                                      <p className="text-[11px] text-muted-foreground py-1" style={{ paddingLeft: "40px" }}>
+                                        {t("sidebar.noNotes")}
+                                      </p>
+                                    ) : (
+                                      sortedTagNotes.map((note) => renderNote(note, 1))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : activeSection === "trash" ? (
+                  <>
+                    {/* Trash Panel Header */}
+                    <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
+                      <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                        {t("sidebar.trash")} ({filteredTrashList.length})
+                      </span>
+                      <div className="flex items-center gap-1 h-6">
+                        {/* Filter Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`h-6 w-6 rounded-md shrink-0 transition-colors ${
+                                    trashFilterType !== "all"
+                                      ? "text-primary hover:text-primary hover:bg-sidebar-accent"
+                                      : "text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <Filter className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                          </Tooltip>
+                          {renderFilterMenuContent(trashFilterType, setTrashFilterType)}
+                        </DropdownMenu>
+
+                        {/* Sort Dropdown */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                                >
+                                  <ArrowUpDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                          </Tooltip>
+                          {renderSortMenuContent(trashSortBy, handleTrashSortChange)}
+                        </DropdownMenu>
+
+                        {/* 3-dots More Actions Menu */}
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent shrink-0 transition-colors"
+                                >
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("trash.moreOptions") || (isTh ? "ตัวเลือกเพิ่มเติม" : "More options")}</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
+                            {filteredTrashList.length > 0 && (
+                              <DropdownMenuItem
+                                onClick={handleToggleSelectAllTrash}
+                                className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                              >
+                                <Check className="h-4 w-4" />
+                                <span>
+                                  {allFilteredTrashSelected
+                                    ? (isTh ? "ยกเลิกการเลือกทั้งหมด" : "Deselect all")
+                                    : (isTh ? "เลือกทั้งหมด" : "Select all")}
+                                </span>
+                              </DropdownMenuItem>
+                            )}
+                            {selectedTrashIds.length > 0 && (
+                              <>
+                                <DropdownMenuItem
+                                  onClick={handleRestoreSelectedTrash}
+                                  className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                  <span>{isTh ? `กู้คืน (${selectedTrashIds.length})` : `Restore (${selectedTrashIds.length})`}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onClick={() => handlePromptDeleteSelectedTrash()}
+                                  className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                  <span>{isTh ? `ลบถาวร (${selectedTrashIds.length})` : `Delete (${selectedTrashIds.length})`}</span>
+                                </DropdownMenuItem>
+                                <ContextMenuSeparator className="my-1" />
+                              </>
+                            )}
+                            <DropdownMenuItem
+                              disabled={currentTrashList.length === 0}
+                              onClick={handleRestoreAllTrash}
+                              className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              <span>{isTh ? "กู้คืนไฟล์ทั้งหมด" : "Restore all files"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              disabled={currentTrashList.length === 0}
+                              onClick={() => setEmptyTrashDialogOpen(true)}
+                              className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <span>{t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty trash")}</span>
+                            </DropdownMenuItem>
+                            {onOpenSettings && (
+                              <>
+                                <DropdownMenuSeparator className="my-1" />
+                                <DropdownMenuItem
+                                  onClick={onOpenSettings}
+                                  className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                                >
+                                  <Settings className="h-4 w-4 text-muted-foreground" />
+                                  <span>{isTh ? "ตั้งค่าถังขยะ" : "Settings"}</span>
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+
+                    {/* Trash List */}
+                    <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-2 flex flex-col">
+                      {filteredTrashList.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground my-auto">
+                          <Trash2 size={24} className="mb-2 opacity-30 text-muted-foreground" />
+                          <p className="text-xs font-medium">{currentTrashList.length === 0 ? (t("trash.emptyTrashEmpty") || "Trash is empty") : (isTh ? "ไม่พบไฟล์ที่ตรงกับตัวกรอง" : "No files match filter")}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5 flex-1">
+                          {filteredTrashList.map((item) => {
+                            const isSelected = selectedTrashIds.includes(item.id);
+                            const noteLabel = item.fileName || item.title || (isTh ? "ไม่มีชื่อ" : "Untitled");
+
+                            return (
+                              <ContextMenu key={item.id}>
+                                <ContextMenuTrigger asChild>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => handleToggleSelectTrashRow(item.id, e)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        handleToggleSelectTrashRow(item.id);
+                                      }
+                                    }}
+                                    className={`group relative flex w-full items-center justify-between gap-1.5 px-3 ${
+                                      settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13px]"
+                                    } text-left transition-colors rounded-lg outline-none focus:outline-none select-none cursor-pointer ${
+                                      isSelected
+                                        ? "bg-sidebar-accent text-foreground font-semibold"
+                                        : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                                    }`}
+                                    style={{ paddingLeft: "12px" }}
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                      <EditorCheckbox
+                                        checked={isSelected}
+                                        onChange={() => handleToggleSelectTrashRow(item.id)}
+                                      />
+                                      {renderTrashedNoteIcon(item)}
+                                      <span className={`truncate text-xs ${isSelected ? "font-semibold text-primary" : "font-normal text-foreground"}`}>
+                                        {noteLabel}
+                                      </span>
+                                    </div>
+
+                                    {/* 3-dots Dropdown Menu Button */}
+                                    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                                          >
+                                            <MoreHorizontal className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-md">
+                                          <DropdownMenuItem
+                                            onClick={() => restoreFromTrash([item.id])}
+                                            className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                                          >
+                                            <RotateCcw className="h-4 w-4" />
+                                            <span>{t("trash.restore") || (isTh ? "กู้คืน" : "Restore")}</span>
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            variant="destructive"
+                                            onClick={() => handlePromptDeleteSelectedTrash([item.id])}
+                                            className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                          >
+                                            <Trash2 className="h-4 w-4 text-destructive" />
+                                            <span>{t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}</span>
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </div>
+                                </ContextMenuTrigger>
+                                <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md">
+                                  <ContextMenuItem
+                                    onClick={() => restoreFromTrash([item.id])}
+                                    className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                                  >
+                                    <RotateCcw className="h-4 w-4" />
+                                    <span>{t("trash.restore") || (isTh ? "กู้คืน" : "Restore")}</span>
+                                  </ContextMenuItem>
+                                  <ContextMenuItem
+                                    variant="destructive"
+                                    onClick={() => handlePromptDeleteSelectedTrash([item.id])}
+                                    className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                    <span>{t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}</span>
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Selected Items Quick Action Bar */}
+                      {selectedTrashIds.length > 0 && (
+                        <div className="mt-2 pt-2 px-1 border-t border-sidebar-border/40 flex items-center justify-between gap-1.5 shrink-0 select-none">
+                          <span className="text-[11px] font-medium text-muted-foreground truncate">
+                            {isTh ? `เลือก ${selectedTrashIds.length} รายการ` : `${selectedTrashIds.length} selected`}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleRestoreSelectedTrash}
+                              className="px-2.5 py-1 rounded-[10px] bg-transparent text-foreground hover:bg-sidebar-accent hover:text-foreground text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              <span>{isTh ? "กู้คืน" : "Restore"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePromptDeleteSelectedTrash()}
+                              className="px-2.5 py-1 rounded-[10px] bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span>{isTh ? "ลบถาวร" : "Delete"}</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : isCollapsed ? (
+          /* =========================================================================
+             DEFAULT LAYOUT - COLLAPSED STATE (Existing)
+             ========================================================================= */
           <div key="collapsed" className="flex flex-col items-center h-full w-[52px] min-w-[52px] py-3 justify-between animate-in fade-in duration-150">
             <div className="flex flex-col items-center gap-2.5 w-full px-1.5">
               {/* Top Logo / Open Sidebar Hover Button */}
@@ -1892,6 +3814,15 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
                     <Globe className="h-4 w-4" />
                     <span>{t("sidebar.newWebPage") || "Web Page"}</span>
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      onSelect("relations");
+                      if (isMobile) onClose?.();
+                    }}
+                  >
+                    {renderIcon("relations", "h-4 w-4")}
+                    <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1929,6 +3860,9 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             </div>
           </div>
         ) : (
+          /* =========================================================================
+             DEFAULT LAYOUT - EXPANDED STATE (Existing)
+             ========================================================================= */
           <div key="expanded" className="flex flex-col h-full w-full min-w-[280px] animate-in fade-in duration-150">
             {/* Brand Header */}
             <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2">
@@ -1945,350 +3879,282 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
               </Button>
             </div>
 
-      {/* Search Input Box */}
-      <div className="px-3 py-1">
-        <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3 py-2 border border-sidebar-border/40 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
-          {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground")}
-          <input
-            ref={searchInputRef}
-            data-sidebar-search="true"
-            type="text"
-            placeholder={isMobile ? t("sidebar.searchShortPlaceholder") : t("sidebar.searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
-          />
-        </div>
-      </div>
+            {/* Search Input Box */}
+            <div className="px-3 py-1">
+              <div className="flex items-center gap-2 rounded-xl bg-sidebar-accent/50 px-3 py-2 border border-sidebar-border/40 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
+                {renderIcon("search", "h-3.5 w-3.5 shrink-0 text-muted-foreground")}
+                <input
+                  ref={searchInputRef}
+                  data-sidebar-search="true"
+                  type="text"
+                  placeholder={isMobile ? t("sidebar.searchShortPlaceholder") : t("sidebar.searchPlaceholder")}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
+                />
+              </div>
+            </div>
 
-      {/* Quick Navigation Items */}
-      <div className="px-3 py-2 space-y-0.5 border-b border-sidebar-border/40">
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("home");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-            activeNoteId === "home"
-              ? "bg-sidebar-accent text-foreground font-semibold"
-              : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("home", `h-4 w-4 shrink-0 ${activeNoteId === "home" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.home")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("templates");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-            activeNoteId === "templates" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("templates", `h-4 w-4 shrink-0 ${activeNoteId === "templates" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("luno-ai");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-            activeNoteId === "luno-ai"
-              ? "bg-sidebar-accent text-foreground font-semibold"
-              : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("ai", `h-4 w-4 shrink-0 ${activeNoteId === "luno-ai" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.lunoAi")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("favorites");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
-            activeNoteId === "favorites" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("star", `h-4 w-4 shrink-0 ${activeNoteId === "favorites" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.favorites")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("tags");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
-            activeNoteId === "tags" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("tag", `h-4 w-4 shrink-0 ${activeNoteId === "tags" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.tags")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect("trash");
-            if (isMobile) onClose?.();
-          }}
-          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
-            activeNoteId === "trash"
-              ? "bg-sidebar-accent text-foreground font-semibold"
-              : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
-          }`}
-        >
-          {renderIcon("trash", `h-4 w-4 shrink-0 ${activeNoteId === "trash" ? "text-primary" : "text-foreground"}`)}
-          <span>{t("sidebar.trash")}</span>
-        </button>
-      </div>
-
-      {/* WORKSPACE Header */}
-      <div
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDropTargetFolderPath("__opened_root__");
-        }}
-        onDragLeave={() => {
-          if (dropTargetFolderPath === "__opened_root__") {
-            setDropTargetFolderPath(null);
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          handleDropToFolder("__opened_root__");
-        }}
-        className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
-          dropTargetFolderPath === "__opened_root__" ? "bg-sidebar-accent/50 text-foreground" : ""
-        }`}
-      >
-        <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase">{t("sidebar.workspace")}</span>
-        <div className="flex items-center gap-1">
-          {/* Sort Dropdown */}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
-                  >
-                    <ArrowUpDown className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
-              <DropdownMenuItem
-                onClick={() => handleSortChange("name-asc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <ArrowDownAZ className="h-4 w-4" />
-                  <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
-                </div>
-                {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => handleSortChange("name-desc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <ArrowUpAZ className="h-4 w-4" />
-                  <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
-                </div>
-                {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => handleSortChange("modified-desc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Clock className="h-4 w-4" />
-                  <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
-                </div>
-                {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => handleSortChange("modified-asc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Clock className="h-4 w-4 opacity-60" />
-                  <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
-                </div>
-                {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => handleSortChange("created-desc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Calendar className="h-4 w-4" />
-                  <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
-                </div>
-                {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => handleSortChange("created-asc")}
-                className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                  sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Calendar className="h-4 w-4 opacity-60" />
-                  <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
-                </div>
-                {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5]" />}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {onOpenFolder && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
-                  onClick={() => void onOpenFolder()}
-                >
-                  {renderIcon("folder", "h-4 w-4")}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("sidebar.openFolder")}</TooltipContent>
-            </Tooltip>
-          )}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
-                  >
-                    {renderIcon("plus", "h-4 w-4")}
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onClick={openCreateFileDialog}>
-                {renderIcon("fileText", "h-4 w-4")}
-                <span>{t("sidebar.createFileAction")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={openCreateFolderDialog}>
-                {renderIcon("folderPlus", "h-4 w-4")}
-                <span>{t("sidebar.createFolderAction")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
+            {/* Quick Navigation Items */}
+            <div className="px-3 py-2 space-y-0.5 border-b border-sidebar-border/40">
+              <button
+                type="button"
                 onClick={() => {
-                  if (onOpenWebTab) {
-                    onOpenWebTab("https://www.google.com", "Google");
-                  }
+                  onSelect("home");
                   if (isMobile) onClose?.();
                 }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                  activeNoteId === "home"
+                    ? "bg-sidebar-accent text-foreground font-semibold"
+                    : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
               >
-                <Globe className="h-4 w-4" />
-                <span>{t("sidebar.newWebPage") || "Web Page"}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-
-      {/* Tree Content */}
-      <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
-        {filtered.length === 0 && (query || !hasTreeView) ? (
-          <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
-            <FileText size={24} className="mb-3 opacity-40" />
-            <p className="text-sm">{query ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
-          </div>
-        ) : hasTreeView && !query ? (
-          renderFolderNode(folderTree)
-        ) : (
-          filtered.map((note) => renderNote(note))
-        )}
-      </div>
-
-      {/* Sidebar Footer */}
-      <div className="border-t border-sidebar-border/60 px-3 py-2 flex items-center justify-between shrink-0 bg-sidebar">
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
+                {renderIcon("home", `h-4 w-4 shrink-0 ${activeNoteId === "home" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.home")}</span>
+              </button>
+              <button
                 type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-                onClick={onOpenSettings}
+                onClick={() => {
+                  onSelect("templates");
+                  if (isMobile) onClose?.();
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                  activeNoteId === "templates" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
               >
-                {renderIcon("settings", "h-4 w-4")}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("common.settings")}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
+                {renderIcon("templates", `h-4 w-4 shrink-0 ${activeNoteId === "templates" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}</span>
+              </button>
+              <button
                 type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
-                onClick={onOpenHelp}
+                onClick={() => {
+                  onSelect("luno-ai");
+                  if (isMobile) onClose?.();
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                  activeNoteId === "luno-ai"
+                    ? "bg-sidebar-accent text-foreground font-semibold"
+                    : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
               >
-                {renderIcon("helpCircle", "h-4 w-4")}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("sidebar.help")}</TooltipContent>
-          </Tooltip>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-              onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
+                {renderIcon("ai", `h-4 w-4 shrink-0 ${activeNoteId === "luno-ai" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.lunoAi")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect("favorites");
+                  if (isMobile) onClose?.();
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
+                  activeNoteId === "favorites" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
+              >
+                {renderIcon("star", `h-4 w-4 shrink-0 ${activeNoteId === "favorites" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.favorites")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect("tags");
+                  if (isMobile) onClose?.();
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
+                  activeNoteId === "tags" ? "bg-sidebar-accent text-foreground font-semibold" : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
+              >
+                {renderIcon("tag", `h-4 w-4 shrink-0 ${activeNoteId === "tags" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.tags")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect("trash");
+                  if (isMobile) onClose?.();
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer ${
+                  activeNoteId === "trash"
+                    ? "bg-sidebar-accent text-foreground font-semibold"
+                    : "text-foreground/80 hover:bg-sidebar-accent/50 hover:text-foreground"
+                }`}
+              >
+                {renderIcon("trash", `h-4 w-4 shrink-0 ${activeNoteId === "trash" ? "text-primary" : "text-foreground"}`)}
+                <span>{t("sidebar.trash")}</span>
+              </button>
+            </div>
+
+            {/* WORKSPACE Header */}
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDropTargetFolderPath("__opened_root__");
+              }}
+              onDragLeave={() => {
+                if (dropTargetFolderPath === "__opened_root__") {
+                  setDropTargetFolderPath(null);
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleDropToFolder("__opened_root__");
+              }}
+              className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
+                dropTargetFolderPath === "__opened_root__" ? "bg-sidebar-accent/50 text-foreground" : ""
+              }`}
             >
-              {settings.colorScheme === "dark" ? renderIcon("sun", "h-4 w-4") : renderIcon("moon", "h-4 w-4")}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("sidebar.toggleTheme")}</TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
-  )}
+              <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
+                {t("sidebar.workspace")}
+              </span>
+              <div className="flex items-center gap-1 h-6">
+                {/* Sort Dropdown */}
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                        >
+                          <ArrowUpDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                  </Tooltip>
+                  {sortDropdownMenuContent}
+                </DropdownMenu>
+
+                {onOpenFolder && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                        onClick={() => void onOpenFolder()}
+                      >
+                        {renderIcon("folder", "h-3.5 w-3.5")}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebar.openFolder")}</TooltipContent>
+                  </Tooltip>
+                )}
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 rounded-md text-foreground hover:text-foreground hover:bg-sidebar-accent"
+                        >
+                          {renderIcon("plus", "h-3.5 w-3.5")}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebar.newNote")}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onClick={openCreateFileDialog}>
+                      {renderIcon("fileText", "h-4 w-4")}
+                      <span>{t("sidebar.createFileAction")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={openCreateFolderDialog}>
+                      {renderIcon("folderPlus", "h-4 w-4")}
+                      <span>{t("sidebar.createFolderAction")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (onOpenWebTab) {
+                          onOpenWebTab("https://www.google.com", "Google");
+                        }
+                        if (isMobile) onClose?.();
+                      }}
+                    >
+                      <Globe className="h-4 w-4" />
+                      <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        onSelect("relations");
+                        if (isMobile) onClose?.();
+                      }}
+                    >
+                      {renderIcon("relations", "h-4 w-4")}
+                      <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+
+            {/* Tree Content */}
+            <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4">
+              {filtered.length === 0 && (query || !hasTreeView) ? (
+                <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-muted-foreground">
+                  <FileText size={24} className="mb-3 opacity-40" />
+                  <p className="text-sm">{query ? t("sidebar.noResults") : t("sidebar.noNotes")}</p>
+                </div>
+              ) : hasTreeView && !query ? (
+                renderFolderNode(folderTree)
+              ) : (
+                filtered.map((note) => renderNote(note))
+              )}
+            </div>
+
+            {/* Sidebar Footer */}
+            <div className="border-t border-sidebar-border/60 px-3 py-2 flex items-center justify-between shrink-0 bg-sidebar">
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                      onClick={onOpenSettings}
+                    >
+                      {renderIcon("settings", "h-4 w-4")}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("common.settings")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                      onClick={onOpenHelp}
+                    >
+                      {renderIcon("helpCircle", "h-4 w-4")}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("sidebar.help")}</TooltipContent>
+                </Tooltip>
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                    onClick={() => updateSetting("colorScheme", settings.colorScheme === "dark" ? "light" : "dark")}
+                  >
+                    {settings.colorScheme === "dark" ? renderIcon("sun", "h-4 w-4") : renderIcon("moon", "h-4 w-4")}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("sidebar.toggleTheme")}</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        )}
 
       <Dialog open={createFileDialogOpen} onOpenChange={setCreateFileDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl">
@@ -2496,6 +4362,56 @@ function SidebarComponent({ notes, folderPaths = [], activeNoteId, openedFolderN
             onClick={handleDeleteFolderConfirmed}
           >
             {t("common.delete")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Trash Empty confirmation dialog */}
+    <AlertDialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("trash.emptyTrashConfirmTitle") || "Empty all trash?"}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("trash.emptyTrashConfirmDesc") || "All files in the trash will be permanently deleted. This action cannot be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel") || "Cancel"}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              emptyTrash();
+              setEmptyTrashDialogOpen(false);
+              setSelectedTrashIds([]);
+            }}
+          >
+            {t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty Trash")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Trash Delete Permanently confirmation dialog */}
+    <AlertDialog open={deletePermanentDialogOpen} onOpenChange={setDeletePermanentDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("trash.deleteConfirmTitle") || (isTh ? "ลบถาวรหรือไม่?" : "Delete permanently?")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingDeleteTrashIds.length > 1
+              ? (t("trash.deleteBatchConfirmDesc")?.replace("{count}", String(pendingDeleteTrashIds.length)) ||
+                 (isTh ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteTrashIds.length} รายการจะถูกลบอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้` : `${pendingDeleteTrashIds.length} selected files will be permanently deleted.`))
+              : (t("trash.deleteConfirmDesc") ||
+                 (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้" : "This file will be permanently deleted and cannot be recovered."))}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel") || "Cancel"}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={handleConfirmPermanentDeleteTrash}
+          >
+            {t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

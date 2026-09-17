@@ -57,6 +57,11 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconArrowForwardUp,
     phosphor: PhosphorIcons.ArrowUUpRight,
   },
+  heading: {
+    lucide: LucideIcons.Heading,
+    tabler: TablerIcons.IconHeading,
+    phosphor: PhosphorIcons.TextH,
+  },
   h1: {
     lucide: LucideIcons.Heading1,
     tabler: TablerIcons.IconH1,
@@ -122,6 +127,51 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconSubscript,
     phosphor: PhosphorIcons.TextSubscript,
   },
+  textColor: {
+    lucide: LucideIcons.Baseline || LucideIcons.Palette,
+    tabler: TablerIcons.IconColorFilter || TablerIcons.IconPalette || TablerIcons.IconBrush,
+    phosphor: PhosphorIcons.PaintBrush || PhosphorIcons.TextAa,
+  },
+  align: {
+    lucide: LucideIcons.AlignLeft,
+    tabler: TablerIcons.IconAlignLeft,
+    phosphor: PhosphorIcons.TextAlignLeft,
+  },
+  alignLeft: {
+    lucide: LucideIcons.AlignLeft,
+    tabler: TablerIcons.IconAlignLeft,
+    phosphor: PhosphorIcons.TextAlignLeft,
+  },
+  alignCenter: {
+    lucide: LucideIcons.AlignCenter,
+    tabler: TablerIcons.IconAlignCenter,
+    phosphor: PhosphorIcons.TextAlignCenter,
+  },
+  alignRight: {
+    lucide: LucideIcons.AlignRight,
+    tabler: TablerIcons.IconAlignRight,
+    phosphor: PhosphorIcons.TextAlignRight,
+  },
+  alignJustify: {
+    lucide: LucideIcons.AlignJustify,
+    tabler: TablerIcons.IconAlignJustified,
+    phosphor: PhosphorIcons.TextAlignJustify,
+  },
+  fontFamily: {
+    lucide: LucideIcons.Type,
+    tabler: TablerIcons.IconLetterCase || TablerIcons.IconLetterT,
+    phosphor: PhosphorIcons.TextT || PhosphorIcons.TextAa,
+  },
+  fontSize: {
+    lucide: LucideIcons.ALargeSmall || LucideIcons.CaseSensitive || LucideIcons.Type,
+    tabler: TablerIcons.IconLetterCase || TablerIcons.IconLetterT,
+    phosphor: PhosphorIcons.TextAa || PhosphorIcons.TextT,
+  },
+  list: {
+    lucide: LucideIcons.List,
+    tabler: TablerIcons.IconList,
+    phosphor: PhosphorIcons.ListBullets,
+  },
   bulletList: {
     lucide: LucideIcons.List,
     tabler: TablerIcons.IconList,
@@ -181,6 +231,11 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     lucide: LucideIcons.ImagePlus || LucideIcons.Image,
     tabler: TablerIcons.IconPhotoPlus || TablerIcons.IconPhoto,
     phosphor: PhosphorIcons.ImageSquare,
+  },
+  qrCode: {
+    lucide: LucideIcons.QrCode,
+    tabler: TablerIcons.IconQrcode,
+    phosphor: PhosphorIcons.QrCode,
   },
   emoji: {
     lucide: LucideIcons.Smile,
@@ -246,6 +301,16 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     lucide: LucideIcons.LayoutTemplate,
     tabler: TablerIcons.IconLayout,
     phosphor: PhosphorIcons.Layout,
+  },
+  relations: {
+    lucide: LucideIcons.GitFork,
+    tabler: TablerIcons.IconGitFork,
+    phosphor: PhosphorIcons.GitFork,
+  },
+  graph: {
+    lucide: LucideIcons.GitFork,
+    tabler: TablerIcons.IconGitFork,
+    phosphor: PhosphorIcons.GitFork,
   },
   shortcuts: {
     lucide: LucideIcons.Keyboard,
@@ -657,16 +722,24 @@ export const EMOJI_CATEGORIES = [
 // Color palette options for custom note & folder icons
 export const ICON_COLOR_PALETTE = [
   { id: "default", label: "Default", color: "" },
-  { id: "amber", label: "Amber", color: "#f59e0b" },
-  { id: "emerald", label: "Emerald", color: "#10b981" },
+  { id: "emerald", label: "Emerald", color: "#26A295" },
+  { id: "teal", label: "Teal", color: "#0d9488" },
+  { id: "cyan", label: "Cyan", color: "#06b6d4" },
+  { id: "sky", label: "Sky Blue", color: "#0284c7" },
   { id: "blue", label: "Blue", color: "#3b82f6" },
   { id: "indigo", label: "Indigo", color: "#6366f1" },
-  { id: "purple", label: "Purple", color: "#a855f7" },
+  { id: "violet", label: "Violet", color: "#8b5cf6" },
+  { id: "lavender", label: "Lavender", color: "#a78bfa" },
+  { id: "fuchsia", label: "Fuchsia", color: "#d946ef" },
   { id: "rose", label: "Rose", color: "#f43f5e" },
-  { id: "red", label: "Red", color: "#ef4444" },
-  { id: "cyan", label: "Cyan", color: "#06b6d4" },
-  { id: "teal", label: "Teal", color: "#14b8a6" },
-  { id: "slate", label: "Slate", color: "#64748b" },
+  { id: "ruby", label: "Ruby", color: "#e11d48" },
+  { id: "crimson", label: "Crimson", color: "#dc2626" },
+  { id: "coral", label: "Coral", color: "#ea580c" },
+  { id: "orange", label: "Orange", color: "#f97316" },
+  { id: "amber", label: "Amber", color: "#f59e0b" },
+  { id: "gold", label: "Gold", color: "#eab308" },
+  { id: "lime", label: "Lime", color: "#84cc16" },
+  { id: "mint", label: "Mint", color: "#10b981" },
 ];
 
 export interface IconCategoryItem {

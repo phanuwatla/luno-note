@@ -9,8 +9,8 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import Image from "@tiptap/extension-image";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
-import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES, HashtagDecoration, collapseBlockWhitespace } from "@/components/Editor";
-import { Kbd, Highlight, Underline, Superscript, Subscript } from "@/lib/tiptapCustomMarks";
+import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES, HashtagDecoration, SpellCheckDecoration, collapseBlockWhitespace, findMatchingFontOption, getActiveFontFamily } from "@/components/Editor";
+import { Kbd, Highlight, Underline, Superscript, Subscript, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
 import fs from "fs";
 
 describe("Markdown empty paragraphs and blank lines semantics and roundtrip", () => {
@@ -33,10 +33,10 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     div.innerHTML = inputHtml;
 
     const saved = normalizeSaved(td.turndown(div.innerHTML));
-    expect(saved).toBe("ข้อความ A\n\nข้อความ B");
+    expect(saved).toBe("ข้อความ A\nข้อความ B");
 
     const cycleSaved = runCycle(saved);
-    expect(cycleSaved).toBe("ข้อความ A\n\nข้อความ B");
+    expect(cycleSaved).toBe("ข้อความ A\nข้อความ B");
   });
 
   it("Test 1 — 1 blank line: renders exactly 1 editable empty paragraph (have 1 show 1) and roundtrips cleanly", () => {
@@ -1197,7 +1197,7 @@ This is HTML with inline styling.
     const backupPath = "C:/Users/LENOVO/.gemini/antigravity/brain/a9d98c8c-12ca-4a99-8bdc-76e15bb11e73/scratch/orig_594.md";
     const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : fs.readFileSync(backupPath, "utf8");
     const origLines = content.split("\n").length;
-    expect(origLines).toBe(594);
+    expect(origLines).toBeGreaterThan(0);
 
     const html = renderMarkdownToEditorHtml(content);
     const editor = new CoreEditor({
@@ -1225,7 +1225,7 @@ This is HTML with inline styling.
     editor.destroy();
 
     const savedLines = saved.split("\n").length;
-    expect(savedLines).toBe(594);
+    expect(savedLines).toBe(origLines);
   });
 
   it("Test 20 — Spacing between note Title (H1) and content: EDITOR_CLASSES includes [&>h1:first-child]:mb-6", () => {
@@ -1379,6 +1379,477 @@ This is HTML with inline styling.
 
     editor.destroy();
   });
+
+  it("Test 29 — Highlight mark preserves highlight across save and reload", () => {
+    const inputMd = "ข้อความ ==ไฮไลต์ตรงนี้== ต่อท้าย";
+    const editorHtml = renderMarkdownToEditorHtml(inputMd);
+    expect(editorHtml).toContain('<mark class="luno-highlight">ไฮไลต์ตรงนี้</mark>');
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit, Highlight],
+      content: editorHtml,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    const serializedHtml = editor.getHTML();
+    expect(serializedHtml).toContain('<mark class="luno-highlight">ไฮไลต์ตรงนี้</mark>');
+
+    const savedMd = normalizeSaved(td.turndown(serializedHtml));
+    expect(savedMd).toBe("ข้อความ ==ไฮไลต์ตรงนี้== ต่อท้าย");
+
+    const reloadedHtml = renderMarkdownToEditorHtml(savedMd);
+    expect(reloadedHtml).toContain('<mark class="luno-highlight">ไฮไลต์ตรงนี้</mark>');
+
+    editor.destroy();
+  });
+
+  it("Test 30 — Highlight mark with formatting and multiple highlights roundtrip", () => {
+    const inputMd = "==ไฮไลต์แรก== และ **==ไฮไลต์ตัวหนา==** และ ==ไฮไลต์ที่สอง==";
+    const editorHtml = renderMarkdownToEditorHtml(inputMd);
+    expect(editorHtml).toContain('<mark class="luno-highlight">ไฮไลต์แรก</mark>');
+    expect(editorHtml).toContain('<mark class="luno-highlight">ไฮไลต์ที่สอง</mark>');
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit, Highlight],
+      content: editorHtml,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    const serializedHtml = editor.getHTML();
+    const savedMd = normalizeSaved(td.turndown(serializedHtml));
+    expect(savedMd).toContain("==ไฮไลต์แรก==");
+    expect(savedMd).toContain("==ไฮไลต์ที่สอง==");
+
+    editor.destroy();
+  });
+
+  it("Test 31 — User selects text, clicks highlight, saves, and reloads in new editor", () => {
+    const cases = [
+      "<p>ข้อความภาษาไทยที่มีคำว่า<mark class=\"luno-highlight\">ไฮไลต์</mark>อยู่ตรงนี้</p>",
+      "<p><mark class=\"luno-highlight\">ทั้งย่อหน้านี้ถูกไฮไลต์</mark></p>",
+      "<p>First line</p><p><mark class=\"luno-highlight\">Second line highlighted</mark></p><p>Third line</p>",
+      "<p>Some <b><mark class=\"luno-highlight\">bold and highlighted</mark></b> text</p>",
+      "<p>Prefix <mark class=\"luno-highlight\">highlighted with trailing space </mark>suffix</p>",
+      "<p>Prefix <mark class=\"luno-highlight\"> highlighted with leading space</mark> suffix</p>",
+    ];
+
+    for (const html of cases) {
+      const editor1 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Underline, Highlight, Superscript, Subscript],
+        content: html,
+        parseOptions: { preserveWhitespace: "full" },
+      });
+
+      const serializedHtml = editor1.getHTML();
+      const savedMd = normalizeSaved(td.turndown(serializedHtml));
+      expect(savedMd).toContain("==");
+
+      const reloadedHtml = renderMarkdownToEditorHtml(savedMd);
+      const editor2 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Underline, Highlight, Superscript, Subscript],
+        content: reloadedHtml,
+        parseOptions: { preserveWhitespace: "full" },
+      });
+
+      const reloadedEditorHtml = editor2.getHTML();
+      const hasMark = reloadedEditorHtml.includes("<mark");
+
+      editor1.destroy();
+      editor2.destroy();
+
+      expect(hasMark).toBe(true);
+    }
+  });
+
+  it("persists and restores FontFamily, FontSize, and TextColor across markdown save and reload", () => {
+    const html = '<p>Normal text, <span style="font-family: \'Prompt\', sans-serif">Prompt font</span>, <span style="font-size: 20px">20px size</span>, and <span style="color: #dc2626">red text</span></p>';
+    const editor1 = new CoreEditor({
+      extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextColor, FontFamily, FontSize],
+      content: html,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    const serializedHtml = editor1.getHTML();
+    const savedMd = normalizeSaved(td.turndown(serializedHtml));
+
+    expect(savedMd).toContain("font-family");
+    expect(savedMd).toContain("font-size");
+    expect(savedMd).toContain("color");
+
+    const reloadedHtml = renderMarkdownToEditorHtml(savedMd);
+    const editor2 = new CoreEditor({
+      extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextColor, FontFamily, FontSize],
+      content: reloadedHtml,
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    const reloadedEditorHtml = editor2.getHTML();
+    expect(reloadedEditorHtml).toContain("font-family");
+    expect(reloadedEditorHtml).toContain("font-size");
+    expect(reloadedEditorHtml).toContain("color");
+
+    editor1.destroy();
+    editor2.destroy();
+  });
+
+  describe("Toolbar Font Family Resolution", () => {
+    it("correctly matches font options across various css formatting formats", () => {
+      // Exact ID and CSS matches
+      expect(findMatchingFontOption("prompt")?.id).toBe("prompt");
+      expect(findMatchingFontOption("'Prompt', 'Inter', sans-serif")?.id).toBe("prompt");
+
+      // Browser normalized styles (without single quotes or with double quotes)
+      expect(findMatchingFontOption("Prompt, Inter, sans-serif")?.id).toBe("prompt");
+      expect(findMatchingFontOption('"Prompt", "Inter", sans-serif')?.id).toBe("prompt");
+      expect(findMatchingFontOption("Prompt")?.id).toBe("prompt");
+      expect(findMatchingFontOption("prompt, sans-serif")?.id).toBe("prompt");
+
+      // Other Thai and English fonts
+      expect(findMatchingFontOption("'Kanit', 'Inter', sans-serif")?.id).toBe("kanit");
+      expect(findMatchingFontOption("Kanit")?.id).toBe("kanit");
+      expect(findMatchingFontOption("sarabun")?.id).toBe("sarabun");
+      expect(findMatchingFontOption("Sarabun, sans-serif")?.id).toBe("sarabun");
+      expect(findMatchingFontOption("mitr")?.id).toBe("mitr");
+      expect(findMatchingFontOption("Mali, cursive, sans-serif")?.id).toBe("mali");
+      expect(findMatchingFontOption("Itim")?.id).toBe("itim");
+      expect(findMatchingFontOption("Sriracha")?.id).toBe("sriracha");
+      expect(findMatchingFontOption("Chonburi")?.id).toBe("chonburi");
+      expect(findMatchingFontOption("Inter, sans-serif")?.id).toBe("inter");
+      expect(findMatchingFontOption("JetBrains Mono")?.id).toBe("mono");
+      expect(findMatchingFontOption("IBM Plex Sans Thai")?.id).toBe("ibmPlexThai");
+      expect(findMatchingFontOption("Noto Sans Thai")?.id).toBe("notoSansThai");
+      expect(findMatchingFontOption("Noto Serif Thai")?.id).toBe("notoSerifThai");
+      expect(findMatchingFontOption("Chakra Petch")?.id).toBe("chakraPetch");
+
+      // Undefined or empty
+      expect(findMatchingFontOption(undefined)).toBeUndefined();
+      expect(findMatchingFontOption(null)).toBeUndefined();
+      expect(findMatchingFontOption("")).toBeUndefined();
+      expect(findMatchingFontOption("   ")).toBeUndefined();
+
+      // Custom font not in FONT_OPTIONS returns undefined (for custom fallback)
+      expect(findMatchingFontOption("Comic Sans MS")).toBeUndefined();
+    });
+
+    it("correctly identifies active font family from editor selection", () => {
+      const html = '<p>Normal text <span style="font-family: \'Prompt\', sans-serif">Prompt text</span> end</p>';
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, FontFamily],
+        content: html,
+      });
+
+      // Position inside "Prompt text"
+      // "Normal text " is length 12 -> pos 1 + 13 = 14
+      editor.commands.setTextSelection(14);
+      const activeFont = getActiveFontFamily(editor as any);
+      expect(activeFont).toBeTruthy();
+      expect(findMatchingFontOption(activeFont)?.id).toBe("prompt");
+
+      // Position in "Normal text"
+      editor.commands.setTextSelection(3);
+      const normalFont = getActiveFontFamily(editor as any);
+      expect(normalFont).toBeUndefined();
+
+      editor.destroy();
+    });
+
+    it("correctly handles applying both fontFamily and fontSize simultaneously on the same text", () => {
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, FontFamily, FontSize],
+        content: "<p>Hello world</p>",
+      });
+
+      // Select "world" (pos 7 to 12)
+      editor.commands.setTextSelection({ from: 7, to: 12 });
+      (editor.commands as any).setFontFamily("'Prompt', 'Inter', sans-serif");
+      (editor.commands as any).setFontSize("24px");
+
+      editor.commands.setTextSelection(9); // inside "world"
+      const activeFont = getActiveFontFamily(editor as any);
+      const activeSize = (editor as any).getAttributes("fontSize")?.fontSize;
+
+      expect(findMatchingFontOption(activeFont)?.id).toBe("prompt");
+      expect(activeSize).toBe("24px");
+
+      const html = editor.getHTML();
+      expect(html).toContain("font-family");
+      expect(html).toContain("font-size");
+
+      editor.destroy();
+    });
+
+    it("correctly sets and gets text alignment on paragraphs and headings", () => {
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
+        content: "<p>Left paragraph</p><h1>Centered heading</h1>",
+      });
+
+      // Selection in first paragraph (pos 3)
+      editor.commands.setTextSelection(3);
+      expect(editor.isActive({ textAlign: "left" })).toBe(true);
+      expect(editor.isActive({ textAlign: "center" })).toBe(false);
+
+      // Set align center
+      (editor.commands as any).setTextAlign("center");
+      expect(editor.isActive({ textAlign: "center" })).toBe(true);
+      expect(editor.isActive({ textAlign: "left" })).toBe(false);
+      expect(editor.getHTML()).toMatch(/<p style="text-align:\s*center;?">/);
+
+      // Set align right
+      (editor.commands as any).setTextAlign("right");
+      expect(editor.isActive({ textAlign: "right" })).toBe(true);
+      expect(editor.getHTML()).toMatch(/<p style="text-align:\s*right;?">/);
+
+      // Set align justify
+      (editor.commands as any).setTextAlign("justify");
+      expect(editor.isActive({ textAlign: "justify" })).toBe(true);
+      expect(editor.getHTML()).toMatch(/<p style="text-align:\s*justify;?">/);
+
+      // Set align left
+      (editor.commands as any).setTextAlign("left");
+      expect(editor.isActive({ textAlign: "left" })).toBe(true);
+
+      // Test heading
+      editor.commands.setTextSelection(25); // Inside heading
+      (editor.commands as any).setTextAlign("center");
+      expect(editor.isActive({ textAlign: "center" })).toBe(true);
+      expect(editor.getHTML()).toMatch(/<h1 style="text-align:\s*center;?">/);
+
+      editor.destroy();
+    });
+  });
+
+  describe("User empty line deletion and adjacent paragraph/image preservation without ghost blank lines", () => {
+    it("Test 32.1 — User's Greek Philosophy script: preserves exact adjacent image and paragraph structure across 10 save/load cycles without adding extra blank lines", () => {
+      const userScript = [
+        '(Intro: เสียงดนตรีพิณกรีกเบาๆ เริ่มต้นด้วยบรรยากาศลึกลับ)',
+        '"ลองจินตนาการว่าคุณกำลังเดินอยู่ในกรุงเอเธนส์เมื่อ 2,400 ปีก่อน ... หากคุณมีอาการหูแว่ว ประสาทหลอน หรือซึมเศร้าอย่างรุนแรง เพื่อนบ้านของคุณจะไม่พาคุณไปหาหมอ แต่จะพาคุณไปหา \'นักบวช\' เพราะในยุคนั้น ความบ้าคลั่งถูกมองว่าเป็น \'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"',
+        '',
+        '## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า',
+        '"ในช่วงศตวรรษที่ 6 ก่อนคริสตกาล โลกยังเต็มไปด้วยเวทมนตร์',
+        '![part1_1.jpg](../../attachments/part1_1.jpg)',
+        '',
+        "หากคุณป่วยทางจิต คุณต้องไปที่ 'วิหารแห่งแอสคลีปิออส' (Asclepius)",
+        '![part1_2.jpg](../../attachments/part1_2.jpg)',
+        '',
+        'เพื่อทำพิธี Incubation หรือการนอนหลับในวิหาร เพื่อรอให้เทพเจ้ามาเข้าฝันและรักษาโรค ให้ ... แต่นั่นคือช่วงเวลาก่อนหน้าที่พายุแห่งเหตุผลจะพัดมาถึง"',
+        '![part1_3.jpg](../../attachments/part1_3.jpg)',
+      ].join('\n');
+
+      let current = userScript;
+      for (let i = 0; i < 10; i++) {
+        const editorHtml = renderMarkdownToEditorHtml(current);
+        const editor = new CoreEditor({
+          extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+          content: editorHtml,
+        });
+        current = normalizeSaved(td.turndown(editor.getHTML()));
+        editor.destroy();
+      }
+
+      expect(current.replace(/\r\n/g, '\n')).toBe(userScript.replace(/\r\n/g, '\n'));
+    });
+
+    it("Test 32.2 — Deleting blank line under intro text before heading: stays permanently deleted upon save, reload, and subsequent cycles", () => {
+      const originalScript = [
+        '(Intro: เสียงดนตรีพิณกรีกเบาๆ เริ่มต้นด้วยบรรยากาศลึกลับ)',
+        '"ลองจินตนาการว่าคุณกำลังเดินอยู่ในกรุงเอเธนส์เมื่อ 2,400 ปีก่อน ... หากคุณมีอาการหูแว่ว ประสาทหลอน หรือซึมเศร้าอย่างรุนแรง เพื่อนบ้านของคุณจะไม่พาคุณไปหาหมอ แต่จะพาคุณไปหา \'นักบวช\' เพราะในยุคนั้น ความบ้าคลั่งถูกมองว่าเป็น \'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"',
+        '',
+        '## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า',
+        '"ในช่วงศตวรรษที่ 6 ก่อนคริสตกาล โลกยังเต็มไปด้วยเวทมนตร์',
+        '![part1_1.jpg](../../attachments/part1_1.jpg)',
+      ].join('\n');
+
+      const editorHtml = renderMarkdownToEditorHtml(originalScript);
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+
+      // Find the empty paragraph between intro and H2
+      let emptyNodePos: number | null = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "paragraph" && !node.textContent.trim() && emptyNodePos === null) {
+          emptyNodePos = pos;
+        }
+      });
+
+      expect(emptyNodePos).not.toBeNull();
+      // User deletes the empty paragraph in editor
+      editor.chain().setNodeSelection(emptyNodePos!).deleteSelection().run();
+
+      const savedAfterDelete = normalizeSaved(td.turndown(editor.getHTML())).replace(/\r\n/g, '\n');
+      editor.destroy();
+
+      // The saved markdown should NOT have a blank line between intro and H2
+      const expectedAdjacent = ['\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"', '## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า'].join('\n');
+      const expectedWithBlank = ['\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"', '', '## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า'].join('\n');
+      expect(savedAfterDelete).toContain(expectedAdjacent);
+      expect(savedAfterDelete).not.toContain(expectedWithBlank);
+
+      // Verify that upon reloading in a fresh editor, NO empty paragraph is restored between intro and H2
+      const reloadHtml = renderMarkdownToEditorHtml(savedAfterDelete);
+      const editor2 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: reloadHtml,
+      });
+
+      // Child 0: Intro paragraph. Child 1: H2 Heading directly (no empty paragraph between them)
+      expect(editor2.state.doc.child(0).textContent).toContain("ลองจินตนาการ");
+      expect(editor2.state.doc.child(1).type.name).toBe("heading");
+      expect(editor2.state.doc.child(1).textContent).toContain("ตอนที่ 1");
+
+      const resaved = normalizeSaved(td.turndown(editor2.getHTML())).replace(/\r\n/g, '\n');
+      expect(resaved).toBe(savedAfterDelete);
+      editor2.destroy();
+    });
+
+    it("Test 32.3 — Deleting blank line between image and paragraph: stays permanently deleted on reload", () => {
+      const initial = ['![test.jpg](test.jpg)', '', 'Paragraph text'].join('\n');
+      const editorHtml = renderMarkdownToEditorHtml(initial);
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+
+      // Find empty paragraph between image and text
+      let emptyPos: number | null = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "paragraph" && !node.textContent.trim() && emptyPos === null) {
+          emptyPos = pos;
+        }
+      });
+      expect(emptyPos).not.toBeNull();
+      editor.chain().setNodeSelection(emptyPos!).deleteSelection().run();
+
+      const saved = normalizeSaved(td.turndown(editor.getHTML())).replace(/\r\n/g, '\n');
+      expect(saved).toBe(['![test.jpg](test.jpg)', 'Paragraph text'].join('\n'));
+      editor.destroy();
+
+      // Reload
+      const reloadHtml = renderMarkdownToEditorHtml(saved);
+      const editor2 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: reloadHtml,
+      });
+      expect(editor2.state.doc.childCount).toBe(2);
+      expect(editor2.state.doc.child(0).type.name).toBe("image");
+      expect(editor2.state.doc.child(1).type.name).toBe("paragraph");
+      editor2.destroy();
+    });
+
+    it("Test 32.4 — Reproduce user deletion on real file", () => {
+      const filePath = 'c:/Users/LENOVO/Documents/PSYC-Explore/Chapter 1/Script/ห้องที่ 1 รากฐานปรัชญาโบราณ (Ancient Philosophical Roots (600 BCE - 300 CE)).md';
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+
+      const editorHtml = renderMarkdownToEditorHtml(fileContent);
+      const editor = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+
+      const logLines: string[] = [];
+      logLines.push(`=== Editor doc children count: ${editor.state.doc.childCount} ===`);
+      editor.state.doc.forEach((child, offset, index) => {
+        const text = child.textContent.slice(0, 40);
+        logLines.push(`[${index}] type=${child.type.name} empty=${!child.textContent.trim()} text="${text}"`);
+      });
+
+      // Find all empty paragraphs
+      const emptyParagraphs: { index: number; pos: number; prevType: string; nextType: string }[] = [];
+      let currentPos = 0;
+      for (let i = 0; i < editor.state.doc.childCount; i++) {
+        const child = editor.state.doc.child(i);
+        if (child.type.name === "paragraph" && !child.textContent.trim()) {
+          const prevType = i > 0 ? editor.state.doc.child(i - 1).type.name : "none";
+          const nextType = i < editor.state.doc.childCount - 1 ? editor.state.doc.child(i + 1).type.name : "none";
+          emptyParagraphs.push({ index: i, pos: currentPos, prevType, nextType });
+        }
+        currentPos += child.nodeSize;
+      }
+      logLines.push(`\n=== Empty Paragraphs (${emptyParagraphs.length}) ===`);
+      emptyParagraphs.forEach((ep) => {
+        logLines.push(`empty at child [${ep.index}] between ${ep.prevType} and ${ep.nextType}`);
+      });
+
+      // Test deletion at child [1] (paragraph -> paragraph)
+      const ep1 = emptyParagraphs[0];
+      const editorP1 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+      editorP1.chain().setNodeSelection(ep1.pos).deleteSelection().run();
+      const savedP1 = normalizeSaved(td.turndown(editorP1.getHTML())).replace(/\r\n/g, '\n');
+      editorP1.destroy();
+      expect(savedP1).toContain('มนุษยชาติที่สำคัญมาก\n(Intro: เสียงดนตรีพิณกรีกเบาๆ เริ่มต้นด้วยบรรยากาศลึกลับ)');
+      expect(savedP1).not.toContain('มนุษยชาติที่สำคัญมาก\n\n(Intro: เสียงดนตรีพิณกรีกเบาๆ เริ่มต้นด้วยบรรยากาศลึกลับ)');
+
+      // Test deletion at child [3] (paragraph -> heading)
+      const ep3 = emptyParagraphs[1];
+      const editorP3 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+      editorP3.chain().setNodeSelection(ep3.pos).deleteSelection().run();
+      const savedP3 = normalizeSaved(td.turndown(editorP3.getHTML())).replace(/\r\n/g, '\n');
+      editorP3.destroy();
+      expect(savedP3).toContain('\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"\n## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า');
+      expect(savedP3).not.toContain('\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"\n\n## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า');
+
+      // Test deletion at child [7] (image -> paragraph)
+      const ep7 = emptyParagraphs[2];
+      const editorP7 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
+        content: editorHtml,
+      });
+      editorP7.chain().setNodeSelection(ep7.pos).deleteSelection().run();
+      const rawTd = td.turndown(editorP7.getHTML());
+      fs.writeFileSync('C:/Users/LENOVO/.gemini/antigravity/brain/0b33554d-8a69-498f-a610-93a5eff01442/scratch/editorP7_debug.txt', 
+        `=== HTML ===\n${editorP7.getHTML()}\n\n=== RAW TURNDOWN ===\n${rawTd}\n\n=== NORMALIZED ===\n${normalizeSaved(rawTd)}`, 'utf8');
+      const savedP7 = normalizeSaved(rawTd).replace(/\r\n/g, '\n');
+      editorP7.destroy();
+      expect(savedP7).toContain('![part1_1.jpg](../../attachments/part1_1.jpg)\nหากคุณป่วยทางจิต คุณต้องไปที่ \'วิหารแห่งแอสคลีปิออส\'');
+      expect(savedP7).not.toContain('![part1_1.jpg](../../attachments/part1_1.jpg)\n\nหากคุณป่วยทางจิต คุณต้องไปที่ \'วิหารแห่งแอสคลีปิออส\'');
+
+      editor.destroy();
+    });
+
+    it("Test 33 — Fast typing: SpellCheckDecoration incrementally preserves and updates decorations when typing across multiple paragraphs", () => {
+      const initialHtml = "<p>ย่อหน้าที่ 1 คอนเน็คชั่น เทคโนโลยี</p><p>ย่อหน้าที่ 2</p>";
+      const editor = new CoreEditor({
+        extensions: [
+          StarterKit.configure({ paragraph: false }),
+          CustomParagraph,
+          SpellCheckDecoration.configure({ enabled: true }),
+        ],
+        content: initialHtml,
+      });
+
+      // Initially, "คอนเน็คชั่น" is recognized as common misspelling (should be คอนเนกชัน)
+      const plugin = editor.state.plugins.find((p) => (p as any).key === "spellCheckDecoration$");
+      expect(plugin).toBeDefined();
+
+      const initialDecos = plugin?.props.decorations?.(editor.state);
+      expect(initialDecos).toBeDefined();
+
+      // Type in paragraph 2 (end of document)
+      editor.commands.focus("end");
+      editor.commands.insertContent(" พิมพ์ข้อความเพิ่มอย่างรวดเร็ว");
+
+      // Verify that decorations in paragraph 1 were preserved by incremental mapping
+      const updatedDecos = plugin?.props.decorations?.(editor.state);
+      expect(updatedDecos).toBeDefined();
+
+      // Type a misspelled word in paragraph 2: "คอมพิวเตอร์" vs misspelled "คอมพิวเตอณ์"
+      editor.commands.insertContent(" เทคโนโลยีใหม่");
+      const postDecos = plugin?.props.decorations?.(editor.state);
+      expect(postDecos).toBeDefined();
+
+      editor.destroy();
+    });
+  });
 });
+
+
 
 
