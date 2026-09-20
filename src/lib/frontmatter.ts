@@ -91,11 +91,12 @@ export function parseInlineTags(content: string): string[] {
   clean = clean.replace(/<code[\s\S]*?<\/code>/gi, "");
   // Remove inline code (`...`)
   clean = clean.replace(/`[^`\n]+`/g, "");
+  // Remove HTML tags (e.g. <span style="color: #64748b">) so hex colors or link anchors are not parsed as tags
+  clean = clean.replace(/<[^>]+>/g, " ");
 
   // Match #tag, #tag/subtag, #thai_tag
-  // Must be followed by whitespace (\s, \r, \n) or boundary punctuation [)\]},.!?:;]
-  // This prevents incomplete tags (e.g. #k, #kk while typing) from being extracted until space or punctuation is entered
-  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n])/g;
+  // Must be followed by whitespace (\s, \r, \n), boundary punctuation [)\]},.!?:;], or end of string ($)
+  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
 
   const found: string[] = [];
   let match: RegExpExecArray | null;
@@ -315,6 +316,10 @@ export function updateFrontmatterTags(markdown: string, newTags: string[]): stri
     }
   }
 
+  if (updatedLines.length === 0) {
+    return parsed.bodyContent.replace(/^\r?\n/, "");
+  }
+
   const newFrontmatter = `---\n${updatedLines.join("\n")}\n---\n`;
   return newFrontmatter + parsed.bodyContent;
 }
@@ -355,10 +360,12 @@ export function removeTagFromMarkdown(markdown: string, tagToRemove: string): st
     (t) => t.toLowerCase() !== normTarget.toLowerCase()
   );
 
-  let updatedContent = updateFrontmatterTags(markdown, updatedFrontmatterTags);
+  let updatedContent = parsed.hasFrontmatter
+    ? updateFrontmatterTags(markdown, updatedFrontmatterTags)
+    : markdown;
 
   // Remove inline tags in body
-  const inlineTagRegex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normTarget)}(?=$|[\\s)\\]},.!?:;])`, "gi");
+  const inlineTagRegex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normTarget)}(?:[ \\t]+|(?=$|[\\s)\\]},.!?:;\\r\\n]))`, "gi");
   updatedContent = updatedContent.replace(inlineTagRegex, "$1");
 
   return updatedContent;
@@ -479,6 +486,6 @@ export function updateFrontmatterFavorite(markdown: string, isFavorite?: boolean
   return newFrontmatter + parsed.bodyContent;
 }
 
-function escapeRegExp(string: string): string {
+export function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -130,9 +130,9 @@ This has a #realtag.
     expect(parsed.allTags).toEqual(["realtag"]);
   });
 
-  it("prevents extracting incomplete tags while typing until space/punctuation/newline is entered", () => {
-    const typingIncomplete = "Build your own knowledge. #k";
-    expect(parseFrontmatterAndTags(typingIncomplete).allTags).toEqual([]);
+  it("extracts inline tags with space, newline, punctuation, or end-of-string", () => {
+    const typedAtEnd = "Build your own knowledge. #kkkk";
+    expect(parseFrontmatterAndTags(typedAtEnd).allTags).toEqual(["kkkk"]);
 
     const typedWithSpace = "Build your own knowledge. #kkkk ";
     expect(parseFrontmatterAndTags(typedWithSpace).allTags).toEqual(["kkkk"]);
@@ -142,6 +142,12 @@ This has a #realtag.
 
     const typedWithNewline = "Build your own knowledge. #kkkk\nNext line";
     expect(parseFrontmatterAndTags(typedWithNewline).allTags).toEqual(["kkkk"]);
+
+    // Does not falsely extract hex colors or anchors inside HTML tags
+    const withHtml = '<span style="color: #64748b">Text with #actualtag</span>';
+    const parsedHtml = parseFrontmatterAndTags(withHtml);
+    expect(parsedHtml.allTags).toEqual(["actualtag"]);
+    expect(parsedHtml.allTags).not.toContain("64748b");
   });
 
   it("preserves intentional blank lines in note body and does not accumulate empty lines", () => {
@@ -220,5 +226,68 @@ Luno is a simple and flexible workspace.`);
     expect(parsedUser.frontmatterData.icon).toBe("lucide:MessageSquare");
     expect(parsedUser.frontmatterData.iconColor).toBe("#64748b");
     expect(parsedUser.frontmatterData.favorite).toBe(true);
+  });
+
+  it("detects #welcome as note tag from '#welcome to my doc' and removes tag when replaced with 'Hi This ismy doc'", () => {
+    const original = "#welcome to my doc";
+    const parsed1 = parseFrontmatterAndTags(original);
+    expect(parsed1.allTags).toEqual(["welcome"]);
+    expect(parsed1.inlineTags).toEqual(["welcome"]);
+
+    const modified = "Hi This ismy doc";
+    const parsed2 = parseFrontmatterAndTags(modified);
+    expect(parsed2.allTags).toEqual([]);
+    expect(parsed2.inlineTags).toEqual([]);
+  });
+
+  it("reads tag immediately when space is pressed without requiring text after space", () => {
+    // 1. Tag right after pressing space (no text after space)
+    const withSpace = "#welcome ";
+    expect(parseFrontmatterAndTags(withSpace).allTags).toEqual(["welcome"]);
+
+    // 2. Tag followed by newline
+    const withNewline = "my name is #nongying\n";
+    expect(parseFrontmatterAndTags(withNewline).allTags).toEqual(["nongying"]);
+
+    // 3. Tag in middle followed by space
+    const inSentence = "Hello #welcome to my doc";
+    expect(parseFrontmatterAndTags(inSentence).allTags).toEqual(["welcome"]);
+  });
+
+  it("removeTagFromMarkdown removes the #tag from text and frontmatter when deleted from UI", () => {
+    const content = "#welcome to my doc";
+    const removed = removeTagFromMarkdown(content, "welcome");
+    expect(removed).toBe("to my doc");
+
+    const contentWithFrontmatter = `---\ntags:\n  - feedback\n  - checklist\n  - hello\n---\n\n#feedback #hello\n\nSome text with #hello to all.`;
+    const removedHello = removeTagFromMarkdown(contentWithFrontmatter, "hello");
+    expect(removedHello).not.toContain("#hello");
+    const parsed = parseFrontmatterAndTags(removedHello);
+    expect(parsed.allTags).toEqual(["feedback", "checklist"]);
+    expect(parsed.frontmatterTags).toEqual(["feedback", "checklist"]);
+  });
+
+  it("ensures inline body tags are displayed in allTags but are NEVER in frontmatter tags", () => {
+    const markdown = `---
+tags:
+  - feedback
+  - checklist
+---
+
+my name is #nongying
+`;
+    const parsed = parseFrontmatterAndTags(markdown);
+    expect(parsed.hasFrontmatter).toBe(true);
+    expect(parsed.frontmatterTags).toEqual(["feedback", "checklist"]);
+    expect(parsed.inlineTags).toEqual(["nongying"]);
+    expect(parsed.allTags).toEqual(["feedback", "checklist", "nongying"]);
+
+    // Updating frontmatter tags should NOT add inline body tags to frontmatter block
+    const updated = updateFrontmatterTags(markdown, ["feedback", "checklist", "newproperty"]);
+    const reParsed = parseFrontmatterAndTags(updated);
+    expect(reParsed.frontmatterTags).toEqual(["feedback", "checklist", "newproperty"]);
+    expect(reParsed.inlineTags).toEqual(["nongying"]);
+    expect(reParsed.allTags).toEqual(["feedback", "checklist", "newproperty", "nongying"]);
+    expect(reParsed.frontmatterRaw).not.toContain("nongying");
   });
 });

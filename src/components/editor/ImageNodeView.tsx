@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { NodeViewWrapper, NodeViewProps } from "@tiptap/react";
-import { Maximize2, RotateCcw, X, ImageOff } from "lucide-react";
+import { Maximize2, RotateCcw, X, ImageOff, Pencil } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
+import { QrCodeDialog, type QrCodeData } from "@/components/QrCodeDialog";
+import { detectQrCodeText } from "@/lib/qrCode";
 
 // Global in-memory cache for resolved local image Data URLs to avoid repetitive disk reads and IPC calls
 const imageLocalCache = new Map<string, string>();
@@ -37,7 +39,27 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   selected,
 }) => {
   const { t } = useTranslation();
-  const { src, alt, title, width, "data-relative-src": dataRelativeSrc } = node.attrs;
+  const {
+    src,
+    alt,
+    title,
+    width,
+    "data-relative-src": dataRelativeSrc,
+    "data-qr-code": dataQrCode,
+    "data-qr-text": dataQrText,
+    "data-qr-color": dataQrColor,
+    "data-qr-bg": dataQrBg,
+    "data-qr-level": dataQrLevel,
+  } = node.attrs;
+
+  const isQrCode = Boolean(
+    dataQrCode === "true" ||
+    dataQrCode === true ||
+    alt === "QR Code" ||
+    alt?.toLowerCase()?.startsWith("qr code") ||
+    title === "QR Code" ||
+    (typeof src === "string" && src.includes("qrcode"))
+  );
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -46,6 +68,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   const [localResolvedSrc, setLocalResolvedSrc] = useState<string | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isQrDialogOpen, setIsQrDialogOpen] = useState(false);
   const [currentWidth, setCurrentWidth] = useState<number | null>(() => {
     if (typeof width === "number") return width;
     if (typeof width === "string") {
@@ -60,6 +83,27 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
   useEffect(() => {
     setHasError(false);
   }, [src]);
+
+  // Auto-detect QR text from image if missing (e.g. legacy notes or external imports)
+  useEffect(() => {
+    if (isQrCode && !dataQrText) {
+      let isCancelled = false;
+      const targetSrc = localResolvedSrc || src;
+      if (targetSrc) {
+        detectQrCodeText(targetSrc).then((detected) => {
+          if (!isCancelled && detected) {
+            updateAttributes({
+              "data-qr-code": "true",
+              "data-qr-text": detected,
+            });
+          }
+        });
+      }
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [isQrCode, dataQrText, localResolvedSrc, src, updateAttributes]);
 
   // Automatically resolve relative attachment paths from disk (essential for packaged production app)
   useEffect(() => {
@@ -308,14 +352,51 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
 
         {/* Floating Width Indicator while resizing */}
         {isResizing && currentWidth && (
-          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-mono font-semibold shadow-xs backdrop-blur-sm z-30 pointer-events-none">
+          <div
+            style={{ fontFamily: "var(--app-font-family, sans-serif)" }}
+            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-semibold shadow-xs backdrop-blur-sm z-30 pointer-events-none"
+          >
             {currentWidth}px
           </div>
         )}
 
-        {/* Top-Right Control Buttons (View Full Image & Reset Size) */}
+        {/* Top-Right Control Buttons (Edit QR Code, View Full Image & Reset Size) */}
         {(isHovered || selected) && !isResizing && (
           <div className="absolute top-2 right-2 flex items-center gap-1.5 z-30">
+            {/* Edit QR Code Button */}
+            {isQrCode && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!dataQrText) {
+                        const targetSrc = localResolvedSrc || src;
+                        if (targetSrc) {
+                          const detected = await detectQrCodeText(targetSrc);
+                          if (detected) {
+                            updateAttributes({
+                              "data-qr-code": "true",
+                              "data-qr-text": detected,
+                            });
+                          }
+                        }
+                      }
+                      setIsQrDialogOpen(true);
+                    }}
+                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                  {t("editor.qrEdit") || "แก้ไขคิวอาร์โค้ด"}
+                </TooltipContent>
+              </Tooltip>
+            )}
+
             {/* Fullscreen Preview Button */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -387,6 +468,31 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
         )}
       </div>
 
+      {/* QR Code Edit Dialog Modal */}
+      {isQrCode && isQrDialogOpen && (
+        <QrCodeDialog
+          open={isQrDialogOpen}
+          onOpenChange={setIsQrDialogOpen}
+          mode="edit"
+          initialText={dataQrText || ""}
+          initialColor={dataQrColor || "#000000"}
+          initialBgType={dataQrBg || "white"}
+          initialLevel={dataQrLevel || "M"}
+          onSaveQrCode={(dataUrl, qrData) => {
+            updateAttributes({
+              src: dataUrl,
+              alt: "QR Code",
+              "data-qr-code": "true",
+              "data-qr-text": qrData?.text || "",
+              "data-qr-color": qrData?.color || "#000000",
+              "data-qr-bg": qrData?.bgType || "white",
+              "data-qr-level": qrData?.level || "M",
+              // Width attribute is completely preserved so image size remains identical!
+            });
+          }}
+        />
+      )}
+
       {/* Full-Screen Image Lightbox Preview */}
       {isPreviewOpen &&
         typeof document !== "undefined" &&
@@ -452,6 +558,11 @@ export const ImageNodeView = React.memo(ImageNodeViewComponent, (prevProps, next
     prevProps.node.attrs.src === nextProps.node.attrs.src &&
     prevProps.node.attrs.width === nextProps.node.attrs.width &&
     prevProps.node.attrs["data-relative-src"] === nextProps.node.attrs["data-relative-src"] &&
+    prevProps.node.attrs["data-qr-code"] === nextProps.node.attrs["data-qr-code"] &&
+    prevProps.node.attrs["data-qr-text"] === nextProps.node.attrs["data-qr-text"] &&
+    prevProps.node.attrs["data-qr-color"] === nextProps.node.attrs["data-qr-color"] &&
+    prevProps.node.attrs["data-qr-bg"] === nextProps.node.attrs["data-qr-bg"] &&
+    prevProps.node.attrs["data-qr-level"] === nextProps.node.attrs["data-qr-level"] &&
     prevProps.node.attrs.alt === nextProps.node.attrs.alt &&
     prevProps.node.attrs.title === nextProps.node.attrs.title &&
     prevProps.selected === nextProps.selected

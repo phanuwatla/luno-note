@@ -239,20 +239,38 @@ describe("templates.ts", () => {
 
   it("has metadata and pack-specific icons for all templates", () => {
     // Markdown
-    expect(NOTE_TEMPLATE_METADATA["daily"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["todo"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["meeting"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["project"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["study"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["bug"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["weekly-review"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["book-notes"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["cornell-notes"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["content-planner"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["api-doc"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["habit-tracker"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["monthly-budget"]).toBeDefined();
-    expect(NOTE_TEMPLATE_METADATA["travel-itinerary"]).toBeDefined();
+    const markdownTypes = [
+      "daily",
+      "todo",
+      "meeting",
+      "project",
+      "study",
+      "bug",
+      "weekly-review",
+      "book-notes",
+      "cornell-notes",
+      "content-planner",
+      "api-doc",
+      "habit-tracker",
+      "monthly-budget",
+      "travel-itinerary",
+    ] as const;
+
+    for (const type of markdownTypes) {
+      const meta = NOTE_TEMPLATE_METADATA[type];
+      expect(meta).toBeDefined();
+      expect(meta.tags).toBeDefined();
+      expect(meta.tags!.length).toBeGreaterThanOrEqual(1);
+      expect(meta.tags!.length).toBeLessThanOrEqual(2);
+
+      const generatedEn = getNoteTemplateContent(type, "en", "markdown");
+      expect(generatedEn).toMatch(/^---\n[\s\S]*?tags:\n/);
+      expect(generatedEn).not.toMatch(/#[a-zA-Z0-9_-]+\s+#[a-zA-Z0-9_-]+/);
+
+      const generatedTh = getNoteTemplateContent(type, "th", "markdown");
+      expect(generatedTh).toMatch(/^---\n[\s\S]*?tags:\n/);
+      expect(generatedTh).not.toMatch(/#[a-zA-Z0-9_-]+\s+#[a-zA-Z0-9_-]+/);
+    }
 
     // HTML
     expect(NOTE_TEMPLATE_METADATA["basic-website"]).toBeDefined();

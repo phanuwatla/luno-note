@@ -72,7 +72,7 @@ describe("HomeView Component", () => {
     const dailyNoteCard = screen.getByText(/Daily Note|บันทึกประจำวัน/i).closest("div");
     if (dailyNoteCard) {
       fireEvent.click(dailyNoteCard);
-      expect(handleCreateWithTemplate).toHaveBeenCalledWith("daily");
+      expect(handleCreateWithTemplate).toHaveBeenCalledWith("daily", undefined, "lucide:Calendar", "#10b981");
     }
   });
 

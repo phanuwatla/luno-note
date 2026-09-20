@@ -66,7 +66,14 @@ import {
   Type,
   ALargeSmall,
   AlignLeft,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Heading1Icon } from "@/components/icons/Heading1Icon";
 import { Heading2Icon } from "@/components/icons/Heading2Icon";
 import { Heading3Icon } from "@/components/icons/Heading3Icon";
@@ -88,13 +95,19 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, DEFAULT_HIDDEN_TOOLBAR_ITEMS, DEFAULT_TOOLBAR_ORDER, TOOLBAR_PRESETS, FONT_OPTIONS, useAppSettings, useCustomFonts } from "@/hooks/useAppSettings";
-import { saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/lib/customFontStore";
+import { saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, type CustomFont } from "@/lib/customFontStore";
 import { ICON_PACK_OPTIONS, IconPackId, TOOLBAR_ICON_MAP, getToolbarIcon } from "@/lib/iconPacks";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { formatDate, formatTime, getDatePatternLabel } from "@/lib/dateTimeFormatter";
-import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_ABOUT_CREDIT, openExternalUrl } from "@/lib/appVersion";
+import {
+  APP_VERSION,
+  APP_AUTHOR,
+  APP_AUTHOR_URL,
+  APP_ABOUT_CREDIT,
+  openExternalUrl,
+} from "@/lib/appVersion";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { exportWorkspaceBackupZip } from "@/lib/backupExporter";
 import { fetchAvailableModels, clearExhaustedModels, type AvailableModelOption } from "@/lib/geminiApi";
@@ -192,6 +205,7 @@ interface SettingsTabViewProps {
   isCloudWorkspace?: boolean;
   onCloseWorkspace?: () => void;
   onOpenWebTab?: (url: string, initialTitle?: string) => void;
+  onOpenWhatsNew?: () => void;
 }
 
 export default function SettingsTabView({
@@ -205,6 +219,7 @@ export default function SettingsTabView({
   isCloudWorkspace = false,
   onCloseWorkspace,
   onOpenWebTab,
+  onOpenWhatsNew,
 }: SettingsTabViewProps) {
   const { settings, updateSetting, applyAppearanceStyle, resetSettings } = useAppSettings();
   const { customFonts, refresh: refreshCustomFonts } = useCustomFonts();
@@ -479,16 +494,16 @@ export default function SettingsTabView({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="h-full w-full flex flex-col bg-background text-foreground overflow-hidden select-none">
+      <div className="flex-1 min-h-0 h-full w-full max-h-full flex flex-col bg-background text-foreground overflow-hidden select-none">
         {/* Main 2-Column Content View */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden">
           {/* Left Navigation Category Column (Matching Screenshot) */}
           <div className="w-60 border-r border-border/50 bg-card/30 flex flex-col shrink-0 select-none">
             <div className="px-5 py-4 border-b border-border/40 font-bold text-lg text-foreground flex items-center justify-between">
               <span>{t("settings.title") || "Settings"}</span>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-1 no-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-1 no-scrollbar overscroll-contain">
               {categories.map((cat) => {
                 const Icon = getToolbarIcon(cat.iconKey, pack);
                 const isActive = safeActiveCategory === cat.id;
@@ -515,7 +530,7 @@ export default function SettingsTabView({
           </div>
 
           {/* Right Content Panel View */}
-          <div className="flex-1 flex flex-col bg-background/50 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
             <div className="px-8 py-5 border-b border-border/40 bg-card/20 shrink-0">
               <div>
@@ -525,7 +540,7 @@ export default function SettingsTabView({
             </div>
 
             {/* Scrollable Category Options Body */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar w-full">
+            <div className="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 no-scrollbar w-full overscroll-contain">
               {/* 1. GENERAL */}
               {safeActiveCategory === "general" && (
                 <div className="space-y-6">
@@ -1203,57 +1218,65 @@ export default function SettingsTabView({
                             <label className="text-xs font-semibold text-foreground">{t("settings.customFonts") || "Workspace Fonts"}</label>
                             <p className="text-[11px] text-muted-foreground mt-0.5">{t("settings.manageFontsDesc") || "Manage uploaded custom fonts for current workspace"}</p>
                           </div>
-                          <span className="text-[11px] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-md">
+                          <span className="text-xs font-normal text-muted-foreground">
                             {customFonts.length}
                           </span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {customFonts.map((font) => (
-                            <div
-                              key={font.id}
-                              className="flex items-center justify-between p-2.5 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
-                            >
-                              <div className="min-w-0 flex-1 mr-2">
-                                <p className="text-xs font-medium truncate text-foreground" style={{ fontFamily: font.css }}>
-                                  {font.name}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground font-mono truncate">
-                                  {font.format.toUpperCase()} · {(font.fileSize / 1024).toFixed(1)} KB
-                                </p>
+                          {customFonts.map((font) => {
+                            const sizeText = getFontDisplayFileSize(font);
+                            return (
+                              <div
+                                key={font.id}
+                                className="group flex items-center justify-between p-2.5 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
+                              >
+                                <div className="min-w-0 flex-1 mr-2">
+                                  <p
+                                    className="text-xs font-medium truncate text-foreground"
+                                    style={{ fontFamily: font.css || font.name }}
+                                  >
+                                    {font.name}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground truncate mt-1">
+                                    {font.format.toUpperCase()}{sizeText ? ` · ${sizeText}` : ""}
+                                  </p>
+                                </div>
+                                <div className="flex items-center shrink-0">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 cursor-pointer transition-opacity"
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                        <span className="sr-only">Actions</span>
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-md">
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setFontToRename(font);
+                                          setFontRenameValue(font.name);
+                                        }}
+                                        className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                        <span>{t("settings.renameFont") || "Rename"}</span>
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        onClick={() => setFontToDelete(font)}
+                                        className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                      >
+                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                        <span>{t("settings.deleteFont") || "Delete"}</span>
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/5 cursor-pointer transition-colors"
-                                      onClick={() => {
-                                        setFontToRename(font);
-                                        setFontRenameValue(font.name);
-                                      }}
-                                    >
-                                      <Pencil className="h-3.5 w-3.5" />
-                                      <span className="sr-only">{t("settings.renameFont") || "Rename"}</span>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t("settings.renameFont") || "Rename font"}</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"
-                                      onClick={() => setFontToDelete(font)}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      <span className="sr-only">{t("settings.deleteFont") || "Delete"}</span>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t("settings.deleteFont") || "Delete font"}</TooltipContent>
-                                </Tooltip>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2452,9 +2475,20 @@ export default function SettingsTabView({
                       <div className="space-y-1.5 max-w-xl">
                         <div>
                           <h3 className="text-sm font-bold text-foreground">Luno Note</h3>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
-                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() => onOpenWhatsNew?.()}
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left block mt-0.5 focus:outline-none"
+                              >
+                                Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {settings.language === "th" ? "ดูรายการอัปเดตเวอร์ชันนี้" : "View release notes for this version"}
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
                           {t("settings.aboutAppDesc")}
@@ -2466,7 +2500,11 @@ export default function SettingsTabView({
                             rel="noopener noreferrer"
                             onClick={(e) => {
                               e.preventDefault();
-                              openExternalUrl(APP_AUTHOR_URL);
+                              if (onOpenWebTab) {
+                                onOpenWebTab(APP_AUTHOR_URL, `GitHub - ${APP_AUTHOR}`);
+                              } else {
+                                openExternalUrl(APP_AUTHOR_URL);
+                              }
                             }}
                             className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                           >
@@ -2580,6 +2618,7 @@ export default function SettingsTabView({
         type="file"
         accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
         className="hidden"
+        style={{ display: "none" }}
         onChange={handleFontFileUpload}
       />
 

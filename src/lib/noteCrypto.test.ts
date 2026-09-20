@@ -4,6 +4,7 @@ import {
   decryptNoteContent,
   isEncryptedNote,
   parseEncryptedEnvelope,
+  isLockableTextFile,
 } from "./noteCrypto";
 
 describe("noteCrypto - 6-Digit PIN Encryption & Decryption", () => {
@@ -48,10 +49,53 @@ describe("noteCrypto - 6-Digit PIN Encryption & Decryption", () => {
 
     expect(envelope).not.toBeNull();
     expect(envelope?.luno_locked).toBe(true);
-    expect(envelope?.version).toBe(1);
+    expect(envelope?.version).toBe(2);
+    expect(envelope?.iterations).toBe(600_000);
     expect(typeof envelope?.salt).toBe("string");
     expect(typeof envelope?.iv).toBe("string");
     expect(typeof envelope?.ciphertext).toBe("string");
+  });
+
+  it("should NOT false-positive detect normal notes that mention 'luno_locked: true' in body", () => {
+    const normalNoteWithMention = "# How Luno Works\n\nInside the file, you might see `luno_locked: true` in config.\n\nEnd of note.";
+    expect(isEncryptedNote(normalNoteWithMention)).toBe(false);
+    expect(parseEncryptedEnvelope(normalNoteWithMention)).toBeNull();
+  });
+
+  it("should maintain backward compatibility with v1 100,000 iteration envelopes without luno_iterations tag", async () => {
+    // Manually construct a valid legacy v1 envelope using 100,000 iterations
+    const legacyEncrypted = await encryptNoteContent(samplePlainText, pin, 100_000);
+    const legacyV1Envelope = legacyEncrypted
+      .replace("luno_version: 2", "luno_version: 1")
+      .replace(/luno_iterations: \d+\n/, "");
+
+    expect(isEncryptedNote(legacyV1Envelope)).toBe(true);
+    const envelope = parseEncryptedEnvelope(legacyV1Envelope);
+    expect(envelope?.version).toBe(1);
+    expect(envelope?.iterations).toBe(100_000);
+
+    const decrypted = await decryptNoteContent(legacyV1Envelope, pin);
+    expect(decrypted).toBe(samplePlainText);
+  });
+
+  it("should correctly identify lockable text files (.md, .txt, .html, .css) and reject binaries", () => {
+    expect(isLockableTextFile("document.md")).toBe(true);
+    expect(isLockableTextFile("guide.markdown")).toBe(true);
+    expect(isLockableTextFile("plain.txt")).toBe(true);
+    expect(isLockableTextFile("index.html")).toBe(true);
+    expect(isLockableTextFile("styles.css")).toBe(true);
+    expect(isLockableTextFile(undefined)).toBe(true); // untitled note
+
+    // Non-lockable binaries/images/special
+    expect(isLockableTextFile("photo.png")).toBe(false);
+    expect(isLockableTextFile("photo.jpg")).toBe(false);
+    expect(isLockableTextFile("photo.webp")).toBe(false);
+    expect(isLockableTextFile("archive.zip")).toBe(false);
+    expect(isLockableTextFile("doc.pdf")).toBe(false);
+    expect(isLockableTextFile("sound.mp3")).toBe(false);
+    expect(isLockableTextFile("note.md", "image")).toBe(false);
+    expect(isLockableTextFile("note.md", "binary")).toBe(false);
+    expect(isLockableTextFile("note.md", "luno-ai")).toBe(false);
   });
 
   it("should support cross-instance re-encryption with new PIN", async () => {
@@ -66,4 +110,24 @@ describe("noteCrypto - 6-Digit PIN Encryption & Decryption", () => {
     // Old pin fails on V2
     await expect(decryptNoteContent(encryptedV2, "112233")).rejects.toThrow("INCORRECT_PIN");
   });
+
+  it("should independently encrypt and decrypt separate notes without data leakage", async () => {
+    const note1Content = "---\ntags:\n  - lock1\n---\nThis is content from testing 1";
+    const note2Content = "---\ntags:\n  - lock2\n---\nThis is content from testing 2";
+
+    const encrypted1 = await encryptNoteContent(note1Content, "111111");
+    const encrypted2 = await encryptNoteContent(note2Content, "222222");
+
+    expect(isEncryptedNote(encrypted1)).toBe(true);
+    expect(isEncryptedNote(encrypted2)).toBe(true);
+
+    const decrypted1 = await decryptNoteContent(encrypted1, "111111");
+    const decrypted2 = await decryptNoteContent(encrypted2, "222222");
+
+    expect(decrypted1).toBe(note1Content);
+    expect(decrypted2).toBe(note2Content);
+    expect(decrypted1).not.toContain("testing 2");
+    expect(decrypted2).not.toContain("testing 1");
+  });
 });
+

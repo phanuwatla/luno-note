@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { Note } from "@/hooks/useNotes";
+import { isEncryptedNote } from "@/lib/noteCrypto";
 
 export interface TrashedNote extends Note {
   deletedAt: number;
@@ -37,19 +38,37 @@ function loadTrash(): TrashedNote[] {
     if (!raw) return [];
     const items: TrashedNote[] = JSON.parse(raw);
     if (!Array.isArray(items)) return [];
-    return items.map((item) => ({
-      ...item,
-      size: item.size || calculateNoteSize(item),
-    }));
+    return items.map((item) => {
+      const isLocked = Boolean(item.isLocked || isEncryptedNote(item.content));
+      return {
+        ...item,
+        isLocked,
+        isDecrypted: false,
+        size: item.size || calculateNoteSize(item),
+      };
+    });
   } catch {
     return [];
   }
 }
 
+function sanitizeTrashForStorage(trash: TrashedNote[]): TrashedNote[] {
+  return trash.map((n) => {
+    if (n.isLocked || isEncryptedNote(n.content)) {
+      return {
+        ...n,
+        content: n.encryptedContent || (isEncryptedNote(n.content) ? n.content : ""),
+        isDecrypted: false,
+      };
+    }
+    return n;
+  });
+}
+
 function saveTrash(trash: TrashedNote[]) {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
-      window.localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(trash));
+      window.localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(sanitizeTrashForStorage(trash)));
     }
   } catch (err) {
     console.warn("Failed to save trash to localStorage:", err);
@@ -80,13 +99,22 @@ export function useTrash() {
     if (noteArray.length === 0) return;
 
     const now = Date.now();
-    const newTrashItems: TrashedNote[] = noteArray.map((note) => ({
-      ...note,
-      deletedAt: now,
-      originalFolderPath: note.folderPath,
-      originalFileName: note.fileName,
-      size: calculateNoteSize(note),
-    }));
+    const newTrashItems: TrashedNote[] = noteArray.map((note) => {
+      const isLocked = Boolean(note.isLocked || isEncryptedNote(note.content));
+      const safeContent = isLocked
+        ? (note.encryptedContent || (isEncryptedNote(note.content) ? note.content : ""))
+        : note.content;
+      return {
+        ...note,
+        content: safeContent,
+        isLocked,
+        isDecrypted: false,
+        deletedAt: now,
+        originalFolderPath: note.folderPath,
+        originalFileName: note.fileName,
+        size: calculateNoteSize({ ...note, content: safeContent }),
+      };
+    });
 
     setTrashedNotes((prev) => {
       // Remove any existing trash item with the same ID before appending

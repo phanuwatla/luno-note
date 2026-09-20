@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Lock, Unlock, Key, Eye, EyeOff, ShieldCheck, AlertCircle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { Note } from "@/hooks/useNotes";
+import { getRemainingLockoutSeconds, recordFailedPinAttempt, clearPinLockout } from "@/lib/pinLockout";
 
 export type PinLockModalMode = "set" | "remove" | "change";
 
@@ -27,6 +29,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
   onConfirmChangePin,
 }) => {
   const { t } = useTranslation();
+  const { settings } = useAppSettings();
 
   const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
@@ -78,6 +81,17 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
         setLoading(false);
       }
     } else if (mode === "remove") {
+      const remaining = getRemainingLockoutSeconds(note.id);
+      if (remaining > 0) {
+        const isTh = settings?.language === "th";
+        setError(
+          isTh
+            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
+            : `Too many failed attempts. Please wait ${remaining}s.`
+        );
+        return;
+      }
+
       if (currentPin.length !== 6) {
         setError(t("pinLock.pinLengthError") || "PIN must be exactly 6 digits.");
         return;
@@ -86,10 +100,21 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
       setLoading(true);
       try {
         await onConfirmRemovePin(note.id, currentPin);
+        clearPinLockout(note.id);
         onOpenChange(false);
       } catch (err: any) {
         if (err.message === "INCORRECT_PIN") {
-          setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+          const { lockoutSeconds: lockout } = recordFailedPinAttempt(note.id);
+          const isTh = settings?.language === "th";
+          if (lockout > 0) {
+            setError(
+              isTh
+                ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
+                : `Too many failed attempts. Please wait ${lockout}s.`
+            );
+          } else {
+            setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+          }
         } else {
           setError(err.message || "Failed to remove PIN");
         }
@@ -97,6 +122,17 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
         setLoading(false);
       }
     } else if (mode === "change") {
+      const remaining = getRemainingLockoutSeconds(note.id);
+      if (remaining > 0) {
+        const isTh = settings?.language === "th";
+        setError(
+          isTh
+            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
+            : `Too many failed attempts. Please wait ${remaining}s.`
+        );
+        return;
+      }
+
       if (currentPin.length !== 6) {
         setError(t("pinLock.pinLengthError") || "Current PIN must be 6 digits.");
         return;
@@ -113,10 +149,21 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
       setLoading(true);
       try {
         await onConfirmChangePin(note.id, currentPin, pin);
+        clearPinLockout(note.id);
         onOpenChange(false);
       } catch (err: any) {
         if (err.message === "INCORRECT_PIN") {
-          setError(t("pinLock.incorrectPin") || "Incorrect current PIN. Please try again.");
+          const { lockoutSeconds: lockout } = recordFailedPinAttempt(note.id);
+          const isTh = settings?.language === "th";
+          if (lockout > 0) {
+            setError(
+              isTh
+                ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
+                : `Too many failed attempts. Please wait ${lockout}s.`
+            );
+          } else {
+            setError(t("pinLock.incorrectPin") || "Incorrect current PIN. Please try again.");
+          }
         } else {
           setError(err.message || "Failed to change PIN");
         }

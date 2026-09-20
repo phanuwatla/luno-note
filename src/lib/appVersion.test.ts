@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_COPYRIGHT, APP_ABOUT_CREDIT } from "./appVersion";
+import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_COPYRIGHT, APP_ABOUT_CREDIT, APP_LATEST_RELEASE_URL } from "./appVersion";
 import packageJson from "../../package.json";
 
 describe("appVersion", () => {
@@ -13,5 +13,6 @@ describe("appVersion", () => {
     expect(APP_AUTHOR_URL).toBe("https://github.com/phanuwatla");
     expect(APP_COPYRIGHT).toBe("Copyright © 2026 phanuwatla");
     expect(APP_ABOUT_CREDIT).toBe("Made by phanuwatla © 2026 Luno Note");
+    expect(APP_LATEST_RELEASE_URL).toBe("https://github.com/phanuwatla/luno-note/releases/latest");
   });
 });

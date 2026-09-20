@@ -12,6 +12,8 @@ export const APP_AUTHOR_URL: string =
     : "https://github.com/phanuwatla";
 export const APP_COPYRIGHT = "Copyright © 2026 phanuwatla";
 export const APP_ABOUT_CREDIT = `Made by ${APP_AUTHOR} © 2026 ${APP_NAME}`;
+export const APP_REPOSITORY_URL = "https://github.com/phanuwatla/luno-note";
+export const APP_LATEST_RELEASE_URL = "https://github.com/phanuwatla/luno-note/releases/latest";
 
 export function openExternalUrl(url: string) {
   const electron = (window as unknown as { electronAPI?: { openExternal?: (url: string) => Promise<boolean> } })?.electronAPI;

@@ -49,6 +49,11 @@ export function sanitizeHtml(rawHtml: string): string {
           "data-color",
           "data-font-family",
           "data-font-size",
+          "data-qr-code",
+          "data-qr-text",
+          "data-qr-color",
+          "data-qr-bg",
+          "data-qr-level",
           "class",
           "style",
           "width",
@@ -64,7 +69,7 @@ export function sanitizeHtml(rawHtml: string): string {
           "disabled",
         ],
         ALLOWED_URI_REGEXP:
-          /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$)|data:image\/|blob:)/i,
+          /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|wikilink):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$)|data:image\/|blob:)/i,
       });
     }
   } catch (err) {

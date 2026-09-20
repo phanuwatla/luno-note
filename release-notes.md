@@ -1,3 +1,44 @@
+## Release Notes - Luno Note v1.3.1
+
+### Overview
+Luno Note version 1.3.1 delivers major security enhancements, native video embedding, in-place QR Code editing, an anchored floating footnote popover, and an interactive in-app What's New release notes hub.
+
+### Key Improvements & New Features
+
+#### 1. Embedded Video Playback & Multimedia Support
+- **Native Video Player**: Seamlessly embed and play MP4, WebM, and local video attachments directly inside the note editor.
+- **Offline & Desktop Asset Resolution**: High-performance local caching (`videoLocalCache`) with Electron workspace integration and blob URL conversion.
+- **Customizable Alignment & Sizing**: Control video alignment (left, center, right, justify) and responsive width constraints with a sleek player wrapper.
+
+#### 2. In-Place QR Code Editing & Auto Detection
+- **Direct Editor Modification**: Hover over any embedded QR code in a note to edit text content, foreground/background colors, and error correction levels without re-creating from scratch.
+- **Automatic Content Recognition**: Scans and decodes existing QR codes automatically upon clicking the edit button, preserving existing layout and dimensions.
+
+#### 3. Major Security Overhaul & Anti-Brute Force Protection
+- **OWASP-Recommended PBKDF2 (600,000 Iterations)**: Upgraded cryptographic key derivation with 600,000 iterations of PBKDF2-HMAC-SHA256 and unique salts, rendering offline dictionary attacks computationally unfeasible.
+- **Progressive Anti-Brute Force Lockout**: Escalating lockout cooldowns (3s -> 30s -> 120s) protect against automated PIN guessing. Lockout timers remain strictly enforced across tab switching and session reloads.
+- **Multi-Format Text File Protection**: Full AES-GCM encryption support extended beyond Markdown to `.txt`, `.html`, and `.css` workspace files.
+- **Distraction-Free Locked Note Mode**: Sensitive toolbar controls, action buttons, and autosave indicators remain concealed until unlocked.
+- **Encrypted Trash Protection**: Locked notes moved to Trash retain full ciphertext security and never leak unencrypted contents.
+
+#### 4. Interactive Floating Footnote Popover
+- **Anchored Quick Insertion**: Minimalist floating popover anchored directly at the cursor insertion point to add or edit footnote references without losing focus.
+- **Keyboard-Driven Workflow**: Press `Enter` to commit footnote reference, or `Escape` to cancel.
+
+#### 5. Interactive What's New Hub
+- **Dedicated Release View**: Accessible anytime from **Settings > About Luno** or **Help > About Luno** by clicking on the version number.
+- **First-Run Automatic Showcase**: Automatically presents release highlights when opening a newly updated version for the first time.
+
+#### 6. Version History & Split-Diff Enhancements
+- **Synchronized Scrolling**: Dual-pane comparison viewer with lockstep scroll synchronization for side-by-side review.
+- **Accurate Metrics**: Line-by-line diff summarization, word counts, and character statistics across Markdown, Plain Text, HTML, and CSS.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.3.1.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.0
 
 ### Overview

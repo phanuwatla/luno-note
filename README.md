@@ -6,30 +6,30 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.3.0-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.0)
+[![Version](https://img.shields.io/badge/version-1.3.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.1)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.3.0-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.3.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.3.0](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.0](#what-is-new-in-version-130) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.3.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.1](#what-is-new-in-version-131) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.3.0
+## What Is New in Version 1.3.1
 
-- <img src="./assets/icons/git-fork.svg" width="16" height="16" align="center" /> **Interactive Knowledge Graph (Relations View)**: Canvas-based force-directed node-link network mapping bi-directional links, wikilinks (`[[...]]`), and Markdown references with drag-and-drop physics, tag filtering, live search, and direct note navigation.
-- <img src="./assets/icons/typography.svg" width="16" height="16" align="center" /> **Workspace Custom Font Management**: Direct local font installation (`.ttf`, `.otf`, `.woff`, `.woff2`) with persistent workspace storage (`.luno/fonts/`), dynamic `@font-face` registration, and integration across App, Editor, and Toolbar font pickers.
-- <img src="./assets/icons/qr-code.svg" width="16" height="16" align="center" /> **Integrated QR Code Generator**: ISO/IEC 18004 compliant QR Code tool supporting error correction levels (L, M, Q, H), color customization, transparency, clipboard copying, file download, and one-click editor insertion.
-- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Custom Accent Color Theming**: User-defined accent themes with a full hex color picker, real-time HSL palette computation, dynamic CSS variables, and adaptive branding filters for logo and favicon.
-- <img src="./assets/icons/sidebar.svg" width="16" height="16" align="center" /> **Compact Activity Bar Layout (VS Code Style)**: Optional modern layout featuring a 52px left activity bar with an independent collapsible workspace explorer panel.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Luno AI History Redesign & Search**: Real-time thread search filtering for past AI conversations with streamlined drawer and tab synchronization.
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Workspace Persistence Across Updates**: Desktop application now safely preserves the active workspace directory across version updates.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Enhanced Snippet Extraction**: Clean plain-text generation stripping Markdown syntax, tables, wikilinks, and HTML for card previews.
+- <img src="./assets/icons/video.svg" width="16" height="16" align="center" /> **Embedded Video Support & Playback**: Native HTML5 video embedding (`video` tag) inside notes with offline local asset caching (`videoLocalCache`), alignment settings, and responsive width controls.
+- <img src="./assets/icons/qr-code.svg" width="16" height="16" align="center" /> **In-Place QR Code Editing & Scanning**: Hover over any QR code in your note to edit content, colors, and error correction levels directly, with automatic QR decoding from existing images.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **OWASP-Recommended PBKDF2 (600,000 Iterations)**: Upgraded key derivation to 600,000 PBKDF2-HMAC-SHA256 iterations with unique cryptographic salts, making offline dictionary attacks computationally unfeasible.
+- <img src="./assets/icons/lock.svg" width="16" height="16" align="center" /> **Progressive Anti-Brute Force Lockout**: Escalating timeouts (3s -> 30s -> 120s) protect against automated PIN guessing, persisting seamlessly across tab switches and app restarts.
+- <img src="./assets/icons/lock.svg" width="16" height="16" align="center" /> **Multi-Format Text File Protection**: Full AES-GCM encryption support extended beyond Markdown to `.txt`, `.html`, and `.css` workspace files.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Floating Footnote Popover**: Minimalist floating popover anchored directly at the cursor insertion point to insert and link footnote references quickly without losing focus.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Interactive What's New Hub**: Dedicated release notes view accessible anytime via Settings/Help or automatically upon first launch after an update.
+- <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History & Split-Diff Enhancements**: Dual-pane comparison viewer with lockstep synchronized scrolling and accurate character and word statistics.
 
 ---
 
@@ -56,7 +56,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.3.0.exe`** | Automated Windows installer with differential update support | [![Download v1.3.0](https://img.shields.io/badge/Download-v1.3.0-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.0/luno-note-setup-1.3.0.exe) |
+| **`luno-note-setup-1.3.1.exe`** | Automated Windows installer with differential update support | [![Download v1.3.1](https://img.shields.io/badge/Download-v1.3.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.1/luno-note-setup-1.3.1.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

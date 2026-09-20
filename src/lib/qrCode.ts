@@ -190,3 +190,39 @@ export async function downloadQrCodeImage(
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Detects / decodes text from a QR code image element or source URL
+ * Uses the browser's native BarcodeDetector API if supported
+ */
+export async function detectQrCodeText(
+  imgOrSrc: HTMLImageElement | string
+): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    if ("BarcodeDetector" in window) {
+      const detector = new (window as any).BarcodeDetector({ formats: ["qr_code"] });
+      let source: HTMLImageElement;
+      if (typeof imgOrSrc === "string") {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = imgOrSrc;
+        await new Promise((resolve) => {
+          if (img.complete && img.naturalWidth > 0) return resolve(true);
+          img.onload = () => resolve(true);
+          img.onerror = () => resolve(false);
+        });
+        source = img;
+      } else {
+        source = imgOrSrc;
+      }
+      const barcodes = await detector.detect(source);
+      if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+        return barcodes[0].rawValue;
+      }
+    }
+  } catch (err) {
+    console.warn("detectQrCodeText error:", err);
+  }
+  return null;
+}

@@ -51,11 +51,23 @@ import {
 import { ICON_COLOR_PALETTE } from "@/lib/iconPacks";
 import { useAppSettings } from "@/hooks/useAppSettings";
 
-interface QrCodeDialogProps {
+export interface QrCodeData {
+  text: string;
+  color: string;
+  bgType: "white" | "transparent" | "dark";
+  level: QrErrorCorrectionLevel;
+}
+
+export interface QrCodeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onInsertQrCode?: (dataUrl: string) => void;
+  mode?: "create" | "edit";
+  onInsertQrCode?: (dataUrl: string, data?: QrCodeData) => void;
+  onSaveQrCode?: (dataUrl: string, data?: QrCodeData) => void;
   initialText?: string;
+  initialColor?: string;
+  initialBgType?: "white" | "transparent" | "dark";
+  initialLevel?: QrErrorCorrectionLevel;
 }
 
 function dataUrlToPngBlob(dataUrl: string): Blob {
@@ -72,17 +84,22 @@ function dataUrlToPngBlob(dataUrl: string): Blob {
 export function QrCodeDialog({
   open,
   onOpenChange,
+  mode = "create",
   onInsertQrCode,
+  onSaveQrCode,
   initialText = "",
+  initialColor = "#000000",
+  initialBgType = "white",
+  initialLevel = "M",
 }: QrCodeDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { settings } = useAppSettings();
 
   const [text, setText] = useState(initialText);
-  const [errorCorrectionLevel, setErrorCorrectionLevel] = useState<QrErrorCorrectionLevel>("M");
-  const [selectedColor, setSelectedColor] = useState<string>("#000000");
-  const [bgType, setBgType] = useState<"white" | "transparent" | "dark">("white");
+  const [errorCorrectionLevel, setErrorCorrectionLevel] = useState<QrErrorCorrectionLevel>(initialLevel);
+  const [selectedColor, setSelectedColor] = useState<string>(initialColor);
+  const [bgType, setBgType] = useState<"white" | "transparent" | "dark">(initialBgType);
   const [copied, setCopied] = useState(false);
   const [isInserting, setIsInserting] = useState(false);
 
@@ -108,20 +125,25 @@ export function QrCodeDialog({
   const totalColorPages = Math.ceil(allColorItems.length / COLOR_ITEMS_PER_PAGE);
   const [colorPage, setColorPage] = useState(0);
 
+  const prevOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       setText(initialText || "");
+      const initColor = initialColor || "#000000";
+      setSelectedColor(initColor);
+      setBgType(initialBgType || "white");
+      setErrorCorrectionLevel(initialLevel || "M");
       setCopied(false);
       setIsInserting(false);
 
       const foundIdx = allColorItems.findIndex((item) => {
         if (item.type === "preset") {
-          return item.color.toLowerCase() === (selectedColor || "#000000").toLowerCase();
+          return item.color.toLowerCase() === initColor.toLowerCase();
         }
         return Boolean(
-          selectedColor &&
+          initColor &&
             !ICON_COLOR_PALETTE.some(
-              (p) => (p.color || "#000000").toLowerCase() === selectedColor.toLowerCase()
+              (p) => (p.color || "#000000").toLowerCase() === initColor.toLowerCase()
             )
         );
       });
@@ -136,7 +158,8 @@ export function QrCodeDialog({
         textareaRef.current?.select();
       }, 50);
     }
-  }, [open, initialText, allColorItems, selectedColor]);
+    prevOpenRef.current = open;
+  }, [open, initialText, initialColor, initialBgType, initialLevel, allColorItems]);
 
   const currentColors = useMemo(() => {
     const start = colorPage * COLOR_ITEMS_PER_PAGE;
@@ -363,18 +386,36 @@ export function QrCodeDialog({
         margin: 3,
       });
 
-      if (onInsertQrCode) {
-        onInsertQrCode(dataUrl);
+      const qrData: QrCodeData = {
+        text: text.trim(),
+        color: selectedColor || "#000000",
+        bgType,
+        level: errorCorrectionLevel,
+      };
+
+      if (mode === "edit" && onSaveQrCode) {
+        onSaveQrCode(dataUrl, qrData);
+      } else if (onInsertQrCode) {
+        onInsertQrCode(dataUrl, qrData);
+      } else if (onSaveQrCode) {
+        onSaveQrCode(dataUrl, qrData);
       }
+
       onOpenChange(false);
       toast({
-        title: t("editor.qrInsertSuccess") || "QR Code Inserted",
-        description: t("editor.qrInsertDesc") || "Inserted QR Code directly into your note.",
+        title: mode === "edit"
+          ? (t("editor.qrSaveSuccess") || "บันทึกคิวอาร์โค้ดแล้ว")
+          : (t("editor.qrInsertSuccess") || "QR Code Inserted"),
+        description: mode === "edit"
+          ? (t("editor.qrSaveDesc") || "อัปเดตคิวอาร์โค้ดในโน้ตเรียบร้อยแล้ว")
+          : (t("editor.qrInsertDesc") || "Inserted QR Code directly into your note."),
       });
     } catch {
       toast({
         title: t("common.error") || "Error",
-        description: t("editor.qrInsertErrorDesc") || "Failed to insert QR Code into note.",
+        description: mode === "edit"
+          ? (t("editor.qrSaveErrorDesc") || "เกิดข้อผิดพลาดในการบันทึกคิวอาร์โค้ด")
+          : (t("editor.qrInsertErrorDesc") || "Failed to insert QR Code into note."),
         variant: "destructive",
       });
     } finally {
@@ -387,9 +428,15 @@ export function QrCodeDialog({
       <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-[650px] rounded-2xl p-5 sm:p-6 overflow-hidden">
         {/* Header */}
         <DialogHeader>
-          <DialogTitle>{t("editor.qrCodeGenerator") || "QR Code Generator"}</DialogTitle>
+          <DialogTitle>
+            {mode === "edit"
+              ? (t("editor.qrEditTitle") || "แก้ไขคิวอาร์โค้ด (QR Code)")
+              : (t("editor.qrCodeGenerator") || "สร้างคิวอาร์โค้ด (QR Code)")}
+          </DialogTitle>
           <DialogDescription>
-            {t("editor.qrCodeDialogDesc") || "Create and customize QR codes to insert into your note."}
+            {mode === "edit"
+              ? (t("editor.qrEditDesc") || "ปรับแต่งและแก้ไขคิวอาร์โค้ดในโน้ตของคุณ")
+              : (t("editor.qrCodeDialogDesc") || "สร้างและปรับแต่งคิวอาร์โค้ดเพื่อแทรกลงในโน้ต")}
           </DialogDescription>
         </DialogHeader>
 
@@ -803,7 +850,9 @@ export function QrCodeDialog({
             onClick={handleInsert}
             className="rounded-xl font-medium"
           >
-            {t("editor.qrInsertIntoNote") || "Insert into Note"}
+            {mode === "edit"
+              ? (t("common.save") || "บันทึก")
+              : (t("editor.qrInsertIntoNote") || "Insert into Note")}
           </Button>
         </DialogFooter>
       </DialogContent>

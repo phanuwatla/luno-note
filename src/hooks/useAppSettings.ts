@@ -1588,7 +1588,7 @@ export function useAppSettings() {
   return context;
 }
 
-export { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont } from "@/lib/customFontStore";
+export { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, formatFontFileSize } from "@/lib/customFontStore";
 
 export function useCustomFonts() {
   const [customFonts, setCustomFonts] = useState<import("@/lib/customFontStore").CustomFont[]>([]);

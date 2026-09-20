@@ -10,6 +10,8 @@ import Image from "@tiptap/extension-image";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { createTurndownService, preprocessMarkdownForEditor, normalizeSerializedMarkdown, renderMarkdownToEditorHtml, CustomParagraph, Toggle, noteEditorStateMap, clearNoteEditorHistory, getNoteScrollPosition, setNoteScrollPosition, noteScrollPositionMap, EDITOR_CLASSES, HashtagDecoration, SpellCheckDecoration, collapseBlockWhitespace, findMatchingFontOption, getActiveFontFamily } from "@/components/Editor";
+import { parseFrontmatterAndTags } from "@/lib/frontmatter";
+import Link from "@tiptap/extension-link";
 import { Kbd, Highlight, Underline, Superscript, Subscript, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
 import fs from "fs";
 
@@ -523,7 +525,69 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
 
     // Note 2 is still preserved
     expect(noteEditorStateMap.has("note-2")).toBe(true);
+
+    // 7. Reopening Note 1 tab resets history so undo/redo are clean (depth 0)
+    editor.commands.setContent("<p>Initial Note 1 - Edited</p>", false, { preserveWhitespace: "full" });
+    const freshNote1State = editor.state.constructor.create({
+      doc: editor.state.doc,
+      plugins: editor.state.plugins,
+    });
+    editor.view.updateState(freshNote1State);
+    expect(editor.can().undo()).toBe(false);
+    expect(editor.can().redo()).toBe(false);
+
     clearNoteEditorHistory("note-2");
+  });
+
+  it("Test 12b — Preserve Undo/Redo History when Toggling between Reading Mode and Edit Mode", () => {
+    clearNoteEditorHistory("test-reading-mode-note");
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit],
+      content: "<p>Initial line</p>",
+      parseOptions: { preserveWhitespace: "full" },
+    });
+
+    // 1. Initial document state in Edit Mode
+    expect(editor.can().undo()).toBe(false);
+
+    // 2. User edits the note
+    editor.commands.focus("end");
+    editor.commands.insertContent(" and additional user edits");
+    expect(editor.getText()).toBe("Initial line and additional user edits");
+    expect(editor.can().undo()).toBe(true);
+
+    // Save edit state as done in Edit mode
+    noteEditorStateMap.set("test-reading-mode-note", editor.state);
+
+    // 3. User switches to Reading Mode (editor becomes non-editable)
+    editor.setEditable(false);
+    expect(editor.isEditable).toBe(false);
+
+    // 4. User switches back to Edit Mode
+    // Instead of resetting EditorState with EditorState.create, restore saved edit state
+    const savedEditState = noteEditorStateMap.get("test-reading-mode-note");
+    expect(savedEditState).toBeDefined();
+    if (savedEditState) {
+      editor.view.updateState(savedEditState);
+    }
+    editor.setEditable(true);
+
+    // 5. Verify undo/redo history is completely intact!
+    expect(editor.isEditable).toBe(true);
+    expect(editor.getText()).toBe("Initial line and additional user edits");
+    expect(editor.can().undo()).toBe(true); // Undo is available!
+
+    // Execute Undo
+    editor.commands.undo();
+    expect(editor.getText()).toBe("Initial line");
+    expect(editor.can().redo()).toBe(true); // Redo is available!
+
+    // Execute Redo
+    editor.commands.redo();
+    expect(editor.getText()).toBe("Initial line and additional user edits");
+
+    clearNoteEditorHistory("test-reading-mode-note");
   });
 
   it("Test 13 — Per-File Scroll Position Persistence & Restoration across Tab Switching", () => {
@@ -557,6 +621,46 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     // If a transition unmount / switch tries to save doc-b right after it closed:
     setNoteScrollPosition("doc-b", 1200);
     expect(getNoteScrollPosition("doc-b")).toBe(0); // Remains 0 (not resurrected)!
+  });
+
+  it("Test 13.1 — Multi-extension scroll retention across txt, md, html, css files", () => {
+    noteScrollPositionMap.clear();
+
+    // Notes of different types
+    const mdNoteId = "note-md-1";
+    const txtNoteId = "note-txt-1";
+    const htmlNoteId = "note-html-1";
+    const cssNoteId = "note-css-1";
+
+    // Set scroll position for each file type
+    setNoteScrollPosition(mdNoteId, 520);
+    setNoteScrollPosition(txtNoteId, 840);
+    setNoteScrollPosition(htmlNoteId, 310);
+    setNoteScrollPosition(cssNoteId, 190);
+
+    // Verify all file types retain their respective scroll positions
+    expect(getNoteScrollPosition(mdNoteId)).toBe(520);
+    expect(getNoteScrollPosition(txtNoteId)).toBe(840);
+    expect(getNoteScrollPosition(htmlNoteId)).toBe(310);
+    expect(getNoteScrollPosition(cssNoteId)).toBe(190);
+
+    // Switching back and forth across different file types preserves all positions
+    expect(getNoteScrollPosition(htmlNoteId)).toBe(310);
+    expect(getNoteScrollPosition(mdNoteId)).toBe(520);
+    expect(getNoteScrollPosition(cssNoteId)).toBe(190);
+    expect(getNoteScrollPosition(txtNoteId)).toBe(840);
+
+    // Closing HTML tab clears only its scroll memory
+    clearNoteEditorHistory(htmlNoteId);
+    expect(getNoteScrollPosition(htmlNoteId)).toBe(0);
+    expect(getNoteScrollPosition(mdNoteId)).toBe(520);
+    expect(getNoteScrollPosition(txtNoteId)).toBe(840);
+    expect(getNoteScrollPosition(cssNoteId)).toBe(190);
+
+    // Clean up
+    clearNoteEditorHistory(mdNoteId);
+    clearNoteEditorHistory(txtNoteId);
+    clearNoteEditorHistory(cssNoteId);
   });
 
   it("Test 14 — Ordered lists with numbers in headings and nested multi-level ordered lists roundtrip", () => {
@@ -1321,6 +1425,37 @@ This is HTML with inline styling.
     expect(editorHtml).toBe("<p></p><p>First line of content</p>");
   });
 
+  it("Test 24.1 — Frontmatter note: deleting leading blank line removes it from file and prevents it from reappearing", () => {
+    const mdWithBlank = "---\ntags:\n  - test\n---\n\nFirst line of content";
+    const initialHtml = renderMarkdownToEditorHtml(mdWithBlank);
+    expect(initialHtml).toBe("<p></p><p>First line of content</p>");
+
+    // User deletes the empty paragraph in the editor interface:
+    const htmlAfterDelete = "<p>First line of content</p>";
+    const bodyMdAfterDelete = normalizeSaved(td.turndown(htmlAfterDelete));
+    expect(bodyMdAfterDelete).toBe("First line of content");
+
+    // Re-attach frontmatter with the fixed logic:
+    const parsedOriginal = parseFrontmatterAndTags(mdWithBlank);
+    const fm = parsedOriginal.frontmatterRaw.endsWith("\n") ? parsedOriginal.frontmatterRaw : parsedOriginal.frontmatterRaw + "\n";
+    const fileSaved = fm + bodyMdAfterDelete;
+
+    // File content must have NO blank line between frontmatter and body:
+    expect(fileSaved).toBe("---\ntags:\n  - test\n---\nFirst line of content");
+
+    // When file is reloaded or rendered, the empty line must NOT reappear:
+    const reloadedHtml = renderMarkdownToEditorHtml(fileSaved);
+    expect(reloadedHtml).toBe("<p>First line of content</p>");
+
+    // And if user adds the blank line back in the editor:
+    const htmlWithBlankAgain = "<p></p><p>First line of content</p>";
+    const bodyMdWithBlank = normalizeSaved(td.turndown(htmlWithBlankAgain));
+    expect(bodyMdWithBlank).toBe("\nFirst line of content");
+    const fileSavedWithBlank = fm + bodyMdWithBlank;
+    expect(fileSavedWithBlank).toBe("---\ntags:\n  - test\n---\n\nFirst line of content");
+    expect(renderMarkdownToEditorHtml(fileSavedWithBlank)).toBe("<p></p><p>First line of content</p>");
+  });
+
   it("Test 25 — Preserves space between multiple hashtags (#study #research #notes)", () => {
     const input = "#study #research #notes ";
     const editorHtml = renderMarkdownToEditorHtml(input);
@@ -1352,6 +1487,64 @@ This is HTML with inline styling.
 
     expect(html).toContain("</a> <a");
     expect(html).not.toContain("</a><a");
+  });
+
+  it("Test 27.1 — Internal wikilinks [[Test2]] maintain link tags and attributes through sanitizeHtml and TipTap Link extension", () => {
+    const input = "google [external](https://google.com)\n[[Test2]]";
+    const html = renderMarkdownToEditorHtml(input);
+
+    expect(html).toContain('href="wikilink:Test2"');
+    expect(html).toContain('data-wikilink="Test2"');
+
+    const CustomLink = Link.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          class: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("class"),
+            renderHTML: (attributes) => {
+              if (!attributes.class) return {};
+              return { class: attributes.class };
+            },
+          },
+          "data-wikilink": {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-wikilink"),
+            renderHTML: (attributes) => {
+              if (!attributes["data-wikilink"]) return {};
+              return { "data-wikilink": attributes["data-wikilink"] };
+            },
+          },
+        };
+      },
+    }).configure({
+      openOnClick: false,
+      protocols: ["wikilink"],
+      validate: () => true,
+      isAllowedUri: (url, ctx) => {
+        if (!url) return false;
+        if (url.startsWith("wikilink:") || url.startsWith("#")) return true;
+        return ctx.defaultValidate(url);
+      },
+      HTMLAttributes: {
+        class: "text-primary underline underline-offset-4 cursor-pointer",
+        rel: "noopener noreferrer nofollow",
+      },
+    });
+
+    const editor = new CoreEditor({
+      extensions: [StarterKit, CustomLink],
+      content: html,
+    });
+
+    const renderedEditorHtml = editor.getHTML();
+    expect(renderedEditorHtml).toContain('href="wikilink:Test2"');
+    expect(renderedEditorHtml).toContain('data-wikilink="Test2"');
+
+    const saved = normalizeSaved(td.turndown(renderedEditorHtml));
+    expect(saved).toContain("[[Test2]]");
+    editor.destroy();
   });
 
   it("Test 28 — Tags at the end of a line or text without spacebar render as badges (#travel #itinerary #vacation)", () => {
@@ -1738,21 +1931,23 @@ This is HTML with inline styling.
       editor2.destroy();
     });
 
-    it("Test 32.4 — Reproduce user deletion on real file", () => {
-      const filePath = 'c:/Users/LENOVO/Documents/PSYC-Explore/Chapter 1/Script/ห้องที่ 1 รากฐานปรัชญาโบราณ (Ancient Philosophical Roots (600 BCE - 300 CE)).md';
-      const fileContent = fs.readFileSync(filePath, 'utf8');
+    it("Test 32.4 — Reproduce user deletion on markdown with empty paragraphs", () => {
+      const fileContent = [
+        'มนุษยชาติที่สำคัญมาก',
+        '',
+        '(Intro: เสียงดนตรีพิณกรีกเบาๆ เริ่มต้นด้วยบรรยากาศลึกลับ)',
+        '\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"',
+        '',
+        '## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า',
+        '![part1_1.jpg](../../attachments/part1_1.jpg)',
+        '',
+        'หากคุณป่วยทางจิต คุณต้องไปที่ \'วิหารแห่งแอสคลีปิออส\'',
+      ].join('\n');
 
       const editorHtml = renderMarkdownToEditorHtml(fileContent);
       const editor = new CoreEditor({
         extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
         content: editorHtml,
-      });
-
-      const logLines: string[] = [];
-      logLines.push(`=== Editor doc children count: ${editor.state.doc.childCount} ===`);
-      editor.state.doc.forEach((child, offset, index) => {
-        const text = child.textContent.slice(0, 40);
-        logLines.push(`[${index}] type=${child.type.name} empty=${!child.textContent.trim()} text="${text}"`);
       });
 
       // Find all empty paragraphs
@@ -1767,10 +1962,6 @@ This is HTML with inline styling.
         }
         currentPos += child.nodeSize;
       }
-      logLines.push(`\n=== Empty Paragraphs (${emptyParagraphs.length}) ===`);
-      emptyParagraphs.forEach((ep) => {
-        logLines.push(`empty at child [${ep.index}] between ${ep.prevType} and ${ep.nextType}`);
-      });
 
       // Test deletion at child [1] (paragraph -> paragraph)
       const ep1 = emptyParagraphs[0];
@@ -1796,7 +1987,7 @@ This is HTML with inline styling.
       expect(savedP3).toContain('\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"\n## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า');
       expect(savedP3).not.toContain('\'กรงเล็บของเทพเจ้า\' ที่ลงทัณฑ์มนุษย์"\n\n## ตอนที่ 1: ยุคแห่งความเชื่อและวิหารเทพเจ้า');
 
-      // Test deletion at child [7] (image -> paragraph)
+      // Test deletion at child [5] / image -> paragraph
       const ep7 = emptyParagraphs[2];
       const editorP7 = new CoreEditor({
         extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image],
@@ -1804,8 +1995,6 @@ This is HTML with inline styling.
       });
       editorP7.chain().setNodeSelection(ep7.pos).deleteSelection().run();
       const rawTd = td.turndown(editorP7.getHTML());
-      fs.writeFileSync('C:/Users/LENOVO/.gemini/antigravity/brain/0b33554d-8a69-498f-a610-93a5eff01442/scratch/editorP7_debug.txt', 
-        `=== HTML ===\n${editorP7.getHTML()}\n\n=== RAW TURNDOWN ===\n${rawTd}\n\n=== NORMALIZED ===\n${normalizeSaved(rawTd)}`, 'utf8');
       const savedP7 = normalizeSaved(rawTd).replace(/\r\n/g, '\n');
       editorP7.destroy();
       expect(savedP7).toContain('![part1_1.jpg](../../attachments/part1_1.jpg)\nหากคุณป่วยทางจิต คุณต้องไปที่ \'วิหารแห่งแอสคลีปิออส\'');
@@ -1846,6 +2035,104 @@ This is HTML with inline styling.
       expect(postDecos).toBeDefined();
 
       editor.destroy();
+    });
+
+    it("Test 34 — Unindented image following list item and emoji headings without space preserve line count and do not indent", () => {
+      const inputMarkdown = [
+        "##✨New Features",
+        "- [x] เพิ่ม sort",
+        "- สำหรับปุ่มกดบวกเพื่อสร้างไฟล์ / โฟลเดอร์ / Web View ให้สร้างเพิ่มอีก1เมนูคือ Relations",
+        "![Pasted_Image_20260917_073645.png](attachments/Pasted_Image_20260917_073645.png)",
+        "",
+        "ข้อความต่อท้าย",
+      ].join("\n");
+
+      let current = inputMarkdown;
+      for (let i = 0; i < 5; i++) {
+        const editorHtml = renderMarkdownToEditorHtml(current);
+        const editor = new CoreEditor({
+          extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, Image, TaskList, TaskItem],
+          content: editorHtml,
+        });
+        current = normalizeSaved(td.turndown(editor.getHTML()));
+        editor.destroy();
+      }
+
+      // Check that image does not have 4-space indent
+      expect(current).not.toContain("    ![Pasted_Image");
+      expect(current).toContain("![Pasted_Image_20260917_073645.png](attachments/Pasted_Image_20260917_073645.png)");
+      // Check that emoji heading normalized to standard H2 heading and roundtrips stably
+      expect(current).toContain("## ✨New Features");
+      expect(current).toContain("- [x] เพิ่ม sort");
+    });
+
+    it("Test 35 — Hashtags like #kkggggggg remain a single unified badge without being split by spellchecker, and sync with note tags", () => {
+      const markdown = "#kkggggggg\n\nเนื้อหาทดสอบ";
+      const editorHtml = renderMarkdownToEditorHtml(markdown);
+
+      const editor = new CoreEditor({
+        extensions: [
+          StarterKit.configure({ paragraph: false }),
+          CustomParagraph,
+          HashtagDecoration,
+          SpellCheckDecoration.configure({ enabled: true }),
+        ],
+        content: editorHtml,
+      });
+
+      // 1. Hashtag decoration should exist and cover "#kkggggggg"
+      const hashtagPlugin = editor.state.plugins.find((p: any) => p.key.startsWith("hashtagDecoration"));
+      expect(hashtagPlugin).toBeDefined();
+      const hashtagDecos = hashtagPlugin!.getState(editor.state);
+      expect(hashtagDecos).toBeDefined();
+      const foundHashtags = hashtagDecos.find();
+      expect(foundHashtags.length).toBe(1);
+      expect(foundHashtags[0].from).toBe(1);
+      expect(foundHashtags[0].to).toBe(1 + "#kkggggggg".length);
+
+      // 2. SpellCheck decoration should NOT flag words inside hashtags
+      const spellPlugin = editor.state.plugins.find((p: any) => p.key.startsWith("spellCheckDecoration"));
+      expect(spellPlugin).toBeDefined();
+      const spellDecos = spellPlugin!.props.decorations?.(editor.state);
+      const foundSpellErrors = spellDecos ? spellDecos.find() : [];
+      // No spell errors should be placed inside the hashtag #kkggggggg
+      expect(foundSpellErrors.some((d: any) => d.spec?.["data-spell-word"] === "kkggggggg")).toBe(false);
+
+      // 3. Note tag extraction: should detect "kkggggggg"
+      const parsedTags = parseFrontmatterAndTags(markdown);
+      expect(parsedTags.inlineTags).toContain("kkggggggg");
+      expect(parsedTags.allTags).toContain("kkggggggg");
+
+      // 4. When deleted from markdown, note tag is removed
+      const deletedMarkdown = "เนื้อหาทดสอบ";
+      const parsedAfterDelete = parseFrontmatterAndTags(deletedMarkdown);
+      expect(parsedAfterDelete.inlineTags).not.toContain("kkggggggg");
+      expect(parsedAfterDelete.allTags).not.toContain("kkggggggg");
+
+      editor.destroy();
+    });
+
+    it("Test 36 — QR Code image preserves data-qr-* attributes on Turndown serialization and renderMarkdownToEditorHtml roundtrip", () => {
+      const td = createTurndownService();
+      const initialHtml = '<p><img src="data:image/png;base64,mockqr" alt="QR Code" width="250" data-qr-code="true" data-qr-text="https://luno-note.app" data-qr-color="#26a295" data-qr-bg="white" data-qr-level="H" /></p>';
+      const serializedMd = td.turndown(initialHtml);
+
+      // Verify serialized markdown contains the QR attributes
+      expect(serializedMd).toContain('data-qr-code="true"');
+      expect(serializedMd).toContain('data-qr-text="https://luno-note.app"');
+      expect(serializedMd).toContain('data-qr-color="#26a295"');
+      expect(serializedMd).toContain('data-qr-bg="white"');
+      expect(serializedMd).toContain('data-qr-level="H"');
+      expect(serializedMd).toContain('width="250"');
+
+      // Verify reloaded HTML preserves the attributes through renderMarkdownToEditorHtml
+      const reloadedHtml = renderMarkdownToEditorHtml(serializedMd);
+      expect(reloadedHtml).toContain('data-qr-code="true"');
+      expect(reloadedHtml).toContain('data-qr-text="https://luno-note.app"');
+      expect(reloadedHtml).toContain('data-qr-color="#26a295"');
+      expect(reloadedHtml).toContain('data-qr-bg="white"');
+      expect(reloadedHtml).toContain('data-qr-level="H"');
+      expect(reloadedHtml).toContain('width="250"');
     });
   });
 });

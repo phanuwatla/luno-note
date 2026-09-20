@@ -605,6 +605,18 @@ aside [role="button"]:focus-visible {
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+  }
   * {
     @apply border-border;
   }
@@ -2643,6 +2655,11 @@ mark,
   margin-bottom: 0.04rem !important;
   line-height: 1.2 !important;
 }
+.luno-reading-view > h1:first-child,
+.luno-reading-view h1:first-of-type {
+  margin-top: 0 !important;
+  margin-bottom: 0.75rem !important;
+}
 .luno-reading-view h2,
 .luno-reading-view h3,
 .luno-reading-view h4,
@@ -2694,18 +2711,26 @@ mark,
    Animation & Reduced Motion Settings Control
    ========================================================================== */
 html[data-animations="false"],
-html[data-animations="false"] *,
-html[data-animations="false"] *::before,
-html[data-animations="false"] *::after,
+html[data-animations="false"] *:not(.animate-spin):not([class*="animate-spin"]),
+html[data-animations="false"] *:not(.animate-spin):not([class*="animate-spin"])::before,
+html[data-animations="false"] *:not(.animate-spin):not([class*="animate-spin"])::after,
 html.reduce-motion,
-html.reduce-motion *,
-html.reduce-motion *::before,
-html.reduce-motion *::after {
+html.reduce-motion *:not(.animate-spin):not([class*="animate-spin"]),
+html.reduce-motion *:not(.animate-spin):not([class*="animate-spin"])::before,
+html.reduce-motion *:not(.animate-spin):not([class*="animate-spin"])::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
   transition-delay: 0s !important;
   scroll-behavior: auto !important;
+}
+
+/* Ensure loading and saving activity spinners always animate smoothly */
+html[data-animations="false"] .animate-spin,
+html[data-animations="false"] [class*="animate-spin"],
+html.reduce-motion .animate-spin,
+html.reduce-motion [class*="animate-spin"] {
+  animation: spin 1s linear infinite !important;
 }
 
 /* Hardware-accelerated distinct smooth animations when enabled */

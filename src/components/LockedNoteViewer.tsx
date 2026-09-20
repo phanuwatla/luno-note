@@ -5,6 +5,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { getToolbarIcon } from "@/lib/iconPacks";
 import { Note } from "@/hooks/useNotes";
+import {
+  getRemainingLockoutSeconds,
+  recordFailedPinAttempt,
+  clearPinLockout,
+} from "@/lib/pinLockout";
 
 interface LockedNoteViewerProps {
   note: Note;
@@ -20,20 +25,55 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [shake, setShake] = useState(false);
+  const [lockoutSeconds, setLockoutSeconds] = useState(() => getRemainingLockoutSeconds(note.id));
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Focus first input on mount or note change
+  // Focus first input on mount or note change, check persistent lockout
   useEffect(() => {
     setDigits(["", "", "", "", "", ""]);
-    setError(null);
     setLoading(false);
-    setTimeout(() => {
-      inputRefs.current[0]?.focus();
-    }, 150);
-  }, [note.id]);
+    const remaining = getRemainingLockoutSeconds(note.id);
+    setLockoutSeconds(remaining);
+    if (remaining > 0) {
+      const isTh = settings?.language === "th";
+      setError(
+        isTh
+          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
+          : `Too many failed attempts. Please wait ${remaining}s.`
+      );
+    } else {
+      setError(null);
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 150);
+    }
+  }, [note.id, settings?.language]);
+
+  // Lockout countdown timer synchronized with clock
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const timer = setInterval(() => {
+      const remaining = getRemainingLockoutSeconds(note.id);
+      setLockoutSeconds(remaining);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setError(null);
+        setTimeout(() => inputRefs.current[0]?.focus(), 50);
+      } else {
+        const isTh = settings?.language === "th";
+        setError(
+          isTh
+            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
+            : `Too many failed attempts. Please wait ${remaining}s.`
+        );
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [note.id, lockoutSeconds, settings?.language]);
 
   const handleDigitChange = (index: number, val: string) => {
+    if (lockoutSeconds > 0) return;
     setError(null);
     const clean = val.replace(/\D/g, "");
 
@@ -70,6 +110,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (lockoutSeconds > 0) return;
     if (e.key === "Backspace") {
       if (!digits[index] && index > 0) {
         const nextDigits = [...digits];
@@ -94,6 +135,17 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   };
 
   const attemptUnlock = async (pin: string) => {
+    const remaining = getRemainingLockoutSeconds(note.id);
+    if (remaining > 0) {
+      setLockoutSeconds(remaining);
+      const isTh = settings?.language === "th";
+      setError(
+        isTh
+          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
+          : `Too many failed attempts. Please wait ${remaining}s.`
+      );
+      return;
+    }
     if (pin.length !== 6) {
       setError(t("pinLock.pinLengthError") || "PIN must be exactly 6 digits.");
       return;
@@ -106,6 +158,9 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
       const success = await onUnlock(pin);
       if (!success) {
         triggerError();
+      } else {
+        clearPinLockout(note.id);
+        setLockoutSeconds(0);
       }
     } catch {
       triggerError();
@@ -115,24 +170,38 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   };
 
   const triggerError = () => {
-    setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+    const { lockoutSeconds: lockout } = recordFailedPinAttempt(note.id);
+    setLockoutSeconds(lockout);
+
+    const isTh = settings?.language === "th";
+    if (lockout > 0) {
+      setError(
+        isTh
+          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
+          : `Too many failed attempts. Please wait ${lockout}s.`
+      );
+    } else {
+      setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+    }
+
     setShake(true);
     setTimeout(() => setShake(false), 500);
     setDigits(["", "", "", "", "", ""]);
-    inputRefs.current[0]?.focus();
+    if (lockout === 0) {
+      inputRefs.current[0]?.focus();
+    }
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (lockoutSeconds > 0) return;
     attemptUnlock(digits.join(""));
   };
 
   return (
     <div className="h-full w-full flex flex-col items-center justify-center p-6 bg-background select-none animate-in fade-in duration-200">
       <div
-        className={`w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-xs flex flex-col items-center text-center transition-transform duration-200 ${
-          shake ? "ring-2 ring-destructive" : ""
-        }`}
+        className="w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-xs flex flex-col items-center text-center transition-transform duration-200"
         style={{
           animation: shake ? "shake 0.4s cubic-bezier(.36,.07,.19,.97) both" : undefined,
         }}
@@ -168,7 +237,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
                 value={digit}
                 onChange={(e) => handleDigitChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(i, e)}
-                disabled={loading}
+                disabled={loading || lockoutSeconds > 0}
                 className="w-9 h-11 sm:w-10 sm:h-12 text-center text-lg font-mono font-medium rounded-xl border border-border bg-background focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all cursor-text disabled:opacity-50"
                 autoComplete="off"
               />
@@ -199,10 +268,20 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
 
           <Button
             type="submit"
-            disabled={loading || digits.some((d) => d === "")}
+            disabled={loading || lockoutSeconds > 0 || digits.some((d) => d === "")}
             className="w-full rounded-xl mt-1"
           >
-            {loading ? <span>...</span> : (t("pinLock.unlockBtn") || "Unlock Note")}
+            {loading ? (
+              <span>...</span>
+            ) : lockoutSeconds > 0 ? (
+              settings?.language === "th" ? (
+                `กรุณารอ (${lockoutSeconds}s)`
+              ) : (
+                `Please wait (${lockoutSeconds}s)`
+              )
+            ) : (
+              t("pinLock.unlockBtn") || "Unlock Note"
+            )}
           </Button>
         </form>
       </div>

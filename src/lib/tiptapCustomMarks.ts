@@ -256,16 +256,16 @@ export const TextColor = Mark.create({
   parseHTML() {
     return [
       {
-        tag: "span",
-        getAttrs: (element) => {
-          const el = element as HTMLElement;
-          const color = el.style?.color || el.getAttribute("data-color");
-          return color ? { color } : false;
-        },
-      },
-      {
         style: "color",
         getAttrs: (value) => (typeof value === "string" && value ? { color: value } : false),
+      },
+      {
+        tag: "span[data-color]",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const color = el.getAttribute("data-color") || el.style?.color;
+          return color ? { color } : false;
+        },
       },
     ];
   },
@@ -320,16 +320,16 @@ export const FontFamily = Mark.create({
   parseHTML() {
     return [
       {
-        tag: "span",
-        getAttrs: (element) => {
-          const el = element as HTMLElement;
-          const fontFamily = el.style?.fontFamily || el.getAttribute("data-font-family");
-          return fontFamily ? { fontFamily: fontFamily.replace(/"/g, "'") } : false;
-        },
-      },
-      {
         style: "font-family",
         getAttrs: (value) => (typeof value === "string" && value ? { fontFamily: value.replace(/"/g, "'") } : false),
+      },
+      {
+        tag: "span[data-font-family]",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const fontFamily = el.getAttribute("data-font-family") || el.style?.fontFamily;
+          return fontFamily ? { fontFamily: fontFamily.replace(/"/g, "'") } : false;
+        },
       },
     ];
   },
@@ -380,16 +380,16 @@ export const FontSize = Mark.create({
   parseHTML() {
     return [
       {
-        tag: "span",
-        getAttrs: (element) => {
-          const el = element as HTMLElement;
-          const fontSize = el.style?.fontSize || el.getAttribute("data-font-size");
-          return fontSize ? { fontSize } : false;
-        },
-      },
-      {
         style: "font-size",
         getAttrs: (value) => (typeof value === "string" && value ? { fontSize: value } : false),
+      },
+      {
+        tag: "span[data-font-size]",
+        getAttrs: (element) => {
+          const el = element as HTMLElement;
+          const fontSize = el.getAttribute("data-font-size") || el.style?.fontSize;
+          return fontSize ? { fontSize } : false;
+        },
       },
     ];
   },

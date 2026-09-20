@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { Note } from "@/hooks/useNotes";
-import { isEncryptedNote } from "@/lib/noteCrypto";
+import { isEncryptedNote, isLockableTextFile } from "@/lib/noteCrypto";
 import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import {
   Plus,
@@ -72,7 +72,7 @@ import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 import { renderCustomIcon, getToolbarIcon, getAutoFolderIconAndColor } from "@/lib/iconPacks";
 import IconPickerDialog from "@/components/IconPickerDialog";
 import LunoAiView from "@/components/LunoAiView";
-import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES } from "@/components/TemplatesView";
+import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES, setPendingTemplatePreview } from "@/components/TemplatesView";
 
 interface SidebarProps {
   notes: Note[];
@@ -400,7 +400,10 @@ function highlightMatchText(text: string, searchQuery: string, appTheme: string 
   );
 }
 
-function getSearchPreviewSnippet(content: string, title: string, query: string, noContentLabel: string) {
+function getSearchPreviewSnippet(content: string, title: string, query: string, noContentLabel: string, isLocked?: boolean) {
+  if (isLocked || isEncryptedNote(content)) {
+    return "••••••";
+  }
   const cleanText = stripMarkdownAndFrontmatter(content);
   if (!cleanText) return title.trim() || noContentLabel;
 
@@ -424,8 +427,8 @@ function getSearchPreviewSnippet(content: string, title: string, query: string, 
   return snippet;
 }
 
-function getPreview(content: string, title: string, noContentLabel: string) {
-  if (isEncryptedNote(content)) {
+function getPreview(content: string, title: string, noContentLabel: string, isLocked?: boolean) {
+  if (isLocked || isEncryptedNote(content)) {
     return "••••••";
   }
   const cleanText = stripMarkdownAndFrontmatter(content);
@@ -1188,7 +1191,8 @@ function SidebarComponent({
           list = list.filter((n) => {
             const titleMatch = n.title?.toLowerCase().includes(q);
             const fileNameMatch = n.fileName?.toLowerCase().includes(q);
-            const contentMatch = n.content?.toLowerCase().includes(q);
+            const isNoteLocked = Boolean(n.isLocked || isEncryptedNote(n.content));
+            const contentMatch = isNoteLocked ? false : n.content?.toLowerCase().includes(q);
             const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
             return titleMatch || fileNameMatch || contentMatch || tagMatch;
           });
@@ -1212,7 +1216,8 @@ function SidebarComponent({
         list = list.filter((n) => {
           const titleMatch = n.title?.toLowerCase().includes(q);
           const fileNameMatch = n.fileName?.toLowerCase().includes(q);
-          const contentMatch = n.content?.toLowerCase().includes(q);
+          const isNoteLocked = Boolean(n.isLocked || isEncryptedNote(n.content));
+          const contentMatch = isNoteLocked ? false : n.content?.toLowerCase().includes(q);
           const tagMatch = n.tags?.some((t) => t.toLowerCase().includes(q));
           return titleMatch || fileNameMatch || contentMatch || tagMatch;
         });
@@ -1757,7 +1762,7 @@ function SidebarComponent({
               <Trash2 className="h-4 w-4 text-destructive" />
               <span>{isMultiSelected ? `${t("sidebar.deleteFileAction")} (${targetCount})` : t("sidebar.deleteFileAction")}</span>
             </ContextMenuItem>
-            {!isMultiSelected && (
+            {!isMultiSelected && (note.isLocked || isLockableTextFile(note.fileName, note.fileType)) && (
               <>
                 <ContextMenuSeparator />
                 {!note.isLocked ? (
@@ -1838,8 +1843,8 @@ function SidebarComponent({
             </div>
             <p className="line-clamp-2 text-xs leading-relaxed text-foreground/90 pl-5">
               {query
-                ? highlightMatchText(getSearchPreviewSnippet(note.content, note.title, query, t("sidebar.noContent")), query, settings.theme)
-                : getPreview(note.content, note.title, t("sidebar.noContent"))}
+                ? highlightMatchText(getSearchPreviewSnippet(note.content, note.title, query, t("sidebar.noContent"), note.isLocked), query, settings.theme)
+                : getPreview(note.content, note.title, t("sidebar.noContent"), note.isLocked)}
             </p>
           </button>
         </ContextMenuTrigger>
@@ -1918,7 +1923,7 @@ function SidebarComponent({
             <Trash2 className="h-4 w-4 text-destructive" />
             <span>{isMultiSelected ? `${t("sidebar.deleteFileAction")} (${targetCount})` : t("sidebar.deleteFileAction")}</span>
           </ContextMenuItem>
-          {!isMultiSelected && (
+          {!isMultiSelected && (note.isLocked || isLockableTextFile(note.fileName, note.fileType)) && (
             <>
               <ContextMenuSeparator />
               {!note.isLocked ? (
@@ -2949,6 +2954,11 @@ function SidebarComponent({
                                             <button
                                               type="button"
                                               onClick={() => {
+                                                setPendingTemplatePreview({
+                                                  type: template.type,
+                                                  format: template.format,
+                                                  formatExt: template.formatExt,
+                                                });
                                                 onSelect("templates");
                                                 window.dispatchEvent(
                                                   new CustomEvent("luno:open-template-preview", {

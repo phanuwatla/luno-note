@@ -1,5 +1,28 @@
 import { useState, useCallback, useRef } from "react";
 import type { Note } from "@/hooks/useNotes";
+import { APP_VERSION } from "@/lib/appVersion";
+
+export const LUNO_LAST_SEEN_VERSION_KEY = "luno_last_seen_version";
+
+export function isFirstLaunchOnVersion(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    const lastSeen = localStorage.getItem(LUNO_LAST_SEEN_VERSION_KEY);
+    return lastSeen !== APP_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+export function markVersionAsSeen(): void {
+  try {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(LUNO_LAST_SEEN_VERSION_KEY, APP_VERSION);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 const TABS_STORAGE_KEY = "notes-app-open-tabs";
 const ACTIVE_TAB_STORAGE_KEY = "notes-app-active-tab";
@@ -108,6 +131,7 @@ export function isSystemOrWebTab(id: string): boolean {
     id === "relations" || id.startsWith("relations:") ||
     id === "favorites" || id.startsWith("favorites:") ||
     id === "tags" || id.startsWith("tags:") ||
+    id === "whats-new" || id.startsWith("whats-new:") ||
     id.startsWith("web:")
   );
 }
@@ -352,9 +376,14 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
     notes: Note[],
     reopenTabs: boolean = true,
     onStartup: string = "home",
-    rootDirHandle?: FileSystemDirectoryHandle | null
+    rootDirHandle?: FileSystemDirectoryHandle | null,
+    forceWhatsNew: boolean = false
   ) => {
-    if (onStartup === "blank") {
+    if (forceWhatsNew) {
+      markVersionAsSeen();
+    }
+
+    if (!forceWhatsNew && onStartup === "blank") {
       resetTabs(true);
       return;
     }
@@ -410,6 +439,18 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
         }
 
         if (resolvedTabIds.length > 0) {
+          if (forceWhatsNew) {
+            if (!resolvedTabIds.includes("whats-new")) {
+              resolvedTabIds.unshift("whats-new");
+            }
+            openTabIdsRef.current = resolvedTabIds;
+            activeTabIdRef.current = "whats-new";
+            setOpenTabIds(resolvedTabIds);
+            setActiveTabId("whats-new");
+            saveTabs(resolvedTabIds, "whats-new", notes);
+            return;
+          }
+
           if (onStartup === "home" && !isCompact) {
             if (!resolvedTabIds.includes("home")) {
               resolvedTabIds.unshift("home");
@@ -455,6 +496,15 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
 
     const rawSettings = typeof window !== "undefined" ? localStorage.getItem("notes-app-settings") : null;
     const isCompact = rawSettings ? JSON.parse(rawSettings)?.appLayout === "compact" : false;
+
+    if (forceWhatsNew) {
+      openTabIdsRef.current = ["whats-new"];
+      activeTabIdRef.current = "whats-new";
+      setOpenTabIds(["whats-new"]);
+      setActiveTabId("whats-new");
+      saveTabs(["whats-new"], "whats-new", notes);
+      return;
+    }
 
     if (onStartup === "home" && !isCompact) {
       openTabIdsRef.current = ["home"];

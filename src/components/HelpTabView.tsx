@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { getToolbarIcon } from "@/lib/iconPacks";
 import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_ABOUT_CREDIT, openExternalUrl } from "@/lib/appVersion";
@@ -57,11 +57,17 @@ interface HelpTabViewProps {
   initialCategory?: HelpCategory;
   onCategoryChange?: (category: HelpCategory) => void;
   onOpenSettings?: (category?: string) => void;
+  onOpenWhatsNew?: () => void;
+  onOpenWebTab?: (url: string, initialTitle?: string) => void;
 }
 
 export default function HelpTabView({
+  onClose,
   initialCategory = "features",
   onCategoryChange,
+  onOpenSettings,
+  onOpenWhatsNew,
+  onOpenWebTab,
 }: HelpTabViewProps) {
   const { t, language } = useTranslation();
   const { settings } = useAppSettings();
@@ -387,16 +393,16 @@ export default function HelpTabView({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="h-full w-full flex flex-col bg-background text-foreground overflow-hidden select-none">
+      <div className="flex-1 min-h-0 h-full w-full max-h-full flex flex-col bg-background text-foreground overflow-hidden select-none">
         {/* Main 2-Column Content View (100% Mirroring SettingsTabView) */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden">
           {/* Left Navigation Category Column (100% Mirroring SettingsTabView - No bottom buttons) */}
           <div className="w-60 border-r border-border/50 bg-card/30 flex flex-col shrink-0 select-none">
             <div className="px-5 py-4 border-b border-border/40 font-bold text-lg text-foreground flex items-center justify-between">
               <span>{t("sidebar.help") || (isTh ? "ช่วยเหลือ" : "Help")}</span>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-1 no-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-1 no-scrollbar overscroll-contain">
               {categories.map((cat) => {
                 const Icon = getToolbarIcon(cat.iconKey, pack);
                 const isActive = safeActiveCategory === cat.id;
@@ -423,7 +429,7 @@ export default function HelpTabView({
           </div>
 
           {/* Right Content Panel View */}
-          <div className="flex-1 flex flex-col bg-background/50 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
             <div className="px-8 py-5 border-b border-border/40 bg-card/20 shrink-0">
               <div>
@@ -433,7 +439,7 @@ export default function HelpTabView({
             </div>
 
             {/* Scrollable Category Body */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar w-full">
+            <div className="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 no-scrollbar w-full overscroll-contain">
               {/* 1. FEATURES & TOOLS (Priority #1: App overview & tools) */}
               {safeActiveCategory === "features" && (
                 <div className="space-y-6">
@@ -579,9 +585,20 @@ export default function HelpTabView({
                       <div className="space-y-1.5 max-w-xl">
                         <div>
                           <h3 className="text-sm font-bold text-foreground">Luno Note</h3>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
-                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={() => onOpenWhatsNew?.()}
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left block mt-0.5 focus:outline-none"
+                              >
+                                Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {settings.language === "th" ? "ดูรายการอัปเดตเวอร์ชันนี้" : "View release notes for this version"}
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
                           {t("settings.aboutAppDesc")}
@@ -593,7 +610,11 @@ export default function HelpTabView({
                             rel="noopener noreferrer"
                             onClick={(e) => {
                               e.preventDefault();
-                              openExternalUrl(APP_AUTHOR_URL);
+                              if (onOpenWebTab) {
+                                onOpenWebTab(APP_AUTHOR_URL, `GitHub - ${APP_AUTHOR}`);
+                              } else {
+                                openExternalUrl(APP_AUTHOR_URL);
+                              }
                             }}
                             className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                           >

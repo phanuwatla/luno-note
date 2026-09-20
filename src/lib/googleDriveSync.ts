@@ -463,7 +463,9 @@ class GoogleDriveSyncEngine {
     // Always pick latest content snapshot for this note if newer exists
     const currentPending = this.latestPendingNoteMap.get(note.id);
     const targetNote = currentPending?.note || note;
-    const currentContentToUpload = targetNote.content;
+    const currentContentToUpload = (targetNote.isLocked && targetNote.encryptedContent)
+      ? targetNote.encryptedContent
+      : targetNote.content;
 
     const syncPromise = (async () => {
       this.isSyncing = true;
@@ -503,7 +505,12 @@ class GoogleDriveSyncEngine {
 
         // If user typed newer content while this sync was uploading in background, schedule follow-up sync!
         const latestAfterUpload = this.latestPendingNoteMap.get(targetNote.id);
-        if (latestAfterUpload && latestAfterUpload.note.content !== currentContentToUpload) {
+        const latestContent = latestAfterUpload
+          ? ((latestAfterUpload.note.isLocked && latestAfterUpload.note.encryptedContent)
+              ? latestAfterUpload.note.encryptedContent
+              : latestAfterUpload.note.content)
+          : undefined;
+        if (latestAfterUpload && latestContent !== currentContentToUpload) {
           this.queueNoteSync(latestAfterUpload.note, latestAfterUpload.onNoteUpdated, 400);
         } else {
           this.updateState({
@@ -858,11 +865,15 @@ class GoogleDriveSyncEngine {
               const targetFolderPath = getFullDriveFolderPath(note);
               const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
 
+              const contentToUpload = (note.isLocked && note.encryptedContent)
+                ? note.encryptedContent
+                : note.content;
+
               const uploaded = await uploadDriveNoteFile(
                 accessToken,
                 structure.projectId,
                 fileName,
-                note.content,
+                contentToUpload,
                 targetDriveId,
                 targetFolderPath
               );
@@ -893,12 +904,15 @@ class GoogleDriveSyncEngine {
           const fileName = note.fileName || `${note.title.trim() || "Untitled"}.md`;
           const targetFolderPath = getFullDriveFolderPath(note);
           const targetDriveId = note.driveFileId || this.noteIdToDriveFileId.get(note.id);
+          const retryContentToUpload = (note.isLocked && note.encryptedContent)
+            ? note.encryptedContent
+            : note.content;
 
           const uploaded = await uploadDriveNoteFile(
             accessToken,
             structure.projectId,
             fileName,
-            note.content,
+            retryContentToUpload,
             targetDriveId,
             targetFolderPath
           );

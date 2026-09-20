@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -35,7 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { updateFrontmatterTags, removeTagFromMarkdown, isTiptapJson, isMarkdownNote } from "@/lib/frontmatter";
+import { updateFrontmatterTags, removeTagFromMarkdown, parseFrontmatterAndTags, dedupeTags, normalizeTag, escapeRegExp, isTiptapJson, isMarkdownNote } from "@/lib/frontmatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { countWords, countCharacters, calculateReadingTime } from "@/lib/wordCount";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
@@ -89,6 +89,7 @@ function RightPanelComponent({
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
+  const isSubmittingTagRef = useRef(false);
   const [editorDocVersion, setEditorDocVersion] = useState(0);
 
   const fileCategory = useMemo(
@@ -441,24 +442,76 @@ function RightPanelComponent({
   };
 
   const handleAddTag = (overrideTag?: string) => {
-    if (!note || !isMarkdownNote(note) || !onUpdateNote) return;
+    if (!note || !isMarkdownNote(note) || !onUpdateNote || isSubmittingTagRef.current) return;
     const rawVal = overrideTag !== undefined ? overrideTag : newTagInput;
-    const tagToAdd = rawVal.trim().replace(/^#/, "");
-    if (!tagToAdd) return;
+    const norm = normalizeTag(rawVal);
+    if (!norm) {
+      setNewTagInput("");
+      setIsAddingTag(false);
+      return;
+    }
 
-    const currentTags = note.tags || [];
-    const updatedTags = Array.from(new Set([...currentTags, tagToAdd]));
-    onUpdateNote(note.id, { tags: updatedTags });
-
-    setNewTagInput("");
-    setIsAddingTag(false);
+    isSubmittingTagRef.current = true;
+    try {
+      const parsed = parseFrontmatterAndTags(note.content || "");
+      const updatedFrontmatterTags = dedupeTags([...parsed.frontmatterTags, norm]);
+      const newContent = updateFrontmatterTags(note.content || "", updatedFrontmatterTags);
+      const updatedAllTags = dedupeTags([...updatedFrontmatterTags, ...parsed.inlineTags]);
+      onUpdateNote(note.id, { content: newContent, tags: updatedAllTags });
+      setNewTagInput("");
+      setIsAddingTag(false);
+    } finally {
+      setTimeout(() => {
+        isSubmittingTagRef.current = false;
+      }, 150);
+    }
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
     if (!note || !isMarkdownNote(note) || !onUpdateNote) return;
-    const currentTags = note.tags || [];
-    const updatedTags = currentTags.filter((t) => t.toLowerCase() !== tagToRemove.toLowerCase());
-    onUpdateNote(note.id, { tags: updatedTags });
+    const normTarget = normalizeTag(tagToRemove);
+    if (!normTarget) return;
+
+    // 1. If active TipTap editor is open, remove any inline #tag from the ProseMirror document live
+    if (editor && !editor.isDestroyed) {
+      try {
+        const { state, view } = editor;
+        const tr = state.tr;
+        tr.setMeta("addToHistory", false);
+        tr.setMeta("isSync", true);
+        const regex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normTarget)}(?:[ \\t]+|(?=$|[\\s)\\]},.!?:;\\r\\n]))`, "gi");
+        const replacements: Array<{ from: number; to: number; insert: string }> = [];
+
+        state.doc.descendants((node, pos) => {
+          if (node.isText && node.text) {
+            let match: RegExpExecArray | null;
+            regex.lastIndex = 0;
+            while ((match = regex.exec(node.text)) !== null) {
+              const leading = match[1] || "";
+              const from = pos + match.index;
+              const to = from + match[0].length;
+              replacements.push({ from, to, insert: leading });
+            }
+          }
+        });
+
+        for (let i = replacements.length - 1; i >= 0; i--) {
+          const { from, to, insert } = replacements[i];
+          tr.replaceWith(from, to, insert ? state.schema.text(insert) : state.schema.text(""));
+        }
+
+        if (replacements.length > 0) {
+          view.dispatch(tr);
+        }
+      } catch (err) {
+        console.warn("Failed to remove hashtag from editor state:", err);
+      }
+    }
+
+    // 2. Remove tag from note content (Frontmatter + Markdown body)
+    const newContent = removeTagFromMarkdown(note.content || "", normTarget);
+    const parsed = parseFrontmatterAndTags(newContent);
+    onUpdateNote(note.id, { content: newContent, tags: parsed.allTags });
   };
 
   if (!note || !isOpen) return null;
@@ -668,7 +721,10 @@ function RightPanelComponent({
                           value={newTagInput}
                           onChange={(e) => setNewTagInput(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") handleAddTag();
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddTag();
+                            }
                             if (e.key === "Escape") setIsAddingTag(false);
                           }}
                           onBlur={() => handleAddTag()}

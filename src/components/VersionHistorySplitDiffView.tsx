@@ -17,10 +17,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useToast } from "@/hooks/use-toast";
 import type { Note } from "@/hooks/useNotes";
-import type { NoteVersionSnapshot } from "@/lib/versionHistoryStorage";
+import { resolveNoteContentFormat, type NoteVersionSnapshot } from "@/lib/versionHistoryStorage";
 import { computeLineDiff, summarizeDiff } from "@/lib/diffUtils";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { countWords } from "@/lib/wordCount";
+import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import NoteEditorPreview from "@/components/NoteEditorPreview";
 
 interface VersionHistorySplitDiffViewProps {
@@ -78,6 +79,52 @@ export default function VersionHistorySplitDiffView({
     return raw.replace(/\.[^/.]+$/, "");
   }, [version.title, note.title, note.fileName]);
 
+  const resolveFormat = (snapshotFormat?: string, targetNote?: Note | null): "markdown" | "html" | "plain" | "css" => {
+    const fn = (targetNote?.fileName || version.title || "").toLowerCase();
+    if (fn.endsWith(".css") || targetNote?.contentFormat === "css" || snapshotFormat === "css") return "css";
+    if (fn.endsWith(".html") || fn.endsWith(".htm") || targetNote?.contentFormat === "html" || snapshotFormat === "html") return "html";
+    if (fn.endsWith(".txt") || targetNote?.contentFormat === "plain" || snapshotFormat === "plain") return "plain";
+    if (snapshotFormat === "markdown" || targetNote?.contentFormat === "markdown") return "markdown";
+    return resolveNoteContentFormat(targetNote);
+  };
+
+  const historicalFormat = useMemo(
+    () => resolveFormat(version.contentFormat, note),
+    [version.contentFormat, note, version.title]
+  );
+  const liveFormat = useMemo(
+    () => resolveFormat(note.contentFormat, note),
+    [note]
+  );
+
+  const historicalTags = useMemo(() => {
+    if (historicalFormat !== "markdown") return [];
+    if (version.tags && version.tags.length > 0) return version.tags;
+    if (version.content) {
+      try {
+        const parsed = parseFrontmatterAndTags(version.content);
+        return parsed.allTags;
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
+  }, [historicalFormat, version.tags, version.content]);
+
+  const liveTags = useMemo(() => {
+    if (liveFormat !== "markdown") return [];
+    if (note.tags && note.tags.length > 0) return note.tags;
+    if (note.content) {
+      try {
+        const parsed = parseFrontmatterAndTags(note.content);
+        return parsed.allTags;
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
+  }, [liveFormat, note.tags, note.content]);
+
   // Synchronized scroll handlers for side-by-side view
   const handleLeftScroll = () => {
     if (!syncScroll || isSyncingScrollRef.current) return;
@@ -130,60 +177,55 @@ export default function VersionHistorySplitDiffView({
     <TooltipProvider delayDuration={150}>
       <div className="flex h-full w-full flex-col min-w-0 bg-background text-foreground select-none overflow-hidden">
         {/* Comparison Top Bar */}
-        <div className="flex h-12 items-center justify-between border-b border-border/70 bg-card/60 px-4 shrink-0 backdrop-blur-xs">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex items-center gap-2 text-xs font-bold text-primary">
-              <Clock className="h-4 w-4 shrink-0" />
-              <span className="truncate max-w-[200px] sm:max-w-none">
-                {t("versionHistoryPanel.comparingWith", { time: formattedVersionTime }) ||
-                  `Comparing with: ${formattedVersionTime}`}
+        <div className="sticky top-0 z-30 flex h-10 items-center justify-between border-b border-border/40 bg-background px-3.5 shrink-0 select-none text-[12px] leading-tight text-muted-foreground min-w-0 w-full gap-2">
+          {/* Diff Stats */}
+          <div className="flex items-center gap-2.5 min-w-0 text-[11.5px] font-semibold">
+            {summary.addedLines > 0 && (
+              <span className="text-emerald-600 dark:text-emerald-400">
+                +{summary.addedLines} {isTh ? "เพิ่ม" : "added"}
               </span>
-            </div>
-
-            {/* Diff Stats Badges */}
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-semibold">
-              {summary.addedLines > 0 && (
-                <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  +{summary.addedLines} {isTh ? "เพิ่ม" : "added"}
-                </span>
-              )}
-              {summary.removedLines > 0 && (
-                <span className="rounded-lg bg-rose-500/10 px-2 py-0.5 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                  -{summary.removedLines} {isTh ? "ลบ" : "removed"}
-                </span>
-              )}
-              {summary.wordCountDiff !== 0 && (
-                <span className="rounded-lg bg-muted px-2 py-0.5 text-muted-foreground border border-border/40">
-                  {summary.wordCountDiff > 0 ? `+${summary.wordCountDiff}` : summary.wordCountDiff}{" "}
-                  {isTh ? "คำ" : "words"}
-                </span>
-              )}
-            </div>
+            )}
+            {summary.removedLines > 0 && (
+              <span className="text-rose-600 dark:text-rose-400">
+                -{summary.removedLines} {isTh ? "ลบ" : "removed"}
+              </span>
+            )}
+            {summary.wordCountDiff !== 0 && (
+              <span className="text-muted-foreground">
+                {summary.wordCountDiff > 0 ? `+${summary.wordCountDiff}` : summary.wordCountDiff}{" "}
+                {isTh ? "คำ" : "words"}
+              </span>
+            )}
+            {summary.addedLines === 0 && summary.removedLines === 0 && summary.wordCountDiff === 0 && (
+              <span className="text-muted-foreground text-[11px]">
+                {isTh ? "ไม่มีการเปลี่ยนแปลง" : "No changes"}
+              </span>
+            )}
           </div>
 
-          {/* Action Buttons & View Modes */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Action Buttons & View Modes (Matching Breadcrumb / Template Preview Style) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 text-[11.5px] pl-1">
             {/* View Mode Toggle Group */}
-            <div className="flex items-center rounded-lg bg-muted/60 p-0.5 text-xs border border-border/40 mr-1">
+            <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
               {/* 1. Side-by-Side Editor Mode */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={() => setViewMode("split-editor")}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "split-editor"
-                        ? "bg-background text-foreground shadow-2xs font-semibold"
+                        ? "bg-background text-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Columns2 className="h-3 w-3" />
-                    <span className="hidden lg:inline">
+                    <span className="hidden sm:inline">
                       {t("versionHistoryPanel.splitEditor") || (isTh ? "สองฝั่ง" : "Side-by-Side")}
                     </span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}>
                   {t("versionHistoryPanel.splitEditor") || "Side-by-Side Editor Comparison (100% Editor WYSIWYG)"}
                 </TooltipContent>
               </Tooltip>
@@ -194,19 +236,19 @@ export default function VersionHistorySplitDiffView({
                   <button
                     type="button"
                     onClick={() => setViewMode("preview")}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "preview"
-                        ? "bg-background text-foreground shadow-2xs font-semibold"
+                        ? "bg-background text-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Eye className="h-3 w-3" />
-                    <span className="hidden lg:inline">
+                    <span className="hidden sm:inline">
                       {t("versionHistoryPanel.preview") || (isTh ? "พรีวิว" : "Preview")}
                     </span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}>
                   {t("versionHistoryPanel.preview") || "Full Historical Preview (100% Editor WYSIWYG)"}
                 </TooltipContent>
               </Tooltip>
@@ -217,25 +259,25 @@ export default function VersionHistorySplitDiffView({
                   <button
                     type="button"
                     onClick={() => setViewMode("code-diff")}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "code-diff"
-                        ? "bg-background text-foreground shadow-2xs font-semibold"
+                        ? "bg-background text-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Code className="h-3 w-3" />
-                    <span className="hidden lg:inline">
+                    <span className="hidden sm:inline">
                       {t("versionHistoryPanel.codeDiff") || "Code Diff"}
                     </span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}>
                   {t("versionHistoryPanel.codeDiff") || "Raw Line-by-Line Code Diff"}
                 </TooltipContent>
               </Tooltip>
             </div>
 
-            {/* Sync Scroll Toggle (for Side-by-Side mode) */}
+            {/* Sync Scroll Toggle (for Side-by-Side mode) - Matches Breadcrumb Read/Edit Toggle */}
             {viewMode === "split-editor" && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -244,18 +286,25 @@ export default function VersionHistorySplitDiffView({
                     variant="ghost"
                     size="icon"
                     onClick={() => setSyncScroll(!syncScroll)}
-                    className={`h-8 w-8 rounded-lg cursor-pointer transition-colors ${
+                    className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                    aria-label={
                       syncScroll
-                        ? "text-primary bg-primary/10 hover:bg-primary/20"
-                        : "text-muted-foreground hover:bg-muted"
-                    }`}
-                    aria-label={t("versionHistoryPanel.syncScroll") || "Sync Scroll"}
+                        ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
+                        : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"
+                    }
                   >
-                    {syncScroll ? <Link2 className="h-3.5 w-3.5" /> : <Link2Off className="h-3.5 w-3.5" />}
+                    {syncScroll ? <Link2Off className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+                    <span className="sr-only">
+                      {syncScroll
+                        ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
+                        : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"}
+                    </span>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {(t("versionHistoryPanel.syncScroll") || "Sync Scroll") + ": " + (syncScroll ? (isTh ? "เปิด" : "On") : (isTh ? "ปิด" : "Off"))}
+                <TooltipContent side="bottom" sideOffset={4}>
+                  {syncScroll
+                    ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
+                    : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -264,32 +313,30 @@ export default function VersionHistorySplitDiffView({
               <TooltipTrigger asChild>
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
                   onClick={handleCopy}
-                  className="h-8 text-xs gap-1.5 px-3.5 rounded-xl border border-border/70 hover:bg-muted/90 shadow-2xs cursor-pointer font-semibold"
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                  aria-label={t("versionHistoryPanel.copyContent")}
                 >
-                  {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                  <span className="hidden sm:inline">{t("versionHistoryPanel.copyContent")}</span>
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("versionHistoryPanel.copyContent")}</TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.copyContent")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="button"
-                  variant="default"
-                  size="sm"
                   onClick={() => onRestore(version)}
-                  className="h-8 text-xs gap-1.5 px-4 rounded-xl font-bold shadow-xs cursor-pointer"
+                  className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs cursor-pointer shrink-0 outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                 >
-                  <RotateCcw className="h-4 w-4" />
+                  <RotateCcw className="h-3.5 w-3.5" />
                   <span>{t("versionHistoryPanel.restore")}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("versionHistoryPanel.confirmRestoreTitle")}</TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.confirmRestoreTitle")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -299,12 +346,13 @@ export default function VersionHistorySplitDiffView({
                   variant="ghost"
                   size="icon"
                   onClick={onClose}
-                  className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                  aria-label={t("common.close") || "Close"}
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("versionHistoryPanel.exitComparison")}</TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.exitComparison")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -333,8 +381,8 @@ export default function VersionHistorySplitDiffView({
                 <NoteEditorPreview
                   content={version.content || ""}
                   title={version.title || noteTitle}
-                  tags={note.tags}
-                  format={version.contentFormat || note.contentFormat || "markdown"}
+                  tags={historicalTags}
+                  format={historicalFormat}
                   assetBlobUrlMap={assetBlobUrlMap?.current}
                   scrollRef={leftScrollRef}
                   onScroll={handleLeftScroll}
@@ -361,8 +409,8 @@ export default function VersionHistorySplitDiffView({
                 <NoteEditorPreview
                   content={note.content || ""}
                   title={note.title || noteTitle}
-                  tags={note.tags}
-                  format={note.contentFormat || "markdown"}
+                  tags={liveTags}
+                  format={liveFormat}
                   assetBlobUrlMap={assetBlobUrlMap?.current}
                   scrollRef={rightScrollRef}
                   onScroll={handleRightScroll}
@@ -378,8 +426,8 @@ export default function VersionHistorySplitDiffView({
             <NoteEditorPreview
               content={version.content || ""}
               title={version.title || noteTitle}
-              tags={note.tags}
-              format={version.contentFormat || note.contentFormat || "markdown"}
+              tags={historicalTags}
+              format={historicalFormat}
               assetBlobUrlMap={assetBlobUrlMap?.current}
               fontSize={editorFontSize}
               className="h-full select-text"
@@ -398,7 +446,11 @@ export default function VersionHistorySplitDiffView({
                   {version.wordCount || 0} {isTh ? "คำ" : "words"}
                 </span>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-0.5 select-text">
+              <div
+                ref={leftScrollRef}
+                onScroll={handleLeftScroll}
+                className="flex-1 overflow-y-auto p-3 space-y-0.5 select-text"
+              >
                 {(version.content || "").split("\n").map((line, idx) => (
                   <div
                     key={`hist-${idx}`}
@@ -426,7 +478,11 @@ export default function VersionHistorySplitDiffView({
                   {diffLines.length} {isTh ? "บรรทัด" : "lines"}
                 </span>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-0.5 select-text">
+              <div
+                ref={rightScrollRef}
+                onScroll={handleRightScroll}
+                className="flex-1 overflow-y-auto p-3 space-y-0.5 select-text"
+              >
                 {diffLines.map((line, idx) => {
                   const isAdded = line.type === "added";
                   const isRemoved = line.type === "removed";

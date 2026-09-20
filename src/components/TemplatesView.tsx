@@ -507,8 +507,56 @@ export const TEMPLATE_DEFINITIONS: TemplateItemDef[] = [
   },
 ];
 
+export interface PendingTemplatePreview {
+  type: string;
+  format?: "markdown" | "html" | "plain";
+  formatExt?: string;
+}
+
+let pendingTemplatePreview: PendingTemplatePreview | null = null;
+
+export function setPendingTemplatePreview(preview: PendingTemplatePreview | null) {
+  pendingTemplatePreview = preview;
+  if (typeof window !== "undefined") {
+    try {
+      if (preview) {
+        window.sessionStorage?.setItem("luno_pending_template_preview", JSON.stringify(preview));
+        (window as any).__pendingTemplatePreview = preview;
+      } else {
+        window.sessionStorage?.removeItem("luno_pending_template_preview");
+        (window as any).__pendingTemplatePreview = null;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function getPendingTemplatePreview(): PendingTemplatePreview | null {
+  if (pendingTemplatePreview) return pendingTemplatePreview;
+  if (typeof window !== "undefined") {
+    try {
+      if ((window as any).__pendingTemplatePreview) {
+        return (window as any).__pendingTemplatePreview;
+      }
+      const saved = window.sessionStorage?.getItem("luno_pending_template_preview");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
 interface TemplatesViewProps {
-  onCreateWithTemplate: (templateType: NoteTemplateType, format?: "markdown" | "html" | "plain") => void;
+  onCreateWithTemplate: (
+    templateType: NoteTemplateType,
+    format?: "markdown" | "html" | "plain",
+    templateIcon?: string,
+    templateColor?: string
+  ) => void;
   notes?: Note[];
 }
 
@@ -522,7 +570,17 @@ export default function TemplatesView({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [previewItem, setPreviewItem] = useState<TemplateItemDef | null>(null);
+  const [previewItem, setPreviewItem] = useState<TemplateItemDef | null>(() => {
+    const pending = getPendingTemplatePreview();
+    if (pending?.type) {
+      setPendingTemplatePreview(null);
+      const found =
+        TEMPLATE_DEFINITIONS.find((item) => item.type === pending.type && (!pending.formatExt || item.formatExt === pending.formatExt)) ||
+        TEMPLATE_DEFINITIONS.find((item) => item.type === pending.type);
+      if (found) return found;
+    }
+    return null;
+  });
   const [previewTab, setPreviewTab] = useState<"rendered" | "code">("rendered");
   const [deviceMode, setDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [iframeKey, setIframeKey] = useState(0);
@@ -625,6 +683,23 @@ export default function TemplatesView({
 
   // Listen to template preview selection from sidebar or other components
   useEffect(() => {
+    const applyPending = () => {
+      const pending = getPendingTemplatePreview();
+      if (pending?.type) {
+        setPendingTemplatePreview(null);
+        const found =
+          TEMPLATE_DEFINITIONS.find((item) => item.type === pending.type && (!pending.formatExt || item.formatExt === pending.formatExt)) ||
+          TEMPLATE_DEFINITIONS.find((item) => item.type === pending.type);
+        if (found) {
+          setPreviewItem(found);
+          setSelectedCategory("all");
+          setSearchQuery("");
+        }
+      }
+    };
+
+    applyPending();
+
     const handleOpenPreview = (e: Event) => {
       const custom = e as CustomEvent<{ type?: string; format?: string; formatExt?: string }>;
       const { type, formatExt } = custom.detail || {};
@@ -893,7 +968,11 @@ export default function TemplatesView({
     setPreviewItem(tmpl);
     setPreviewTab("rendered");
     setDeviceMode("desktop");
-    mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    if (typeof mainScrollRef.current?.scrollTo === "function") {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    } else if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0;
+    }
   };
 
   const renderTemplateCard = (tmpl: TemplateItemDef, compact = false, extraClassName = "") => {
@@ -969,7 +1048,11 @@ export default function TemplatesView({
                         type="button"
                         onClick={() => {
                           setPreviewItem(null);
-                          mainScrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
+                          if (typeof mainScrollRef.current?.scrollTo === "function") {
+                            mainScrollRef.current.scrollTo({ top: 0, behavior: "instant" });
+                          } else if (mainScrollRef.current) {
+                            mainScrollRef.current.scrollTop = 0;
+                          }
                         }}
                         className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0 text-muted-foreground/90"
                       >
@@ -1171,7 +1254,9 @@ export default function TemplatesView({
                     <Button
                       type="button"
                       onClick={() => {
-                        onCreateWithTemplate(previewItem.type, previewItem.format);
+                        const iconVal = getTemplateIcon(previewItem.type, pack) || NOTE_TEMPLATE_METADATA[previewItem.type]?.icon || previewItem.icon;
+                        const colorVal = NOTE_TEMPLATE_METADATA[previewItem.type]?.iconColor || previewItem.color;
+                        onCreateWithTemplate(previewItem.type, previewItem.format, iconVal, colorVal);
                       }}
                       className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs cursor-pointer shrink-0"
                     >
@@ -1215,7 +1300,7 @@ export default function TemplatesView({
               </div>
 
             {/* Main Preview Container */}
-            <div className="h-[480px] lg:h-[540px] rounded-xl border border-border/70 bg-background overflow-hidden flex flex-col relative shadow-inner shrink-0">
+            <div className="h-[520px] lg:h-[600px] rounded-xl border border-border/60 bg-background overflow-hidden flex flex-col relative shadow-xs shrink-0">
               {previewTab === "rendered" ? (
                 previewItem.format === "html" ? (
                   // Live HTML Webpage Preview with Simulated Browser Bar & Device Viewport
@@ -1296,26 +1381,15 @@ export default function TemplatesView({
                       )}
                     </div>
                   </div>
-                ) : previewItem.format === "markdown" ? (
-                  // 100% Editor-Matching Realistic Markdown Preview using live TipTap Editor Renderer
+                ) : (
+                  // 100% Editor-Matching Realistic Preview using live TipTap Editor Renderer for Markdown and Plain Text (.txt)
                   <NoteEditorPreview
-                    content={displayPreviewContent}
-                    title={appliedTitle}
-                    format="markdown"
+                    content={previewItem.format === "markdown" ? displayPreviewContent : previewContent}
+                    title={previewItem.format === "markdown" ? appliedTitle : undefined}
+                    tags={previewItem.tags}
+                    format={previewItem.format}
                     className="h-full select-text"
                   />
-                ) : (
-                  // Plain Text Formatting (Matching Plain Text Editor with scrollbar on the far right edge)
-                  <div className="flex-1 h-full overflow-y-auto w-full select-text">
-                    <div
-                      className="max-w-2xl mx-auto px-6 py-5 font-mono text-xs text-foreground/90 whitespace-pre-wrap leading-relaxed selection:bg-primary/20"
-                      style={{
-                        fontSize: settings?.fontSize ? `${settings.fontSize}px` : undefined,
-                      }}
-                    >
-                      {previewContent}
-                    </div>
-                  </div>
                 )
               ) : (
                 // Raw Source Code

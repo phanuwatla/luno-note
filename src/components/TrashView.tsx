@@ -32,6 +32,7 @@ import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import { formatDate } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { stripHtmlAndMarkdown } from "@/lib/snippetUtils";
+import { isEncryptedNote } from "@/lib/noteCrypto";
 
 interface TrashViewProps {
   trashedNotes: TrashedNote[];
@@ -250,7 +251,8 @@ export default function TrashView({
       const fileMatch = (note.fileName || "").toLowerCase().includes(q);
       const folderMatch = (note.folderPath || "").toLowerCase().includes(q);
       const tagMatch = (note.tags || []).some((t) => t.toLowerCase().includes(q));
-      const contentMatch = (note.content || "").toLowerCase().includes(q);
+      const isNoteLocked = Boolean(note.isLocked || isEncryptedNote(note.content));
+      const contentMatch = isNoteLocked ? false : (note.content || "").toLowerCase().includes(q);
 
       return titleMatch || fileMatch || folderMatch || tagMatch || contentMatch;
     });
@@ -353,7 +355,8 @@ export default function TrashView({
     return <IconComp className={`${cls} text-muted-foreground/80`} />;
   };
 
-  const getNoteSnippet = (content?: string) => {
+  const getNoteSnippet = (content?: string, isLocked?: boolean) => {
+    if (isLocked || isEncryptedNote(content)) return "••••••";
     if (!content) return "";
     return stripHtmlAndMarkdown(content).slice(0, 90);
   };
@@ -707,7 +710,7 @@ export default function TrashView({
                   filteredNotes.map((note) => {
                     const isSelected = selectedIds.includes(note.id);
                     const exp = getExpirationInfo(note.deletedAt);
-                    const snippet = getNoteSnippet(note.content);
+                    const snippet = getNoteSnippet(note.content, note.isLocked);
                     const originalLoc = note.originalFolderPath || note.folderPath || (isTh ? "หน้าหลัก" : "Root");
 
                     return (

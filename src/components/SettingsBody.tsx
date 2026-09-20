@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Sun, Moon, Monitor, Wand, Key, Eye, EyeOff, ExternalLink, Palette, Check, Loader2, Upload, Pencil, Trash2 } from "lucide-react";
+import { Sun, Moon, Monitor, Wand, Key, Eye, EyeOff, ExternalLink, Palette, Check, Loader2, Upload, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -8,7 +14,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, FONT_OPTIONS, FontFamilyOption, useAppSettings, useCustomFonts } from "@/hooks/useAppSettings";
-import { saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/lib/customFontStore";
+import { saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, type CustomFont } from "@/lib/customFontStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
@@ -584,57 +590,65 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground">{t("settings.customFonts") || "Workspace Fonts"}</span>
-                <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+                <span className="text-xs font-normal text-muted-foreground">
                   {customFonts.length}
                 </span>
               </div>
               <div className="space-y-1.5">
-                {customFonts.map((font) => (
-                  <div
-                    key={font.id}
-                    className="flex items-center justify-between p-2 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
-                  >
-                    <div className="min-w-0 flex-1 mr-2">
-                      <p className="text-xs font-medium truncate text-foreground" style={{ fontFamily: font.css }}>
-                        {font.name}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground font-mono truncate">
-                        {font.format.toUpperCase()} · {(font.fileSize / 1024).toFixed(1)} KB
-                      </p>
+                {customFonts.map((font) => {
+                  const sizeText = getFontDisplayFileSize(font);
+                  return (
+                    <div
+                      key={font.id}
+                      className="group flex items-center justify-between p-2 rounded-xl border border-border/60 bg-muted/20 hover:bg-muted/40 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1 mr-2">
+                        <p
+                          className="text-xs font-medium truncate text-foreground"
+                          style={{ fontFamily: font.css || font.name }}
+                        >
+                          {font.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate mt-1">
+                          {font.format.toUpperCase()}{sizeText ? ` · ${sizeText}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center shrink-0">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/5 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 cursor-pointer transition-opacity"
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                              <span className="sr-only">Actions</span>
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-md">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setFontToRename(font);
+                                setFontRenameValue(font.name);
+                              }}
+                              className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
+                            >
+                              <Pencil className="h-4 w-4" />
+                              <span>{t("settings.renameFont") || "Rename"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => setFontToDelete(font)}
+                              className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <span>{t("settings.deleteFont") || "Delete"}</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/5 cursor-pointer transition-colors"
-                            onClick={() => {
-                              setFontToRename(font);
-                              setFontRenameValue(font.name);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3" />
-                            <span className="sr-only">{t("settings.renameFont") || "Rename"}</span>
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("settings.renameFont") || "Rename font"}</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer transition-colors"
-                            onClick={() => setFontToDelete(font)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span className="sr-only">{t("settings.deleteFont") || "Delete"}</span>
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("settings.deleteFont") || "Delete font"}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

@@ -61,6 +61,7 @@ import {
   Pause,
   ArrowLeft,
   ArrowRight,
+  CornerDownLeft,
   ArrowUp,
   ArrowDown,
   XCircle,
@@ -130,6 +131,7 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Dialog,
   DialogContent,
@@ -264,8 +266,12 @@ export function clearNoteEditorHistory(noteId: string) {
   noteScrollPositionMap.delete(noteId);
   try {
     sessionStorage.removeItem(`luno_scroll_${noteId}`);
+    localStorage.removeItem(`luno_backup_${noteId}`);
   } catch {
     /* ignore */
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("luno:clear-note-editor-history", { detail: { noteId } }));
   }
 }
 
@@ -476,6 +482,27 @@ export function normalizeSerializedMarkdown(markdown: string): string {
   return clean;
 }
 
+/** Parses inline Markdown formatting (italics, bold, code, wikilinks, highlights) inside footnote content */
+export function parseFootnoteInlineMarkdown(content: string): string {
+  if (!content) return "";
+  let processed = content;
+  // Convert Wikilinks [[Target|Alias]]
+  processed = processed.replace(/\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g, (_m, target, alias) => {
+    const cleanTarget = (target || "").trim();
+    const cleanAlias = (alias || "").trim() || cleanTarget;
+    return `<a href="wikilink:${encodeURIComponent(cleanTarget)}" data-wikilink="${cleanTarget}" class="internal-wikilink text-primary underline underline-offset-4 cursor-pointer">${cleanAlias}</a>`;
+  });
+  // Convert ==highlight== outside code blocks
+  processed = processed.replace(/==((?:\\=|[^\r\n=]|=(?!=))+?)==/g, '<mark class="luno-highlight">$1</mark>');
+
+  try {
+    const inline = marked.parseInline(processed, { async: false, gfm: true, breaks: true }) as string;
+    return inline || processed;
+  } catch {
+    return processed;
+  }
+}
+
 /** Preprocess Markdown to preserve paragraph first-line indentation and empty paragraphs while preserving code blocks and syntax */
 export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boolean = false): string {
   if (!markdown) return "";
@@ -486,11 +513,13 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
   const resultLines: string[] = [];
   const footnoteDefs = new Map<string, string>();
   let justStrippedFootnote = false;
+  let inList = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const fenceMatch = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
     if (fenceMatch) {
+      inList = false;
       const fenceStr = fenceMatch[2];
       if (!inFencedCode) {
         inFencedCode = true;
@@ -508,6 +537,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     }
 
     if (inFencedCode) {
+      inList = false;
       // Unescape legacy double-escaped HTML entities stored in code blocks by previous versions
       const unescapedLine = line.replace(/&(?:lt|gt|amp|quot|#39);/gi, (match) => {
         if (match === "&lt;") return "<";
@@ -526,6 +556,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     // Handle footnote definitions outside code blocks: e.g. [^1]: This is a footnote.
     const footnoteDefMatch = line.match(/^\[\^([^\]\r\n\s]+)\]:\s*(.*)$/);
     if (footnoteDefMatch) {
+      inList = false;
       const fnId = footnoteDefMatch[1].trim();
       const fnContent = footnoteDefMatch[2].trim();
       if (isReadingMode) {
@@ -544,8 +575,9 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
         justStrippedFootnote = true;
         continue;
       } else {
-        // In Edit Mode: rendered in-place without separate arrow icon, with clickable prefix
-        processedLine = `<p id="fn-${fnId}" data-footnote-def="${fnId}" class="footnote-def text-sm text-muted-foreground my-1.5"><a href="#fnref-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer">[^${fnId}]:</a> ${fnContent}</p>`;
+        // In Edit Mode: rendered in-place without separate arrow icon, with clickable prefix and parsed inline formatting
+        const formattedContent = parseFootnoteInlineMarkdown(fnContent);
+        processedLine = `<p id="fn-${fnId}" data-footnote-def="${fnId}" class="footnote-def text-sm text-muted-foreground my-1.5"><a href="#fnref-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer">[^${fnId}]:</a> ${formattedContent}</p>`;
         resultLines.push(processedLine);
         continue;
       }
@@ -553,6 +585,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
 
     // Handle empty or blank lines (Obsidian compatibility: every blank line becomes an editable empty paragraph)
     if (!line.trim() || /^\s*\|[\s|]*$/.test(line)) {
+      inList = false;
       if (isReadingMode && justStrippedFootnote) {
         // Skip blank lines immediately following a stripped footnote definition in reading mode
         continue;
@@ -597,6 +630,28 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     }
 
     justStrippedFootnote = false;
+
+    // Track list item status and prevent unindented images/media from being lazily absorbed into <li>
+    const isListLine = /^\s*(?:[-*+]\s|\d+[\.\)]\s)/.test(line);
+    if (isListLine) {
+      inList = true;
+    } else if (inList) {
+      const isIndentedContinuation = /^[ \t]{2,}/.test(line);
+      if (isIndentedContinuation) {
+        inList = true;
+      } else {
+        inList = false;
+        const isStandaloneImageOrMedia = /^(!\[.*?\]\(.*?\)|<img\s|<video\s|<audio\s)/.test(line);
+        if (isStandaloneImageOrMedia && resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
+          resultLines.push("");
+        }
+      }
+    }
+
+    // Normalize headings missing a space after hashes e.g. "##✨New Features" -> "## ✨New Features"
+    processedLine = processedLine
+      .replace(/^(#{2,6})([^\s#])/, "$1 $2")
+      .replace(/^#([^\s#a-zA-Z0-9_\-\/\u0E00-\u0E7F])/, "# $1");
 
     // Do NOT alter indentation for Markdown structural syntax:
     // lists (- *, 1.), blockquotes (>), headings (#), horizontal rules (--- *** ___ * * *), tables (|)
@@ -687,21 +742,80 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
   }
 
   // In Reading Mode: render collected footnotes at the bottom below divider with return arrow
+  // Structure: Blank Line (<p></p>) -> Divider Line (<hr class="footnotes-sep">) -> Blank Line (<p></p>) -> Footnotes list
   if (isReadingMode && footnoteDefs.size > 0) {
+    const sortedEntries = Array.from(footnoteDefs.entries()).sort(([idA], [idB]) => {
+      const numA = Number(idA);
+      const numB = Number(idB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: "base" });
+    });
+
     const footnoteItems: string[] = [];
-    footnoteDefs.forEach((fnContent, fnId) => {
+    sortedEntries.forEach(([fnId, fnContent]) => {
+      const formattedContent = parseFootnoteInlineMarkdown(fnContent);
       footnoteItems.push(
-        `<li id="fn-${fnId}" class="footnote-item" data-footnote-id="${fnId}"><p><a id="fn-${fnId}" data-footnote-target="${fnId}" class="footnote-anchor select-none"></a>${fnContent} <a href="#fnref-${fnId}" id="fnback-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary hover:underline cursor-pointer select-none ml-1">↩</a></p></li>`
+        `<li id="fn-${fnId}" class="footnote-item" data-footnote-id="${fnId}"><p><a id="fn-${fnId}" data-footnote-target="${fnId}" class="footnote-anchor select-none"></a>${formattedContent} <a href="#fnref-${fnId}" id="fnback-${fnId}" data-footnote-backref="${fnId}" class="footnote-backref text-primary hover:underline cursor-pointer select-none ml-1">↩</a></p></li>`
       );
     });
+
+    // Clean any trailing empty lines/paragraphs before the footnote section
+    while (
+      resultLines.length > 0 &&
+      (resultLines[resultLines.length - 1] === "" || resultLines[resultLines.length - 1] === "<p></p>")
+    ) {
+      resultLines.pop();
+    }
+
     resultLines.push("");
     resultLines.push("<p></p>");
+    resultLines.push("");
     resultLines.push('<hr class="footnotes-sep my-6 border-t border-border/60" />');
+    resultLines.push("");
     resultLines.push("<p></p>");
+    resultLines.push("");
     resultLines.push(`<section class="footnotes my-4" data-footnotes="true"><ol class="footnotes-list list-decimal pl-6 space-y-1 text-sm text-muted-foreground">${footnoteItems.join("")}</ol></section>`);
   }
 
   return resultLines.join("\n");
+}
+
+export function hasReadingModeFootnotesDoc(doc: any): boolean {
+  if (!doc || !doc.childCount) return false;
+  // Reading mode footnotes (hr.footnotes-sep and footnotes list) are always placed at the bottom of the document
+  const count = doc.childCount;
+  const start = Math.max(0, count - 6);
+  for (let i = start; i < count; i++) {
+    const node = doc.child(i);
+    if (node.type.name === "horizontalRule" && node.attrs?.class?.includes("footnotes-sep")) {
+      return true;
+    }
+    if (node.type.name === "orderedList") {
+      let hasFootnoteMark = false;
+      node.descendants((child: any) => {
+        if (hasFootnoteMark) return false;
+        if (child.isText && (child.text?.includes("↩") || child.text?.includes("\u21a9"))) {
+          hasFootnoteMark = true;
+          return false;
+        }
+        if (
+          child.marks &&
+          child.marks.some(
+            (m: any) =>
+              m.type.name === "link" &&
+              (m.attrs?.href?.includes("#fnref-") || m.attrs?.["data-footnote-backref"] || m.attrs?.["data-footnote-target"])
+          )
+        ) {
+          hasFootnoteMark = true;
+          return false;
+        }
+      });
+      if (hasFootnoteMark) return true;
+    }
+  }
+  return false;
 }
 
 export const EDITOR_CLASSES =
@@ -860,6 +974,20 @@ export const prepareDomForEditor = (
           img.setAttribute("src", cachedBlobUrl);
         }
       }
+    }
+
+    // Preserve and normalize QR code metadata
+    const alt = img.getAttribute("alt") || "";
+    const title = img.getAttribute("title") || "";
+    const isQr =
+      img.getAttribute("data-qr-code") === "true" ||
+      Boolean(img.getAttribute("data-qr-text")) ||
+      alt === "QR Code" ||
+      alt.toLowerCase().startsWith("qr code") ||
+      title === "QR Code";
+
+    if (isQr && !img.getAttribute("data-qr-code")) {
+      img.setAttribute("data-qr-code", "true");
     }
   });
 
@@ -1278,7 +1406,45 @@ function collectSpellCheckDecorationsForNode(
   }
 
   if (node.isText && node.text) {
+    if (node.marks && node.marks.some((m: any) => m.type.name === "code")) {
+      return false;
+    }
+
     const text = node.text;
+
+    // Collect ranges of hashtags, wikilinks, and URLs to exclude from spell checking
+    const excludedRanges: Array<{ start: number; end: number }> = [];
+
+    // 1. Hashtags: #tag (exclude from spell check so spell check decorations don't split the hashtag pill badge)
+    const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
+    let tagMatch: RegExpExecArray | null;
+    while ((tagMatch = tagRegex.exec(text)) !== null) {
+      const rawTag = tagMatch[1];
+      if (!/^\d+$/.test(rawTag)) {
+        const hashIdx = tagMatch[0].indexOf("#");
+        const start = tagMatch.index + hashIdx;
+        const end = start + 1 + rawTag.length;
+        excludedRanges.push({ start, end });
+      }
+    }
+
+    // 2. Wikilinks: [[target]] or [[target|alias]]
+    const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
+    let wikiMatch: RegExpExecArray | null;
+    while ((wikiMatch = wikilinkRegex.exec(text)) !== null) {
+      excludedRanges.push({ start: wikiMatch.index, end: wikiMatch.index + wikiMatch[0].length });
+    }
+
+    // 3. URLs: https://... or http://...
+    const urlRegex = /https?:\/\/[^\s<>)\]}]+/g;
+    let urlMatch: RegExpExecArray | null;
+    while ((urlMatch = urlRegex.exec(text)) !== null) {
+      excludedRanges.push({ start: urlMatch.index, end: urlMatch.index + urlMatch[0].length });
+    }
+
+    const isInsideExcludedRange = (fromIdx: number, toIdx: number) =>
+      excludedRanges.some((r) => fromIdx < r.end && toIdx > r.start);
+
     const thaiSpellRegex = getThaiSpellRegex();
     const thaiAnomalyRegex = getThaiAnomalyRegex();
     const latinSpellRegex = /[A-Za-z']+/g;
@@ -1288,6 +1454,7 @@ function collectSpellCheckDecorationsForNode(
       thaiSpellRegex.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = thaiSpellRegex.exec(text)) !== null) {
+        if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
         const misspelled = match[0];
         const from = pos + match.index;
         const to = from + misspelled.length;
@@ -1301,6 +1468,7 @@ function collectSpellCheckDecorationsForNode(
 
       thaiAnomalyRegex.lastIndex = 0;
       while ((match = thaiAnomalyRegex.exec(text)) !== null) {
+        if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
         const anomaly = match[0];
         const from = pos + match.index;
         const to = from + anomaly.length;
@@ -1317,6 +1485,7 @@ function collectSpellCheckDecorationsForNode(
     latinSpellRegex.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = latinSpellRegex.exec(text)) !== null) {
+      if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
       const word = match[0];
       if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
         if (isWordMisspelled(word)) {
@@ -1927,6 +2096,7 @@ export type SlashMenuItem = {
     editor: TiptapEditor,
     helpers: {
       openLinkDialog: () => void;
+      openFootnoteDialog?: () => void;
       openImageDialog: () => void;
       openWorkspaceImageDialog?: () => void;
       triggerImageUpload: () => void;
@@ -1967,13 +2137,11 @@ const escHtml = (str: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-export const insertFootnoteAtSelection = (editor: any) => {
+export const insertFootnoteAtSelection = (editor: any, referenceText: string = "") => {
   if (!editor || editor.isDestroyed) return;
 
   const doc = editor.state.doc;
-  const existingDefs: { id: string; content: string }[] = [];
   const existingNums: number[] = [];
-  const rangesToDelete: { from: number; to: number }[] = [];
 
   try {
     // Collect all existing citation numbers across the whole document
@@ -1997,61 +2165,9 @@ export const insertFootnoteAtSelection = (editor: any) => {
           }
         });
       }
-    });
-
-    // Scan top-level children to find definition paragraphs and their preceding blank line
-    let prevChildBlankRange: { from: number; to: number } | null = null;
-    let inDefGroup = false;
-
-    doc.forEach((childNode: any, offset: number) => {
-      const isDef =
-        childNode.type?.name === "paragraph" &&
-        (childNode.attrs?.["data-footnote-def"] ||
-          (childNode.attrs?.["id"]?.startsWith("fn-") ? childNode.attrs["id"].replace(/^fn-/, "") : null) ||
-          /^\s*\[\^[^\]]+\]:/.test(childNode.textContent || ""));
-
-      const isEmpty =
-        childNode.type?.name === "paragraph" &&
-        !childNode.textContent?.trim() &&
-        !isDef;
-
-      if (isDef) {
-        if (!inDefGroup && prevChildBlankRange) {
-          rangesToDelete.push(prevChildBlankRange);
-        }
-        inDefGroup = true;
-
-        let fnId = childNode.attrs?.["data-footnote-def"] || (childNode.attrs?.["id"]?.startsWith("fn-") ? childNode.attrs["id"].replace(/^fn-/, "") : null);
-        let content = childNode.textContent || "";
-        const match = content.match(/^\s*\[\^([^\]]+)\]:\s*(.*)$/);
-        if (match) {
-          fnId = fnId || match[1];
-          content = match[2].trim();
-        } else {
-          content = content.replace(/^\s*\[\^[^\]]+\]:\s*/, "").trim();
-        }
-
-        if (fnId) {
-          existingDefs.push({
-            id: String(fnId),
-            content,
-          });
-        }
-        rangesToDelete.push({
-          from: offset,
-          to: offset + childNode.nodeSize,
-        });
-      } else {
-        inDefGroup = false;
-      }
-
-      if (isEmpty) {
-        prevChildBlankRange = {
-          from: offset,
-          to: offset + childNode.nodeSize,
-        };
-      } else {
-        prevChildBlankRange = null;
+      if (node.attrs?.["data-footnote-def"]) {
+        const n = parseInt(node.attrs["data-footnote-def"], 10);
+        if (!isNaN(n)) existingNums.push(n);
       }
     });
   } catch {
@@ -2069,19 +2185,9 @@ export const insertFootnoteAtSelection = (editor: any) => {
   }
 
   const tr = editor.state.tr;
+  const cursorPos = editor.state.selection.from;
 
-  // 1. Delete all old definitions and their preceding blank line in reverse order
-  rangesToDelete.sort((a, b) => b.from - a.from);
-  for (const r of rangesToDelete) {
-    if (r.from < tr.doc.content.size && r.to <= tr.doc.content.size) {
-      tr.delete(r.from, r.to);
-    }
-  }
-
-  // 2. Map current cursor position through deletions
-  const mappedCursorPos = tr.mapping.map(editor.state.selection.from);
-
-  // 3. Insert citation [nextNum] at mapped cursor position
+  // 1. Insert citation [nextNum] at current cursor position
   const citationSchema = editor.schema;
   const supMark = citationSchema.marks.superscript ? citationSchema.marks.superscript.create() : null;
   const linkMark = citationSchema.marks.link.create({
@@ -2092,56 +2198,62 @@ export const insertFootnoteAtSelection = (editor: any) => {
   });
   const marks = supMark ? [linkMark, supMark] : [linkMark];
   const citationText = citationSchema.text(`[${nextNum}]`, marks);
-  tr.insert(mappedCursorPos, citationText);
+  tr.insert(cursorPos, citationText);
 
-  // 4. Resolve the end of the top-level block containing the new citation
-  const resolved = tr.doc.resolve(mappedCursorPos + citationText.nodeSize);
-  const afterBlockPos = resolved.after(1);
-
-  // 5. Construct the new definitions block
-  const allDefs = [...existingDefs, { id: String(nextNum), content: "" }];
-  const defNodes: any[] = [];
-  defNodes.push(citationSchema.nodes.paragraph.create());
-
-  for (const def of allDefs) {
-    const backlink = citationSchema.marks.link.create({
-      href: `#fnref-${def.id}`,
-      "data-footnote-backref": def.id,
-      class: "footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer",
-    });
-    const prefix = citationSchema.text(`[^${def.id}]:`, [backlink]);
-    const children = [prefix];
-    if (def.content) {
-      children.push(citationSchema.text(" " + def.content));
-    } else {
-      children.push(citationSchema.text(" "));
-    }
-    const para = citationSchema.nodes.paragraph.create(
-      {
-        id: `fn-${def.id}`,
-        "data-footnote-def": def.id,
-        class: "footnote-def text-sm text-muted-foreground my-1.5",
-      },
-      children
-    );
-    defNodes.push(para);
+  // 2. Build the definition paragraph: [^nextNum]: referenceText
+  const backlink = citationSchema.marks.link.create({
+    href: `#fnref-${nextNum}`,
+    "data-footnote-backref": String(nextNum),
+    class: "footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer",
+  });
+  const prefix = citationSchema.text(`[^${nextNum}]:`, [backlink]);
+  const children = [prefix];
+  const trimmed = referenceText.trim();
+  if (trimmed) {
+    children.push(citationSchema.text(" " + trimmed));
+  } else {
+    children.push(citationSchema.text(" "));
   }
 
-  // 6. Insert new definitions block right after current block (or at document end)
-  const insertPos = Math.min(afterBlockPos, tr.doc.content.size);
-  tr.insert(insertPos, defNodes);
+  const defPara = citationSchema.nodes.paragraph.create(
+    {
+      id: `fn-${nextNum}`,
+      "data-footnote-def": String(nextNum),
+      class: "footnote-def text-sm text-muted-foreground my-1.5",
+    },
+    children
+  );
 
-  // 7. Move selection inside the new definition line
-  let targetPos = -1;
-  tr.doc.descendants((node: any, pos: number) => {
-    if (node.type?.name === "paragraph" && node.attrs?.["data-footnote-def"] === String(nextNum)) {
-      targetPos = pos + node.nodeSize - 1;
-      return false;
-    }
-  });
+  // 3. Append definition to the end of the document preceded by 1 empty line
+  const lastChild = tr.doc.lastChild;
+  const isLastChildDef =
+    lastChild?.type?.name === "paragraph" &&
+    (lastChild.attrs?.["data-footnote-def"] ||
+      (lastChild.attrs?.["id"]?.startsWith("fn-") ? lastChild.attrs["id"].replace(/^fn-/, "") : null) ||
+      /^\s*\[\^[^\]]+\]:/.test(lastChild.textContent || ""));
 
-  if (targetPos >= 0) {
-    tr.setSelection(editor.state.selection.constructor.near(tr.doc.resolve(targetPos)));
+  const isLastChildEmpty =
+    lastChild?.type?.name === "paragraph" &&
+    !lastChild.textContent?.trim();
+
+  const docEndPos = tr.doc.content.size;
+
+  if (isLastChildDef) {
+    // If the last line is already a footnote definition, append directly below it
+    tr.insert(docEndPos, defPara);
+  } else if (isLastChildEmpty) {
+    // Already has 1 empty line at the end, insert definition after it
+    tr.insert(docEndPos, defPara);
+  } else {
+    // Precede with 1 empty line (empty paragraph), followed by the definition
+    const emptyPara = citationSchema.nodes.paragraph.create();
+    tr.insert(docEndPos, [emptyPara, defPara]);
+  }
+
+  // 4. Move selection to right after the inserted citation [nextNum]
+  const afterCitationPos = cursorPos + citationText.nodeSize;
+  if (afterCitationPos <= tr.doc.content.size) {
+    tr.setSelection(editor.state.selection.constructor.near(tr.doc.resolve(afterCitationPos)));
   }
 
   editor.view.dispatch(tr);
@@ -2372,7 +2484,13 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     categoryKey: "settings.toolCategoryBlock",
     icon: <FootnoteIcon className="mr-2 h-4 w-4" />,
     keywords: ["footnote", "note", "fn", "เชิงอรรถ", "อ้างอิงท้ายหน้า", "อ้างอิง", "reference"],
-    action: (editor) => insertFootnoteAtSelection(editor),
+    action: (editor, helpers) => {
+      if (helpers.openFootnoteDialog) {
+        helpers.openFootnoteDialog();
+      } else {
+        insertFootnoteAtSelection(editor);
+      }
+    },
   },
   {
     id: "horizontalRule",
@@ -3439,7 +3557,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const align = h.style?.textAlign || h.getAttribute("align");
       const prev = h.previousElementSibling;
       const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
         (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
       );
       const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
@@ -3466,7 +3584,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const prev = el.previousElementSibling;
       const next = el.nextElementSibling;
       const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
         (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
       );
       const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
@@ -3479,7 +3597,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         return `${leadingNl}<p style="${style}">\n${content}\n</p>\n\n`;
       }
       const isNextNonEmptyBlock = next && (
-        /^H[1-6]|IMG|HR$/i.test(next.nodeName) ||
+        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
         (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
       );
       const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
@@ -3620,7 +3738,16 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       clone.querySelectorAll(".footnote-backref, [data-footnote-backref]").forEach((a) => a.remove());
       const rawContent = td.turndown(clone.innerHTML).trim();
       const cleanContent = rawContent.replace(/^\[\^[^\]]+\]:\s*/, "").trim();
-      return `\n\n[^${fnId}]: ${cleanContent}\n\n`;
+
+      const prev = el.previousElementSibling;
+      const isPrevFootnoteDef =
+        prev &&
+        prev.nodeName === "P" &&
+        (prev.getAttribute("data-footnote-def") !== null ||
+          prev.classList?.contains("footnote-def") ||
+          /^\s*\[\^[^\]]+\]:/.test(prev.textContent || ""));
+
+      return isPrevFootnoteDef ? `[^${fnId}]: ${cleanContent}\n` : `\n\n[^${fnId}]: ${cleanContent}\n`;
     },
   });
 
@@ -3628,18 +3755,60 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
   td.addRule("readingModeFootnoteItem", {
     filter: (node) => {
       const el = node as HTMLElement;
-      return el.nodeName === "LI" && (el.classList?.contains("footnote-item") || el.getAttribute("data-footnote-id") !== null);
+      return (
+        el.nodeName === "LI" &&
+        (el.classList?.contains("footnote-item") ||
+          el.getAttribute("data-footnote-id") !== null ||
+          Boolean(el.querySelector("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']")))
+      );
     },
     replacement: () => "",
   });
 
   td.addRule("footnotesSection", {
-    filter: (node) => (node as HTMLElement).nodeName === "SECTION" && (node as HTMLElement).classList?.contains("footnotes"),
+    filter: (node) => {
+      const el = node as HTMLElement;
+      if (
+        (el.nodeName === "SECTION" && (el.classList?.contains("footnotes") || el.getAttribute("data-footnotes") !== null)) ||
+        (el.nodeName === "DIV" && (el.classList?.contains("footnotes") || el.getAttribute("data-footnotes") !== null))
+      ) {
+        return true;
+      }
+      if (el.nodeName === "OL") {
+        if (el.classList?.contains("footnotes-list")) return true;
+        const allItemsAreFootnotes =
+          el.children.length > 0 &&
+          Array.from(el.children).every(
+            (li) =>
+              (li as HTMLElement).classList?.contains("footnote-item") ||
+              (li as HTMLElement).getAttribute("data-footnote-id") !== null ||
+              Boolean((li as HTMLElement).querySelector("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']"))
+          );
+        if (allItemsAreFootnotes) return true;
+      }
+      return false;
+    },
     replacement: () => "",
   });
 
   td.addRule("footnotesSep", {
-    filter: (node) => (node as HTMLElement).nodeName === "HR" && (node as HTMLElement).classList?.contains("footnotes-sep"),
+    filter: (node) => {
+      const el = node as HTMLElement;
+      if (el.nodeName !== "HR") return false;
+      if (el.classList?.contains("footnotes-sep")) return true;
+      let next = el.nextElementSibling;
+      while (next && !next.textContent?.trim() && (next.tagName === "P" || next.tagName === "BR")) {
+        next = next.nextElementSibling;
+      }
+      if (
+        next &&
+        (next.matches?.("section.footnotes, [data-footnotes], ol.footnotes-list") ||
+          Boolean(next.querySelector?.("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']")))
+      ) {
+        return true;
+      }
+      return false;
+    },
     replacement: () => "",
   });
 
@@ -3720,7 +3889,31 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         }
       }
       const titleAttr = title ? ` "${title}"` : "";
-      const md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
+      const qrCode = img.getAttribute("data-qr-code");
+      const qrText = img.getAttribute("data-qr-text");
+      const qrColor = img.getAttribute("data-qr-color");
+      const qrBg = img.getAttribute("data-qr-bg");
+      const qrLevel = img.getAttribute("data-qr-level");
+      const isQr = qrCode === "true" || Boolean(qrText);
+
+      let md: string;
+      if (isQr) {
+        const qrAttrs = [
+          `src="${relSrc}"`,
+          `alt="${escapeHtml(alt || "QR Code")}"`,
+          width ? `width="${width}"` : "",
+          `data-qr-code="true"`,
+          qrText ? `data-qr-text="${escapeHtml(qrText)}"` : "",
+          qrColor ? `data-qr-color="${escapeHtml(qrColor)}"` : "",
+          qrBg ? `data-qr-bg="${escapeHtml(qrBg)}"` : "",
+          qrLevel ? `data-qr-level="${escapeHtml(qrLevel)}"` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        md = `<img ${qrAttrs} />`;
+      } else {
+        md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
+      }
       const parent = img.parentElement;
       const parentTag = parent?.nodeName?.toUpperCase() || "";
       const isStandaloneBlock =
@@ -3735,13 +3928,13 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         const prev = img.previousElementSibling;
         const next = img.nextElementSibling;
         const isPrevNonEmptyBlock = prev && (
-          /^H[1-6]|IMG|HR$/i.test(prev.nodeName) ||
+          /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
           (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
         );
         const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
 
         const isNextNonEmptyBlock = next && (
-          /^H[1-6]|IMG|HR$/i.test(next.nodeName) ||
+          /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
           (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
         );
         const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
@@ -3993,6 +4186,81 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
   return td;
 }
 
+/**
+ * Shared helper to navigate footnote citations ([1]), footnote return backrefs (↩),
+ * and in-page anchor links (#section) with smooth scrolling and highlight pulse.
+ */
+export function navigateFootnoteOrAnchor(clickedEl: HTMLElement, container: HTMLElement | null = null): boolean {
+  const linkEl = clickedEl.closest("a, [data-footnote-ref], [data-footnote-backref], [data-footnote-target], sup, .footnote-ref, .footnote-backref") as HTMLElement | null;
+  if (!linkEl) return false;
+
+  const fnRef =
+    linkEl.getAttribute("data-footnote-ref") ||
+    linkEl.querySelector("[data-footnote-ref]")?.getAttribute("data-footnote-ref") ||
+    linkEl.closest("[data-footnote-ref]")?.getAttribute("data-footnote-ref");
+
+  const fnBackref =
+    linkEl.getAttribute("data-footnote-backref") ||
+    linkEl.querySelector("[data-footnote-backref]")?.getAttribute("data-footnote-backref") ||
+    linkEl.closest("[data-footnote-backref]")?.getAttribute("data-footnote-backref");
+
+  const href = linkEl.getAttribute("href") || (linkEl.querySelector("a")?.getAttribute("href") || "");
+
+  const isBackref = Boolean(fnBackref || href.includes("#fnref-") || linkEl.classList?.contains("footnote-backref"));
+  const isCitation = Boolean(!isBackref && (fnRef || href.includes("#fn-") || linkEl.classList?.contains("footnote-ref") || linkEl.closest("sup")));
+
+  if (!isCitation && !isBackref && !href.startsWith("#")) return false;
+
+  const cleanId = (
+    fnRef ||
+    fnBackref ||
+    (href.includes("#") ? href.split("#")[1].replace(/^(fn|fnref)-/, "") : "") ||
+    (linkEl.textContent || "").replace(/[\[\]\^:\s]/g, "")
+  ).trim();
+
+  if (!cleanId && !href.startsWith("#")) return false;
+
+  const rootEl = container || (typeof document !== "undefined" ? (document.querySelector(".editor-scroll-container") || document) : null);
+  if (!rootEl) return false;
+
+  let targetEl: HTMLElement | null = null;
+
+  if (isCitation) {
+    // User clicked citation [1] in text -> jump down to definition at bottom (or in-place)
+    targetEl =
+      (rootEl.querySelector(`[data-footnote-def="${cleanId}"]`) as HTMLElement) ||
+      (rootEl.querySelector(`[data-footnote-backref="${cleanId}"]`) as HTMLElement) ||
+      (rootEl.querySelector(`[data-footnote-target="${cleanId}"]`) as HTMLElement) ||
+      (rootEl.querySelector(`[id="fn-${cleanId}"]`) as HTMLElement) ||
+      (rootEl.querySelector(`[data-footnote-id="${cleanId}"]`) as HTMLElement) ||
+      (typeof document !== "undefined" ? document.getElementById(`fn-${cleanId}`) : null);
+  } else if (isBackref) {
+    // User clicked return arrow ↩ (or [^1]:) -> jump back up to citation [1] in text
+    targetEl =
+      (rootEl.querySelector(`[data-footnote-ref="${cleanId}"]`) as HTMLElement) ||
+      (rootEl.querySelector(`[id="fnref-${cleanId}"]`) as HTMLElement) ||
+      (typeof document !== "undefined" ? document.getElementById(`fnref-${cleanId}`) : null);
+  } else if (href.startsWith("#")) {
+    const targetId = href.slice(1);
+    targetEl =
+      (rootEl.querySelector(`[id="${targetId}"]`) as HTMLElement) ||
+      (typeof document !== "undefined" ? document.getElementById(targetId) : null);
+  }
+
+  if (targetEl) {
+    const scrollBlock = targetEl.closest("li, p, h1, h2, h3, h4, h5, h6, sup") || targetEl;
+    scrollBlock.scrollIntoView({ behavior: "smooth", block: "center" });
+    const highlightTarget = targetEl.closest("li, p, sup") || targetEl;
+    highlightTarget.classList.add("bg-primary/20", "transition-colors", "duration-500", "rounded");
+    setTimeout(() => {
+      highlightTarget.classList.remove("bg-primary/20");
+    }, 1200);
+    return true;
+  }
+
+  return false;
+}
+
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const { note, isVisible = true, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
 
@@ -4005,11 +4273,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [newFolderName, setNewFolderName] = useState("");
   const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
+  const isReadingModeRef = useRef(isReadingMode);
+  isReadingModeRef.current = isReadingMode;
   const [htmlCursor, setHtmlCursor] = useState({ line: 1, col: 1 });
 
   // Version History State
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [comparingVersion, setComparingVersion] = useState<NoteVersionSnapshot | null>(null);
+
+  // When active note / tab changes, automatically close version comparison
+  const lastActiveNoteIdRef = useRef<string | null>(note?.id ?? null);
+  useEffect(() => {
+    if (lastActiveNoteIdRef.current !== (note?.id ?? null)) {
+      lastActiveNoteIdRef.current = note?.id ?? null;
+      if (comparingVersion) {
+        setComparingVersion(null);
+      }
+    }
+  }, [note?.id, comparingVersion]);
 
   // Custom Font State & Handlers
   const { customFonts, refresh: refreshCustomFonts } = useCustomFonts();
@@ -4429,6 +4710,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       event.target.value = "";
     };
   const autoSaveDiskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSavingStartTimeRef = useRef(0);
   const debounceRenameTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRenameRef = useRef<{ note: Note; firstH1Text: string; newFileName: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -4445,6 +4727,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [lineEnding, setLineEnding] = useState<"LF" | "CRLF">("LF");
   const [extensionDialogOpen, setExtensionDialogOpen] = useState(false);
+  const [footnotePopoverState, setFootnotePopoverState] = useState<{
+    open: boolean;
+    coords: { top: number; left: number } | null;
+  }>({
+    open: false,
+    coords: null,
+  });
+  const [footnoteInputText, setFootnoteInputText] = useState("");
+  const footnoteInputRef = useRef<HTMLInputElement | null>(null);
+  const footnotePopoverRef = useRef<HTMLDivElement | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkTab, setLinkTab] = useState<"workspace" | "external">("workspace");
   const [linkUrl, setLinkUrl] = useState("");
@@ -5028,6 +5320,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [slashMenuState.open, slashMenuState.filteredItems, checkSlashMenuScroll, stopAutoScroll]);
 
   const openLinkDialogRef = useRef<(() => void) | null>(null);
+  const openFootnoteDialogRef = useRef<(() => void) | null>(null);
   const openImageDialogRef = useRef<(() => void) | null>(null);
   const openWorkspaceImageDialogRef = useRef<(() => void) | null>(null);
   const triggerImageUploadRef = useRef<(() => void) | null>(null);
@@ -5047,6 +5340,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     tRef.current = t;
     isMobileRef.current = isMobile;
     noteRef.current = note;
+    if (note && (!activeNoteRef.current || activeNoteRef.current.id === note.id)) {
+      activeNoteRef.current = note;
+    }
   }, [t, isMobile, note]);
 
   const executeSlashCommand = useCallback(
@@ -5060,6 +5356,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       setSlashMenuState((prev) => ({ ...prev, open: false }));
       item.action(editorInstance, {
         openLinkDialog: () => openLinkDialogRef.current?.(),
+        openFootnoteDialog: () => openFootnoteDialogRef.current?.(),
         openImageDialog: () => openImageDialogRef.current?.(),
         openWorkspaceImageDialog: () => openWorkspaceImageDialogRef.current?.(),
         triggerImageUpload: () => triggerImageUploadRef.current?.(),
@@ -5233,10 +5530,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const editorScrollContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const isRestoringScrollRef = useRef(false);
+  const restoreScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const restoreScrollPosition = useCallback((noteId: string) => {
     if (!noteId) return;
     const targetTop = getNoteScrollPosition(noteId);
+    if (targetTop <= 0) return;
     
+    isRestoringScrollRef.current = true;
+    if (restoreScrollTimeoutRef.current) {
+      clearTimeout(restoreScrollTimeoutRef.current);
+    }
+
     const applyScroll = () => {
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== noteId) return;
       if (editorScrollContainerRef.current) {
@@ -5247,10 +5553,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     applyScroll();
     requestAnimationFrame(applyScroll);
     setTimeout(applyScroll, 20);
-    setTimeout(applyScroll, 60);
-    setTimeout(applyScroll, 120);
-    setTimeout(applyScroll, 240);
-    setTimeout(applyScroll, 400);
+    setTimeout(applyScroll, 50);
+    setTimeout(applyScroll, 100);
+    setTimeout(applyScroll, 200);
+    setTimeout(applyScroll, 350);
+    setTimeout(applyScroll, 500);
+
+    restoreScrollTimeoutRef.current = setTimeout(() => {
+      isRestoringScrollRef.current = false;
+    }, 600);
   }, []);
 
   const prevIsVisibleRef = useRef(isVisible);
@@ -5259,18 +5570,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const wasVisible = prevIsVisibleRef.current;
     prevIsVisibleRef.current = isVisible;
 
-    if (!isVisible && wasVisible && note?.id && editorScrollContainerRef.current) {
+    if (!isVisible && wasVisible && note?.id && editorScrollContainerRef.current && !isHtmlFile(note) && !isCssFile(note)) {
       const container = editorScrollContainerRef.current;
-      if (container.clientHeight > 0 || container.scrollTop > 0) {
+      if (container.scrollTop > 0) {
         setNoteScrollPosition(note.id, container.scrollTop);
       }
-    } else if (isVisible && !wasVisible && note?.id) {
+    } else if (isVisible && !wasVisible && note?.id && !isHtmlFile(note) && !isCssFile(note)) {
       restoreScrollPosition(note.id);
     }
-  }, [isVisible, note?.id, restoreScrollPosition]);
+  }, [isVisible, note?.id, restoreScrollPosition, isHtmlFile, isCssFile]);
 
   const handleEditorScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!note?.id) return;
+    if (isRestoringScrollRef.current) return;
+    if (isHtmlFile(note) || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) return;
     const target = e.currentTarget;
     if (
       target.scrollTop === 0 &&
@@ -5280,22 +5593,58 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     const top = target.scrollTop;
     setNoteScrollPosition(note.id, top);
-  }, [note?.id]);
+  }, [note?.id, isHtmlFile, isCssFile, isImageFile, isBinaryFile]);
 
   const serializeEditorContent = useCallback((targetNote: Note, instance: TiptapEditor): string => {
     if (isTxtFile(targetNote)) {
       return getPlainTextFromHtml(instance.getHTML());
     }
+    if (isReadingModeRef.current && isMarkdownNote(targetNote)) {
+      const sourceContent = noteRef.current?.id === targetNote.id ? (noteRef.current?.content ?? targetNote.content ?? "") : (targetNote.content ?? "");
+      if (sourceContent) return sourceContent;
+    }
     const html = instance.getHTML();
     const temp = document.createElement("div");
     temp.innerHTML = html;
-    // Strip reading-mode footnote section and separator if any are present in the DOM
+    // Strip reading-mode footnote section, items, and separator if any are present in the DOM
     temp.querySelectorAll("section.footnotes, [data-footnotes], hr.footnotes-sep").forEach((el) => el.remove());
+    temp.querySelectorAll(".footnote-item, [data-footnote-id], [data-footnote-target]").forEach((el) => {
+      const block = el.closest("li, ol, ul, section, p") || el;
+      block.remove();
+    });
+    temp.querySelectorAll("a[href*='#fnref-'], [data-footnote-backref]").forEach((el) => {
+      const li = el.closest("li");
+      if (li) {
+        const ol = li.closest("ol, ul");
+        li.remove();
+        if (ol && !ol.textContent?.trim()) ol.remove();
+      }
+    });
     const firstChild = temp.firstElementChild;
     if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
       firstChild.remove();
     }
-    return normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
+    const bodyMd = normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML));
+    if (isMarkdownNote(targetNote)) {
+      const sourceContent = noteRef.current?.id === targetNote.id ? (noteRef.current?.content ?? targetNote.content ?? "") : (targetNote.content ?? "");
+      const parsedOriginal = parseFrontmatterAndTags(sourceContent);
+      let serialized = bodyMd;
+      if (parsedOriginal.hasFrontmatter) {
+        const fm = parsedOriginal.frontmatterRaw.endsWith("\n") ? parsedOriginal.frontmatterRaw : parsedOriginal.frontmatterRaw + "\n";
+        serialized = fm + bodyMd;
+      }
+      if (targetNote.tags && targetNote.tags.length > 0) {
+        serialized = updateFrontmatterTags(serialized, targetNote.tags);
+      }
+      if (targetNote.icon !== undefined || targetNote.iconColor !== undefined) {
+        serialized = updateFrontmatterIcon(serialized, targetNote.icon, targetNote.iconColor);
+      }
+      if (targetNote.isFavorite !== undefined) {
+        serialized = updateFrontmatterFavorite(serialized, targetNote.isFavorite);
+      }
+      return serialized;
+    }
+    return bodyMd;
   }, [isTxtFile, turndown]);
 
   const flushDebouncedContentSave = useCallback((targetNote?: Note) => {
@@ -5303,7 +5652,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       clearTimeout(debouncedContentSaveTimeoutRef.current);
       debouncedContentSaveTimeoutRef.current = null;
     }
-    const currentNote = targetNote || activeNoteRef.current || noteRef.current;
+    const currentNote = targetNote || activeNoteRef.current;
+    if (!currentNote) return;
+
+    // Safety checks: ensure the editor actually belongs to this note and note is not locked
+    if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== currentNote.id) {
+      return;
+    }
+    const isLocked = Boolean((currentNote.isLocked && !currentNote.isDecrypted) || isEncryptedNote(currentNote.content));
+    if (isLocked) {
+      return;
+    }
+
     if (userEditedRef.current && currentNote) {
       let contentToSave = pendingSaveContentRef.current?.content;
       if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current && !editorInstanceRef.current.isDestroyed) {
@@ -5313,86 +5673,45 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           // fallback
         }
       }
+      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote))) {
+        contentToSave = currentNote.content;
+      }
       pendingSaveContentRef.current = null;
       if (contentToSave !== undefined && contentToSave !== null) {
-        try {
-          localStorage.setItem(`luno_backup_${currentNote.id}`, contentToSave);
-          if (currentNote.fileName) {
-            localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, contentToSave);
+        if (!currentNote.isLocked) {
+          try {
+            localStorage.setItem(`luno_backup_${currentNote.id}`, contentToSave);
+            if (currentNote.fileName) {
+              localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, contentToSave);
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
         onUpdate(currentNote.id, { content: contentToSave });
+
+        // Also flush pending debounced version snapshot if one is scheduled
+        if (debouncedVersionSnapshotTimeoutRef.current) {
+          clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
+          debouncedVersionSnapshotTimeoutRef.current = null;
+        }
+        if (!currentNote.isLocked) {
+          saveVersionSnapshot(
+            { ...currentNote, content: contentToSave },
+            "auto",
+            undefined,
+            false
+          );
+        }
       }
       userEditedRef.current = false;
     } else if (!userEditedRef.current) {
       pendingSaveContentRef.current = null;
     }
-  }, [onUpdate, serializeEditorContent]);
+  }, [onUpdate, serializeEditorContent, isHtmlFile, isCssFile]);
 
-  const navigateFootnoteOrAnchor = useCallback((clickedEl: HTMLElement, container: HTMLElement | null): boolean => {
-    const linkEl = clickedEl.closest("a, [data-footnote-ref], [data-footnote-backref], [data-footnote-target], sup, .footnote-ref, .footnote-backref") as HTMLElement | null;
-    if (!linkEl) return false;
-
-    const fnRef =
-      linkEl.getAttribute("data-footnote-ref") ||
-      linkEl.querySelector("[data-footnote-ref]")?.getAttribute("data-footnote-ref") ||
-      linkEl.closest("[data-footnote-ref]")?.getAttribute("data-footnote-ref");
-
-    const fnBackref =
-      linkEl.getAttribute("data-footnote-backref") ||
-      linkEl.querySelector("[data-footnote-backref]")?.getAttribute("data-footnote-backref") ||
-      linkEl.closest("[data-footnote-backref]")?.getAttribute("data-footnote-backref");
-
-    const href = linkEl.getAttribute("href") || (linkEl.querySelector("a")?.getAttribute("href") || "");
-
-    const isBackref = Boolean(fnBackref || href.includes("#fnref-") || linkEl.classList?.contains("footnote-backref"));
-    const isCitation = Boolean(!isBackref && (fnRef || href.includes("#fn-") || linkEl.classList?.contains("footnote-ref") || linkEl.closest("sup")));
-
-    if (!isCitation && !isBackref && !href.startsWith("#")) return false;
-
-    const cleanId = (
-      fnRef ||
-      fnBackref ||
-      (href.includes("#") ? href.split("#")[1].replace(/^(fn|fnref)-/, "") : "") ||
-      (linkEl.textContent || "").replace(/[\[\]\^:\s]/g, "")
-    ).trim();
-
-    if (!cleanId) return false;
-
-    const rootEl = container || editorScrollContainerRef.current || document;
-    let targetEl: HTMLElement | null = null;
-
-    if (isCitation) {
-      // User clicked citation [1] in text -> jump down to definition at bottom (or in-place)
-      targetEl =
-        (rootEl.querySelector(`[data-footnote-def="${cleanId}"]`) as HTMLElement) ||
-        (rootEl.querySelector(`[data-footnote-backref="${cleanId}"]`) as HTMLElement) ||
-        (rootEl.querySelector(`[data-footnote-target="${cleanId}"]`) as HTMLElement) ||
-        (rootEl.querySelector(`[id="fn-${cleanId}"]`) as HTMLElement) ||
-        (rootEl.querySelector(`[data-footnote-id="${cleanId}"]`) as HTMLElement) ||
-        (document.getElementById(`fn-${cleanId}`));
-    } else {
-      // User clicked return arrow ↩ (or [^1]:) -> jump back up to citation [1] in text
-      targetEl =
-        (rootEl.querySelector(`[data-footnote-ref="${cleanId}"]`) as HTMLElement) ||
-        (rootEl.querySelector(`[id="fnref-${cleanId}"]`) as HTMLElement) ||
-        (document.getElementById(`fnref-${cleanId}`));
-    }
-
-    if (targetEl) {
-      const scrollBlock = targetEl.closest("li, p, h1, h2, h3, h4, h5, h6, sup") || targetEl;
-      scrollBlock.scrollIntoView({ behavior: "smooth", block: "center" });
-      const highlightTarget = targetEl.closest("li, p, sup") || targetEl;
-      highlightTarget.classList.add("bg-primary/20", "transition-colors", "duration-500", "rounded");
-      setTimeout(() => {
-        highlightTarget.classList.remove("bg-primary/20");
-      }, 1200);
-      return true;
-    }
-
-    return false;
+  const navigateFootnoteOrAnchorHandler = useCallback((clickedEl: HTMLElement, container: HTMLElement | null): boolean => {
+    return navigateFootnoteOrAnchor(clickedEl, container || editorScrollContainerRef.current);
   }, []);
 
   const editor = useEditor({
@@ -5502,6 +5821,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         addAttributes() {
           return {
             ...this.parent?.(),
+            class: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("class"),
+              renderHTML: (attributes) => {
+                if (!attributes.class) return {};
+                return {
+                  class: attributes.class,
+                };
+              },
+            },
             "data-wikilink": {
               default: null,
               parseHTML: (element) => element.getAttribute("data-wikilink"),
@@ -5547,9 +5876,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }).configure({
         openOnClick: false,
         autolink: settings.smartTypography !== false,
+        protocols: ["wikilink"],
         validate: () => true,
+        isAllowedUri: (url, ctx) => {
+          if (!url) return false;
+          if (url.startsWith("wikilink:") || url.startsWith("#")) return true;
+          return ctx.defaultValidate(url);
+        },
         HTMLAttributes: {
-          class: "text-primary underline underline-offset-4",
+          class: "text-primary underline underline-offset-4 cursor-pointer",
           rel: "noopener noreferrer nofollow",
         },
       }),
@@ -5583,6 +5918,56 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 };
               },
             },
+            "data-qr-code": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-code"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-code"]) return {};
+                return {
+                  "data-qr-code": attributes["data-qr-code"],
+                };
+              },
+            },
+            "data-qr-text": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-text"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-text"]) return {};
+                return {
+                  "data-qr-text": attributes["data-qr-text"],
+                };
+              },
+            },
+            "data-qr-color": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-color"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-color"]) return {};
+                return {
+                  "data-qr-color": attributes["data-qr-color"],
+                };
+              },
+            },
+            "data-qr-bg": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-bg"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-bg"]) return {};
+                return {
+                  "data-qr-bg": attributes["data-qr-bg"],
+                };
+              },
+            },
+            "data-qr-level": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-level"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-level"]) return {};
+                return {
+                  "data-qr-level": attributes["data-qr-level"],
+                };
+              },
+            },
           };
         },
         addNodeView() {
@@ -5598,7 +5983,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 oldAttrs.width !== newAttrs.width ||
                 oldAttrs["data-relative-src"] !== newAttrs["data-relative-src"] ||
                 oldAttrs.alt !== newAttrs.alt ||
-                oldAttrs.title !== newAttrs.title
+                oldAttrs.title !== newAttrs.title ||
+                oldAttrs["data-qr-code"] !== newAttrs["data-qr-code"] ||
+                oldAttrs["data-qr-text"] !== newAttrs["data-qr-text"] ||
+                oldAttrs["data-qr-color"] !== newAttrs["data-qr-color"] ||
+                oldAttrs["data-qr-bg"] !== newAttrs["data-qr-bg"] ||
+                oldAttrs["data-qr-level"] !== newAttrs["data-qr-level"]
               ) {
                 updateProps();
               }
@@ -5949,23 +6339,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           plugins: instance.state.plugins,
         });
         instance.view.updateState(cleanState);
-        if (note?.id) {
+        if (note?.id && !hasReadingModeFootnotesDoc(instance.state.doc)) {
           noteEditorStateMap.set(note.id, instance.state);
         }
       }
     },
     onBlur: () => {
-      if (note?.id && editor?.state) {
-        noteEditorStateMap.set(note.id, editor.state);
+      const currentActiveId = editorActiveNoteIdRef.current;
+      const currentNote = activeNoteRef.current;
+      const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
+      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked) {
+        if (editor?.state && !isReadingModeRef.current && !syncingFromNote.current) {
+          noteEditorStateMap.set(currentActiveId, editor.state);
+        }
+        flushPendingRename();
+        flushDebouncedContentSave(currentNote);
       }
-      flushPendingRename();
-      flushDebouncedContentSave();
     },
     onSelectionUpdate: ({ editor: instance }) => {
       checkSlashCommand(instance);
       scheduleEditorTick(true);
-      if (note?.id) {
-        noteEditorStateMap.set(note.id, instance.state);
+      const currentActiveId = editorActiveNoteIdRef.current;
+      const currentNote = activeNoteRef.current;
+      const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
+      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isReadingModeRef.current && !syncingFromNote.current) {
+        noteEditorStateMap.set(currentActiveId, instance.state);
       }
       const { from } = instance.state.selection;
       if (from > (instance.state.doc.firstChild?.nodeSize ?? 0)) {
@@ -5976,17 +6374,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       checkSlashCommand(instance);
       scheduleEditorTick(false);
       scheduleCountUpdate();
-      if (note?.id) {
-        noteEditorStateMap.set(note.id, instance.state);
+      const currentActiveId = editorActiveNoteIdRef.current;
+      const currentNote = activeNoteRef.current || note;
+      const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
+
+      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isReadingModeRef.current && !syncingFromNote.current) {
+        noteEditorStateMap.set(currentActiveId, instance.state);
       }
-      if (isReadingMode || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
+      if (isLocked || (currentActiveId && note && currentActiveId !== note.id)) return;
+      if (isReadingModeRef.current || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (loadingNoteIdRef.current === note.id) return;
       if (transaction?.getMeta("isSync")) return;
+      if (transaction && !transaction.docChanged) return;
       userEditedRef.current = true;
       hasPendingDiskSaveRef.current = true;
       if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
-      if (note.fileType === "image" || note.fileType === "binary" || isHtmlFile(note) || isCssFile(note) || isTxtFile(note)) return;
-
       const doc = instance.state.doc;
       const firstChild = doc.firstChild;
       let firstH1Text = "";
@@ -6026,8 +6428,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
       }
       debouncedContentSaveTimeoutRef.current = setTimeout(() => {
+        if (isReadingModeRef.current) return;
         if (userEditedRef.current && noteRef.current) {
           const currentNote = noteRef.current;
+          if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== currentNote.id) return;
+          if ((currentNote.isLocked && !currentNote.isDecrypted) || isEncryptedNote(currentNote.content)) return;
+
           const savedContent = serializeEditorContent(currentNote, instance);
           pendingSaveContentRef.current = { id: currentNote.id, content: savedContent };
           try {
@@ -6064,6 +6470,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             setSaveStatus("unsaved");
             return;
           }
+          autoSavingStartTimeRef.current = Date.now();
           setSaveStatus("auto_saving");
           scheduleAutoSaveDiskRef.current?.();
         } else {
@@ -6386,9 +6793,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [rootDirHandle]);
 
   const saveLinkedFileToDisk = useCallback(async (targetNote?: Note) => {
+    if (isReadingModeRef.current) return;
     if (!hasPendingDiskSaveRef.current) return;
     const n = targetNote || activeNoteRef.current || note;
     if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n)) || !settings.autoSave) return;
+    if ((n.isLocked && !n.isDecrypted) || isEncryptedNote(n.content)) return;
     if (!targetNote && editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== n.id) return;
     if (n.fileType === "image" || n.fileType === "binary") return;
     if (deletedNoteIdsRef.current.has(n.id) || isNoteDeleted(n.id)) return;
@@ -6396,12 +6805,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!targetNote && (loadingNoteIdRef.current === n.id || syncingFromNote.current)) return;
 
     const opId = ++saveOpIdRef.current;
-    setSaveStatus("auto_saving");
 
     const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
     if (relPath && isRelativePathDeleted(relPath)) {
       if (saveOpIdRef.current === opId) {
-        setSaveStatus("auto_saved");
+        setSaveStatus("saved");
       }
       return;
     }
@@ -6423,25 +6831,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     autoSaveDiskTimeoutRef.current = setTimeout(() => {
       void saveLinkedFileToDisk();
-    }, 200);
+    }, 500);
   }, [saveLinkedFileToDisk]);
 
   useEffect(() => {
     scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
   }, [scheduleAutoSaveDisk]);
 
-  const prevNoteIdForTagsRef = useRef<string | null>(null);
-  const prevTagsStrRef = useRef<string>("");
-  useEffect(() => {
-    if (!note) return;
-    const currentTagsStr = JSON.stringify(note.tags || []);
-    if (prevNoteIdForTagsRef.current === note.id && prevTagsStrRef.current !== currentTagsStr) {
-      hasPendingDiskSaveRef.current = true;
-      scheduleAutoSaveDiskRef.current?.();
-    }
-    prevNoteIdForTagsRef.current = note.id;
-    prevTagsStrRef.current = currentTagsStr;
-  }, [note?.id, note?.tags]);
 
   useEffect(() => {
     return () => {
@@ -6532,6 +6928,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastEditedTime, setLastEditedTime] = useState<number | null>(null);
   const saveOpIdRef = useRef(0);
+
+  useEffect(() => {
+    if (saveStatus === "auto_saved" || saveStatus === "manually_saved") {
+      const timer = setTimeout(() => {
+        setSaveStatus((prev) => (prev === "auto_saved" || prev === "manually_saved" ? "saved" : prev));
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [saveStatus]);
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [statusPortalTarget, setStatusPortalTarget] = useState<HTMLElement | null>(null);
@@ -6644,18 +7049,65 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [saveStatus]);
 
   useEffect(() => {
-    if (!editor || !note) return;
+    const handleClearHistory = (e: Event) => {
+      const customEvent = e as CustomEvent<{ noteId: string }>;
+      const targetId = customEvent.detail?.noteId;
+      if (!targetId) return;
 
-    if ((note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content)) {
-      editorActiveNoteIdRef.current = null;
-      noteEditorStateMap.delete(note.id);
+      if (editorActiveNoteIdRef.current === targetId || activeNoteRef.current?.id === targetId) {
+        editorActiveNoteIdRef.current = null;
+        activeNoteRef.current = null;
+        userEditedRef.current = false;
+        hasPendingDiskSaveRef.current = false;
+        if (editor && !editor.isDestroyed) {
+          try {
+            const cleanState = EditorState.create({
+              doc: editor.state.schema.topNodeType.createAndFill() || editor.state.doc,
+              plugins: editor.state.plugins,
+            });
+            editor.view.updateState(cleanState);
+            setEditorTick((v) => (v + 1) % 1000000);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    };
+
+    window.addEventListener("luno:clear-note-editor-history", handleClearHistory);
+    return () => {
+      window.removeEventListener("luno:clear-note-editor-history", handleClearHistory);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    if (!note) {
+      if (editorActiveNoteIdRef.current) {
+        editorActiveNoteIdRef.current = null;
+        activeNoteRef.current = null;
+        userEditedRef.current = false;
+        hasPendingDiskSaveRef.current = false;
+        try {
+          const cleanState = EditorState.create({
+            doc: editor.state.schema.topNodeType.createAndFill() || editor.state.doc,
+            plugins: editor.state.plugins,
+          });
+          editor.view.updateState(cleanState);
+          setEditorTick((v) => (v + 1) % 1000000);
+        } catch {
+          /* ignore */
+        }
+      }
       return;
     }
 
     const baseTitle = getBaseTitle(note);
 
-    // If editor is already showing content for this exact active note, sync Title H1 if fileName was changed externally
-    if (editorActiveNoteIdRef.current === note.id) {
+    // If editor is already showing content for this exact active note and it was not closed, sync Title H1 if fileName was changed externally
+    if (editorActiveNoteIdRef.current === note.id && !closedNoteIds.has(note.id)) {
+      activeNoteRef.current = note;
       if (!isTxtFile(note)) {
         const firstChild = editor.state.doc.firstChild;
         if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
@@ -6693,16 +7145,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         void saveLinkedFileToDisk(prevNote);
       }
       if (!closedNoteIds.has(prevId)) {
-        if (editor?.state) {
+        if (editor?.state && !isReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote)) {
           noteEditorStateMap.set(prevId, editor.state);
         }
-        if (editorScrollContainerRef.current) {
+        if (editorScrollContainerRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote)) {
           const container = editorScrollContainerRef.current;
-          if (container.clientHeight > 0 || container.scrollTop > 0) {
+          if (container.scrollTop > 0) {
             setNoteScrollPosition(prevId, container.scrollTop);
           }
         }
       }
+    }
+
+    if ((note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content)) {
+      editorActiveNoteIdRef.current = null;
+      activeNoteRef.current = null;
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      noteEditorStateMap.delete(note.id);
+      try {
+        const cleanState = EditorState.create({
+          doc: editor.state.schema.topNodeType.createAndFill() || editor.state.doc,
+          plugins: editor.state.plugins,
+        });
+        editor.view.updateState(cleanState);
+        setEditorTick((v) => (v + 1) % 1000000);
+      } catch {
+        /* ignore */
+      }
+      return;
     }
 
     if (isHtmlFile(note) || isCssFile(note)) {
@@ -6712,6 +7183,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       pendingRenameRef.current = null;
       editorActiveNoteIdRef.current = note.id;
+      activeNoteRef.current = note;
+      closedNoteIds.delete(note.id);
       return;
     }
 
@@ -6721,26 +7194,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     // Check if this note already has a preserved editor state (from an open tab)
     const savedState = noteEditorStateMap.get(note.id);
     if (savedState) {
-      syncingFromNote.current = true;
-      editorActiveNoteIdRef.current = note.id;
-      activeNoteRef.current = note;
-      editor.view.updateState(savedState);
-      userEditedRef.current = false;
-      hasPendingDiskSaveRef.current = false;
-      if (debouncedContentSaveTimeoutRef.current) {
-        clearTimeout(debouncedContentSaveTimeoutRef.current);
-        debouncedContentSaveTimeoutRef.current = null;
+      if (!isReadingMode && hasReadingModeFootnotesDoc(savedState.doc)) {
+        noteEditorStateMap.delete(note.id);
+      } else {
+        syncingFromNote.current = true;
+        editorActiveNoteIdRef.current = note.id;
+        activeNoteRef.current = note;
+        editor.view.updateState(savedState);
+        if (isReadingMode) {
+          editor.setEditable(false);
+          const rawContent = noteRef.current?.content ?? note.content ?? "";
+          if (/\[\^[^\]]+\]/.test(rawContent)) {
+            const parsed = parseEditorContent(rawContent, baseTitle, isTxtFile(note), isHtmlFile(note), true);
+            (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+          }
+        }
+        userEditedRef.current = false;
+        hasPendingDiskSaveRef.current = false;
+        if (debouncedContentSaveTimeoutRef.current) {
+          clearTimeout(debouncedContentSaveTimeoutRef.current);
+          debouncedContentSaveTimeoutRef.current = null;
+        }
+        if (autoSaveDiskTimeoutRef.current) {
+          clearTimeout(autoSaveDiskTimeoutRef.current);
+          autoSaveDiskTimeoutRef.current = null;
+        }
+        setSaveStatus("saved");
+        syncingFromNote.current = false;
+        loadingNoteIdRef.current = null;
+        setEditorTick((v) => v + 1);
+        restoreScrollPosition(note.id);
+        return;
       }
-      if (autoSaveDiskTimeoutRef.current) {
-        clearTimeout(autoSaveDiskTimeoutRef.current);
-        autoSaveDiskTimeoutRef.current = null;
-      }
-      setSaveStatus("saved");
-      syncingFromNote.current = false;
-      loadingNoteIdRef.current = null;
-      setEditorTick((v) => v + 1);
-      restoreScrollPosition(note.id);
-      return;
     }
 
     loadingNoteIdRef.current = note.id;
@@ -6749,14 +7234,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       try {
         const backup = localStorage.getItem(`luno_backup_${note.id}`) ||
                        (note.fileName ? localStorage.getItem(`luno_backup_fn_${note.fileName}`) : null);
-        if (backup && backup.trim()) {
+        if (backup && backup.trim() && !isEncryptedNote(backup)) {
           noteContent = backup;
         }
       } catch {
         /* ignore */
       }
     }
-    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note));
+    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note), Boolean(isReadingMode));
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
@@ -6786,7 +7271,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       plugins: editor.state.plugins,
     });
     editor.view.updateState(cleanState);
-    noteEditorStateMap.set(note.id, editor.state);
+    if (!isReadingMode) {
+      noteEditorStateMap.set(note.id, editor.state);
+    }
 
     userEditedRef.current = false;
     hasPendingDiskSaveRef.current = false;
@@ -6843,12 +7330,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return () => {
       const target = activeNoteRef.current || note;
       if (target?.id && !closedNoteIds.has(target.id)) {
-        if (editor && !editor.isDestroyed) {
+        if (editor && !editor.isDestroyed && !isReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target)) {
           noteEditorStateMap.set(target.id, editor.state);
         }
-        if (editorScrollContainerRef.current) {
+        if (editorScrollContainerRef.current && !isHtmlFile(target) && !isCssFile(target)) {
           const container = editorScrollContainerRef.current;
-          if (container.clientHeight > 0 || container.scrollTop > 0) {
+          if (container.scrollTop > 0) {
             setNoteScrollPosition(target.id, container.scrollTop);
           }
         }
@@ -6899,34 +7386,102 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const prevReadingModeRef = useRef(isReadingMode);
   useEffect(() => {
+    isReadingModeRef.current = isReadingMode;
     if (!editor || editor.isDestroyed) return;
-    editor.setEditable(!isReadingMode);
     if (prevReadingModeRef.current === isReadingMode) {
+      editor.setEditable(!isReadingMode);
       return;
     }
+    const enteringReadingMode = isReadingMode;
     prevReadingModeRef.current = isReadingMode;
-    if (!note) return;
-    const rawContent = noteRef.current?.content ?? note.content ?? "";
-    const isTxt = isTxtFile(note);
-    const isHtml = isHtmlFile(note);
-    const baseTitle = getBaseTitle(note);
-    const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, isReadingMode);
-    const prevScroll = editorScrollContainerRef.current?.scrollTop;
-    syncingFromNote.current = true;
-    (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
-    const cleanState = EditorState.create({
-      doc: editor.state.doc,
-      plugins: editor.state.plugins,
-    });
-    editor.view.updateState(cleanState);
-    if (note.id) {
-      noteEditorStateMap.set(note.id, editor.state);
+    if (!note) {
+      editor.setEditable(!isReadingMode);
+      return;
     }
-    syncingFromNote.current = false;
+
+    const prevScroll = editorScrollContainerRef.current?.scrollTop;
+
+    if (enteringReadingMode) {
+      // Edit Mode -> Reading Mode:
+      syncingFromNote.current = true;
+      if (userEditedRef.current && note) {
+        flushDebouncedContentSave(note);
+      }
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
+        debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+        autoSaveDiskTimeoutRef.current = null;
+      }
+
+      editor.setEditable(false);
+
+      const rawContent = noteRef.current?.content ?? note.content ?? "";
+      const hasFootnotes = /\[\^[^\]]+\]/.test(rawContent);
+      if (hasFootnotes) {
+        const isTxt = isTxtFile(note);
+        const isHtml = isHtmlFile(note);
+        const baseTitle = getBaseTitle(note);
+        const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, true);
+        (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+      }
+      // In Reading Mode, do not overwrite noteEditorStateMap so that the clean Edit-Mode state is preserved
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      syncingFromNote.current = false;
+    } else {
+      // Reading Mode -> Edit Mode:
+      syncingFromNote.current = true;
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      if (debouncedContentSaveTimeoutRef.current) {
+        clearTimeout(debouncedContentSaveTimeoutRef.current);
+        debouncedContentSaveTimeoutRef.current = null;
+      }
+      if (autoSaveDiskTimeoutRef.current) {
+        clearTimeout(autoSaveDiskTimeoutRef.current);
+        autoSaveDiskTimeoutRef.current = null;
+      }
+
+      editor.setEditable(true);
+
+      const rawContent = noteRef.current?.content ?? note.content ?? "";
+      const hasFootnotes = /\[\^[^\]]+\]/.test(rawContent);
+      const savedState = note.id ? noteEditorStateMap.get(note.id) : null;
+      const isSavedStateValid = savedState && !hasReadingModeFootnotesDoc(savedState.doc);
+
+      if (isSavedStateValid && !hasFootnotes) {
+        editor.view.updateState(savedState);
+      } else {
+        // If note has footnotes or savedState was tainted, always parse fresh clean Edit-Mode content!
+        const isTxt = isTxtFile(note);
+        const isHtml = isHtmlFile(note);
+        const baseTitle = getBaseTitle(note);
+        const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, false);
+        (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+        const cleanState = EditorState.create({
+          doc: editor.state.doc,
+          plugins: editor.state.plugins,
+        });
+        editor.view.updateState(cleanState);
+        if (note.id) {
+          noteEditorStateMap.set(note.id, editor.state);
+        }
+      }
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      syncingFromNote.current = false;
+      setEditorTick((v) => v + 1);
+    }
+
     if (typeof prevScroll === "number" && editorScrollContainerRef.current) {
       editorScrollContainerRef.current.scrollTop = prevScroll;
     }
-  }, [editor, isReadingMode, getBaseTitle, isTxtFile, isHtmlFile]);
+  }, [editor, isReadingMode, getBaseTitle, isTxtFile, isHtmlFile, note, flushDebouncedContentSave]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -7630,6 +8185,74 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSelectedWorkspaceNote(null);
   };
 
+  const openFootnoteDialog = useCallback(() => {
+    if (!editor || editor.isDestroyed) return;
+    rememberSelection();
+    setFootnoteInputText("");
+
+    let coords: { top: number; left: number } | null = null;
+    try {
+      const { from } = editor.state.selection;
+      const c = editor.view.coordsAtPos(from);
+      if (c && c.bottom > 0) {
+        coords = {
+          top: c.bottom + 8,
+          left: Math.max(16, Math.min(c.left - 20, window.innerWidth - 320)),
+        };
+      }
+    } catch {
+      // fallback
+    }
+
+    if (!coords || coords.top <= 0) {
+      coords = {
+        top: 140,
+        left: Math.max(16, window.innerWidth / 2 - 140),
+      };
+    }
+
+    setFootnotePopoverState({ open: true, coords });
+    setTimeout(() => {
+      footnoteInputRef.current?.focus();
+      footnoteInputRef.current?.select();
+    }, 50);
+  }, [editor, rememberSelection]);
+
+  useEffect(() => {
+    if (!footnotePopoverState.open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (footnotePopoverRef.current && !footnotePopoverRef.current.contains(e.target as Node)) {
+        setFootnotePopoverState({ open: false, coords: null });
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setFootnotePopoverState({ open: false, coords: null });
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [footnotePopoverState.open]);
+
+  const handleConfirmFootnote = useCallback(() => {
+    const textToInsert = footnoteInputText;
+    setFootnotePopoverState({ open: false, coords: null });
+    setFootnoteInputText("");
+    if (!editor || editor.isDestroyed) return;
+    if (editorSelectionRef.current) {
+      const docSize = editor.state.doc.content.size;
+      const { from, to } = editorSelectionRef.current;
+      if (typeof from === "number" && typeof to === "number" && from >= 0 && to <= docSize && from <= to) {
+        editor.commands.setTextSelection({ from, to });
+      }
+    }
+    insertFootnoteAtSelection(editor, textToInsert);
+  }, [editor, footnoteInputText]);
+
   const openImageDialog = () => {
     rememberSelection();
     setImageUrl("");
@@ -7688,6 +8311,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   useEffect(() => {
     openLinkDialogRef.current = openLinkDialog;
+    openFootnoteDialogRef.current = openFootnoteDialog;
     openImageDialogRef.current = openImageDialog;
     openWorkspaceImageDialogRef.current = openWorkspaceImageDialog;
     triggerImageUploadRef.current = triggerImageUpload;
@@ -7998,7 +8622,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const parsedFm = parseFrontmatterAndTags(text);
     const cleanText = parsedFm.hasFrontmatter ? parsedFm.bodyContent : text;
     const content = format === "plain" ? cleanText : toEditorHtml(cleanText, false);
-    const tags = Array.from(new Set([...(note.tags || []), ...parsedFm.allTags]));
+    const tags = parsedFm.allTags;
     onUpdate(note.id, { content, contentFormat: format, tags });
   };
 
@@ -8262,7 +8886,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleRestoreVersionContent = useCallback((ver: NoteVersionSnapshot) => {
     if (!note) return;
-    saveVersionSnapshot(note, "pre-restore");
+    const currentContent = (isHtmlFile(note) || isCssFile(note) || !editor)
+      ? (note.content || "")
+      : serializeEditorContent(note, editor);
+    saveVersionSnapshot({ ...note, content: currentContent }, "pre-restore");
 
     // 1. Update localStorage crash-recovery backups
     try {
@@ -8276,11 +8903,44 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       /* ignore */
     }
 
-    // 2. Update React Note state
-    onUpdate(note.id, { content: ver.content });
+    // 2. Parse restored properties if present
+    let restoredTags = ver.tags;
+    let restoredIcon = ver.icon;
+    let restoredIconColor = ver.iconColor;
+    let restoredIsFavorite = ver.isFavorite;
 
-    // 3. Update TipTap Editor DOM
-    if (editor && !editor.isDestroyed) {
+    if (ver.content && isMarkdownNote(note)) {
+      const parsedFm = parseFrontmatterAndTags(ver.content);
+      if (parsedFm.hasFrontmatter) {
+        if (!restoredTags || restoredTags.length === 0) {
+          restoredTags = parsedFm.allTags;
+        }
+        if (restoredIcon === undefined && typeof parsedFm.frontmatterData?.icon === "string") {
+          restoredIcon = parsedFm.frontmatterData.icon;
+        }
+        if (restoredIconColor === undefined) {
+          const col = parsedFm.frontmatterData?.iconColor || parsedFm.frontmatterData?.icon_color;
+          if (typeof col === "string") restoredIconColor = col;
+        }
+        if (restoredIsFavorite === undefined) {
+          const fav = parsedFm.frontmatterData?.favorite ?? parsedFm.frontmatterData?.isFavorite;
+          if (typeof fav === "boolean") restoredIsFavorite = fav;
+        }
+      }
+    }
+
+    // 3. Update React Note state with full properties
+    const patch: Partial<Note> = {
+      content: ver.content,
+      tags: restoredTags ?? [],
+      icon: restoredIcon,
+      iconColor: restoredIconColor,
+      isFavorite: restoredIsFavorite ?? false,
+    };
+    onUpdate(note.id, patch);
+
+    // 4. Update TipTap Editor DOM (for markdown and txt files)
+    if (!isHtmlFile(note) && !isCssFile(note) && editor && !editor.isDestroyed) {
       const baseTitle = getBaseTitle(note);
       const parsed = parseEditorContent(ver.content, baseTitle, isTxtFile(note), isHtmlFile(note));
       syncingFromNote.current = true;
@@ -8288,7 +8948,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       void resolveRelativeImagesInEditor(editor);
     }
 
-    // 4. Trigger Auto-Save to Disk / Workspace Files
+    // 5. Trigger Auto-Save to Disk / Workspace Files
     hasPendingDiskSaveRef.current = true;
     setSaveStatus("auto_saving");
     scheduleAutoSaveDiskRef.current?.();
@@ -8296,21 +8956,89 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     toast({
       title: t("versionHistoryPanel.restoreSuccess"),
     });
-  }, [note, onUpdate, editor, getBaseTitle, parseEditorContent, isTxtFile, isHtmlFile, resolveRelativeImagesInEditor, t, toast]);
+  }, [note, onUpdate, editor, getBaseTitle, parseEditorContent, isTxtFile, isHtmlFile, isCssFile, serializeEditorContent, resolveRelativeImagesInEditor, t, toast]);
 
   const handleManualVersionSnapshot = useCallback((): NoteVersionSnapshot | null => {
     if (!note) return null;
-    const currentContent = editor ? serializeEditorContent(note, editor) : (note.content || "");
+    const isCode = isHtmlFile(note) || isCssFile(note) || !editor;
+    const currentContent = isCode ? (note.content || "") : serializeEditorContent(note, editor);
+    const words = isCode
+      ? (currentContent.trim() ? currentContent.trim().split(/\s+/).filter(Boolean).length : 0)
+      : editorStats.wordCount;
+    const chars = isCode ? currentContent.length : editorStats.charCount;
+
     const snap = saveVersionSnapshot(
       { ...note, content: currentContent },
       "manual",
       undefined,
       true,
-      editorStats.wordCount,
-      editorStats.charCount
+      words,
+      chars
     );
     return snap;
-  }, [note, editor, serializeEditorContent, editorStats]);
+  }, [note, editor, isHtmlFile, isCssFile, serializeEditorContent, editorStats]);
+
+  const handleCodeEditorChange = useCallback((val: string) => {
+    if (!note) return;
+    pendingSaveContentRef.current = { id: note.id, content: val };
+    userEditedRef.current = true;
+    hasPendingDiskSaveRef.current = true;
+    setLastEditedTime(Date.now());
+    setSaveStatus("unsaved");
+
+    if (debouncedContentSaveTimeoutRef.current) {
+      clearTimeout(debouncedContentSaveTimeoutRef.current);
+    }
+
+    debouncedContentSaveTimeoutRef.current = setTimeout(() => {
+      if (isReadingModeRef.current) return;
+      const currentNote = noteRef.current || note;
+      if (!currentNote) return;
+
+      const latestContent = (pendingSaveContentRef.current?.id === currentNote.id
+        ? pendingSaveContentRef.current.content
+        : null) ?? val;
+
+      try {
+        if (latestContent) {
+          localStorage.setItem(`luno_backup_${currentNote.id}`, latestContent);
+          if (currentNote.fileName) {
+            localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, latestContent);
+          }
+        }
+      } catch {
+        /* ignore localStorage quota */
+      }
+
+      onUpdate(currentNote.id, { content: latestContent });
+
+      // Throttled and debounced automatic version snapshot on typing idle (10s)
+      if (debouncedVersionSnapshotTimeoutRef.current) {
+        clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
+      }
+      const targetNote = { ...currentNote, content: latestContent };
+      debouncedVersionSnapshotTimeoutRef.current = setTimeout(() => {
+        const words = latestContent.trim() ? latestContent.trim().split(/\s+/).filter(Boolean).length : 0;
+        const chars = latestContent.length;
+        saveVersionSnapshot(
+          targetNote,
+          "auto",
+          undefined,
+          false,
+          words,
+          chars
+        );
+      }, 10000);
+
+      if (!settings.autoSave) {
+        setSaveStatus("unsaved");
+        return;
+      }
+      autoSavingStartTimeRef.current = Date.now();
+      setSaveStatus("auto_saving");
+      scheduleAutoSaveDiskRef.current?.();
+    }, 1000);
+  }, [note, onUpdate, settings.autoSave, saveVersionSnapshot]);
 
   const fileToDataUrl = async (file: File) => {
     return await new Promise<string>((resolve, reject) => {
@@ -8433,7 +9161,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const n = targetNote || activeNoteRef.current || note;
     if (!n) return "";
     if (isHtmlFile(n) || isCssFile(n) || targetExt === "css") {
+      if (pendingSaveContentRef.current && pendingSaveContentRef.current.id === n.id) {
+        return pendingSaveContentRef.current.content;
+      }
       return n.content || "";
+    }
+    const sourceContent = noteRef.current?.id === n.id ? (noteRef.current?.content ?? n.content ?? "") : (n.content ?? "");
+    if (isReadingModeRef.current && (!targetExt || targetExt === "md" || isMarkdownNote(n))) {
+      return sourceContent;
     }
     const format = targetExt === "html" ? "html" : targetExt === "txt" ? "plain" : targetExt === "md" ? "markdown" : getContentFormat();
 
@@ -8443,6 +9178,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     let htmlContent = (!n || isTxtFile(n)) ? rawHtml : stripTopH1FromHtml(rawHtml);
+    if (htmlContent && /footnote/i.test(htmlContent)) {
+      htmlContent = htmlContent
+        .replace(/<hr\b[^>]*class="[^"]*footnotes-sep[^"]*"[^>]*>/gi, "")
+        .replace(/<section\b[^>]*class="[^"]*footnotes[^"]*"[^>]*>[\s\S]*?<\/section>/gi, "")
+        .replace(/<ol\b[^>]*class="[^"]*footnotes-list[^"]*"[^>]*>[\s\S]*?<\/ol>/gi, "");
+    }
 
     const isBlank = !htmlContent || htmlContent.trim() === "<p></p>" || htmlContent.trim() === "<h1></h1><p></p>";
     if (isBlank && n.content && n.content.trim() !== "<p></p>") {
@@ -8478,7 +9219,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       // For markdown, convert HTML back to markdown using turndown rules
       let mdText = isLikelyHtml(htmlContent) ? getMarkdownFromHtml(htmlContent) : htmlContent;
       if (isMarkdownNote(n)) {
-        mdText = updateFrontmatterTags(mdText, n.tags || []);
+        const sourceContent = noteRef.current?.id === n.id ? (noteRef.current?.content ?? n.content ?? "") : (n.content ?? "");
+        const parsedOriginal = parseFrontmatterAndTags(sourceContent);
+        if (parsedOriginal.hasFrontmatter) {
+          // Re-attach existing frontmatter without polluting it with inline tags
+          const fm = parsedOriginal.frontmatterRaw.endsWith("\n") ? parsedOriginal.frontmatterRaw : parsedOriginal.frontmatterRaw + "\n";
+          mdText = fm + mdText;
+        }
+        if (n.tags && n.tags.length > 0) {
+          mdText = updateFrontmatterTags(mdText, n.tags);
+        }
         if (n.icon !== undefined || n.iconColor !== undefined) {
           mdText = updateFrontmatterIcon(mdText, n.icon, n.iconColor);
         }
@@ -8571,14 +9321,31 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let finalPayloadToDisk = normalizedContent;
     if (n.isLocked) {
       const activePin = onGetActivePin?.(n.id);
-      if (activePin) {
-        try {
-          finalPayloadToDisk = await encryptNoteContent(normalizedContent, activePin);
-        } catch (err) {
-          console.error("Failed to encrypt note before disk save:", err);
-        }
+      if (!activePin) {
+        console.warn("Attempted to save locked note without active PIN session. Aborting save to protect ciphertext on disk.");
+        if (saveOpIdRef.current === currentOpId) setSaveStatus("idle");
+        return;
+      }
+      try {
+        finalPayloadToDisk = await encryptNoteContent(normalizedContent, activePin);
+      } catch (err) {
+        console.error("Failed to encrypt note before disk save. Aborting save to prevent data leak:", err);
+        if (saveOpIdRef.current === currentOpId) setSaveStatus("failed");
+        return;
       }
     }
+
+    const ensureMinAutoSavingDuration = async () => {
+      if (isSilent && autoSavingStartTimeRef.current > 0) {
+        const elapsed = Date.now() - autoSavingStartTimeRef.current;
+        const MIN_DURATION = 800; // minimum 800ms display time so Auto-saving... is clearly visible and smooth
+        const remaining = MIN_DURATION - elapsed;
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+        autoSavingStartTimeRef.current = 0;
+      }
+    };
 
     // 1. Electron Desktop Native Direct Disk Save
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
@@ -8591,9 +9358,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         const ok = await electronAPI.writeFileContent({ fullPath, content: finalPayloadToDisk });
         if (ok) {
-          hasPendingDiskSaveRef.current = false;
-          onUpdate(n.id, { content: normalizedContent });
+          if (saveOpIdRef.current === currentOpId) {
+            hasPendingDiskSaveRef.current = false;
+            if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+              onUpdate(n.id, { content: normalizedContent });
+            }
+          }
           setSavedSnapshot(n.id, ext, normalizedContent);
+          await ensureMinAutoSavingDuration();
           if (saveOpIdRef.current === currentOpId) {
             setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
           }
@@ -8612,8 +9384,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!existingHandle?.createWritable) {
       if (saveOpIdRef.current === currentOpId) {
         hasPendingDiskSaveRef.current = false;
-        onUpdate(n.id, { content: normalizedContent });
+        if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+          onUpdate(n.id, { content: normalizedContent });
+        }
         setSavedSnapshot(n.id, ext, normalizedContent);
+        await ensureMinAutoSavingDuration();
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
         if (!isSilent) {
           toast({
@@ -8640,8 +9415,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       await writable.write(finalPayloadToDisk);
       await writable.close();
       writable = null;
-      hasPendingDiskSaveRef.current = false;
-      onUpdate(n.id, { content: normalizedContent });
+      if (saveOpIdRef.current === currentOpId) {
+        hasPendingDiskSaveRef.current = false;
+        if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+          onUpdate(n.id, { content: normalizedContent });
+        }
+      }
       await setStoredFileHandle(n.id, existingHandle);
       const savedFile = await existingHandle.getFile();
       updateLinkedMetadata(n.id, savedFile.name);
@@ -8652,6 +9431,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         });
       }
       setSavedSnapshot(n.id, ext, normalizedContent);
+      await ensureMinAutoSavingDuration();
       if (saveOpIdRef.current === currentOpId) {
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
       }
@@ -9398,6 +10178,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }
 
   function renderSaveStatusIndicator() {
+    if (isNoteCurrentlyLocked) {
+      return null;
+    }
+
     const isNonEditable =
       !note ||
       note.fileType === "image" ||
@@ -9409,8 +10193,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return null;
     }
 
+    const isAnim = settings?.enableAnimations !== false;
+
     const solidCheckIcon = (
-      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-background" />
+      <CheckCircle2
+        key={saveStatus}
+        className={`h-3.5 w-3.5 shrink-0 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-background ${
+          isAnim ? "animate-in zoom-in-75 fade-in duration-300 ease-out" : ""
+        }`}
+      />
     );
 
     let icon = solidCheckIcon;
@@ -9469,12 +10260,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const isIconOnly = paneId !== "main";
 
     return (
-      <div className="flex items-center gap-1.5 select-none text-[11.5px] shrink-0">
+      <div className="flex items-center gap-1.5 select-none text-[11.5px] shrink-0 transition-opacity duration-300">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className={`flex items-center gap-1 cursor-default ${textClass}`}>
+            <div className={`flex items-center gap-1 cursor-default transition-colors duration-200 ${textClass}`}>
               {icon}
-              {!isIconOnly && <span className="hidden sm:inline">{text}</span>}
+              {!isIconOnly && <span className="hidden sm:inline transition-all duration-200">{text}</span>}
             </div>
           </TooltipTrigger>
           <TooltipContent>{text}</TooltipContent>
@@ -9482,7 +10273,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         {!isIconOnly && (
           <>
             <span className="hidden md:inline text-muted-foreground/30 font-light">|</span>
-            <span className="hidden md:inline text-muted-foreground/70">{getLastEditedLabel()}</span>
+            <span className="hidden md:inline text-muted-foreground/70 transition-opacity duration-300">{getLastEditedLabel()}</span>
           </>
         )}
       </div>
@@ -9490,7 +10281,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }
 
   function renderActionButtons() {
-    if (!note) return null;
+    if (!note || isNoteCurrentlyLocked) return null;
 
     const isImg = isImageFile(note);
     const isBin = isBinaryFile(note);
@@ -9526,7 +10317,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                disabled={!note || isSharingLoading}
+                disabled={!note || isSharingLoading || isNoteCurrentlyLocked}
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
                 onClick={handleShareClick}
               >
@@ -9795,7 +10586,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" disabled={!note} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
+                <Button type="button" variant="ghost" size="icon" disabled={!note || isNoteCurrentlyLocked} className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5">
                   {(() => {
                     const SaveIconComp = getToolbarIcon("save", settings.iconPack);
                     return <SaveIconComp className="h-3.5 w-3.5" />;
@@ -9807,14 +10598,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <TooltipContent>{t("editor.saveFile")}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem disabled={!note} onClick={() => void handleSaveFile()}>
+            <DropdownMenuItem disabled={!note || isNoteCurrentlyLocked} onClick={() => void handleSaveFile()}>
               {(() => {
                 const SaveIconComp = getToolbarIcon("save", settings.iconPack);
                 return <SaveIconComp className="h-4 w-4" />;
               })()}
               <span>{t("editor.save")}</span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!note} onClick={() => void performSaveAs()}>
+            <DropdownMenuItem disabled={!note || isNoteCurrentlyLocked} onClick={() => void performSaveAs()}>
               {(() => {
                 const FileIconComp = getToolbarIcon("file", settings.iconPack);
                 return <FileIconComp className="h-4 w-4" />;
@@ -9831,7 +10622,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               type="button"
               variant="ghost"
               size="icon"
-              disabled={!note || isSharingLoading}
+              disabled={!note || isSharingLoading || isNoteCurrentlyLocked}
               className="hidden sm:inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
               onClick={handleShareClick}
             >
@@ -9856,10 +10647,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               type="button"
               variant="ghost"
               size="icon"
-              disabled={!note}
-              className="hidden md:inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5"
+              disabled={!note || isNoteCurrentlyLocked}
+              className="inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
               onClick={() => {
-                if (note) {
+                if (note && !isNoteCurrentlyLocked) {
                   setVersionHistoryOpen((prev) => !prev);
                 }
               }}
@@ -10092,7 +10883,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={(note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) && !isMobile ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+          <div className={isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) && !isMobile) ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
           {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
@@ -10512,15 +11303,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
                                     </div>
                                   </ContextMenuTrigger>
-                                  <ContextMenuContent className="w-40 rounded-xl p-1 shadow-md z-[999999]">
+                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[999999]">
                                     <ContextMenuItem
                                       onClick={() => {
                                         setFontToRename(font);
                                         setFontRenameValue(font.name);
                                       }}
-                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg cursor-pointer text-[13px]"
+                                      className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                     >
-                                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                      <Pencil className="h-4 w-4 text-muted-foreground" />
                                       <span>{t("settings.renameFont") || "Rename"}</span>
                                     </ContextMenuItem>
                                     <ContextMenuItem
@@ -10528,9 +11319,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       onClick={() => {
                                         setFontToDelete(font);
                                       }}
-                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                      className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                     >
-                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                      <Trash2 className="h-4 w-4 text-destructive" />
                                       <span>{t("settings.deleteFont") || "Delete"}</span>
                                     </ContextMenuItem>
                                   </ContextMenuContent>
@@ -11238,7 +12029,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
                             if (!editor) return;
-                            insertFootnoteAtSelection(editor);
+                            openFootnoteDialog();
                           }}
                         >
                           {renderToolIcon("footnote")}
@@ -11716,15 +12507,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
                                     </div>
                                   </ContextMenuTrigger>
-                                  <ContextMenuContent className="w-40 rounded-xl p-1 shadow-md z-[999999]">
+                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[999999]">
                                     <ContextMenuItem
                                       onClick={() => {
                                         setFontToRename(font);
                                         setFontRenameValue(font.name);
                                       }}
-                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg cursor-pointer text-[13px]"
+                                      className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                     >
-                                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                      <Pencil className="h-4 w-4 text-muted-foreground" />
                                       <span>{t("settings.renameFont") || "Rename"}</span>
                                     </ContextMenuItem>
                                     <ContextMenuItem
@@ -11732,9 +12523,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       onClick={() => {
                                         setFontToDelete(font);
                                       }}
-                                      className="gap-2.5 py-1.5 px-2.5 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
+                                      className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                     >
-                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                      <Trash2 className="h-4 w-4 text-destructive" />
                                       <span>{t("settings.deleteFont") || "Delete"}</span>
                                     </ContextMenuItem>
                                   </ContextMenuContent>
@@ -12258,7 +13049,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       key="footnote"
                       onClick={() => {
                         if (!editor) return;
-                        insertFootnoteAtSelection(editor);
+                        openFootnoteDialog();
                       }}
                       className="flex items-center gap-2 cursor-pointer"
                     >
@@ -12642,6 +13433,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div
           ref={editorScrollContainerRef}
           onScroll={handleEditorScroll}
+          onWheelCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onPointerDownCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onTouchStartCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onKeyDownCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
             if (navigateFootnoteOrAnchor(target, e.currentTarget)) {
@@ -12661,12 +13464,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }}
           className={`flex flex-col ${isReadingMode ? "cursor-default" : "cursor-text"} ${
-            isImageFile(note) || isBinaryFile(note) || note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note)
+            isImageFile(note) || isBinaryFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
               ? "flex-1 min-h-0 min-w-0 overflow-hidden"
               : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
           } w-full`}
         >
-          {comparingVersion ? (
+          {(note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content) ? (
+            <LockedNoteViewer
+              note={note}
+              onUnlock={async (pin) => {
+                if (onUnlockNote) {
+                  return await onUnlockNote(note.id, pin);
+                }
+                return false;
+              }}
+            />
+          ) : comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName))) ? (
             <VersionHistorySplitDiffView
               note={note}
               version={comparingVersion}
@@ -12678,16 +13491,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 setComparingVersion(null);
               }}
               onClose={() => setComparingVersion(null)}
-            />
-          ) : (note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content) ? (
-            <LockedNoteViewer
-              note={note}
-              onUnlock={async (pin) => {
-                if (onUnlockNote) {
-                  return await onUnlockNote(note.id, pin);
-                }
-                return false;
-              }}
             />
           ) : isImageFile(note) ? (
             <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 overflow-auto flex">
@@ -12791,15 +13594,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <HtmlCodeEditor
               key={note.id}
               value={note.content}
-              onChange={(val) => onUpdate(note.id, { content: val })}
+              onChange={handleCodeEditorChange}
               fontSize={editorFontSize}
               onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+              onBlur={() => flushDebouncedContentSave(note)}
               spellCheck={spellCheckEnabled}
               noteId={note.id}
               language="css"
               isVisible={isVisible}
             />
-          ) : note.contentFormat === "html" ? (
+          ) : note.contentFormat === "html" || isHtmlFile(note) ? (
             htmlPreviewOpen ? (
               <div className="flex-1 w-full h-full overflow-hidden flex flex-col bg-muted/20">
                 <div className="flex items-center justify-between border-b border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/40 shrink-0 select-none">
@@ -12847,9 +13651,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <HtmlCodeEditor
                 key={note.id}
                 value={note.content}
-                onChange={(val) => onUpdate(note.id, { content: val })}
+                onChange={handleCodeEditorChange}
                 fontSize={editorFontSize}
                 onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+                onBlur={() => flushDebouncedContentSave(note)}
                 spellCheck={spellCheckEnabled}
                 noteId={note.id}
                 isVisible={isVisible}
@@ -13646,14 +14451,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               isOpen={versionHistoryOpen}
               onClose={() => setVersionHistoryOpen(false)}
               note={note}
-              currentWordCount={editorStats.wordCount}
-              currentCharCount={editorStats.charCount}
+              currentWordCount={
+                (isHtmlFile(note) || isCssFile(note))
+                  ? (note.content ? note.content.trim().split(/\s+/).filter(Boolean).length : 0)
+                  : editorStats.wordCount
+              }
+              currentCharCount={
+                (isHtmlFile(note) || isCssFile(note))
+                  ? (note.content ? note.content.length : 0)
+                  : editorStats.charCount
+              }
               onManualSnapshot={handleManualVersionSnapshot}
               onRestoreVersion={(ver) => {
                 handleRestoreVersionContent(ver);
               }}
               onCompareVersion={(ver) => {
-                setComparingVersion(ver);
+                setComparingVersion({ ...ver, noteId: note.id });
               }}
             />
           )}
@@ -13743,6 +14556,62 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Footnote Reference Input Popover (Anchored at insertion point, matching Relations search box style with NO dark background) */}
+      {footnotePopoverState.open && footnotePopoverState.coords && (
+        <div
+          ref={footnotePopoverRef}
+          style={{
+            position: "fixed",
+            top: Math.min(Math.max(12, footnotePopoverState.coords.top), window.innerHeight - 80),
+            left: Math.min(Math.max(12, footnotePopoverState.coords.left), window.innerWidth - 300),
+            zIndex: 9999,
+          }}
+          className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text animate-in fade-in-0 zoom-in-95 duration-150"
+        >
+          <div className="flex items-center gap-2 rounded-xl bg-muted/60 px-2.5 py-1.5 border border-border/60 focus-within:border-primary/80 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+            <FootnoteIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground pointer-events-none" />
+            <input
+              ref={footnoteInputRef}
+              type="text"
+              value={footnoteInputText}
+              onChange={(e) => setFootnoteInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleConfirmFootnote();
+                } else if (e.key === "Escape") {
+                  setFootnotePopoverState({ open: false, coords: null });
+                }
+              }}
+              placeholder={t("editor.footnotePlaceholder") || (settings.language === "th" ? "ข้อความอ้างอิง..." : "Footnote reference...")}
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
+              autoFocus
+            />
+            {footnoteInputText && (
+              <button
+                type="button"
+                onClick={() => setFootnoteInputText("")}
+                className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleConfirmFootnote}
+              title={settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}
+              className={`p-1 rounded-md transition-colors cursor-pointer text-[10px] font-medium ${
+                footnoteInputText.trim()
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <CornerDownLeft className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl overflow-hidden">
@@ -14323,9 +15192,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <QrCodeDialog
         open={qrCodeDialogOpen}
         onOpenChange={setQrCodeDialogOpen}
-        onInsertQrCode={(dataUrl) => {
+        onInsertQrCode={(dataUrl, qrData) => {
           if (editor) {
-            editor.chain().focus().setImage({ src: dataUrl, alt: "QR Code" }).run();
+            editor
+              .chain()
+              .focus()
+              .setImage({
+                src: dataUrl,
+                alt: "QR Code",
+                "data-qr-code": "true",
+                "data-qr-text": qrData?.text || "",
+                "data-qr-color": qrData?.color || "#000000",
+                "data-qr-bg": qrData?.bgType || "white",
+                "data-qr-level": qrData?.level || "M",
+              } as any)
+              .run();
           }
         }}
       />

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
+import { getNoteScrollPosition, setNoteScrollPosition, closedNoteIds } from "@/components/Editor";
 
 interface HtmlCodeEditorProps {
   value: string;
@@ -9,6 +10,7 @@ interface HtmlCodeEditorProps {
   noteId?: string;
   language?: "html" | "css";
   isVisible?: boolean;
+  onBlur?: () => void;
 }
 
 const INDENT = "  "; // 2 spaces
@@ -144,13 +146,62 @@ function highlightCss(code: string): string {
   return result;
 }
 
-export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCursorChange, spellCheck = false, noteId, language = "html", isVisible = true }: HtmlCodeEditorProps) {
+export default function HtmlCodeEditor({
+  value,
+  onChange,
+  fontSize = 14,
+  onCursorChange,
+  spellCheck = false,
+  noteId,
+  language = "html",
+  isVisible = true,
+  onBlur,
+}: HtmlCodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
 
-  const lines = value.split("\n");
+  const [localVal, setLocalVal] = useState(value);
+  const lastInternalValRef = useRef(value);
+  const lastNoteIdRef = useRef(noteId);
+
+  const lines = localVal.split("\n");
   const computedLineHeight = `${Math.round(fontSize * 1.6)}px`;
+
+  const isRestoringScrollRef = useRef(false);
+  const restoreScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const restoreScrollPosition = useCallback((targetNoteId: string) => {
+    if (!targetNoteId) return;
+    const targetTop = getNoteScrollPosition(targetNoteId);
+    if (targetTop <= 0) return;
+
+    isRestoringScrollRef.current = true;
+    if (restoreScrollTimeoutRef.current) {
+      clearTimeout(restoreScrollTimeoutRef.current);
+    }
+
+    const applyScroll = () => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.scrollTop = targetTop;
+      if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = targetTop;
+      if (preRef.current) preRef.current.scrollTop = targetTop;
+    };
+
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+    setTimeout(applyScroll, 20);
+    setTimeout(applyScroll, 50);
+    setTimeout(applyScroll, 100);
+    setTimeout(applyScroll, 200);
+    setTimeout(applyScroll, 350);
+    setTimeout(applyScroll, 500);
+
+    restoreScrollTimeoutRef.current = setTimeout(() => {
+      isRestoringScrollRef.current = false;
+    }, 600);
+  }, []);
 
   const syncScroll = () => {
     const ta = textareaRef.current;
@@ -160,34 +211,22 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
       preRef.current.scrollTop = ta.scrollTop;
       preRef.current.scrollLeft = ta.scrollLeft;
     }
-    if (noteId) {
+    if (noteId && !isRestoringScrollRef.current) {
       if (
         ta.scrollTop === 0 &&
         (ta.clientHeight === 0 || ta.scrollHeight === 0 || ta.offsetParent === null)
       ) {
         return;
       }
-      try {
-        sessionStorage.setItem(`luno_scroll_${noteId}`, String(ta.scrollTop));
-      } catch {
-        /* ignore */
-      }
+      setNoteScrollPosition(noteId, ta.scrollTop);
     }
   };
 
   useEffect(() => {
     if (!noteId) return;
-    try {
-      const saved = sessionStorage.getItem(`luno_scroll_${noteId}`);
-      if (textareaRef.current) {
-        const top = saved ? parseFloat(saved) : 0;
-        textareaRef.current.scrollTop = !isNaN(top) ? top : 0;
-        syncScroll();
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [noteId]);
+    closedNoteIds.delete(noteId);
+    restoreScrollPosition(noteId);
+  }, [noteId, restoreScrollPosition]);
 
   const prevIsVisibleRef = useRef(isVisible);
   useEffect(() => {
@@ -195,19 +234,29 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
     const wasVisible = prevIsVisibleRef.current;
     prevIsVisibleRef.current = isVisible;
 
-    if (isVisible && !wasVisible && noteId) {
-      try {
-        const saved = sessionStorage.getItem(`luno_scroll_${noteId}`);
-        if (textareaRef.current) {
-          const top = saved ? parseFloat(saved) : 0;
-          textareaRef.current.scrollTop = !isNaN(top) ? top : 0;
-          syncScroll();
-        }
-      } catch {
-        /* ignore */
+    if (!isVisible && wasVisible && noteId && textareaRef.current) {
+      const ta = textareaRef.current;
+      if (ta.scrollTop > 0) {
+        setNoteScrollPosition(noteId, ta.scrollTop);
       }
+    } else if (isVisible && !wasVisible && noteId) {
+      restoreScrollPosition(noteId);
     }
-  }, [isVisible, noteId]);
+  }, [isVisible, noteId, restoreScrollPosition]);
+
+  useEffect(() => {
+    return () => {
+      if (restoreScrollTimeoutRef.current) {
+        clearTimeout(restoreScrollTimeoutRef.current);
+      }
+      if (textareaRef.current && noteId) {
+        const top = textareaRef.current.scrollTop;
+        if (top > 0) {
+          setNoteScrollPosition(noteId, top);
+        }
+      }
+    };
+  }, [noteId]);
 
   const updateCursorPos = useCallback(() => {
     const ta = textareaRef.current;
@@ -225,6 +274,13 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
     const val = ta.value;
+
+    const applyTextUpdate = (next: string) => {
+      ta.value = next;
+      lastInternalValRef.current = next;
+      setLocalVal(next);
+      onChange(next);
+    };
 
     // Tab = indent
     if (e.key === "Tab") {
@@ -247,7 +303,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
         }
 
         const next = val.slice(0, lineStart) + newText + (lineEnd === -1 ? "" : val.slice(lineEnd));
-        onChange(next);
+        applyTextUpdate(next);
         requestAnimationFrame(() => {
           ta.selectionStart = start + (e.shiftKey ? 0 : INDENT.length);
           ta.selectionEnd = end + delta;
@@ -260,7 +316,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
           const line = val.slice(lineStart);
           if (line.startsWith(INDENT)) {
             const next = val.slice(0, lineStart) + val.slice(lineStart + INDENT.length);
-            onChange(next);
+            applyTextUpdate(next);
             requestAnimationFrame(() => {
               ta.selectionStart = ta.selectionEnd = start - INDENT.length;
               updateCursorPos();
@@ -268,7 +324,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
           }
         } else {
           const next = val.slice(0, start) + INDENT + val.slice(end);
-          onChange(next);
+          applyTextUpdate(next);
           requestAnimationFrame(() => {
             ta.selectionStart = ta.selectionEnd = start + INDENT.length;
             updateCursorPos();
@@ -296,7 +352,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
         e.preventDefault();
         const insertText = "\n" + indent + extraIndent + "\n" + indent;
         const next = val.slice(0, start) + insertText + val.slice(end);
-        onChange(next);
+        applyTextUpdate(next);
         requestAnimationFrame(() => {
           const pos = start + 1 + indent.length + extraIndent.length;
           ta.selectionStart = ta.selectionEnd = pos;
@@ -309,7 +365,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
         e.preventDefault();
         const insertText = "\n" + indent;
         const next = val.slice(0, start) + insertText + val.slice(end);
-        onChange(next);
+        applyTextUpdate(next);
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + insertText.length;
           updateCursorPos();
@@ -345,7 +401,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
         ? e.key + val.slice(start, end) + close
         : e.key + close;
       const next = val.slice(0, start) + insert + val.slice(end);
-      onChange(next);
+      applyTextUpdate(next);
       requestAnimationFrame(() => {
         ta.selectionStart = ta.selectionEnd = start + 1;
         updateCursorPos();
@@ -357,27 +413,53 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
     requestAnimationFrame(updateCursorPos);
   }, [onChange, updateCursorPos]);
 
-  const lastInternalValRef = useRef(value);
-
   const handleTextChange = (newVal: string) => {
     lastInternalValRef.current = newVal;
+    setLocalVal(newVal);
     onChange(newVal);
     updateCursorPos();
   };
 
-  // Keep textarea synced to external value changes (e.g. Switching files) without overwriting active user typing
+  // Keep textarea synced to external value changes (e.g. switching files or undo/redo) without overwriting active user typing
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    if (value === lastInternalValRef.current || ta.value === value) return;
+
+    // Switching to a different note
+    if (noteId && lastNoteIdRef.current !== noteId) {
+      lastNoteIdRef.current = noteId;
+      lastInternalValRef.current = value;
+      setLocalVal(value);
+      ta.value = value;
+      updateCursorPos();
+      restoreScrollPosition(noteId);
+      return;
+    }
+
+    // Normalize CRLF to LF so CRLF from disk / Windows does not cause false comparison mismatches
+    const normValue = (value ?? "").replace(/\r\n/g, "\n");
+    const normInternal = (lastInternalValRef.current ?? "").replace(/\r\n/g, "\n");
+    const normTa = (ta.value ?? "").replace(/\r\n/g, "\n");
+
+    // If external value already matches current internal value or DOM value, ignore
+    if (normValue === normInternal || normValue === normTa) {
+      return;
+    }
+
+    // Never overwrite textarea content while the user is actively focused and typing!
+    if (document.activeElement === ta) {
+      return;
+    }
+
     lastInternalValRef.current = value;
+    setLocalVal(value);
     const ss = ta.selectionStart;
     const se = ta.selectionEnd;
     ta.value = value;
     ta.selectionStart = Math.min(ss, value.length);
     ta.selectionEnd = Math.min(se, value.length);
     updateCursorPos();
-  }, [value, updateCursorPos]);
+  }, [value, noteId, updateCursorPos]);
 
   return (
     <div className="relative flex h-full w-full overflow-hidden font-mono" style={{ fontSize }}>
@@ -400,7 +482,7 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
           aria-hidden
           className="no-scrollbar pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-all px-4 py-4"
           style={{ fontSize, lineHeight: computedLineHeight, tabSize: 2 }}
-          dangerouslySetInnerHTML={{ __html: (language === "css" ? highlightCss(value) : highlightHtml(value)) + "\n" }}
+          dangerouslySetInnerHTML={{ __html: (language === "css" ? highlightCss(localVal) : highlightHtml(localVal)) + "\n" }}
         />
         <textarea
           ref={textareaRef}
@@ -412,7 +494,20 @@ export default function HtmlCodeEditor({ value, onChange, fontSize = 14, onCurso
           onKeyUp={updateCursorPos}
           onSelect={updateCursorPos}
           onScroll={syncScroll}
+          onWheelCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onPointerDownCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onTouchStartCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
+          onKeyDownCapture={() => {
+            isRestoringScrollRef.current = false;
+          }}
           onKeyDown={handleKeyDown}
+          onBlur={onBlur}
           spellCheck={spellCheck}
           autoComplete="off"
           autoCorrect="off"

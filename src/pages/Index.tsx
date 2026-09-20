@@ -10,11 +10,12 @@ import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
 import SettingsTabView, { type SettingsCategory, isValidSettingsCategory } from "@/components/SettingsTabView";
 import HelpTabView, { type HelpCategory, isValidHelpCategory } from "@/components/HelpTabView";
+import WhatsNewView from "@/components/WhatsNewView";
 import LunoAiView from "@/components/LunoAiView";
 import WebViewerView from "@/components/WebViewerView";
 import HomeView from "@/components/HomeView";
 import TrashView from "@/components/TrashView";
-import TemplatesView from "@/components/TemplatesView";
+import TemplatesView, { TEMPLATE_DEFINITIONS } from "@/components/TemplatesView";
 import { RelationsView } from "@/components/RelationsView";
 import FavoritesTabView from "@/components/FavoritesTabView";
 import TagsTabView from "@/components/TagsTabView";
@@ -24,7 +25,8 @@ import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName }
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
 import { useTrash, type TrashedNote } from "@/hooks/useTrash";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useTabs, isSystemOrWebTab, isTabAllowedInCompactLayout } from "@/hooks/useTabs";
+import { useTabs, isSystemOrWebTab, isTabAllowedInCompactLayout, isFirstLaunchOnVersion, markVersionAsSeen } from "@/hooks/useTabs";
+import { APP_VERSION } from "@/lib/appVersion";
 import type { CreateNoteOptions } from "@/lib/fileHandles";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
 import { updateFrontmatterIcon, updateFrontmatterTags, updateFrontmatterFavorite, isMarkdownNote, isMarkdownFileName, isTiptapJson, parseFrontmatterAndTags } from "@/lib/frontmatter";
@@ -37,7 +39,8 @@ import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { createCloudWorkspace } from "@/lib/googleDriveApi";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
-import { encryptNoteContent, decryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
+import { encryptNoteContent, decryptNoteContent, isEncryptedNote, getRemainingLockoutSeconds, clearPinLockout } from "@/lib/noteCrypto";
+import { clearNoteVersionHistory } from "@/lib/versionHistoryStorage";
 import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, replaceFirstH1InMarkdown, type NoteTemplateType } from "@/lib/templates";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState } from "@/components/Editor";
@@ -71,6 +74,7 @@ export default function Index() {
     restoreTabsFromSession,
     setActiveTabId,
   } = useTabs(notesRef);
+  const isFirstTimeOnVersionRef = useRef(isFirstLaunchOnVersion());
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
   const workspaceFavoritesRef = useRef<Set<string>>(new Set());
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
@@ -207,6 +211,19 @@ export default function Index() {
     [t, settings.language]
   );
 
+  const WHATS_NEW_NOTE: Note = useMemo(
+    () => ({
+      id: "whats-new",
+      title: `Luno Note v${APP_VERSION}`,
+      content: "",
+      createdAt: 0,
+      updatedAt: 0,
+      fileName: `Luno Note v${APP_VERSION}`,
+      fileType: "whats-new" as any,
+    }),
+    []
+  );
+
   const {
     trashedNotes,
     moveToTrash,
@@ -277,6 +294,8 @@ export default function Index() {
       ? SETTINGS_NOTE
       : activeTabId === "help" || activeTabId?.startsWith("help:")
       ? HELP_NOTE
+      : activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")
+      ? WHATS_NEW_NOTE
       : activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")
       ? LUNO_AI_NOTE
       : activeTabId === "templates" || activeTabId?.startsWith("templates:")
@@ -344,6 +363,8 @@ export default function Index() {
       ? SETTINGS_NOTE
       : splitTabId === "help" || splitTabId?.startsWith("help:")
       ? HELP_NOTE
+      : splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")
+      ? WHATS_NEW_NOTE
       : splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")
       ? LUNO_AI_NOTE
       : splitTabId === "templates" || splitTabId?.startsWith("templates:")
@@ -431,6 +452,10 @@ export default function Index() {
       }
     }
     openTab("help");
+  }, [openTab]);
+
+  const handleOpenWhatsNew = useCallback(() => {
+    openTab("whats-new");
   }, [openTab]);
 
   const handleOpenWebTab = useCallback(
@@ -593,15 +618,18 @@ export default function Index() {
                   diskContent = currentNote.content || "";
                 }
 
-                let newContent = diskContent;
-                if ("icon" in patch || "iconColor" in patch || nextIcon !== undefined || nextIconColor !== undefined) {
+                let newContent = patch.content !== undefined ? patch.content : diskContent;
+                if ("icon" in patch || "iconColor" in patch) {
                   newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
                 }
-                if ("tags" in patch || (nextTags && nextTags.length > 0)) {
-                  newContent = updateFrontmatterTags(newContent, nextTags || []);
+                if ("tags" in patch && patch.content === undefined) {
+                  const parsed = parseFrontmatterAndTags(newContent);
+                  const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
+                  const frontmatterOnlyTags = (patch.tags || []).filter((t) => !inlineSet.has(t.toLowerCase()));
+                  newContent = updateFrontmatterTags(newContent, frontmatterOnlyTags);
                 }
-                if ("isFavorite" in patch || nextFavorite !== undefined) {
-                  newContent = updateFrontmatterFavorite(newContent, nextFavorite);
+                if ("isFavorite" in patch) {
+                  newContent = updateFrontmatterFavorite(newContent, patch.isFavorite);
                 }
 
                 await electronAPI.writeFileContent({ fullPath, content: newContent });
@@ -623,15 +651,18 @@ export default function Index() {
                   diskContent = currentNote.content || "";
                 }
 
-                let newContent = diskContent;
-                if ("icon" in patch || "iconColor" in patch || nextIcon !== undefined || nextIconColor !== undefined) {
+                let newContent = patch.content !== undefined ? patch.content : diskContent;
+                if ("icon" in patch || "iconColor" in patch) {
                   newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
                 }
-                if ("tags" in patch || (nextTags && nextTags.length > 0)) {
-                  newContent = updateFrontmatterTags(newContent, nextTags || []);
+                if ("tags" in patch && patch.content === undefined) {
+                  const parsed = parseFrontmatterAndTags(newContent);
+                  const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
+                  const frontmatterOnlyTags = (patch.tags || []).filter((t) => !inlineSet.has(t.toLowerCase()));
+                  newContent = updateFrontmatterTags(newContent, frontmatterOnlyTags);
                 }
-                if ("isFavorite" in patch || nextFavorite !== undefined) {
-                  newContent = updateFrontmatterFavorite(newContent, nextFavorite);
+                if ("isFavorite" in patch) {
+                  newContent = updateFrontmatterFavorite(newContent, patch.isFavorite);
                 }
 
                 if (handle.createWritable) {
@@ -705,9 +736,13 @@ export default function Index() {
     const encrypted = await encryptNoteContent(target.content || "", pin);
     unlockedSessionPinsRef.current.delete(noteId);
 
+    // Clear version history so unencrypted versions aren't leaked!
+    clearNoteVersionHistory(noteId);
+
     // Update in state - set isLocked true and isDecrypted false so it locks immediately!
     updateNote(noteId, {
       content: encrypted,
+      encryptedContent: encrypted,
       isLocked: true,
       isDecrypted: false,
     });
@@ -751,13 +786,20 @@ export default function Index() {
     let decryptedText = target.content;
     if (isEncryptedNote(target.content)) {
       decryptedText = await decryptNoteContent(target.content, pin);
+    } else if (target.encryptedContent && isEncryptedNote(target.encryptedContent)) {
+      decryptedText = await decryptNoteContent(target.encryptedContent, pin);
     }
 
     unlockedSessionPinsRef.current.delete(noteId);
+    clearPinLockout(noteId);
+
+    clearNoteEditorHistory(noteId);
+    clearNoteEditorState(noteId);
 
     // Update in state
     updateNote(noteId, {
       content: decryptedText,
+      encryptedContent: undefined,
       isLocked: false,
       isDecrypted: true,
     });
@@ -798,6 +840,8 @@ export default function Index() {
     let plainText = target.content;
     if (isEncryptedNote(target.content)) {
       plainText = await decryptNoteContent(target.content, currentPin);
+    } else if (target.encryptedContent && isEncryptedNote(target.encryptedContent)) {
+      plainText = await decryptNoteContent(target.encryptedContent, currentPin);
     } else {
       const oldEncrypted = await encryptNoteContent(plainText, currentPin);
       await decryptNoteContent(oldEncrypted, currentPin);
@@ -805,9 +849,13 @@ export default function Index() {
 
     const newEncrypted = await encryptNoteContent(plainText, newPin);
     unlockedSessionPinsRef.current.delete(noteId);
+    clearPinLockout(noteId);
+
+    clearNoteVersionHistory(noteId);
 
     updateNote(noteId, {
       content: newEncrypted,
+      encryptedContent: newEncrypted,
       isLocked: true,
       isDecrypted: false,
     });
@@ -848,14 +896,28 @@ export default function Index() {
     const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return false;
 
+    const remaining = getRemainingLockoutSeconds(noteId);
+    if (remaining > 0) {
+      return false;
+    }
+
     try {
       let plainText = target.content;
+      const cipherText = isEncryptedNote(target.content) ? target.content : (target.encryptedContent || "");
       if (isEncryptedNote(target.content)) {
         plainText = await decryptNoteContent(target.content, pin);
+      } else if (target.encryptedContent && isEncryptedNote(target.encryptedContent)) {
+        plainText = await decryptNoteContent(target.encryptedContent, pin);
       }
       unlockedSessionPinsRef.current.set(noteId, pin);
+      clearPinLockout(noteId);
+
+      // Clear any tainted in-memory editor history so note is cleanly parsed from decrypted text
+      clearNoteEditorHistory(noteId);
+
       updateNote(noteId, {
         content: plainText,
+        encryptedContent: cipherText,
         isLocked: true,
         isDecrypted: true,
       });
@@ -876,12 +938,42 @@ export default function Index() {
         try {
           encrypted = await encryptNoteContent(target.content, pin);
         } catch {}
+      } else if (target.encryptedContent && isEncryptedNote(target.encryptedContent)) {
+        encrypted = target.encryptedContent;
       }
       updateNote(noteId, {
         content: encrypted,
+        encryptedContent: encrypted,
         isLocked: true,
         isDecrypted: false,
       });
+
+      // Write encrypted content directly to disk immediately upon relocking!
+      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && target.fileName) {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            const fullPath = target.folderPath
+              ? `${saved.folderPath}/${target.folderPath}/${target.fileName}`
+              : `${saved.folderPath}/${target.fileName}`;
+            await electronAPI.writeFileContent({ fullPath, content: encrypted });
+          }
+        } catch (err) {
+          console.error("Failed saving encrypted note to disk on relock:", err);
+        }
+      } else {
+        const handle = await getStoredFileHandle(noteId);
+        if (handle?.createWritable) {
+          try {
+            const writable = await handle.createWritable();
+            await writable.write(encrypted);
+            await writable.close();
+          } catch (err) {
+            console.error("Failed saving encrypted note to handle on relock:", err);
+          }
+        }
+      }
     }
 
     clearNoteEditorHistory(noteId);
@@ -1102,13 +1194,15 @@ export default function Index() {
   };
 
   const mapTreeEntryToItem = (e: any, existing?: Note, overrideId?: string, overrideDriveFileId?: string) => {
-    const isEncrypted = isEncryptedNote(e.content);
-    const isLocked = isEncrypted || existing?.isLocked || false;
+    const isDiskEncrypted = isEncryptedNote(e.content);
+    const hasMemoryCipher = Boolean(existing?.encryptedContent && isEncryptedNote(existing.encryptedContent));
+    const isLocked = isDiskEncrypted || hasMemoryCipher;
     const isCurrentlyDecrypted = Boolean(
       existing &&
+      isLocked &&
       (unlockedSessionPinsRef.current.has(existing.id) || (existing.isDecrypted && !isEncryptedNote(existing.content)))
     );
-    const isDecrypted = isCurrentlyDecrypted;
+    const isDecrypted = isLocked ? isCurrentlyDecrypted : false;
     const relPath = getRelativePath(e.folderPath || "", e.fileName || "");
     const isFavorite = existing?.isFavorite !== undefined
       ? existing.isFavorite
@@ -1119,7 +1213,7 @@ export default function Index() {
     let fmIcon: string | undefined = undefined;
     let fmIconColor: string | undefined = undefined;
 
-    if (isMd && typeof e.content === "string" && e.content && !isEncrypted && !isTiptapJson(e.content)) {
+    if (isMd && typeof e.content === "string" && e.content && !isDiskEncrypted && !isTiptapJson(e.content)) {
       try {
         const parsedFm = parseFrontmatterAndTags(e.content);
         parsedTags = parsedFm.allTags || [];
@@ -1133,19 +1227,27 @@ export default function Index() {
       } catch {}
     }
     const mergedTags = isMd
-      ? (existing?.tags !== undefined && existing.tags.length > 0
-          ? Array.from(new Set([...existing.tags, ...parsedTags]))
-          : (parsedTags.length > 0 ? parsedTags : (existing?.tags || [])))
+      ? (typeof e.content === "string" && !isDiskEncrypted && !isTiptapJson(e.content)
+          ? parsedTags
+          : (existing?.tags || []))
       : [];
 
     const customFileIcon = settings?.fileIcons?.[relPath];
     const resolvedIcon = fmIcon || existing?.icon || customFileIcon?.icon;
     const resolvedIconColor = fmIconColor || existing?.iconColor || customFileIcon?.color;
 
+    const content = (isCurrentlyDecrypted && isDiskEncrypted && existing?.content && !isEncryptedNote(existing.content))
+      ? existing.content
+      : e.content;
+    const encryptedContent = isDiskEncrypted
+      ? e.content
+      : (hasMemoryCipher ? existing?.encryptedContent : undefined);
+
     return {
       id: overrideId ?? existing?.id ?? crypto.randomUUID(),
       title: existing?.title || (e.fileName ? e.fileName.replace(/\.md$/i, "") : "Untitled"),
-      content: e.content,
+      content,
+      encryptedContent,
       fileName: e.fileName,
       contentFormat: e.contentFormat,
       isLinkedFile: true as const,
@@ -1403,7 +1505,8 @@ export default function Index() {
       }
 
       if (openTabIds.length === 0) {
-        restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+        restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup, openedRootDirHandle, isFirstTimeOnVersionRef.current);
+        isFirstTimeOnVersionRef.current = false;
       } else {
         removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
       }
@@ -1436,7 +1539,10 @@ export default function Index() {
       settings.timeFormat,
       settings.iconPack
     );
-    const initialContent = options?.initialContent ?? (templateContent ? templateContent : (isTxt ? "" : `<h1>${initialTitle}</h1>`));
+    let initialContent = options?.initialContent ?? (templateContent ? templateContent : (isTxt ? "" : `<h1>${initialTitle}</h1>`));
+    if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isTxt && (desiredFileName.endsWith(".md") || desiredFileName.endsWith(".markdown"))))) {
+      initialContent = updateFrontmatterIcon(initialContent, options.icon, options.iconColor);
+    }
 
     // 1. Electron Desktop Native File Creation
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
@@ -1460,6 +1566,10 @@ export default function Index() {
         );
 
         const createdRelPath = getRelativePath(normalizedPath, desiredFileName);
+        if (options?.icon && (isTxt || contentFormat === "html" || desiredFileName.endsWith(".html") || desiredFileName.endsWith(".htm") || desiredFileName.endsWith(".txt"))) {
+          setFileIcon(createdRelPath, options.icon, options.iconColor);
+        }
+
         const newNoteId = crypto.randomUUID();
 
         const nextItems = entries.map((e: any) => {
@@ -1476,7 +1586,7 @@ export default function Index() {
 
         const targetId = createdNote?.id ?? newNoteId;
         if (targetId && (options?.icon || options?.iconColor)) {
-          updateNote(targetId, {
+          handleUpdateNote(targetId, {
             icon: options?.icon,
             iconColor: options?.iconColor,
           });
@@ -1532,8 +1642,14 @@ export default function Index() {
         settings.timeFormat,
         settings.iconPack
       );
-      const fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isFileTxt ? "" : `<h1>${fileTitle}</h1>`));
+      let fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isFileTxt ? "" : `<h1>${fileTitle}</h1>`));
+      if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isFileTxt && (fileName.endsWith(".md") || fileName.endsWith(".markdown"))))) {
+        fileContent = updateFrontmatterIcon(fileContent, options.icon, options.iconColor);
+      }
       const relPath = getRelativePath(normalizedPath, fileName);
+      if (options?.icon && (isFileTxt || contentFormat === "html" || fileName.endsWith(".html") || fileName.endsWith(".htm") || fileName.endsWith(".txt"))) {
+        setFileIcon(relPath, options.icon, options.iconColor);
+      }
       clearDeletedRelativePath(relPath);
 
       const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
@@ -1552,6 +1668,12 @@ export default function Index() {
         icon: options?.icon,
         iconColor: options?.iconColor,
       });
+      if (options?.icon || options?.iconColor) {
+        handleUpdateNote(note.id, {
+          icon: options?.icon,
+          iconColor: options?.iconColor,
+        });
+      }
       openTab(note.id);
       await setStoredFileHandle(note.id, fileHandle);
       return note;
@@ -3258,7 +3380,8 @@ export default function Index() {
             const folderName = dirHandle.name || "My Notes";
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
-            restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup);
+            restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup, dirHandle, isFirstTimeOnVersionRef.current);
+            isFirstTimeOnVersionRef.current = false;
           },
         });
       } else {
@@ -3310,7 +3433,8 @@ export default function Index() {
             const nextItems = entries.map((e: any) => mapTreeEntryToItem(e));
 
             const nextNotes = replaceNotes(nextItems, true);
-            restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+            restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup, undefined, isFirstTimeOnVersionRef.current);
+            isFirstTimeOnVersionRef.current = false;
             void loadCustomFonts();
 
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
@@ -3395,7 +3519,8 @@ export default function Index() {
             await importDriveNotes([], (imported) => {
               if (active) {
                 const nextNotes = replaceNotes(imported, true);
-                restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup);
+                restoreTabsFromSession(nextNotes, settings.reopenTabs, settings.onStartup, undefined, isFirstTimeOnVersionRef.current);
+                isFirstTimeOnVersionRef.current = false;
               }
             });
           } catch (cloudRestoreErr) {
@@ -3411,7 +3536,13 @@ export default function Index() {
         // 4. Fallback: No workspace found
         if (active) {
           setOpenedFolderName(null);
-          resetTabs();
+          if (isFirstTimeOnVersionRef.current) {
+            isFirstTimeOnVersionRef.current = false;
+            markVersionAsSeen();
+            openTab("whats-new");
+          } else {
+            resetTabs();
+          }
           replaceNotes([], true);
           setIsWorkspaceLoading(false);
         }
@@ -3567,6 +3698,7 @@ export default function Index() {
     existingSet.add("favorites");
     existingSet.add("tags");
     existingSet.add("trash");
+    existingSet.add("whats-new");
     if (newlyCreatedNoteIdRef.current) {
       existingSet.add(newlyCreatedNoteIdRef.current);
     }
@@ -3580,6 +3712,15 @@ export default function Index() {
         if (id === "trash" || id.startsWith("trash:")) return { ...TRASH_NOTE, id };
         if (id === "settings" || id.startsWith("settings:")) return { ...SETTINGS_NOTE, id };
         if (id === "help" || id.startsWith("help:")) return { ...HELP_NOTE, id };
+        if (id === "whats-new" || id.startsWith("whats-new:")) {
+          const version = id.startsWith("whats-new:") ? id.replace("whats-new:", "") : APP_VERSION;
+          return {
+            ...WHATS_NEW_NOTE,
+            id,
+            title: `Luno Note v${version || APP_VERSION}`,
+            fileName: `Luno Note v${version || APP_VERSION}`,
+          };
+        }
         if (id === "luno-ai" || id.startsWith("luno-ai:")) return { ...LUNO_AI_NOTE, id };
         if (id === "templates" || id.startsWith("templates:")) return { ...TEMPLATES_NOTE, id };
         if (id === "relations" || id.startsWith("relations:")) return { ...RELATIONS_NOTE, id };
@@ -3589,7 +3730,7 @@ export default function Index() {
         return notes.find((n) => n.id === id);
       })
       .filter((n): n is Note => Boolean(n));
-  }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, HELP_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, RELATIONS_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
+  }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, HELP_NOTE, WHATS_NEW_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, RELATIONS_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
 
   // Cycle open tabs with Ctrl+Tab / Ctrl+Shift+Tab
   const cycleActiveTab = useCallback((direction: 1 | -1) => {
@@ -4308,13 +4449,19 @@ export default function Index() {
 
   const handleCreateFromHomeTemplate = async (
     templateType: NoteTemplateType,
-    explicitFormat?: "markdown" | "html" | "plain"
+    explicitFormat?: "markdown" | "html" | "plain",
+    explicitIcon?: string,
+    explicitColor?: string
   ) => {
     const isTxt = explicitFormat ? explicitFormat === "plain" : settings.defaultExtension === "txt";
     const defaultExt = explicitFormat === "html" ? "html" : explicitFormat === "plain" ? "txt" : explicitFormat === "markdown" ? "md" : settings.defaultExtension || "md";
     const format: "markdown" | "html" | "plain" = explicitFormat || (defaultExt === "html" ? "html" : isTxt ? "plain" : "markdown");
     const meta = getNoteTemplateMetadata(templateType);
-    const templateIcon = getTemplateIcon(templateType, settings.iconPack);
+    const templateDef =
+      TEMPLATE_DEFINITIONS.find((t) => t.type === templateType && (!explicitFormat || t.format === explicitFormat)) ||
+      TEMPLATE_DEFINITIONS.find((t) => t.type === templateType);
+    const templateIcon = explicitIcon || templateDef?.icon || getTemplateIcon(templateType, settings.iconPack) || meta?.icon;
+    const templateColor = explicitColor || templateDef?.color || meta?.iconColor;
     const templateContent = getNoteTemplateContent(
       templateType,
       settings.language,
@@ -4327,9 +4474,13 @@ export default function Index() {
     const prefix = meta.filePrefix || (templateType === "daily" ? "Daily" : "Note");
     const fileName = `${prefix}-${dateStr}.${defaultExt}`;
     const initialTitle = `${prefix}-${dateStr}`;
-    const initialContent = format === "markdown"
+    let initialContent = format === "markdown"
       ? replaceFirstH1InMarkdown(templateContent, initialTitle)
       : templateContent;
+
+    if (format === "markdown" && templateIcon) {
+      initialContent = updateFrontmatterIcon(initialContent, templateIcon, templateColor);
+    }
 
     if (openedRootDirHandle || electronWorkspacePathRef.current || isCloudWorkspace) {
       const created = await createNoteInFolder(undefined, {
@@ -4337,12 +4488,13 @@ export default function Index() {
         contentFormat: format,
         initialContent,
         icon: templateIcon,
-        iconColor: meta.iconColor,
+        iconColor: templateColor,
       });
-      if (created?.id && templateIcon) {
-        updateNote(created.id, {
+      const targetId = created?.id;
+      if (targetId && (templateIcon || templateColor)) {
+        handleUpdateNote(targetId, {
           icon: templateIcon,
-          iconColor: meta.iconColor,
+          iconColor: templateColor,
         });
       }
     } else {
@@ -4353,8 +4505,14 @@ export default function Index() {
         content: initialContent,
         title: initialTitle,
         icon: templateIcon || undefined,
-        iconColor: meta.iconColor || undefined,
+        iconColor: templateColor || undefined,
       });
+      if (templateIcon || templateColor) {
+        handleUpdateNote(note.id, {
+          icon: templateIcon || undefined,
+          iconColor: templateColor || undefined,
+        });
+      }
       openTab(note.id);
     }
   };
@@ -4405,7 +4563,7 @@ export default function Index() {
     Boolean(openedFolderName);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-full w-full max-h-full max-w-full overflow-hidden bg-background">
       {/* Overlay for mobile sidebar */}
       {isMobile && sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-foreground/10 backdrop-blur-[1px] md:hidden" onClick={() => setSidebarOpen(false)} />
@@ -4465,9 +4623,9 @@ export default function Index() {
       </div>
 
       {/* Editor area responsive */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full overflow-hidden">
         {splitTabId && splitTabId !== activeTabId ? (
-          <div className="flex flex-1 min-h-0 flex-row w-full">
+          <div className="flex flex-1 min-h-0 min-w-0 flex-row w-full h-full overflow-hidden">
             {/* Left Pane Group: TabBar + Breadcrumb + Editor */}
             <div
               className="min-w-0 border-r border-border flex flex-col h-full overflow-hidden"
@@ -4492,13 +4650,13 @@ export default function Index() {
                   note={activeTabNote}
                   rootFolderName={openedFolderName}
                   notes={notes}
-                  onSelectNote={setActiveTabId}
+                  onSelectNote={(id) => openTab(id)}
                   onOpenRightPanel={() => setRightPanelOpen((prev) => !prev)}
                   paneId="left"
                   isCloudWorkspace={isCloudWorkspace}
                 />
               )}
-              <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+              <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
                 {!openedFolderName && !activeTabId?.startsWith("web:") && !activeTabId?.startsWith("settings") && !activeTabId?.startsWith("help") ? (
                   <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
                     <WorkspaceLauncher
@@ -4599,7 +4757,7 @@ export default function Index() {
                         />
                       )}
                     </div>
-                    <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
                         <SettingsTabView
                           initialCategory={settingsCategory}
@@ -4612,20 +4770,33 @@ export default function Index() {
                           isCloudWorkspace={isCloudWorkspace}
                           onCloseWorkspace={handleCloseWorkspace}
                           onOpenWebTab={handleOpenWebTab}
+                          onOpenWhatsNew={handleOpenWhatsNew}
                         />
                       )}
                     </div>
-                    <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
                         <HelpTabView
                           initialCategory={helpCategory}
                           onCategoryChange={setHelpCategory}
                           onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
                           onOpenSettings={handleOpenSettings}
+                          onOpenWhatsNew={handleOpenWhatsNew}
+                          onOpenWebTab={handleOpenWebTab}
                         />
                       )}
                     </div>
-                    <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                    <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                      {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
+                        <WhatsNewView
+                          onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
+                          onOpenSettings={handleOpenSettings}
+                          onOpenHelp={handleOpenHelp}
+                          onOpenWebTab={handleOpenWebTab}
+                        />
+                      )}
+                    </div>
+                    <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                         <LunoAiView
                           notes={notes}
@@ -4715,7 +4886,7 @@ export default function Index() {
                         }}
                         rightPanelOpen={rightPanelOpen}
                         onCloseRightPanel={() => setRightPanelOpen(false)}
-                        onSelectNote={setActiveTabId}
+                        onSelectNote={(id) => openTab(id)}
                         onOpenWebTab={handleOpenWebTab}
                         onUnlockNote={handleUnlockNote}
                         onRelockNote={handleRelockNote}
@@ -4770,7 +4941,7 @@ export default function Index() {
                   isCloudWorkspace={isCloudWorkspace}
                 />
               )}
-              <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+              <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
                 <div className={(splitTabId === "templates" || splitTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "templates" || splitTabId?.startsWith("templates:")) && (
                     <TemplatesView
@@ -4832,7 +5003,7 @@ export default function Index() {
                     />
                   )}
                 </div>
-                <div className={(splitTabId === "settings" || splitTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                <div className={(splitTabId === "settings" || splitTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "settings" || splitTabId?.startsWith("settings:")) && (
                     <SettingsTabView
                       initialCategory={settingsCategory}
@@ -4845,20 +5016,33 @@ export default function Index() {
                       isCloudWorkspace={isCloudWorkspace}
                       onCloseWorkspace={handleCloseWorkspace}
                       onOpenWebTab={handleOpenWebTab}
+                      onOpenWhatsNew={handleOpenWhatsNew}
                     />
                   )}
                 </div>
-                <div className={(splitTabId === "help" || splitTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                <div className={(splitTabId === "help" || splitTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "help" || splitTabId?.startsWith("help:")) && (
                     <HelpTabView
                       initialCategory={helpCategory}
                       onCategoryChange={setHelpCategory}
                       onClose={() => setSplitTabId(null)}
                       onOpenSettings={handleOpenSettings}
+                      onOpenWhatsNew={handleOpenWhatsNew}
+                      onOpenWebTab={handleOpenWebTab}
                     />
                   )}
                 </div>
-                <div className={(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                <div className={(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                  {(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) && (
+                    <WhatsNewView
+                      onClose={() => setSplitTabId(null)}
+                      onOpenSettings={handleOpenSettings}
+                      onOpenHelp={handleOpenHelp}
+                      onOpenWebTab={handleOpenWebTab}
+                    />
+                  )}
+                </div>
+                <div className={(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                   {(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) && (
                     <LunoAiView
                       notes={notes}
@@ -4942,7 +5126,7 @@ export default function Index() {
           </div>
         ) : (
           /* Normal Single Pane Mode */
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full overflow-hidden">
             <TabBar
               tabs={openTabNotes}
               activeTabId={activeTabId}
@@ -4967,7 +5151,7 @@ export default function Index() {
                 isCloudWorkspace={isCloudWorkspace}
               />
             )}
-            <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
               {!openedFolderName && !isSystemOrWebTab(activeTabId || "") ? (
                 <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
                   <WorkspaceLauncher
@@ -5068,7 +5252,7 @@ export default function Index() {
                       />
                     )}
                   </div>
-                  <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                  <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
                       <SettingsTabView
                         initialCategory={settingsCategory}
@@ -5081,20 +5265,33 @@ export default function Index() {
                         isCloudWorkspace={isCloudWorkspace}
                         onCloseWorkspace={handleCloseWorkspace}
                         onOpenWebTab={handleOpenWebTab}
+                        onOpenWhatsNew={handleOpenWhatsNew}
                       />
                     )}
                   </div>
-                  <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                  <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
                       <HelpTabView
                         initialCategory={helpCategory}
                         onCategoryChange={setHelpCategory}
                         onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
                         onOpenSettings={handleOpenSettings}
+                        onOpenWhatsNew={handleOpenWhatsNew}
+                        onOpenWebTab={handleOpenWebTab}
                       />
                     )}
                   </div>
-                  <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}>
+                  <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+                    {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
+                      <WhatsNewView
+                        onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
+                        onOpenSettings={handleOpenSettings}
+                        onOpenHelp={handleOpenHelp}
+                        onOpenWebTab={handleOpenWebTab}
+                      />
+                    )}
+                  </div>
+                  <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
                       <LunoAiView
                         notes={notes}
@@ -5191,7 +5388,7 @@ export default function Index() {
                       }}
                       rightPanelOpen={rightPanelOpen}
                       onCloseRightPanel={() => setRightPanelOpen(false)}
-                      onSelectNote={setActiveTabId}
+                      onSelectNote={(id) => openTab(id)}
                       onOpenWebTab={handleOpenWebTab}
                       onUnlockNote={handleUnlockNote}
                       onRelockNote={handleRelockNote}

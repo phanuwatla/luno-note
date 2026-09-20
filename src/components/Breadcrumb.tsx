@@ -6,6 +6,7 @@ import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getToolbarIcon, renderCustomIcon, IconPack } from "@/lib/iconPacks";
 import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import lunoLogo from "@/assets/luno-logo.png";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +53,9 @@ function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
     const LockIcon = getToolbarIcon("lock", pack);
     return <LockIcon className={cls} />;
   }
+  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
+    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
+  }
   const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
   const IconComp = getToolbarIcon(defaultKey, pack);
   return <IconComp className={cls} />;
@@ -75,6 +79,9 @@ function MarkdownIndicator({ active, className = "" }: { active: boolean; classN
 function getFileIcon(fileName?: string, fileType?: Note["fileType"], active = false, pack: IconPack = "lucide") {
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   if (fileType === "web-viewer") return <Globe className={cls} />;
+  if (fileType === "whats-new") {
+    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
+  }
   const defaultKey = getDefaultFileIconKey(fileName, fileType);
   const IconComp = getToolbarIcon(defaultKey, pack);
   return <IconComp className={cls} />;

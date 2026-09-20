@@ -33,6 +33,8 @@ import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { toast } from "@/hooks/use-toast";
+import { APP_VERSION } from "@/lib/appVersion";
+import lunoLogo from "@/assets/luno-logo.png";
 
 interface TabBarProps {
   tabs: Note[];
@@ -104,6 +106,9 @@ function NoteIcon({ note, isActive, pack, settings }: { note: Note; isActive: bo
   if (note.id === "help" || note.id.startsWith("help:") || note.fileType === "help") {
     const HelpIcon = getToolbarIcon("helpCircle", pack);
     return <HelpIcon className={cls} />;
+  }
+  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
+    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
   }
   if (note.id === "luno-ai" || note.id.startsWith("luno-ai:") || note.fileType === "luno-ai") {
     const SparklesIconComp = getToolbarIcon("sparkles", pack);
@@ -210,7 +215,10 @@ const TabItem = React.memo(function TabItem({
     note.fileType === "favorites" ||
     note.id === "tags" ||
     note.id.startsWith("tags:") ||
-    note.fileType === "tags";
+    note.fileType === "tags" ||
+    note.id === "whats-new" ||
+    note.id.startsWith("whats-new:") ||
+    note.fileType === "whats-new";
 
   const handleReload = useCallback(() => {
     window.dispatchEvent(new CustomEvent("luno:reload-web-tab", { detail: { tabId: note.id } }));
@@ -516,6 +524,7 @@ function TabBarComponent({
               const isRelations = note.id === "relations" || note.id.startsWith("relations:") || note.fileType === "relations";
               const isFavorites = note.id === "favorites" || note.id.startsWith("favorites:") || note.fileType === "favorites";
               const isTags = note.id === "tags" || note.id.startsWith("tags:") || note.fileType === "tags";
+              const isWhatsNew = note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new";
               const isWebViewer = note.fileType === "web-viewer" || note.id.startsWith("web:");
               const label = isHome
                 ? (t("sidebar.home") || "Home")
@@ -525,6 +534,8 @@ function TabBarComponent({
                 ? (t("settings.title") || "Settings")
                 : isHelp
                 ? (t("sidebar.help") || (settings?.language === "th" ? "ช่วยเหลือ" : "Help"))
+                : isWhatsNew
+                ? (note.title || note.fileName || `Luno Note v${APP_VERSION}`)
                 : isLunoAi
                 ? "Luno AI"
                 : isTemplates

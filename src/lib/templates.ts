@@ -1,5 +1,5 @@
 import { formatDate, formatTime } from "./dateTimeFormatter";
-import { updateFrontmatterIcon } from "./frontmatter";
+import { updateFrontmatterIcon, updateFrontmatterTags } from "./frontmatter";
 
 export type NoteTemplateType =
   | "blank"
@@ -48,6 +48,7 @@ export interface TemplateMetadata {
   filePrefix: string;
   icon?: string;
   iconColor?: string;
+  tags?: string[];
   icons?: {
     lucide: string;
     tabler: string;
@@ -64,6 +65,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Daily",
     icon: "lucide:Calendar",
     iconColor: "#10b981",
+    tags: ["daily", "journal"],
     icons: {
       lucide: "lucide:Calendar",
       tabler: "tabler:IconCalendar",
@@ -78,6 +80,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Todo",
     icon: "lucide:CheckSquare",
     iconColor: "#3b82f6",
+    tags: ["todo", "tasks"],
     icons: {
       lucide: "lucide:CheckSquare",
       tabler: "tabler:IconSquareCheck",
@@ -92,6 +95,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Meeting",
     icon: "lucide:Users",
     iconColor: "#8b5cf6",
+    tags: ["meeting", "work"],
     icons: {
       lucide: "lucide:Users",
       tabler: "tabler:IconUsers",
@@ -106,6 +110,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Project",
     icon: "lucide:Briefcase",
     iconColor: "#f59e0b",
+    tags: ["project", "planning"],
     icons: {
       lucide: "lucide:Briefcase",
       tabler: "tabler:IconBriefcase",
@@ -120,6 +125,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Brainstorm",
     icon: "lucide:Lightbulb",
     iconColor: "#f43f5e",
+    tags: ["study", "research"],
     icons: {
       lucide: "lucide:Lightbulb",
       tabler: "tabler:IconBulb",
@@ -134,6 +140,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Bug",
     icon: "lucide:Bug",
     iconColor: "#ef4444",
+    tags: ["bug", "issue"],
     icons: {
       lucide: "lucide:Bug",
       tabler: "tabler:IconBug",
@@ -148,6 +155,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Weekly",
     icon: "lucide:CalendarCheck",
     iconColor: "#0ea5e9",
+    tags: ["review"],
     icons: {
       lucide: "lucide:CalendarCheck",
       tabler: "tabler:IconCalendarStats",
@@ -162,6 +170,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Book",
     icon: "lucide:Bookmark",
     iconColor: "#a855f7",
+    tags: ["reading", "books"],
     icons: {
       lucide: "lucide:Bookmark",
       tabler: "tabler:IconBookmark",
@@ -344,6 +353,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Cornell",
     icon: "lucide:GraduationCap",
     iconColor: "#6366f1",
+    tags: ["notes"],
     icons: {
       lucide: "lucide:GraduationCap",
       tabler: "tabler:IconSchool",
@@ -358,6 +368,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "ContentPlan",
     icon: "lucide:Video",
     iconColor: "#ef4444",
+    tags: ["content", "planning"],
     icons: {
       lucide: "lucide:Video",
       tabler: "tabler:IconVideo",
@@ -372,6 +383,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "APISpec",
     icon: "lucide:Code2",
     iconColor: "#0ea5e9",
+    tags: ["api", "docs"],
     icons: {
       lucide: "lucide:Code2",
       tabler: "tabler:IconCode",
@@ -386,6 +398,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "HabitTracker",
     icon: "lucide:Activity",
     iconColor: "#10b981",
+    tags: ["habits"],
     icons: {
       lucide: "lucide:Activity",
       tabler: "tabler:IconActivity",
@@ -400,6 +413,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Budget",
     icon: "lucide:Wallet",
     iconColor: "#14b8a6",
+    tags: ["budget", "finance"],
     icons: {
       lucide: "lucide:Wallet",
       tabler: "tabler:IconWallet",
@@ -414,6 +428,7 @@ export const NOTE_TEMPLATE_METADATA: Record<NoteTemplateType, TemplateMetadata> 
     filePrefix: "Trip",
     icon: "lucide:Compass",
     iconColor: "#06b6d4",
+    tags: ["travel"],
     icons: {
       lucide: "lucide:Compass",
       tabler: "tabler:IconCompass",
@@ -2964,64 +2979,62 @@ export function getNoteTemplateContent(
   if (templateType === "meeting") {
     if (isTh) {
       rawMarkdown = (
-        `# บันทึกการประชุม - ${dateStr}\n\n` +
-        `> 📌 **มติสำคัญที่ประชุม:** อนุมัติสถาปัตยกรรม Local-first v2.4 และเตรียมปล่อยทดสอบใน Staging วันศุกร์นี้\n\n` +
+        `# บันทึกการประชุม - ${dateStr}\n` +
+        `> 📌 **มติสำคัญที่ประชุม (Key Decision):** อนุมัติสถาปัตยกรรม <mark>Local-first v2.4</mark> และเตรียมปล่อยทดสอบใน Staging วันศุกร์นี้\n\n` +
         `## ข้อมูลและผู้เข้าร่วมการประชุม (Meeting Details)\n` +
         `| ผู้เข้าร่วม | บทบาท / แผนก | สถานะ |\n` +
         `| :--- | :--- | :---: |\n` +
-        `| สมชาย วงศ์สวัสดิ์ | Lead Architect | เข้าร่วม |\n` +
-        `| วิภา เลิศรัตนชัย | Product Designer | เข้าร่วม |\n` +
-        `| ธีรภัทร ชาญวิทย์ | Senior Backend Engineer | เข้าร่วม |\n` +
-        `| กานต์ดา สุขใจ | QA Specialist | ลากิจ |\n\n` +
+        `| สมชาย วงศ์สวัสดิ์ | Lead Architect | <span style="color: #10b981; font-weight: 600;">✓ เข้าร่วม</span> |\n` +
+        `| วิภา เลิศรัตนชัย | Product Designer | <span style="color: #10b981; font-weight: 600;">✓ เข้าร่วม</span> |\n` +
+        `| ธีรภัทร ชาญวิทย์ | Senior Backend Engineer | <span style="color: #10b981; font-weight: 600;">✓ เข้าร่วม</span> |\n` +
+        `| กานต์ดา สุขใจ | QA Specialist | <span style="color: #ef4444; font-weight: 600;">✕ ลากิจ</span> |\n\n` +
         `## วาระการประชุมตามลำดับ (Agenda)\n` +
         `1. **ทบทวนผล Benchmark:** ตรวจสอบ Latency ของระบบแคชและฐานข้อมูล\n` +
         `2. **อนุมัติ UI Search Flow:** ดูตัวอย่าง Wireframe หน้าค้นหาแบบเรียลไทม์\n` +
         `3. **วางแผนการปล่อยระบบ (Rollout):** กำหนดการย้ายข้อมูลและกรอบเวลา Staging\n\n` +
         `## บันทึกการพูดคุย & ข้อตกลง (Discussion Notes)\n` +
-        `- ผลการทดสอบโหลดระบบพบว่า **p99 latency** อยู่ที่ \`85ms\` ภายใต้การโหลด \`10,000 req/s\` ผ่านเกณฑ์ความปลอดภัยเรียบร้อย\n` +
+        `- ผลการทดสอบโหลดระบบพบว่า **p99 latency** อยู่ที่ \`85ms\` ภายใต้การโหลด \`10,000 req/s\` <mark>ผ่านเกณฑ์ความปลอดภัยเรียบร้อย</mark>\n` +
         `- ทีมเห็นพ้องใช้ \`pgvector\` ร่วมกับ Index แบบ HNSW สำหรับฟีเจอร์ Semantic Search\n` +
         `- คุณวิภานำเสนอแบบร่าง UI หน้าค้นหาใหม่ ทุกฝ่ายเห็นชอบกับการแสดงผลแบบ Instant Snippet\n\n` +
         `## รายการงานที่ต้องทำต่อ (Action Items)\n` +
         `- [x] ตรวจสอบ Index ฐานข้อมูลสำหรับ Full-text Search (ผู้รับผิดชอบ: ธีรภัทร, กำหนดเสร็จ: พรุ่งนี้ 17:00)\n` +
         `- [ ] ออกแบบ Responsive Mockup สำหรับหน้าจอมือถือ (ผู้รับผิดชอบ: วิภา, กำหนดเสร็จ: ศุกร์นี้)\n` +
-        `- [ ] จัดเตรียมเอกสาร Migration Checklist สำหรับทีม DevOps (ผู้รับผิดชอบ: สมชาย)\n\n` +
-        `#meeting #work #planning `
+        `- [ ] จัดเตรียมเอกสาร Migration Checklist สำหรับทีม DevOps (ผู้รับผิดชอบ: สมชาย)`
       );
     } else {
       rawMarkdown = (
-        `# Meeting Notes - ${dateStr}\n\n` +
-        `> 📌 **Key Decision:** Approved Local-first v2.4 core architecture specification; cut-off scheduled for Staging deployment this Friday.\n\n` +
+        `# Meeting Notes - ${dateStr}\n` +
+        `> 📌 **Key Decision:** Approved <mark>Local-first v2.4</mark> core architecture specification; cut-off scheduled for Staging deployment this Friday.\n\n` +
         `## Meeting Details & Attendees\n` +
         `| Attendee | Role / Department | Status |\n` +
         `| :--- | :--- | :---: |\n` +
-        `| Alex Rivera | Lead Architect | Present |\n` +
-        `| Sarah Chen | Product Designer | Present |\n` +
-        `| Marcus Vance | Senior Backend Engineer | Present |\n` +
-        `| Elena Rostova | QA Specialist | Excused |\n\n` +
+        `| Alex Rivera | Lead Architect | <span style="color: #10b981; font-weight: 600;">✓ Present</span> |\n` +
+        `| Sarah Chen | Product Designer | <span style="color: #10b981; font-weight: 600;">✓ Present</span> |\n` +
+        `| Marcus Vance | Senior Backend Engineer | <span style="color: #10b981; font-weight: 600;">✓ Present</span> |\n` +
+        `| Elena Rostova | QA Specialist | <span style="color: #ef4444; font-weight: 600;">✕ Excused</span> |\n\n` +
         `## Ordered Agenda\n` +
         `1. **Benchmark Review:** Audit vector cache latency and memory profiling under stress\n` +
         `2. **Search UI Approval:** Walkthrough responsive real-time snippet previews\n` +
         `3. **Release Planning:** Coordinate staging migration steps and rollback procedures\n\n` +
         `## Discussion Notes\n` +
-        `- QA verified p99 latency stabilized below \`85ms\` across \`10,000 requests/sec\`, meeting all SLA criteria.\n` +
+        `- QA verified p99 latency stabilized below \`85ms\` across \`10,000 requests/sec\`, <mark>meeting all SLA criteria</mark>.\n` +
         `- Team agreed on adopting \`pgvector\` with HNSW indexing for low-latency semantic retrieval.\n` +
         `- Sarah presented updated modal designs; unanimous consensus on the split layout with live markdown rendering.\n\n` +
         `## Action Items\n` +
         `- [x] Configure database indexes for full-text search (Owner: Marcus Vance, Due: Tomorrow 5 PM)\n` +
         `- [ ] Finalize responsive mobile mockups (Owner: Sarah Chen, Due: Friday)\n` +
-        `- [ ] Prepare staging deployment runbook for DevOps (Owner: Alex Rivera)\n\n` +
-        `#meeting #work #planning `
+        `- [ ] Prepare staging deployment runbook for DevOps (Owner: Alex Rivera)`
       );
     }
   } else if (templateType === "daily") {
     if (isTh) {
       rawMarkdown = (
-        `# บันทึกประจำวัน - ${dateStr}\n\n` +
-        `> 💡 "การเริ่มต้นวันด้วยความชัดเจนในเป้าหมาย ดีกว่าการรีบเร่งลงมือทำโดยไร้ทิศทาง" — **Daily Mindset**\n\n` +
+        `# บันทึกประจำวัน - ${dateStr}\n` +
+        `> 💡 <span style="font-family: 'Playfair Display', Georgia, serif; font-size: 15px; font-style: italic;">"การเริ่มต้นวันด้วยความชัดเจนในเป้าหมาย ดีกว่าการรีบเร่งลงมือทำโดยไร้ทิศทาง"</span> — **Daily Mindset**\n\n` +
         `## 🎯 3 อันดับสิ่งสำคัญที่สุดวันนี้ (Top 3 Priorities)\n` +
-        `1. **ตรวจสอบโค้ด Core Architecture:** อนุมัติ Pull Request สำหรับระบบแคชเอกสาร\n` +
-        `2. **ออกแบบ Schema ฐานข้อมูล:** สรุปโครงสร้างตารางและดัชนีสำหรับระบบค้นหา\n` +
-        `3. **ส่งสรุปสปรินต์ประจำสัปดาห์:** สรุปผลการทดสอบและตัวชี้วัดส่งให้ผู้จัดการฝ่าย\n\n` +
+        `1. <span style="color: #6366f1; font-weight: 700;">[P1]</span> **ตรวจสอบโค้ด Core Architecture:** อนุมัติ Pull Request สำหรับระบบแคชเอกสาร\n` +
+        `2. <span style="color: #6366f1; font-weight: 700;">[P2]</span> **ออกแบบ Schema ฐานข้อมูล:** สรุปโครงสร้างตารางและดัชนีสำหรับระบบค้นหา\n` +
+        `3. <span style="color: #6366f1; font-weight: 700;">[P3]</span> **ส่งสรุปสปรินต์ประจำสัปดาห์:** สรุปผลการทดสอบและตัวชี้วัดส่งให้ผู้จัดการฝ่าย\n\n` +
         `## ⏰ ตารางจัดสรรเวลา (Time-blocking Schedule)\n` +
         `| ช่วงเวลา | กิจกรรม / งานสำคัญ | หมวดหมู่งาน |\n` +
         `| :--- | :--- | :---: |\n` +
@@ -3036,17 +3049,16 @@ export function getNoteTemplateContent(
         `- [ ] บันทึกสิ่งที่ได้เรียนรู้และสรุปความคืบหน้าก่อนเลิกงาน\n\n` +
         `## 🌟 เรื่องที่รู้สึกขอบคุณ & บันทึกข้อคิด (Gratitude & Notes)\n` +
         `- ขอบคุณทีมงานที่ช่วยแก้ปัญหา Deployment ได้อย่างรวดเร็วและเป็นมืออาชีพ\n` +
-        `- ได้เรียนรู้ว่าการเขียน Type Definition ที่ครอบคลุมตั้งแต่แรก ช่วยประหยัดเวลาแก้ไขบั๊กได้มหาศาล\n\n` +
-        `#daily #journal #focus `
+        `- ได้เรียนรู้ว่า <mark>การเขียน Type Definition ที่ครอบคลุมตั้งแต่แรก ช่วยประหยัดเวลาแก้ไขบั๊กได้มหาศาล</mark>`
       );
     } else {
       rawMarkdown = (
-        `# Daily Journal - ${dateStr}\n\n` +
-        `> 💡 "Clarity of purpose at dawn prevents regret at twilight. Focus on the essential few." — **Daily Mindset**\n\n` +
+        `# Daily Journal - ${dateStr}\n` +
+        `> 💡 <span style="font-family: 'Playfair Display', Georgia, serif; font-size: 15px; font-style: italic;">"Clarity of purpose at dawn prevents regret at twilight. Focus on the essential few."</span> — **Daily Mindset**\n\n` +
         `## 🎯 Top 3 Priorities for Today\n` +
-        `1. **Core Architecture Review:** Review and approve the document caching refactor PR\n` +
-        `2. **Schema Design:** Finalize table definitions and vector index layout for search\n` +
-        `3. **Sprint Wrap-up:** Publish sprint velocity metrics and deliverables summary\n\n` +
+        `1. <span style="color: #6366f1; font-weight: 700;">[P1]</span> **Core Architecture Review:** Review and approve the document caching refactor PR\n` +
+        `2. <span style="color: #6366f1; font-weight: 700;">[P2]</span> **Schema Design:** Finalize table definitions and vector index layout for search\n` +
+        `3. <span style="color: #6366f1; font-weight: 700;">[P3]</span> **Sprint Wrap-up:** Publish sprint velocity metrics and deliverables summary\n\n` +
         `## ⏰ Time-blocking Schedule\n` +
         `| Time Window | Focus Activity | Category |\n` +
         `| :--- | :--- | :---: |\n` +
@@ -3061,14 +3073,13 @@ export function getNoteTemplateContent(
         `- [ ] Log end-of-day reflections and plan tomorrow's docket\n\n` +
         `## 🌟 Highlights & Gratitude\n` +
         `- Grateful for the seamless staging deployment executed with the team this morning.\n` +
-        `- Key takeaway: Upfront investment into airtight type contracts eliminates dozens of downstream bugs.\n\n` +
-        `#daily #journal #focus `
+        `- Key takeaway: <mark>Upfront investment into airtight type contracts eliminates dozens of downstream bugs.</mark>`
       );
     }
   } else if (templateType === "project") {
     if (isTh) {
       rawMarkdown = (
-        `# วางแผนโปรเจกต์ - ระบบคลังเอกสารอัจฉริยะ\n\n` +
+        `# วางแผนโปรเจกต์ - ระบบคลังเอกสารอัจฉริยะ\n` +
         `> 🚀 **วิสัยทัศน์โครงการ:** พัฒนาพื้นที่จัดเก็บและสืบค้นความรู้อัจฉริยะ (Local-first Knowledge Workspace) ที่ทำงานได้อย่างสมบูรณ์แบบแม้ออฟไลน์ ปลอดภัย และรวดเร็วระดับ Sub-second\n\n` +
         `## 🎯 วัตถุประสงค์หลักของโครงการ (Core Objectives)\n` +
         `1. **สถาปัตยกรรมแบบ Local-first:** บันทึกข้อมูลลงดิสก์เครื่องผู้ใช้ทันที พร้อมระบบเข้ารหัส AES-256\n` +
@@ -3077,20 +3088,19 @@ export function getNoteTemplateContent(
         `## 📅 แผนการดำเนินงานและกำหนดส่ง (Milestones & Timeline)\n` +
         `| ระยะที่ | เป้าหมายส่งมอบ (Milestone) | ผู้รับผิดชอบ | กำหนดส่ง | สถานะ |\n` +
         `| :---: | :--- | :--- | :---: | :---: |\n` +
-        `| 1 | สถาปัตยกรรมระบบและกำหนด API Contract | Lead Architect | 15 ต.ค. | เสร็จสมบูรณ์ |\n` +
-        `| 2 | พัฒนา TipTap Core Editor & Custom Views | Frontend Team | 30 ต.ค. | กำลังทำ |\n` +
-        `| 3 | ทดสอบประสิทธิภาพการโหลดและ Pen-test | QA / Security | 15 พ.ย. | รอดำเนินการ |\n` +
-        `| 4 | ปล่อยเวอร์ชัน Production & อบรมผู้ใช้ | Release Team | 30 พ.ย. | รอดำเนินการ |\n\n` +
+        `| 1 | สถาปัตยกรรมระบบและกำหนด API Contract | Lead Architect | 15 ต.ค. | <span style="color: #10b981; font-weight: 600;">🟢 เสร็จสมบูรณ์</span> |\n` +
+        `| 2 | พัฒนา TipTap Core Editor & Custom Views | Frontend Team | 30 ต.ค. | <span style="color: #3b82f6; font-weight: 600;">🔵 กำลังทำ</span> |\n` +
+        `| 3 | ทดสอบประสิทธิภาพการโหลดและ Pen-test | QA / Security | 15 พ.ย. | <span style="color: #f59e0b; font-weight: 600;">🟡 รอดำเนินการ</span> |\n` +
+        `| 4 | ปล่อยเวอร์ชัน Production & อบรมผู้ใช้ | Release Team | 30 พ.ย. | <span style="color: #f59e0b; font-weight: 600;">🟡 รอดำเนินการ</span> |\n\n` +
         `## 📦 รายการส่งมอบและเช็กลิสต์ความพร้อม (Deliverables Checklist)\n` +
         `- [x] เอกสาร System Architecture RFC ได้รับการอนุมัติ\n` +
         `- [x] ตรวจสอบความถูกต้องของ Type Definitions ทั้งหมดในโปรเจกต์\n` +
         `- [ ] ทดสอบความเข้ากันได้บนระบบปฏิบัติการ Windows, macOS และ Linux\n` +
-        `- [ ] จัดทำคู่มือ Getting Started Guide พร้อมตัวอย่างโค้ด\n\n` +
-        `#project #planning #roadmap `
+        `- [ ] จัดทำคู่มือ Getting Started Guide พร้อมตัวอย่างโค้ด`
       );
     } else {
       rawMarkdown = (
-        `# Project Planning - Intelligent Knowledge Workspace\n\n` +
+        `# Project Planning - Intelligent Knowledge Workspace\n` +
         `> 🚀 **Vision:** Build a high-performance, local-first document and knowledge platform engineered for modern engineering teams with sub-second responsiveness and military-grade encryption.\n\n` +
         `## 🎯 Core Objectives\n` +
         `1. **Local-first Foundation:** Zero-latency writes to local storage with automated AES-GCM-256 encryption\n` +
@@ -3099,73 +3109,70 @@ export function getNoteTemplateContent(
         `## 📅 Milestones & Timeline\n` +
         `| Phase | Milestone Deliverable | Owner | Target Date | Status |\n` +
         `| :---: | :--- | :--- | :---: | :---: |\n` +
-        `| 1 | Architecture RFC & API Contract Specifications | Lead Architect | Oct 15 | Completed |\n` +
-        `| 2 | Core TipTap Editor & Custom Block NodeViews | Frontend Team | Oct 30 | In Progress |\n` +
-        `| 3 | Load Benchmarks & Penetration Audit | QA / Security | Nov 15 | Pending |\n` +
-        `| 4 | Production Cutover & Team Onboarding | Release Team | Nov 30 | Pending |\n\n` +
+        `| 1 | Architecture RFC & API Contract Specifications | Lead Architect | Oct 15 | <span style="color: #10b981; font-weight: 600;">🟢 Completed</span> |\n` +
+        `| 2 | Core TipTap Editor & Custom Block NodeViews | Frontend Team | Oct 30 | <span style="color: #3b82f6; font-weight: 600;">🔵 In Progress</span> |\n` +
+        `| 3 | Load Benchmarks & Penetration Audit | QA / Security | Nov 15 | <span style="color: #f59e0b; font-weight: 600;">🟡 Pending</span> |\n` +
+        `| 4 | Production Cutover & Team Onboarding | Release Team | Nov 30 | <span style="color: #f59e0b; font-weight: 600;">🟡 Pending</span> |\n\n` +
         `## 📦 Deliverables Checklist\n` +
         `- [x] Architecture RFC approved by leadership\n` +
         `- [x] Full TypeScript strict mode compliance across all modules\n` +
         `- [ ] Cross-platform validation across Windows, macOS, and Linux\n` +
-        `- [ ] Comprehensive developer guide and API documentation published\n\n` +
-        `#project #planning #roadmap `
+        `- [ ] Comprehensive developer guide and API documentation published`
       );
     }
   } else if (templateType === "todo") {
     if (isTh) {
       rawMarkdown = (
-        `# รายการงานที่ต้องทำ - ${dateStr}\n\n` +
+        `# รายการงานที่ต้องทำ - ${dateStr}\n` +
         `> ⚡ **หลักการทำงาน:** ทำงานที่ยากและสำคัญที่สุดให้เสร็จเป็นอันดับแรก (Eat That Frog) เพื่อสร้างแรงผลักดันตลอดทั้งวัน\n\n` +
-        `## 🔥 งานด่วนและสำคัญมาก (High Priority Tasks)\n` +
+        `## <span style="color: #ef4444; font-weight: 700;">🔴 P1 - ด่วนและสำคัญมาก (High Priority Tasks)</span>\n` +
         `- [x] ตรวจสอบ Canvas Memory Profiler เพื่อแก้ปัญหา Buffer ล้น\n` +
         `- [ ] เขียน Unit Test ครอบคลุมการส่งออกไฟล์ขนาดใหญ่\n` +
         `- [ ] ส่ง Patch แก้ไขบั๊กขึ้น Staging Environment\n\n` +
-        `## 📌 งานสำคัญทั่วไป (Medium Priority Tasks)\n` +
+        `## <span style="color: #f59e0b; font-weight: 700;">🟡 P2 - งานสำคัญทั่วไป (Medium Priority Tasks)</span>\n` +
         `- [x] เพิ่มคำแปลภาษาสำหรับ Version History Diff\n` +
         `- [ ] ปรับปรุงการแสดงผล Badge แท็กในหน้าต่างเทมเพลต\n` +
         `- [ ] ทดสอบปุ่มสลับธีม Dark/Light บนจอภาพความละเอียดสูง\n\n` +
-        `## 📥 งานรอจัดสรรเวลา (Backlog & Someday)\n` +
+        `## <span style="color: #3b82f6; font-weight: 600;">🔵 P3 - งานรอจัดสรรเวลา (Backlog & Someday)</span>\n` +
         `- [ ] ศึกษาฟีเจอร์ Multi-tab Drag and Drop\n` +
         `- [ ] ออกแบบชุดธีมสี Pastel สำหรับโหมดอ่านหนังสือ\n\n` +
         `## 💡 กฎ 3 ข้อสำหรับการทำงานให้มีประสิทธิภาพ (Rules of Execution)\n` +
         `1. **Timebox 25 นาที:** โฟกัสกับงานเดียวโดยไม่สลับหน้าจอ (Pomodoro Technique)\n` +
         `2. **ทดสอบก่อนส่ง:** ทุกการแก้บั๊กต้องมีชุดทดสอบรองรับเสมอ\n` +
-        `3. **สรุปความคืบหน้า:** บันทึกสถานะงานลงในบอร์ดก่อนปิดการทำงานแต่ละวัน\n\n` +
-        `#todo #tasks #productivity `
+        `3. **สรุปความคืบหน้า:** บันทึกสถานะงานลงในบอร์ดก่อนปิดการทำงานแต่ละวัน`
       );
     } else {
       rawMarkdown = (
-        `# Task & To-Do List - ${dateStr}\n\n` +
+        `# Task & To-Do List - ${dateStr}\n` +
         `> ⚡ **Execution Rule:** "Eat that frog first thing in the morning." Tackle the most demanding priority before answering reactive communications.\n\n` +
-        `## 🔥 High Priority Tasks\n` +
+        `## <span style="color: #ef4444; font-weight: 700;">🔴 P1 - High Priority Tasks</span>\n` +
         `- [x] Trace canvas buffer allocation in heap profiler\n` +
         `- [ ] Write stress tests for concurrent batch document conversions\n` +
         `- [ ] Promote memory patch to staging environment\n\n` +
-        `## 📌 Medium Priority Tasks\n` +
+        `## <span style="color: #f59e0b; font-weight: 700;">🟡 P2 - Medium Priority Tasks</span>\n` +
         `- [x] Add localized translation strings for version history diff\n` +
         `- [ ] Refine tag badge rendering inside template browser\n` +
         `- [ ] Verify dark/light theme contrast ratios on high-DPI displays\n\n` +
-        `## 📥 Backlog & Someday Tasks\n` +
+        `## <span style="color: #3b82f6; font-weight: 600;">🔵 P3 - Backlog & Someday Tasks</span>\n` +
         `- [ ] Explore tab drag-and-drop reordering with tab grouping\n` +
         `- [ ] Create pastel reading themes with low contrast for night work\n\n` +
         `## 💡 3 Rules of Execution\n` +
         `1. **25-Minute Focus Blocks:** Single-task without context switching (Pomodoro method)\n` +
         `2. **Test Before Commit:** Every bug fix must include an automated regression test\n` +
-        `3. **Daily Closeout:** Sync board statuses and outline tomorrow's top docket before logging off\n\n` +
-        `#todo #tasks #productivity `
+        `3. **Daily Closeout:** Sync board statuses and outline tomorrow's top docket before logging off`
       );
     }
   } else if (templateType === "study") {
     if (isTh) {
       rawMarkdown = (
-        `# บันทึกการเรียนรู้ - สถาปัตยกรรมกระจายศูนย์และขั้นตอนวิธี Raft\n\n` +
+        `# บันทึกการเรียนรู้ - สถาปัตยกรรมกระจายศูนย์และขั้นตอนวิธี Raft\n` +
         `> 🔬 **คำถามวิจัยหลัก:** ทำไมขั้นตอนวิธี Raft จึงได้รับการยอมรับและนำมาใช้งานจริงอย่างแพร่หลายแทนที่ Paxos ในระบบคลาวด์ยุคใหม่?\n\n` +
         `## 📌 ข้อมูลและแหล่งอ้างอิง (Topic Overview)\n` +
         `| หมวดหมู่ | ข้อมูล |\n` +
         `| :--- | :--- |\n` +
         `| **วิชา / หัวข้อ** | Distributed Consensus & State Machine Replication |\n` +
-        `| **ผู้สอน / สถาบัน** | MIT 6.824: Distributed Systems (Prof. Robert Morris) |\n` +
-        `| **เอกสารอ้างอิง** | In Search of an Understandable Consensus Algorithm (Ongaro & Ousterhout) |\n` +
+        `| **ผู้สอน / สถาบัน** | MIT 6.824: Distributed Systems (Prof. Robert Morris)[^2] |\n` +
+        `| **เอกสารอ้างอิง** | In Search of an Understandable Consensus Algorithm (Ongaro & Ousterhout)[^1] |\n` +
         `| **วันที่บันทึก** | ${dateStr} |\n\n` +
         `## 💡 ข้อสรุป 3 ประเด็นหลัก (Core Findings)\n` +
         `1. **การแยกปัญหาย่อย (Decomposition):** Raft แบ่งขั้นตอนวิธีออกเป็น Leader Election, Log Replication และ Safety ทำให้ตรวจสอบและทำความเข้าใจได้ง่ายกว่า Paxos\n` +
@@ -3174,7 +3181,7 @@ export function getNoteTemplateContent(
         `## ⚖️ ตารางเปรียบเทียบ Raft vs Multi-Paxos\n` +
         `| คุณสมบัติ | Raft | Multi-Paxos |\n` +
         `| :--- | :--- | :--- |\n` +
-        `| **ความซับซ้อนในการเข้าใจ** | ต่ำ (ออกแบบมาเพื่อให้เข้าใจง่าย) | สูงมาก (ทฤษฎีซับซ้อนและช่องว่างการตีความเยอะ) |\n` +
+        `| **ความซับซ้อนในการเข้าใจ** | <mark>ต่ำ (ออกแบบมาเพื่อให้เข้าใจง่าย)</mark> | สูงมาก (ทฤษฎีซับซ้อนและช่องว่างการตีความเยอะ) |\n` +
         `| **บทบาทของผู้นำ (Leader)** | ผู้นำเดี่ยวมีอำนาจสมบูรณ์ (Strong Leader) | มี Weak Leader หรือสลับบทบาทได้ |\n` +
         `| **การจัดการ Log Holes** | ไม่อนุญาตให้มีช่องว่างใน Log | มี Log Holes และต้องมีกลไกตามอุด |\n` +
         `| **การนำไปใช้งานจริง** | etcd (Kubernetes), Consul, TiKV, MongoDB | Chubby (Google), Apache ZooKeeper (Zab) |\n\n` +
@@ -3198,18 +3205,19 @@ export function getNoteTemplateContent(
         `- [x] ศึกษาการทำงานของ Randomized Election Timeout ในการป้องกัน Split Vote\n` +
         `- [ ] ทำความเข้าใจกลไก Log Compaction ด้วย Snapshotting เพื่อลดขนาดดิสก์\n` +
         `- [ ] เขียนโปรแกรมจำลอง Raft Cluster ขนาด 3 โหนดด้วย Node.js\n\n` +
-        `#study #research #notes `
+        `[^1]: Ongaro, D., & Ousterhout, J. (2014). *In Search of an Understandable Consensus Algorithm*. USENIX Annual Technical Conference (ATC '14), 305–319.\n` +
+        `[^2]: MIT 6.824 Distributed Systems Lecture Series, Prof. Robert Morris.`
       );
     } else {
       rawMarkdown = (
-        `# Study & Research Notes - Distributed Consensus & Raft\n\n` +
+        `# Study & Research Notes - Distributed Consensus & Raft\n` +
         `> 🔬 **Core Research Question:** Why has the Raft consensus algorithm displaced Multi-Paxos as the standard foundation in modern cloud infrastructure?\n\n` +
         `## 📌 Overview & Source Metadata\n` +
         `| Category | Details |\n` +
         `| :--- | :--- |\n` +
         `| **Course / Subject** | Distributed Consensus & Fault-tolerant State Machines |\n` +
-        `| **Instructor / University** | MIT 6.824: Distributed Systems (Prof. Robert Morris) |\n` +
-        `| **Primary Paper** | In Search of an Understandable Consensus Algorithm (Ongaro & Ousterhout) |\n` +
+        `| **Instructor / University** | MIT 6.824: Distributed Systems (Prof. Robert Morris)[^2] |\n` +
+        `| **Primary Paper** | In Search of an Understandable Consensus Algorithm (Ongaro & Ousterhout)[^1] |\n` +
         `| **Date Recorded** | ${dateStr} |\n\n` +
         `## 💡 Core Takeaways\n` +
         `1. **Problem Decomposition:** Raft separates consensus into explicit sub-problems: Leader Election, Log Replication, and Safety guarantees\n` +
@@ -3218,7 +3226,7 @@ export function getNoteTemplateContent(
         `## ⚖️ Comparative Architecture: Raft vs Multi-Paxos\n` +
         `| Dimension | Raft Protocol | Multi-Paxos |\n` +
         `| :--- | :--- | :--- |\n` +
-        `| **Understandability** | High (Engineered specifically for clarity) | Very Low (Notorious conceptual hurdles) |\n` +
+        `| **Understandability** | <mark>High (Engineered specifically for clarity)</mark> | Very Low (Notorious conceptual hurdles) |\n` +
         `| **Leader Role** | Strong, authoritative Leader | Weak or symmetric proposers |\n` +
         `| **Log Holes** | Strictly disallowed (Sequential contiguous entries) | Allows log holes requiring explicit fill rounds |\n` +
         `| **Production Adopters** | etcd (Kubernetes), Consul, TiKV, MongoDB | Chubby (Google), Apache ZooKeeper (Zab) |\n\n` +
@@ -3242,19 +3250,20 @@ export function getNoteTemplateContent(
         `- [x] Analyze randomized election timeout mechanics to avoid split-vote stalls\n` +
         `- [ ] Deep-dive into log compaction via state snapshotting\n` +
         `- [ ] Build a minimal 3-node in-memory cluster simulator in TypeScript\n\n` +
-        `#study #research #notes `
+        `[^1]: Ongaro, D., & Ousterhout, J. (2014). *In Search of an Understandable Consensus Algorithm*. USENIX Annual Technical Conference (ATC '14), 305–319.\n` +
+        `[^2]: MIT 6.824 Distributed Systems Lecture Series, Prof. Robert Morris.`
       );
     }
   } else if (templateType === "bug") {
     if (isTh) {
       rawMarkdown = (
-        `# รายงานปัญหา / บั๊ก - ปัญหาหน่วยความจำรั่วไหลในกระบวนการแปลงไฟล์ PDF\n\n` +
+        `# รายงานปัญหา / บั๊ก - ปัญหาหน่วยความจำรั่วไหลในกระบวนการแปลงไฟล์ PDF\n` +
         `> ⚠️ **คำเตือนผลกระทบ:** บั๊กนี้ทำให้ Node.js process หยุดทำงาน (Crash) ทันทีเมื่อผู้ใช้ส่งออกเอกสารมากกว่า 5 ไฟล์พร้อมกัน ส่งผลต่อระบบ Production ในระดับสูง\n\n` +
         `## 📋 ข้อมูลสรุปของปัญหา (Issue Overview)\n` +
         `| ข้อมูล | รายละเอียด |\n` +
         `| :--- | :--- |\n` +
-        `| **ระดับความรุนแรง** | Critical / P1 |\n` +
-        `| **สถานะปัจจุบัน** | กำลังแก้ไข (In Progress) |\n` +
+        `| **ระดับความรุนแรง** | <span style="color: #ef4444; font-weight: 700;">Critical / P1</span> |\n` +
+        `| **สถานะปัจจุบัน** | <span style="color: #3b82f6; font-weight: 600;">กำลังแก้ไข (In Progress)</span> |\n` +
         `| **สภาพแวดล้อมที่พบ** | Production & Staging (Node.js v20.x, Windows / Linux) |\n` +
         `| **ผู้รายงาน** | ทีมทดสอบระบบ (QA Team) |\n` +
         `| **วันที่พบปัญหา** | ${dateStr} |\n\n` +
@@ -3274,23 +3283,22 @@ export function getNoteTemplateContent(
         `\`\`\`\n\n` +
         `## 🎯 ผลลัพธ์ที่คาดหวัง vs ผลลัพธ์ที่เกิดขึ้นจริง\n` +
         `- **ผลลัพธ์ที่คาดหวัง:** ไฟล์ควรถูกประมวลผลแบบสตรีมทีละไฟล์ โดยควบคุมการใช้หน่วยความจำไม่ให้เกิน \`250MB\`\n` +
-        `- **ผลลัพธ์ที่เกิดขึ้นจริง:** กระบวนการเรนเดอร์ Canvas โหลดข้อมูลทุกภาพเข้า Buffer พร้อมกันโดยไม่ได้เรียก \`dispose()\` ส่งผลให้ Memory รั่วไหล\n\n` +
+        `- **ผลลัพธ์ที่เกิดขึ้นจริง:** <mark>กระบวนการเรนเดอร์ Canvas โหลดข้อมูลทุกภาพเข้า Buffer พร้อมกันโดยไม่ได้เรียก dispose()</mark> ส่งผลให้ Memory รั่วไหล\n\n` +
         `## ✅ แนวทางการแก้ไขและเช็กลิสต์ (Proposed Fix & Action Items)\n` +
         `- [x] ตรวจพบจุดที่หน่วยความจำค้างในโมดูล \`pdfExportWorker.ts\`\n` +
         `- [ ] ปรับกระบวนการทำงานให้เป็น Queue Worker โดยจำกัดการทำงานพร้อมกันไม่เกิน 2 ไฟล์\n` +
         `- [ ] เรียกใช้ \`context.cleanup()\` และเคลียร์ Blob Object URLs ทันทีหลังแปลงหน้าเสร็จ\n` +
-        `- [ ] เขียน Integration Test เพื่อจำลองการส่งออกเอกสาร 20 ฉบับติดต่อกัน\n\n` +
-        `#bug #issue #debugging `
+        `- [ ] เขียน Integration Test เพื่อจำลองการส่งออกเอกสาร 20 ฉบับติดต่อกัน`
       );
     } else {
       rawMarkdown = (
-        `# Bug & Issue Report - Memory Leak in Batch PDF Export Processing\n\n` +
+        `# Bug & Issue Report - Memory Leak in Batch PDF Export Processing\n` +
         `> ⚠️ **Impact Warning:** Process crashes ungracefully due to Node.js OOM when exporting more than 5 notes with heavy inline assets concurrently.\n\n` +
         `## 📋 Issue Overview\n` +
         `| Attribute | Value |\n` +
         `| :--- | :--- |\n` +
-        `| **Severity** | Critical / P1 |\n` +
-        `| **Status** | In Progress |\n` +
+        `| **Severity** | <span style="color: #ef4444; font-weight: 700;">Critical / P1</span> |\n` +
+        `| **Status** | <span style="color: #3b82f6; font-weight: 600;">In Progress</span> |\n` +
         `| **Environment** | Production & Staging (Node.js v20.x, Windows / Linux) |\n` +
         `| **Reporter** | QA Performance Benchmarking Team |\n` +
         `| **Reported Date** | ${dateStr} |\n\n` +
@@ -3310,20 +3318,19 @@ export function getNoteTemplateContent(
         `\`\`\`\n\n` +
         `## 🎯 Expected vs Actual Behavior\n` +
         `- **Expected:** Sequential batch queue processing with bounded heap ceiling under \`250MB\`\n` +
-        `- **Actual:** Concurrent canvas allocations retain unreleased buffer handles across iterations\n\n` +
+        `- **Actual:** <mark>Concurrent canvas allocations retain unreleased buffer handles across iterations</mark>\n\n` +
         `## ✅ Proposed Fix & Action Items\n` +
         `- [x] Locate uncollected canvas buffer references in \`pdfExportWorker.ts\`\n` +
         `- [ ] Implement rate-limited queue worker (concurrency limit: 2)\n` +
         `- [ ] Invoke explicit \`context.cleanup()\` and revoke created Blob URLs after page render\n` +
-        `- [ ] Add stress regression test asserting memory stays bounded over 20 exports\n\n` +
-        `#bug #issue #debugging `
+        `- [ ] Add stress regression test asserting memory stays bounded over 20 exports`
       );
     }
   } else if (templateType === "weekly-review") {
     if (isTh) {
       rawMarkdown = (
-        `# สรุปประจำสัปดาห์ (Weekly Review) - ${dateStr}\n\n` +
-        `> 📊 **ภาพรวมสัปดาห์นี้:** ปิดรอบสปรินต์ได้ตามเป้าหมาย 85% ประสิทธิภาพของ Editor เร็วขึ้นอย่างมีนัยสำคัญ แต่ต้องเพิ่มความระมัดระวังเรื่องการจัดการ State บนหลายอุปกรณ์\n\n` +
+        `# สรุปประจำสัปดาห์ (Weekly Review) - ${dateStr}\n` +
+        `> 📊 **ภาพรวมสัปดาห์นี้:** ปิดรอบสปรินต์ได้ตามเป้าหมาย <mark>85%</mark> ประสิทธิภาพของ Editor เร็วขึ้นอย่างมีนัยสำคัญ แต่ต้องเพิ่มความระมัดระวังเรื่องการจัดการ State บนหลายอุปกรณ์\n\n` +
         `## 🏆 ผลงานและความสำเร็จในสัปดาห์นี้ (Wins & Highlights)\n` +
         `- ปล่อยฟีเจอร์ Editor Toolbar v2.4 ตรงตามกำหนดการ พร้อมรับคำชมจากผู้ใช้กลุ่มเบต้า\n` +
         `- ประสิทธิภาพการเปิดเอกสารเร็วขึ้น \`40%\` ด้วยการย้ายกระบวนการคำนวณเข้าสู่ Web Worker\n` +
@@ -3336,7 +3343,7 @@ export function getNoteTemplateContent(
         `| รายการบั๊กรอการแก้ไข (Pending P1/P2 Bugs) | 0 รายการ | 1 รายการ | 🟡 ต้องแก้ไขเร่งด่วน |\n` +
         `| การจัดส่งฟีเจอร์ตามสปรินต์ | 100% | 85% | 🟡 เลื่อน 1 ฟีเจอร์ย่อย |\n\n` +
         `## 🧠 บทเรียนและข้อคิดสำคัญ (Lessons & Insights)\n` +
-        `- การออกแบบ State Synchronization ให้เป็น Finite State Machine ชัดเจน ช่วยป้องกันปัญหา Race Condition ได้ดีกว่าการใช้ธงสถานะแยกย่อย\n` +
+        `- <span style="font-family: 'Playfair Display', Georgia, serif; font-style: italic;">"การออกแบบ State Synchronization ให้เป็น Finite State Machine ชัดเจน ช่วยป้องกันปัญหา Race Condition ได้ดีกว่าการใช้ธงสถานะแยกย่อย"</span>\n` +
         `- การรับฟังข้อเสนอแนะจากผู้ใช้จริงช่วยให้เห็นจุดบกพร่องที่ทีมมองข้ามได้อย่างรวดเร็ว\n\n` +
         `## 🎯 3 อันดับเป้าหมายสำคัญสำหรับสัปดาห์หน้า (Top 3 Priorities for Next Week)\n` +
         `1. **ติดตั้งระบบสำรองข้อมูลอัตโนมัติ (Auto-backup):** เชื่อมต่อระบบแบ็กอัปเข้ารหัสลงดิสก์และคลาวด์แบบ Background Sync\n` +
@@ -3346,13 +3353,12 @@ export function getNoteTemplateContent(
         `- [x] เคลียร์กล่องข้อความและอีเมลที่ยังค้างตอบ\n` +
         `- [x] ตรวจสอบปฏิทินนัดหมายและจัดสรรเวลาสำหรับงานสำคัญ (Focus Blocks)\n` +
         `- [ ] จัดระเบียบโฟลเดอร์เอกสารและลบไฟล์ชั่วคราวที่ไม่จำเป็น\n` +
-        `- [ ] สำรองข้อมูลฐานข้อมูลประจำสัปดาห์\n\n` +
-        `#weekly #review #productivity `
+        `- [ ] สำรองข้อมูลฐานข้อมูลประจำสัปดาห์`
       );
     } else {
       rawMarkdown = (
-        `# Weekly Review - ${dateStr}\n\n` +
-        `> 📊 **Weekly Debrief:** Sprint velocity achieved 85% of forecast. Core editor responsiveness improved markedly, though multi-device replication needs tighter state machine safeguards.\n\n` +
+        `# Weekly Review - ${dateStr}\n` +
+        `> 📊 **Weekly Debrief:** Sprint velocity achieved <mark>85%</mark> of forecast. Core editor responsiveness improved markedly, though multi-device replication needs tighter state machine safeguards.\n\n` +
         `## 🏆 Wins & Highlights\n` +
         `- Shipped Editor Toolbar v2.4 milestone ahead of schedule with enthusiastic beta user feedback\n` +
         `- Slashed initial document load latency by \`40%\` by offloading parsing pipelines to Web Workers\n` +
@@ -3365,7 +3371,7 @@ export function getNoteTemplateContent(
         `| Open P1/P2 Regression Bugs | 0 defects | 1 defect | 🟡 Needs Urgent Patch |\n` +
         `| Sprint Feature Delivery | 100% | 85% | 🟡 Minor Stretch Carried |\n\n` +
         `## 🧠 Lessons & Strategic Insights\n` +
-        `- Formally modeling state transitions as deterministic finite state machines eliminates race conditions much earlier than dispersed boolean flags.\n` +
+        `- <span style="font-family: 'Playfair Display', Georgia, serif; font-style: italic;">"Formally modeling state transitions as deterministic finite state machines eliminates race conditions much earlier than dispersed boolean flags."</span>\n` +
         `- Regular user feedback sessions pinpoint edge cases that automated suites inherently miss.\n\n` +
         `## 🎯 Top 3 Priorities for Next Week (The Big 3)\n` +
         `1. **Background Backup Pipeline:** Implement encrypted local and cloud sync backups\n` +
@@ -3375,27 +3381,26 @@ export function getNoteTemplateContent(
         `- [x] Inbox zero across communication channels & pending PRs\n` +
         `- [x] Calendar audit and dedicated deep-work schedule block reservations\n` +
         `- [ ] Workspace folder tidy-up and archival of completed project notes\n` +
-        `- [ ] Complete weekly encrypted backup verification\n\n` +
-        `#weekly #review #productivity `
+        `- [ ] Complete weekly encrypted backup verification`
       );
     }
   } else if (templateType === "book-notes") {
     if (isTh) {
       rawMarkdown = (
-        `# สรุปหนังสือ: Atomic Habits (เพราะชีวิตดีได้กว่าที่เป็น)\n\n` +
-        `> 📖 **แก่นสำคัญของเล่ม:** "คุณไม่ได้ก้าวหน้าไปตามระดับของเป้าหมายที่คุณตั้งไว้ แต่คุณตกลงมาอยู่ที่ระดับของระบบที่คุณสร้างขึ้นมาต่างหาก" — **James Clear**\n\n` +
+        `# สรุปหนังสือ: Atomic Habits (เพราะชีวิตดีได้กว่าที่เป็น)\n` +
+        `> 📖 **แก่นสำคัญ & คำคมประจำเล่ม (Favorite Quote):** <span style="font-family: 'Playfair Display', Georgia, serif; font-size: 16px; font-style: italic;">"คุณไม่ได้ก้าวหน้าไปตามระดับของเป้าหมายที่คุณตั้งไว้ แต่คุณตกลงมาอยู่ที่ระดับของระบบที่คุณสร้างขึ้นมาต่างหาก"</span> — **James Clear**\n\n` +
         `## 📚 ข้อมูลหนังสือ (Book Metadata)\n` +
         `| ข้อมูล | รายละเอียด |\n` +
         `| :--- | :--- |\n` +
-        `| **ชื่อหนังสือ** | Atomic Habits: Tiny Changes, Remarkable Results |\n` +
+        `| **ชื่อหนังสือ** | Atomic Habits: Tiny Changes, Remarkable Results[^1] |\n` +
         `| **ผู้เขียน** | James Clear |\n` +
         `| **คะแนนประเมิน** | ⭐⭐⭐⭐⭐ (5/5) |\n` +
         `| **หมวดหมู่** | พัฒนาตนเอง / จิตวิทยาพฤติกรรม |\n` +
         `| **วันที่อ่านจบ** | ${dateStr} |\n\n` +
         `## 💡 สาระสำคัญและแนวคิดหลัก (Key Takeaways & Core Concepts)\n` +
-        `1. การเปลี่ยนแปลงที่ยิ่งใหญ่ในชีวิตไม่ได้เกิดจากการกระทำครั้งใหญ่เพียงครั้งเดียว แต่เกิดจากการสะสมของการพัฒนาเล็กๆ วันละ \`1%\` อย่างต่อเนื่อง\n` +
+        `1. การเปลี่ยนแปลงที่ยิ่งใหญ่ในชีวิตไม่ได้เกิดจากการกระทำครั้งใหญ่เพียงครั้งเดียว แต่เกิดจากการสะสมของการพัฒนาเล็กๆ <mark>วันละ 1%</mark> อย่างต่อเนื่อง\n` +
         `2. การสร้างนิสัยที่ดีอย่างยั่งยืนไม่ได้พึ่งพาพลังใจ (Willpower) แต่ขึ้นอยู่กับการออกแบบสภาพแวดล้อมและระบบที่ลดแรงต้านทานในการลงมือทำ\n` +
-        `3. การเปลี่ยนนิสัยที่ทรงพลังที่สุดคือการเปลี่ยนที่ระดับตัวตน (Identity-based Habits) โดยเริ่มจากการถามตัวเองว่า "คนแบบที่เราอยากเป็นจะตัดสินใจอย่างไร?"\n\n` +
+        `3. การเปลี่ยนนิสัยที่ทรงพลังที่สุดคือการเปลี่ยนที่ระดับตัวตน (Identity-based Habits) โดยเริ่มจากการถามตัวเองว่า *"คนแบบที่เราอยากเป็นจะตัดสินใจอย่างไร?"*\n\n` +
         `## ⚙️ กฎ 4 ข้อของการสร้างและทำลายนิสัย (The 4 Laws of Behavior Change)\n` +
         `| กฎ (The Laws) | วิธีสร้างนิสัยที่ดี (How to Create) | วิธีทำลายนิสัยที่ไม่ดี (How to Break) |\n` +
         `| :--- | :--- | :--- |\n` +
@@ -3408,24 +3413,24 @@ export function getNoteTemplateContent(
         `- [x] ใช้กฎ 2 นาที: อ่านหนังสือวันละ 2 หน้าทันทีหลังนั่งลงที่โต๊ะทำงาน (Make it easy)\n` +
         `- [ ] กำหนด Habit Stacking: "หลังชงกาแฟตอนเช้าเสร็จ ฉันจะเขียนบันทึก 1 ย่อหน้าทันที"\n` +
         `- [ ] นำมือถือไปวางไว้นอกห้องนอนตอน 22:00 น. เพื่อหลีกเลี่ยงการไถจอดึก (Make it invisible)\n\n` +
-        `#book #reading #notes `
+        `[^1]: Clear, J. (2018). *Atomic Habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones*. Avery / Penguin Random House.`
       );
     } else {
       rawMarkdown = (
-        `# Book Notes: Atomic Habits by James Clear\n\n` +
-        `> 📖 **Favorite Quotes & Core Thesis:** "You do not rise to the level of your goals. You fall to the level of your systems." — **James Clear**\n\n` +
+        `# Book Notes: Atomic Habits by James Clear\n` +
+        `> 📖 **Favorite Quotes & Core Thesis:** <span style="font-family: 'Playfair Display', Georgia, serif; font-size: 16px; font-style: italic;">"You do not rise to the level of your goals. You fall to the level of your systems."</span> — **James Clear**\n\n` +
         `## 📚 Book Metadata\n` +
         `| Attribute | Details |\n` +
         `| :--- | :--- |\n` +
-        `| **Title** | Atomic Habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones |\n` +
+        `| **Title** | Atomic Habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones[^1] |\n` +
         `| **Author** | James Clear |\n` +
         `| **Rating** | ⭐⭐⭐⭐⭐ (5/5) |\n` +
         `| **Genre** | Behavioral Psychology / Self-Improvement |\n` +
         `| **Date Finished** | ${dateStr} |\n\n` +
         `## 💡 Key Takeaways & Core Concepts\n` +
-        `1. Groundbreaking transformations stem not from monumental singular feats, but from compounding small \`1%\` improvements enacted consistently every single day.\n` +
+        `1. Groundbreaking transformations stem not from monumental singular feats, but from compounding small <mark>1% improvements</mark> enacted consistently every single day.\n` +
         `2. Sustainable behavioral change depends far less on raw willpower and far more on intentionally architecting low-friction environments.\n` +
-        `3. The most profound shifts take root at the identity level by asking: "Who is the type of person that achieves the outcome I desire?"\n\n` +
+        `3. The most profound shifts take root at the identity level by asking: *"Who is the type of person that achieves the outcome I desire?"*\n\n` +
         `## ⚙️ The 4 Laws of Behavior Change\n` +
         `| Stage of Habit | To Build a Good Habit | To Break a Bad Habit |\n` +
         `| :--- | :--- | :--- |\n` +
@@ -3438,20 +3443,20 @@ export function getNoteTemplateContent(
         `- [x] Apply Two-Minute Rule: Read 2 pages immediately after morning coffee (Make it easy)\n` +
         `- [ ] Habit Stacking: "After closing my laptop for the day, I will immediately slip on running shoes"\n` +
         `- [ ] Place mobile charger in another room past 10 PM to eliminate late-night scrolling (Make it invisible)\n\n` +
-        `#book #reading #notes `
+        `[^1]: Clear, J. (2018). *Atomic Habits: An Easy & Proven Way to Build Good Habits & Break Bad Ones*. Avery / Penguin Random House.`
       );
     }
   } else if (templateType === "cornell-notes") {
     if (isTh) {
       rawMarkdown = (
-        `# บันทึกการเรียนแบบคอร์เนลล์: สถาปัตยกรรมคอมพิวเตอร์และระบบหน่วยความจำ\n\n` +
+        `# บันทึกการเรียนแบบคอร์เนลล์: สถาปัตยกรรมคอมพิวเตอร์และระบบหน่วยความจำ\n` +
         `> 📐 **Average Memory Access Time (AMAT):**\n` +
         `> $\\text{AMAT} = \\text{Hit Time} + (\\text{Miss Rate} \\times \\text{Miss Penalty})$\n\n` +
         `## 📋 ข้อมูลการบรรยาย (Lecture Details)\n` +
         `| ข้อมูล | รายละเอียด |\n` +
         `| :--- | :--- |\n` +
         `| **วิชา / รหัสวิชา** | Computer Science 61C: Great Ideas in Computer Architecture |\n` +
-        `| **หัวข้อการบรรยาย** | Memory Hierarchy, Caching Principles, and Locality |\n` +
+        `| **หัวข้อการบรรยาย** | Memory Hierarchy, Caching Principles, and Locality[^1] |\n` +
         `| **ผู้บรรยาย / สถาบัน** | UC Berkeley / MIT OpenCourseWare |\n` +
         `| **วันที่บันทึก** | ${dateStr} |\n\n` +
         `## 🗄️ ตารางเปรียบเทียบลำดับชั้นหน่วยความจำ (Memory Hierarchy)\n` +
@@ -3472,23 +3477,23 @@ export function getNoteTemplateContent(
         `- **Temporal Locality:** ข้อมูลที่เพิ่งถูกเรียกใช้ มีโอกาสสูงมากที่จะถูกเรียกใช้ซ้ำในอนาคตอันใกล้ (เช่น ตัวแปรใน Loop \`for (int i = 0; i < n; i++)\`)\n` +
         `- **Spatial Locality:** ข้อมูลที่มีตำแหน่ง Address ติดกัน มักจะถูกเรียกใช้ตามมาเรื่อยๆ ฮาร์ดแวร์จึงดึงข้อมูลมาเป็นบล็อกขนาด \`64 bytes\` (Cache Line)\n\n` +
         `## 💡 สรุปใจความสำคัญ (Summary)\n` +
-        `> 💡 ความเร็วในการประมวลผลของซอฟต์แวร์ถูกจำกัดด้วยความเร็วของหน่วยความจำ (Memory Wall) การเขียนโค้ดที่เข้าถึงข้อมูลเรียงตามแนวราบ (Row-major) ในภาษา C ช่วยลด Cache Miss ได้มากกว่าการวนแบบ Column-major หลายเท่าตัว\n\n` +
+        `> 💡 <mark>ความเร็วในการประมวลผลของซอฟต์แวร์ถูกจำกัดด้วยความเร็วของหน่วยความจำ (Memory Wall)</mark> การเขียนโค้ดที่เข้าถึงข้อมูลเรียงตามแนวราบ (Row-major) ในภาษา C ช่วยลด Cache Miss ได้มากกว่าการวนแบบ Column-major หลายเท่าตัว\n\n` +
         `## 🎯 เช็กลิสต์ทบทวนความเข้าใจ (Self-Quiz Checklist)\n` +
         `- [x] อธิบายความหมายของสมการคำนวณ AMAT ได้ด้วยตนเอง\n` +
         `- [ ] เขียนโปรแกรมภาษา C เปรียบเทียบเวลา Execution Time ระหว่าง Row-major vs Column-major Matrix\n` +
         `- [ ] ศึกษาเรื่อง Virtual Memory และ Translation Lookaside Buffer (TLB) เพิ่มเติม\n\n` +
-        `#cornell #learning #notes `
+        `[^1]: Patterson, D. A., & Hennessy, J. L. *Computer Organization and Design: The Hardware/Software Interface* (RISC-V Edition). Morgan Kaufmann.`
       );
     } else {
       rawMarkdown = (
-        `# Cornell Notes: Computer Systems Architecture - Memory Hierarchy\n\n` +
+        `# Cornell Notes: Computer Systems Architecture - Memory Hierarchy\n` +
         `> 📐 **Average Memory Access Time (AMAT):**\n` +
         `> $\\text{AMAT} = \\text{Hit Time} + (\\text{Miss Rate} \\times \\text{Miss Penalty})$\n\n` +
         `## 📋 Lecture Details\n` +
         `| Attribute | Details |\n` +
         `| :--- | :--- |\n` +
         `| **Course / Code** | CS 61C: Great Ideas in Computer Architecture |\n` +
-        `| **Lecture Topic** | Memory Hierarchy, Caching Mechanics, and Locality |\n` +
+        `| **Lecture Topic** | Memory Hierarchy, Caching Mechanics, and Locality[^1] |\n` +
         `| **Instructor / Source** | UC Berkeley / MIT OpenCourseWare |\n` +
         `| **Date Recorded** | ${dateStr} |\n\n` +
         `## 🗄️ Memory Hierarchy Architecture\n` +
@@ -3509,18 +3514,18 @@ export function getNoteTemplateContent(
         `- **Temporal Locality:** Recently accessed memory addresses are likely to be accessed again soon (e.g. index variable in a tight loop \`for (int i = 0; i < n; i++)\`).\n` +
         `- **Spatial Locality:** Contiguous memory locations tend to be accessed in sequence. Caches load contiguous \`64-byte\` Cache Lines on every miss.\n\n` +
         `## 💡 Core Summary\n` +
-        `> 💡 Application throughput is fundamentally bounded by memory latency (The Memory Wall). Designing data access patterns that traverse memory linearly in row-major order maximizes hardware cache hits and eliminates CPU pipeline stalls.\n\n` +
+        `> 💡 <mark>Application throughput is fundamentally bounded by memory latency (The Memory Wall).</mark> Designing data access patterns that traverse memory linearly in row-major order maximizes hardware cache hits and eliminates CPU pipeline stalls.\n\n` +
         `## 🎯 Action Items & Self-Quiz\n` +
         `- [x] Articulate AMAT derivation and penalty trade-offs\n` +
         `- [ ] Benchmark C program comparing row-major vs column-major 2D matrix multiplication\n` +
         `- [ ] Review Virtual Memory page tables and Translation Lookaside Buffer (TLB) caching\n\n` +
-        `#cornell #learning #notes `
+        `[^1]: Patterson, D. A., & Hennessy, J. L. *Computer Organization and Design: The Hardware/Software Interface* (RISC-V Edition). Morgan Kaufmann.`
       );
     }
   } else if (templateType === "content-planner") {
     if (isTh) {
       rawMarkdown = (
-        `# วางแผนคอนเทนต์และสคริปต์วิดีโอ (Content Planner)\n\n` +
+        `# วางแผนคอนเทนต์และสคริปต์วิดีโอ (Content Planner)\n` +
         `> 🪝 **ท่อนฮุกดึงดูดใจ (The Hook - 0:00 to 0:05):** "เคยสงสัยไหมว่าทำไมโค้ดที่เราเขียนเมื่อ 6 เดือนที่แล้ว พอกลับมาเปิดอ่านอีกทีกลับรู้สึกเหมือนกำลังแกะรหัสโบราณ ทั้งๆ ที่เราเป็นคนเขียนเองทุกบรรทัด?"\n\n` +
         `## 📋 ข้อมูลคอนเทนต์ (Content Metadata)\n` +
         `| รายการ | รายละเอียด |\n` +
@@ -3562,12 +3567,11 @@ export function getNoteTemplateContent(
         `- [ ] ถ่ายทำฟุตเทจหน้ากล้อง (A-roll) และบันทึกเสียงบรรยาย\n` +
         `- [ ] ตัดต่อคลิป ใส่ซับไตเติล และ B-roll ประกอบ\n` +
         `- [ ] ออกแบบภาพปกที่มีอัตราการคลิกสูง (High CTR Thumbnail)\n` +
-        `- [ ] อัปโหลดวิดีโอพร้อมตั้งเวลาเผยแพร่\n\n` +
-        `#content #video #creator `
+        `- [ ] อัปโหลดวิดีโอพร้อมตั้งเวลาเผยแพร่`
       );
     } else {
       rawMarkdown = (
-        `# Content & Video Script Planner\n\n` +
+        `# Content & Video Script Planner\n` +
         `> 🪝 **The Hook (0:00 - 0:05):** "Why does code written six months ago feel like deciphering an ancient foreign dialect—even when you wrote every single line yourself?"\n\n` +
         `## 📋 Content Metadata\n` +
         `| Attribute | Value |\n` +
@@ -3609,28 +3613,27 @@ export function getNoteTemplateContent(
         `- [ ] Record talking-head video footage (A-roll) and high-fidelity audio\n` +
         `- [ ] Edit timeline, add animated syntax callouts and background tracks\n` +
         `- [ ] Render high-CTR thumbnail assets\n` +
-        `- [ ] Schedule release and draft newsletter companion post\n\n` +
-        `#content #video #creator `
+        `- [ ] Schedule release and draft newsletter companion post`
       );
     }
   } else if (templateType === "api-doc") {
     if (isTh) {
       rawMarkdown = (
-        `# เอกสารข้อกำหนด API (API Specification)\n\n` +
-        `> \`POST /api/v1/notes\` — สร้างเอกสารหรือโน้ตใหม่ในคลังข้อมูล พร้อมรองรับการเข้ารหัสข้อมูลและการกำหนดแท็ก\n\n` +
+        `# เอกสารข้อกำหนด API (API Specification)\n` +
+        `> 🌐 <span style="font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; color: #10b981;">POST /api/v1/notes</span> — สร้างเอกสารหรือโน้ตใหม่ในคลังข้อมูล พร้อมรองรับการเข้ารหัสข้อมูลและการกำหนดแท็ก\n\n` +
         `## 📋 ข้อมูลทั่วไปของ Endpoint (Overview)\n` +
         `| คุณสมบัติ | ค่าที่กำหนด |\n` +
         `| :--- | :--- |\n` +
         `| **HTTP Method** | \`POST\` |\n` +
         `| **Base URL** | \`https://api.luno.local/api/v1\` |\n` +
-        `| **การยืนยันตัวตน (Auth)** | \`Bearer <JWT_TOKEN>\` |\n` +
+        `| **การยืนยันตัวตน (Auth)** | \`Bearer <JWT_TOKEN>\`[^1] |\n` +
         `| **Rate Limit** | 120 คำขอ / นาที / IP |\n\n` +
         `## 🔐 Headers ที่ต้องส่งในคำขอ (Request Headers)\n` +
         `| Header Name | Type | Required | Description |\n` +
         `| :--- | :---: | :---: | :--- |\n` +
-        `| \`Authorization\` | string | จำเป็น (Yes) | รูปแบบ: \`Bearer eyJhbGciOi...\` |\n` +
-        `| \`Content-Type\` | string | จำเป็น (Yes) | ต้องระบุเป็น \`application/json\` |\n` +
-        `| \`X-Client-Version\` | string | ไม่บังคับ (No) | เวอร์ชันของแอปพลิเคชัน เช่น \`2.4.0\` |\n\n` +
+        `| \`Authorization\` | string | <span style="color: #ef4444; font-weight: 600;">Required</span> | รูปแบบ: \`Bearer eyJhbGciOi...\` |\n` +
+        `| \`Content-Type\` | string | <span style="color: #ef4444; font-weight: 600;">Required</span> | ต้องระบุเป็น \`application/json\` |\n` +
+        `| \`X-Client-Version\` | string | <span style="color: #6b7280;">Optional</span> | เวอร์ชันของแอปพลิเคชัน เช่น \`2.4.0\` |\n\n` +
         `## 📦 โครงสร้างข้อมูลคำขอ (Request Body Schema)\n` +
         `\`\`\`json\n` +
         `{\n` +
@@ -3648,10 +3651,10 @@ export function getNoteTemplateContent(
         `## 🚦 รหัสสถานะและการตอบกลับ (Response Status Codes)\n` +
         `| HTTP Status | ความหมาย | รูปแบบเนื้อหาที่ส่งคืน |\n` +
         `| :---: | :--- | :--- |\n` +
-        `| **201 Created** | สำเร็จ: สร้างเอกสารใหม่เรียบร้อย | JSON Object ของโน้ตที่สร้าง |\n` +
-        `| **400 Bad Request** | ข้อมูลนำเข้าไม่ถูกต้อง | รายการฟิลด์ที่ Validation ไม่ผ่าน |\n` +
-        `| **401 Unauthorized** | Token หมดอายุหรือไม่ถูกต้อง | ข้อความแจ้งเตือนข้อผิดพลาด Auth |\n` +
-        `| **429 Too Many Requests** | เกินขีดจำกัด Rate Limit | ข้อมูล Retry-After ใน Header |\n\n` +
+        `| **<span style="color: #10b981; font-weight: 700;">201 Created</span>** | สำเร็จ: สร้างเอกสารใหม่เรียบร้อย | JSON Object ของโน้ตที่สร้าง |\n` +
+        `| **<span style="color: #f59e0b; font-weight: 700;">400 Bad Request</span>** | ข้อมูลนำเข้าไม่ถูกต้อง | รายการฟิลด์ที่ Validation ไม่ผ่าน |\n` +
+        `| **<span style="color: #ef4444; font-weight: 700;">401 Unauthorized</span>** | Token หมดอายุหรือไม่ถูกต้อง | ข้อความแจ้งเตือนข้อผิดพลาด Auth |\n` +
+        `| **<span style="color: #6366f1; font-weight: 700;">429 Too Many Requests</span>** | เกินขีดจำกัด Rate Limit | ข้อมูล Retry-After ใน Header |\n\n` +
         `## 💻 ตัวอย่างคำสั่งเรียกใช้งานผ่าน cURL\n` +
         `\`\`\`bash\n` +
         `curl -X POST "https://api.luno.local/api/v1/notes" \\\n` +
@@ -3680,25 +3683,25 @@ export function getNoteTemplateContent(
         `  }\n` +
         `}\n` +
         `\`\`\`\n\n` +
-        `#api #docs #backend `
+        `[^1]: RFC 7519: JSON Web Token (JWT) specification for secure API claims.`
       );
     } else {
       rawMarkdown = (
-        `# API Endpoint Specification\n\n` +
-        `> \`POST /api/v1/notes\` — Create a new note or document with encrypted payload support, workspace tags, and custom icon metadata.\n\n` +
+        `# API Endpoint Specification\n` +
+        `> 🌐 <span style="font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; color: #10b981;">POST /api/v1/notes</span> — Create a new note or document with encrypted payload support, workspace tags, and custom icon metadata.\n\n` +
         `## 📋 Endpoint Overview\n` +
         `| Attribute | Value |\n` +
         `| :--- | :--- |\n` +
         `| **HTTP Method** | \`POST\` |\n` +
         `| **Base URL** | \`https://api.luno.local/api/v1\` |\n` +
-        `| **Authentication** | \`Bearer <JWT_TOKEN>\` |\n` +
+        `| **Authentication** | \`Bearer <JWT_TOKEN>\`[^1] |\n` +
         `| **Rate Limiting** | 120 requests / minute / IP |\n\n` +
         `## 🔐 Required Request Headers\n` +
         `| Header Name | Type | Required | Description |\n` +
         `| :--- | :---: | :---: | :--- |\n` +
-        `| \`Authorization\` | string | Yes | Bearer Token: \`Bearer eyJhbGciOi...\` |\n` +
-        `| \`Content-Type\` | string | Yes | Must be \`application/json\` |\n` +
-        `| \`X-Client-Version\` | string | Optional | Client release version string (e.g. \`2.4.0\`) |\n\n` +
+        `| \`Authorization\` | string | <span style="color: #ef4444; font-weight: 600;">Required</span> | Bearer Token: \`Bearer eyJhbGciOi...\` |\n` +
+        `| \`Content-Type\` | string | <span style="color: #ef4444; font-weight: 600;">Required</span> | Must be \`application/json\` |\n` +
+        `| \`X-Client-Version\` | string | <span style="color: #6b7280;">Optional</span> | Client release version string (e.g. \`2.4.0\`) |\n\n` +
         `## 📦 Request Body Schema\n` +
         `\`\`\`json\n` +
         `{\n` +
@@ -3716,10 +3719,10 @@ export function getNoteTemplateContent(
         `## 🚦 Response Status Codes\n` +
         `| HTTP Status | Meaning | Response Body Format |\n` +
         `| :---: | :--- | :--- |\n` +
-        `| **201 Created** | Document created successfully | JSON representation of created resource |\n` +
-        `| **400 Bad Request** | Schema validation failed | List of invalid property constraints |\n` +
-        `| **401 Unauthorized** | Token missing, invalid, or expired | Standardized error payload |\n` +
-        `| **429 Too Many Requests** | Rate limit ceiling exceeded | Includes \`Retry-After\` header timestamp |\n\n` +
+        `| **<span style="color: #10b981; font-weight: 700;">201 Created</span>** | Document created successfully | JSON representation of created resource |\n` +
+        `| **<span style="color: #f59e0b; font-weight: 700;">400 Bad Request</span>** | Schema validation failed | List of invalid property constraints |\n` +
+        `| **<span style="color: #ef4444; font-weight: 700;">401 Unauthorized</span>** | Token missing, invalid, or expired | Standardized error payload |\n` +
+        `| **<span style="color: #6366f1; font-weight: 700;">429 Too Many Requests</span>** | Rate limit ceiling exceeded | Includes \`Retry-After\` header timestamp |\n\n` +
         `## 💻 Practical cURL Invocation\n` +
         `\`\`\`bash\n` +
         `curl -X POST "https://api.luno.local/api/v1/notes" \\\n` +
@@ -3748,22 +3751,22 @@ export function getNoteTemplateContent(
         `  }\n` +
         `}\n` +
         `\`\`\`\n\n` +
-        `#api #docs #backend `
+        `[^1]: RFC 7519: JSON Web Token (JWT) specification for secure API claims.`
       );
     }
   } else if (templateType === "habit-tracker") {
     if (isTh) {
       rawMarkdown = (
-        `# ตารางติดตามนิสัยและสุขภาพ (Habit & Wellness Tracker)\n\n` +
+        `# ตารางติดตามนิสัยและสุขภาพ (Habit & Wellness Tracker)\n` +
         `> 🎯 **เป้าหมายสุขภาพประจำสัปดาห์:** "ความสม่ำเสมอชนะความสมบูรณ์แบบเสมอ การทำเพียง 10 นาทีทุกวันให้ผลลัพธ์ที่ยิ่งใหญ่กว่าการทำ 2 ชั่วโมงเพียงสัปดาห์ละครั้ง"\n\n` +
         `## 🏃‍♂️ ตารางติดตามนิสัยรายวัน (Daily Habit Matrix)\n` +
         `| นิสัยเป้าหมาย (Daily Habits) | จ. | อ. | พ. | พฤ. | ศ. | ส. | อา. | สำเร็จ |\n` +
         `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n` +
-        `| 💧 ดื่มน้ำ 2 - 3 ลิตร | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | 5/7 |\n` +
-        `| 🏃 ออกกำลังกาย / วิ่ง 30 นาที | [x] | [ ] | [x] | [ ] | [x] | [ ] | [ ] | 3/7 |\n` +
-        `| 📖 อ่านหนังสือพัฒนาตนเอง 15 นาที | [x] | [x] | [x] | [x] | [ ] | [ ] | [ ] | 4/7 |\n` +
-        `| 🧘 ฝึกสมาธิ / ผ่อนคลายกล้ามเนื้อ | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | 5/7 |\n` +
-        `| 🛌 เข้านอนก่อน 23:00 น. | [x] | [x] | [ ] | [x] | [x] | [ ] | [ ] | 4/7 |\n\n` +
+        `| 💧 ดื่มน้ำ 2 - 3 ลิตร | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | **5/7** |\n` +
+        `| 🏃 ออกกำลังกาย / วิ่ง 30 นาที | [x] | [ ] | [x] | [ ] | [x] | [ ] | [ ] | **3/7** |\n` +
+        `| 📖 อ่านหนังสือพัฒนาตนเอง 15 นาที | [x] | [x] | [x] | [x] | [ ] | [ ] | [ ] | **4/7** |\n` +
+        `| 🧘 ฝึกสมาธิ / ผ่อนคลายกล้ามเนื้อ | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | **5/7** |\n` +
+        `| 🛌 เข้านอนก่อน 23:00 น. | [x] | [x] | [ ] | [x] | [x] | [ ] | [ ] | **4/7** |\n\n` +
         `## 🌅 ลำดับขั้นตอนกิจวัตรยามเช้า (Morning Routine)\n` +
         `1. **ดื่มน้ำและรับแสงแดดยามเช้า:** ดื่มน้ำ 500ml ทันทีหลังตื่น และเดินรับแดดอ่อน 10 นาทีเพื่อตั้งนาฬิกาชีวภาพ\n` +
         `2. **ยืดเหยียดร่างกาย:** ทำท่ายืดกล้ามเนื้อและโยคะเบาๆ 10 นาที เพื่อกระตุ้นการไหลเวียนโลหิต\n` +
@@ -3778,21 +3781,20 @@ export function getNoteTemplateContent(
         `- [x] เตรียมขวดน้ำประจำโต๊ะทำงานขนาด 1.5 ลิตรทุกเช้า\n` +
         `- [x] ปิดเสียงแจ้งเตือนโทรศัพท์มือถือขณะฝึกสมาธิ\n` +
         `- [ ] ไม่รับประทานอาหารมื้อหนักหลัง 19:30 น.\n` +
-        `- [ ] เดินสะสมระยะทางให้ครบ 8,000 ก้าวต่อวัน\n\n` +
-        `#habits #tracker #wellness `
+        `- [ ] เดินสะสมระยะทางให้ครบ 8,000 ก้าวต่อวัน`
       );
     } else {
       rawMarkdown = (
-        `# Weekly Habit & Wellness Tracker\n\n` +
+        `# Weekly Habit & Wellness Tracker\n` +
         `> 🎯 **Weekly Wellness Intent:** "Consistency always beats intensity. Ten mindful minutes every day compounds into greater vitality than a grueling two-hour session once a week."\n\n` +
         `## 🏃‍♂️ Daily Habit Matrix\n` +
         `| Target Habit | Mon | Tue | Wed | Thu | Fri | Sat | Sun | Progress |\n` +
         `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n` +
-        `| 💧 Hydrate 2-3 Liters | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | 5/7 |\n` +
-        `| 🏃 30-min Cardio / Exercise | [x] | [ ] | [x] | [ ] | [x] | [ ] | [ ] | 3/7 |\n` +
-        `| 📖 15-min Book Reading | [x] | [x] | [x] | [x] | [ ] | [ ] | [ ] | 4/7 |\n` +
-        `| 🧘 Mindfulness & Breathwork | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | 5/7 |\n` +
-        `| 🛌 Asleep before 11:00 PM | [x] | [x] | [ ] | [x] | [x] | [ ] | [ ] | 4/7 |\n\n` +
+        `| 💧 Hydrate 2-3 Liters | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | **5/7** |\n` +
+        `| 🏃 30-min Cardio / Exercise | [x] | [ ] | [x] | [ ] | [x] | [ ] | [ ] | **3/7** |\n` +
+        `| 📖 15-min Book Reading | [x] | [x] | [x] | [x] | [ ] | [ ] | [ ] | **4/7** |\n` +
+        `| 🧘 Mindfulness & Breathwork | [x] | [x] | [x] | [x] | [x] | [ ] | [ ] | **5/7** |\n` +
+        `| 🛌 Asleep before 11:00 PM | [x] | [x] | [ ] | [x] | [x] | [ ] | [ ] | **4/7** |\n\n` +
         `## 🌅 Morning Routine Sequence\n` +
         `1. **Hydration & Sunlight Exposure:** Drink 500ml of water and get 10 minutes of direct morning sunlight to anchor circadian rhythm\n` +
         `2. **Gentle Mobility Routine:** 10 minutes of dynamic full-body stretching to invigorate blood flow\n` +
@@ -3807,38 +3809,37 @@ export function getNoteTemplateContent(
         `- [x] Keep filled 1.5L water bottle on desk every morning\n` +
         `- [x] Activate Do Not Disturb mode during breathwork sessions\n` +
         `- [ ] Avoid heavy carbohydrate meals after 7:30 PM\n` +
-        `- [ ] Log at least 8,000 steps daily\n\n` +
-        `#habits #tracker #wellness `
+        `- [ ] Log at least 8,000 steps daily`
       );
     }
   } else if (templateType === "monthly-budget") {
     if (isTh) {
       rawMarkdown = (
-        `# วางแผนงบประมาณและการเงินประจำเดือน (Monthly Budget)\n\n` +
+        `# วางแผนงบประมาณและการเงินประจำเดือน (Monthly Budget)\n` +
         `> 💰 **เป้าหมายการเงินประจำเดือน:** "ออมเงินให้ได้อย่างน้อย 20% ของรายรับสุทธิ และควบคุมงบประมาณหมวดหมู่อาหารและสังสรรค์ไม่ให้เกินที่กำหนด"\n\n` +
         `## 💵 1. รายรับทั้งหมด (Total Income)\n` +
         `| แหล่งรายรับ | ประมาณการ (฿) | ได้รับจริง (฿) | ผลต่าง (฿) |\n` +
         `| :--- | :---: | :---: | :---: |\n` +
         `| เงินเดือนประจำ | 55,000.00 | 55,000.00 | 0.00 |\n` +
-        `| รายได้เสริม / ฟรีแลนซ์ | 12,000.00 | 14,500.00 | +2,500.00 |\n` +
-        `| เงินปันผล / ผลตอบแทนการลงทุน | 2,000.00 | 2,250.00 | +250.00 |\n` +
-        `| **รวมรายรับทั้งหมด** | **69,000.00** | **71,750.00** | **+2,750.00** |\n\n` +
+        `| รายได้เสริม / ฟรีแลนซ์ | 12,000.00 | 14,500.00 | <span style="color: #10b981; font-weight: 600;">+2,500.00</span> |\n` +
+        `| เงินปันผล / ผลตอบแทนการลงทุน | 2,000.00 | 2,250.00 | <span style="color: #10b981; font-weight: 600;">+250.00</span> |\n` +
+        `| **รวมรายรับทั้งหมด** | **69,000.00** | **71,750.00** | **<span style="color: #10b981; font-weight: 700;">+2,750.00</span>** |\n\n` +
         `## 🏠 2. รายจ่ายคงที่ (Fixed Expenses)\n` +
         `| รายการค่าใช้จ่าย | งบประมาณ (฿) | จ่ายจริง (฿) | สถานะการชำระ |\n` +
         `| :--- | :---: | :---: | :---: |\n` +
-        `| ค่าเช่าที่พัก / ผ่อนคอนโด | 15,000.00 | 15,000.00 | ชำระแล้ว |\n` +
-        `| ค่าน้ำ / ค่าไฟฟ้า / อินเทอร์เน็ตบ้าน | 3,000.00 | 2,840.00 | ชำระแล้ว |\n` +
-        `| ค่าเดินทาง / รถไฟฟ้า / น้ำมัน | 4,500.00 | 4,200.00 | ชำระแล้ว |\n` +
-        `| ค่าประกันสุขภาพและอุบัติเหตุ | 3,500.00 | 3,500.00 | ชำระแล้ว |\n` +
-        `| **รวมรายจ่ายคงที่** | **26,000.00** | **25,540.00** | **ประหยัดได้ ฿460** |\n\n` +
+        `| ค่าเช่าที่พัก / ผ่อนคอนโด | 15,000.00 | 15,000.00 | <span style="color: #10b981; font-weight: 600;">ชำระแล้ว</span> |\n` +
+        `| ค่าน้ำ / ค่าไฟฟ้า / อินเทอร์เน็ตบ้าน | 3,000.00 | 2,840.00 | <span style="color: #10b981; font-weight: 600;">ชำระแล้ว</span> |\n` +
+        `| ค่าเดินทาง / รถไฟฟ้า / น้ำมัน | 4,500.00 | 4,200.00 | <span style="color: #10b981; font-weight: 600;">ชำระแล้ว</span> |\n` +
+        `| ค่าประกันสุขภาพและอุบัติเหตุ | 3,500.00 | 3,500.00 | <span style="color: #10b981; font-weight: 600;">ชำระแล้ว</span> |\n` +
+        `| **รวมรายจ่ายคงที่** | **26,000.00** | **25,540.00** | **<span style="color: #10b981;">ประหยัดได้ ฿460</span>** |\n\n` +
         `## 🛒 3. รายจ่ายผันแปร & เงินออม (Variable & Savings)\n` +
         `| หมวดหมู่ | งบประมาณ (฿) | จ่ายจริง (฿) | คงเหลือ (฿) |\n` +
         `| :--- | :---: | :---: | :---: |\n` +
-        `| ค่าอาหารและวัตถุดิบทำกับข้าว | 14,000.00 | 13,200.00 | +800.00 |\n` +
+        `| ค่าอาหารและวัตถุดิบทำกับข้าว | 14,000.00 | 13,200.00 | <span style="color: #10b981;">+800.00</span> |\n` +
         `| เงินออมเพื่อการเกษียณ / กองทุน (20%) | 14,000.00 | 14,000.00 | 0.00 |\n` +
         `| เงินสำรองฉุกเฉิน | 5,000.00 | 5,000.00 | 0.00 |\n` +
-        `| ช้อปปิ้ง บันเทิง และสังสรรค์ | 6,000.00 | 5,400.00 | +600.00 |\n` +
-        `| **รวมรายจ่ายผันแปรและออม** | **39,000.00** | **37,600.00** | **ประหยัดได้ ฿1,400** |\n\n` +
+        `| ช้อปปิ้ง บันเทิง และสังสรรค์ | 6,000.00 | 5,400.00 | <span style="color: #10b981;">+600.00</span> |\n` +
+        `| **รวมรายจ่ายผันแปรและออม** | **39,000.00** | **37,600.00** | **<span style="color: #10b981;">ประหยัดได้ ฿1,400</span>** |\n\n` +
         `## 🧭 ลำดับความสำคัญในการจัดสรรเงิน (Financial Priority Rules)\n` +
         `1. **Pay Yourself First:** โอนเงินออมและลงทุน \`20%\` เข้าบัญชีแยกทันทีที่เงินเดือนเข้า\n` +
         `2. **เคลียร์หนี้สินและค่าใช้จ่ายคงที่:** ชำระค่าที่พัก บิลค่าสาธารณูปโภค และบัตรเครดิตเต็มจำนวน\n` +
@@ -3853,37 +3854,36 @@ export function getNoteTemplateContent(
         `| :--- | :---: |\n` +
         `| **รายรับจริงรวม** | ฿71,750.00 |\n` +
         `| **รายจ่ายจริงรวม (รวมเงินออม)** | ฿63,140.00 |\n` +
-        `| **ยอดเงินคงเหลือสุทธิ (Net Surplus)** | **฿8,610.00** |\n` +
-        `| **อัตราการออมและการลงทุนจริง** | **26.48%** |\n\n` +
-        `#budget #finance #money `
+        `| **ยอดเงินคงเหลือสุทธิ (Net Surplus)** | <mark><b>฿8,610.00</b></mark> |\n` +
+        `| **อัตราการออมและการลงทุนจริง** | **26.48%** |`
       );
     } else {
       rawMarkdown = (
-        `# Monthly Budget & Financial Planner\n\n` +
+        `# Monthly Budget & Financial Planner\n` +
         `> 💰 **Financial North Star:** "Pay yourself first: Automate a minimum 20% savings and investment allocation prior to discretionary lifestyle expenditures."\n\n` +
         `## 💵 1. Total Income Breakdown\n` +
         `| Income Stream | Projected ($) | Actual Received ($) | Variance ($) |\n` +
         `| :--- | :---: | :---: | :--- |\n` +
         `| Primary Salary | 5,500.00 | 5,500.00 | 0.00 |\n` +
-        `| Secondary / Consulting | 1,200.00 | 1,450.00 | +250.00 |\n` +
-        `| Dividends & Investments | 200.00 | 225.00 | +25.00 |\n` +
-        `| **Total Monthly Income** | **6,900.00** | **7,175.00** | **+275.00** |\n\n` +
+        `| Secondary / Consulting | 1,200.00 | 1,450.00 | <span style="color: #10b981; font-weight: 600;">+250.00</span> |\n` +
+        `| Dividends & Investments | 200.00 | 225.00 | <span style="color: #10b981; font-weight: 600;">+25.00</span> |\n` +
+        `| **Total Monthly Income** | **6,900.00** | **7,175.00** | **<span style="color: #10b981; font-weight: 700;">+275.00</span>** |\n\n` +
         `## 🏠 2. Fixed Expenses & Essentials\n` +
         `| Expense Category | Budgeted ($) | Actual Paid ($) | Payment Status |\n` +
         `| :--- | :---: | :---: | :--- |\n` +
-        `| Rent / Mortgage | 1,500.00 | 1,500.00 | Settled |\n` +
-        `| Utilities & High-Speed Internet | 300.00 | 284.00 | Settled |\n` +
-        `| Commute, Fuel & Transit | 450.00 | 420.00 | Settled |\n` +
-        `| Health & Property Insurance | 350.00 | 350.00 | Settled |\n` +
-        `| **Total Fixed Expenses** | **2,600.00** | **2,554.00** | **Saved $46.00** |\n\n` +
+        `| Rent / Mortgage | 1,500.00 | 1,500.00 | <span style="color: #10b981; font-weight: 600;">Settled</span> |\n` +
+        `| Utilities & High-Speed Internet | 300.00 | 284.00 | <span style="color: #10b981; font-weight: 600;">Settled</span> |\n` +
+        `| Commute, Fuel & Transit | 450.00 | 420.00 | <span style="color: #10b981; font-weight: 600;">Settled</span> |\n` +
+        `| Health & Property Insurance | 350.00 | 350.00 | <span style="color: #10b981; font-weight: 600;">Settled</span> |\n` +
+        `| **Total Fixed Expenses** | **2,600.00** | **2,554.00** | **<span style="color: #10b981;">Saved $46.00</span>** |\n\n` +
         `## 🛒 3. Variable Spending & Savings\n` +
         `| Category | Budgeted ($) | Actual Spent ($) | Remaining ($) |\n` +
         `| :--- | :---: | :---: | :--- |\n` +
-        `| Groceries & Dining | 1,400.00 | 1,320.00 | +80.00 |\n` +
+        `| Groceries & Dining | 1,400.00 | 1,320.00 | <span style="color: #10b981;">+80.00</span> |\n` +
         `| Retirement & Index Funds (20%) | 1,400.00 | 1,400.00 | 0.00 |\n` +
         `| Emergency Cushion Fund | 500.00 | 500.00 | 0.00 |\n` +
-        `| Entertainment & Personal | 600.00 | 540.00 | +60.00 |\n` +
-        `| **Total Variable & Savings** | **3,900.00** | **3,760.00** | **Saved $140.00** |\n\n` +
+        `| Entertainment & Personal | 600.00 | 540.00 | <span style="color: #10b981;">+60.00</span> |\n` +
+        `| **Total Variable & Savings** | **3,900.00** | **3,760.00** | **<span style="color: #10b981;">Saved $140.00</span>** |\n\n` +
         `## 🧭 3 Golden Financial Execution Rules\n` +
         `1. **Automate Savings First:** Direct 20% into diversified index funds immediately upon pay distribution\n` +
         `2. **Settle High-Priority Fixed Bills:** Clear housing, utilities, and credit balances in full without carrying debt\n` +
@@ -3898,24 +3898,23 @@ export function getNoteTemplateContent(
         `| :--- | :---: |\n` +
         `| **Total Actual Income** | $7,175.00 |\n` +
         `| **Total Outflows (Incl. Savings)** | $6,314.00 |\n` +
-        `| **Net Monthly Surplus** | **$861.00** |\n` +
-        `| **Effective Savings & Investment Rate** | **26.48%** |\n\n` +
-        `#budget #finance #money `
+        `| **Net Monthly Surplus** | <mark><b>$861.00</b></mark> |\n` +
+        `| **Effective Savings & Investment Rate** | **26.48%** |`
       );
     }
   } else if (templateType === "travel-itinerary") {
     if (isTh) {
       rawMarkdown = (
-        `# แผนการเดินทางท่องเที่ยว (Travel Itinerary)\n\n` +
+        `# แผนการเดินทางท่องเที่ยว (Travel Itinerary)\n` +
         `> ✈️ **ทริปพักผ่อนธรรมชาติและวัฒนธรรม: เชียงใหม่ 4 วัน 3 คืน** (${dateStr})\n` +
         `> ผู้ร่วมเดินทาง: 2 คน | สภาพอากาศเฉลี่ย: 18°C - 26°C | งบประมาณรวม: ฿20,000\n\n` +
         `## 🛫 ข้อมูลการเดินทางและที่พัก (Flights & Accommodation)\n` +
         `| วันที่ | รายการ | รายละเอียด | หมายเลขยืนยัน |\n` +
         `| :---: | :--- | :--- | :---: |\n` +
-        `| วันที่ 1 | เที่ยวบินขาไป (DMK - CNX) | สายการบิน Thai AirAsia (FD3435) ออก 08:30 ถึง 09:45 | \`TK-9821A\` |\n` +
-        `| วันที่ 1 - 4 | โรงแรมที่พัก | Nimman Heritage Boutique Hotel (ห้อง Deluxe) | \`HTL-77412\` |\n` +
-        `| วันที่ 1 - 4 | รถเช่าขับเอง | Toyota Yaris Ativ (รับ-ส่งที่สนามบินเชียงใหม่) | \`RC-55209\` |\n` +
-        `| วันที่ 4 | เที่ยวบินขากลับ (CNX - DMK)| สายการบิน Thai AirAsia (FD3436) ออก 18:50 ถึง 20:05 | \`TK-9821B\` |\n\n` +
+        `| วันที่ 1 | เที่ยวบินขาไป (DMK - CNX) | สายการบิน Thai AirAsia (FD3435) ออก 08:30 ถึง 09:45 | <span style="font-family: monospace; font-weight: 600;">TK-9821A</span> |\n` +
+        `| วันที่ 1 - 4 | โรงแรมที่พัก | Nimman Heritage Boutique Hotel (ห้อง Deluxe) | <span style="font-family: monospace; font-weight: 600;">HTL-77412</span> |\n` +
+        `| วันที่ 1 - 4 | รถเช่าขับเอง | Toyota Yaris Ativ (รับ-ส่งที่สนามบินเชียงใหม่) | <span style="font-family: monospace; font-weight: 600;">RC-55209</span> |\n` +
+        `| วันที่ 4 | เที่ยวบินขากลับ (CNX - DMK)| สายการบิน Thai AirAsia (FD3436) ออก 18:50 ถึง 20:05 | <span style="font-family: monospace; font-weight: 600;">TK-9821B</span> |\n\n` +
         `## 🗺️ ตารางกิจกรรมรายวัน (Day-by-Day Itinerary)\n` +
         `### 📍 วันที่ 1: เดินทางถึง แวะคาเฟ่นิมมาน และชมพระอาทิตย์ตก\n` +
         `1. **10:00 - รับรถเช่า:** เดินทางถึงสนามบินเชียงใหม่ รับรถเช่าและมุ่งหน้าสู่นิมมานเหมินท์\n` +
@@ -3929,33 +3928,32 @@ export function getNoteTemplateContent(
         `4. **15:30 - น้ำตกวชิรธาร:** แวะถ่ายรูปความอลังการของน้ำตกและเดินทางกลับที่พัก\n\n` +
         `## 💰 ตารางประมาณการงบประมาณ (Budget Breakdown)\n` +
         `| หมวดหมู่ | ประมาณการ (฿) | จ่ายจริง (฿) | สถานะ |\n` +
-        `| :--- | :---: | :---: | :---: |\n` +
-        `| ตั๋วเครื่องบินไป-กลับ (2 คน) | 5,500.00 | 5,200.00 | จ่ายแล้ว |\n` +
-        `| ค่าที่พัก 3 คืน | 6,000.00 | 5,850.00 | จ่ายแล้ว |\n` +
-        `| ค่าเช่ารถและค่าน้ำมัน | 3,500.00 | 3,300.00 | จ่ายแล้ว |\n` +
-        `| ค่าอาหาร คาเฟ่ และของฝาก | 5,000.00 | 4,650.00 | ในงบประมาณ |\n` +
-        `| **รวมงบประมาณทั้งหมด** | **20,000.00** | **19,000.00** | **ประหยัดได้ ฿1,000** |\n\n` +
+        `| :--- | :---: | :---: | :--- |\n` +
+        `| ตั๋วเครื่องบินไป-กลับ (2 คน) | 5,500.00 | 5,200.00 | <span style="color: #10b981; font-weight: 600;">จ่ายแล้ว</span> |\n` +
+        `| ค่าที่พัก 3 คืน | 6,000.00 | 5,850.00 | <span style="color: #10b981; font-weight: 600;">จ่ายแล้ว</span> |\n` +
+        `| ค่าเช่ารถและค่าน้ำมัน | 3,500.00 | 3,300.00 | <span style="color: #10b981; font-weight: 600;">จ่ายแล้ว</span> |\n` +
+        `| ค่าอาหาร คาเฟ่ และของฝาก | 5,000.00 | 4,650.00 | <span style="color: #3b82f6; font-weight: 600;">ในงบประมาณ</span> |\n` +
+        `| **รวมงบประมาณทั้งหมด** | **20,000.00** | **19,000.00** | **<span style="color: #10b981;">ประหยัดได้ ฿1,000</span>** |\n\n` +
         `## 🎒 เช็กลิสต์จัดกระเป๋าเดินทาง (Packing Checklist)\n` +
         `- [x] บัตรประชาชน / ใบขับขี่ / เอกสารยืนยันการจองตั๋วและโรงแรม\n` +
         `- [x] เสื้อกันหนาวและเสื้อแจ็กเกตสำหรับเดินกิ่วแม่ปาน\n` +
         `- [x] รองเท้าผ้าใบสำหรับเดินป่าและถุงเท้าหนา\n` +
         `- [x] ยาสามัญประจำตัว ยาแก้เมารถ และชุดปฐมพยาบาลเบื้องต้น\n` +
         `- [ ] กล้องถ่ายรูป สายชาร์จ และ Power Bank ความจุ 20,000mAh\n` +
-        `- [ ] ร่มพับและครีมกันแดด\n\n` +
-        `#travel #itinerary #vacation `
+        `- [ ] ร่มพับและครีมกันแดด`
       );
     } else {
       rawMarkdown = (
-        `# Travel Itinerary & Trip Planner\n\n` +
+        `# Travel Itinerary & Trip Planner\n` +
         `> ✈️ **Cultural & Scenic Expedition: Tokyo & Hakone 5 Days 4 Nights** (${dateStr})\n` +
         `> Travelers: 2 Adults | Weather Forecast: 15°C - 22°C | Total Budget: $3,200\n\n` +
         `## 🛫 Flights & Accommodations\n` +
         `| Segment | Service / Booking | Details | Confirmation |\n` +
         `| :---: | :--- | :--- | :---: |\n` +
-        `| Day 1 | Inbound Flight | ANA (NH850) Dep 08:00 Arr 15:45 Haneda (HND) | \`NH-8821X\` |\n` +
-        `| Day 1 - 4 | Hotel Lodging | Shibuya Stream Excel Hotel Tokyu (Corner King) | \`HTL-9041A\` |\n` +
-        `| Day 1 - 5 | Transit Passes | Digital Suica IC Card + Tokyo Metro 72-Hour Pass | Active |\n` +
-        `| Day 5 | Outbound Flight | ANA (NH849) Dep 18:30 Arr 23:15 | \`NH-8821Y\` |\n\n` +
+        `| Day 1 | Inbound Flight | ANA (NH850) Dep 08:00 Arr 15:45 Haneda (HND) | <span style="font-family: monospace; font-weight: 600;">NH-8821X</span> |\n` +
+        `| Day 1 - 4 | Hotel Lodging | Shibuya Stream Excel Hotel Tokyu (Corner King) | <span style="font-family: monospace; font-weight: 600;">HTL-9041A</span> |\n` +
+        `| Day 1 - 5 | Transit Passes | Digital Suica IC Card + Tokyo Metro 72-Hour Pass | <span style="color: #10b981; font-weight: 600;">Active</span> |\n` +
+        `| Day 5 | Outbound Flight | ANA (NH849) Dep 18:30 Arr 23:15 | <span style="font-family: monospace; font-weight: 600;">NH-8821Y</span> |\n\n` +
         `## 🗺️ Day-by-Day Itinerary\n` +
         `### 📍 Day 1: Arrival, Shibuya Crossing & Sunset Skyline\n` +
         `1. **16:30 - Haneda Express:** Clear customs, activate digital transit pass, and take Tokyo Monorail\n` +
@@ -3964,25 +3962,24 @@ export function getNoteTemplateContent(
         `4. **21:00 - Izakaya Dinner:** Authentic yakitori and craft ramen in Omoide Yokocho\n\n` +
         `### 📍 Day 2: Historic Heritage, Tech Districts & Gastronomy\n` +
         `1. **08:30 - Senso-ji Temple & Asakusa:** Explore Tokyo's oldest temple before peak tourist hours\n` +
-        `2. **12:00 - Tsukiji Outer Market:** Fresh sushi, grilled scallops, and tamagoyaki tastings\n` +
+        `2. **12:00 - Tsukiji Outer Market:** Fresh sushi, practical seafood and tamagoyaki tastings\n` +
         `3. **15:00 - Akihabara Electric Town:** Explore retro gaming arcades and specialty electronics\n` +
         `4. **19:30 - Ginza District:** Traditional multi-course Kaiseki dinner and specialty roastery\n\n` +
         `## 💰 Comprehensive Budget Breakdown\n` +
         `| Category | Projected ($) | Actual Spent ($) | Status |\n` +
-        `| :--- | :---: | :---: | :---: |\n` +
-        `| Roundtrip Flights (2 Adults) | 1,400.00 | 1,350.00 | Booked |\n` +
-        `| Hotel Accommodations (4 Nights) | 900.00 | 880.00 | Booked |\n` +
-        `| Local Transit & High-Speed Rail | 200.00 | 185.00 | Funded |\n` +
-        `| Dining, Cafes & Experiences | 700.00 | 660.00 | On Track |\n` +
-        `| **Total Trip Expenditure** | **3,200.00** | **3,075.00** | **Under Budget ($125)** |\n\n` +
+        `| :--- | :---: | :---: | :--- |\n` +
+        `| Roundtrip Flights (2 Adults) | 1,400.00 | 1,350.00 | <span style="color: #10b981; font-weight: 600;">Booked</span> |\n` +
+        `| Hotel Accommodations (4 Nights) | 900.00 | 880.00 | <span style="color: #10b981; font-weight: 600;">Booked</span> |\n` +
+        `| Local Transit & High-Speed Rail | 200.00 | 185.00 | <span style="color: #10b981; font-weight: 600;">Funded</span> |\n` +
+        `| Dining, Cafes & Experiences | 700.00 | 660.00 | <span style="color: #3b82f6; font-weight: 600;">On Track</span> |\n` +
+        `| **Total Trip Expenditure** | **3,200.00** | **3,075.00** | **<span style="color: #10b981;">Under Budget ($125)</span>** |\n\n` +
         `## 🎒 Packing & Essentials Checklist\n` +
         `- [x] Passports valid 6+ months & international e-tickets\n` +
         `- [x] Universal plug adapters & high-capacity 20,000mAh power banks\n` +
         `- [x] Comfortable walking shoes (15k+ daily steps expected)\n` +
         `- [x] Prescriptions and international travel health insurance card\n` +
         `- [ ] Compact travel umbrella and weather-appropriate layer jacket\n` +
-        `- [ ] Pocket Wi-Fi reservation voucher\n\n` +
-        `#travel #itinerary #vacation `
+        `- [ ] Pocket Wi-Fi reservation voucher`
       );
     }
   }
@@ -3993,11 +3990,16 @@ export function getNoteTemplateContent(
 
   const meta = NOTE_TEMPLATE_METADATA[templateType];
   const templateIcon = getTemplateIcon(templateType, iconPack);
+  let content = rawMarkdown;
+
   if (templateIcon) {
-    return updateFrontmatterIcon(rawMarkdown, templateIcon, meta?.iconColor);
+    content = updateFrontmatterIcon(content, templateIcon, meta?.iconColor);
+  }
+  if (meta?.tags && meta.tags.length > 0) {
+    content = updateFrontmatterTags(content, meta.tags);
   }
 
-  return rawMarkdown;
+  return content;
 }
 
 /**

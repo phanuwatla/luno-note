@@ -28,6 +28,7 @@ export interface Note {
   isFavorite?: boolean;
   isLocked?: boolean;
   isDecrypted?: boolean;
+  encryptedContent?: string;
   tags?: string[];
   icon?: string;
   iconColor?: string;
@@ -38,6 +39,19 @@ export interface Note {
 
 const STORAGE_KEY = "notes-app-data";
 
+function sanitizeNotesForStorage(notes: Note[]): Note[] {
+  return notes.map((n) => {
+    if (n.isLocked) {
+      return {
+        ...n,
+        content: n.encryptedContent || (isEncryptedNote(n.content) ? n.content : ""),
+        isDecrypted: false,
+      };
+    }
+    return n;
+  });
+}
+
 function loadNotes(): Note[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -45,7 +59,10 @@ function loadNotes(): Note[] {
     const loaded: Note[] = JSON.parse(raw);
     return loaded.map((n) => {
       const isMd = isMarkdownNote(n);
-      const isLocked = isEncryptedNote(n.content);
+      const isEncrypted = isEncryptedNote(n.content);
+      const hasCipher = Boolean(n.encryptedContent && isEncryptedNote(n.encryptedContent));
+      const isLocked = isEncrypted || (hasCipher && Boolean(n.isLocked));
+      const encContent = hasCipher ? n.encryptedContent : (isEncrypted ? n.content : undefined);
       const parsedFm = (isMd && n.content && !isLocked && !isTiptapJson(n.content)) ? parseFrontmatterAndTags(n.content) : undefined;
       const extracted = parsedFm ? parsedFm.allTags : [];
       const fmIcon = typeof parsedFm?.frontmatterData?.icon === "string" ? parsedFm.frontmatterData.icon : undefined;
@@ -54,8 +71,10 @@ function loadNotes(): Note[] {
         : undefined;
       return {
         ...n,
-        isLocked: isLocked || n.isLocked || false,
-        tags: isMd ? Array.from(new Set([...(n.tags || []), ...extracted])) : [],
+        isLocked,
+        isDecrypted: false,
+        encryptedContent: encContent,
+        tags: isMd ? (parsedFm ? extracted : (n.tags || [])) : [],
         icon: n.icon ?? fmIcon,
         iconColor: n.iconColor ?? fmIconColor,
       };
@@ -75,7 +94,7 @@ function saveNotes(notes: Note[], immediate = false) {
 
   const doSave = () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizeNotesForStorage(notes)));
     } catch (err) {
       console.warn("Failed to save notes to LocalStorage (QuotaExceededError or disabled):", err);
     }
@@ -229,18 +248,30 @@ export function useNotes() {
         : (typeof parsedFm?.frontmatterData?.isFavorite === "boolean"
           ? parsedFm.frontmatterData.isFavorite
           : undefined);
-      const mergedTags = isMd ? (item.tags !== undefined ? item.tags : Array.from(new Set([...(existingNote?.tags || []), ...extractedTags]))) : [];
+      const mergedTags = isMd
+        ? (item.tags !== undefined
+            ? item.tags
+            : (parsedFm ? extractedTags : (existingNote?.tags || [])))
+        : [];
 
-      const isEncrypted = isEncryptedNote(item.content);
-      const isLocked = isEncrypted || (item as any).isLocked || existingNote?.isLocked || false;
-      const isCurrentlyDecrypted = Boolean(
-        (item as any).isDecrypted ??
-        (existingNote?.isDecrypted && !isEncryptedNote(existingNote?.content))
+      const isDiskEncrypted = isEncryptedNote(item.content);
+      const hasMemoryCipher = Boolean(
+        (existingNote?.encryptedContent && isEncryptedNote(existingNote.encryptedContent)) ||
+        ((item as any).encryptedContent && isEncryptedNote((item as any).encryptedContent))
       );
-      const isDecrypted = isCurrentlyDecrypted;
-      const content = (isCurrentlyDecrypted && isEncrypted && existingNote?.content)
+      const isLocked = isDiskEncrypted || hasMemoryCipher;
+      const isCurrentlyDecrypted = Boolean(
+        existingNote &&
+        isLocked &&
+        ((item as any).isDecrypted ?? (existingNote?.isDecrypted && !isEncryptedNote(existingNote?.content)))
+      );
+      const isDecrypted = isLocked ? isCurrentlyDecrypted : false;
+      const content = (isCurrentlyDecrypted && isDiskEncrypted && existingNote?.content)
         ? existingNote.content
         : (typeof item.content === "string" ? item.content : "");
+      const encryptedContent = isDiskEncrypted
+        ? item.content
+        : (hasMemoryCipher ? (existingNote?.encryptedContent || (item as any).encryptedContent) : undefined);
 
       return {
         id,
@@ -255,6 +286,7 @@ export function useNotes() {
         fileType: item.fileType,
         isLocked,
         isDecrypted,
+        encryptedContent,
         tags: mergedTags,
         isFavorite: (item as any).isFavorite !== undefined
           ? (item as any).isFavorite
@@ -304,19 +336,17 @@ export function useNotes() {
           if (isMd) {
             if (normalizedPatch.tags !== undefined) {
               finalTags = normalizedPatch.tags;
-              if (mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
-                mergedContent = updateFrontmatterTags(mergedContent, normalizedPatch.tags);
+              if (normalizedPatch.content === undefined && mergedContent && typeof mergedContent === "string" && !isTiptapJson(mergedContent)) {
+                const parsed = parseFrontmatterAndTags(mergedContent);
+                const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
+                const frontmatterOnlyTags = normalizedPatch.tags.filter((t) => !inlineSet.has(t.toLowerCase()));
+                mergedContent = updateFrontmatterTags(mergedContent, frontmatterOnlyTags);
               }
             } else if (normalizedPatch.content !== undefined) {
               const str = mergedContent || "";
-              if (typeof str === "string" && !isTiptapJson(str) && !str.trimStart().startsWith("<")) {
+              if (typeof str === "string" && !isTiptapJson(str)) {
                 const parsed = parseFrontmatterAndTags(str);
-                if (parsed.hasFrontmatter) {
-                  finalTags = parsed.allTags;
-                } else {
-                  // Content is body-only (e.g. from Tiptap): preserve existing tags and merge any inline #tags
-                  finalTags = Array.from(new Set([...(n.tags || []), ...parsed.inlineTags]));
-                }
+                finalTags = parsed.allTags;
               }
             }
 

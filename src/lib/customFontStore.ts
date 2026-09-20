@@ -13,6 +13,7 @@ export interface CustomFont {
   name: string; // User-facing display name, e.g. "Kanit Light"
   fileName: string; // File name on disk, e.g. "Kanit-Light.ttf"
   format: "truetype" | "opentype" | "woff" | "woff2";
+  fileSize?: number; // File size in bytes
   dataUrl?: string; // base64 data URL for CSS font-face
   css: string; // CSS font-family string, e.g. "'Kanit Light', sans-serif"
   createdAt: number;
@@ -171,6 +172,32 @@ export function refreshCustomFontStyles(fonts: CustomFont[]): void {
 }
 
 /**
+ * Formats byte size into human readable KB or MB.
+ */
+export function formatFontFileSize(bytes?: number): string {
+  if (bytes === undefined || isNaN(bytes) || bytes <= 0) return "";
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Returns formatted file size string for a CustomFont, calculating from dataUrl or fileSize.
+ */
+export function getFontDisplayFileSize(font: CustomFont): string {
+  let bytes = font.fileSize;
+  if (bytes === undefined || isNaN(bytes) || bytes <= 0) {
+    if (font.dataUrl) {
+      const base64Part = font.dataUrl.split(",")[1] || "";
+      bytes = Math.round(base64Part.length * 0.75);
+    }
+  }
+  if (!bytes || isNaN(bytes) || bytes <= 0) return "";
+  return formatFontFileSize(bytes);
+}
+
+/**
  * Load all custom fonts from Workspace (.luno/fonts/) and/or IndexedDB fallback.
  */
 export async function loadCustomFonts(): Promise<CustomFont[]> {
@@ -193,8 +220,12 @@ export async function loadCustomFonts(): Promise<CustomFont[]> {
             if (base64) {
               const mime = getFontMimeType(f.format);
               const dataUrl = `data:${mime};base64,${base64}`;
+              const calcSize = typeof f.fileSize === "number" && !isNaN(f.fileSize) && f.fileSize > 0
+                ? f.fileSize
+                : Math.round(base64.length * 0.75);
               const fullFont: CustomFont = {
                 ...f,
+                fileSize: calcSize,
                 dataUrl,
                 css: `'${f.name}', sans-serif`,
               };
@@ -233,8 +264,12 @@ export async function loadCustomFonts(): Promise<CustomFont[]> {
           const base64 = arrayBufferToBase64(buffer);
           const mime = getFontMimeType(f.format);
           const dataUrl = `data:${mime};base64,${base64}`;
+          const calcSize = typeof f.fileSize === "number" && !isNaN(f.fileSize) && f.fileSize > 0
+            ? f.fileSize
+            : fontFile.size;
           const fullFont: CustomFont = {
             ...f,
+            fileSize: calcSize,
             dataUrl,
             css: `'${f.name}', sans-serif`,
           };
@@ -264,6 +299,10 @@ export async function loadCustomFonts(): Promise<CustomFont[]> {
     for (const f of storedFonts) {
       if (f.dataUrl) {
         registerFontFace(f, f.dataUrl);
+        if (!f.fileSize) {
+          const base64Part = f.dataUrl.split(",")[1] || "";
+          f.fileSize = Math.round(base64Part.length * 0.75);
+        }
       }
     }
     return storedFonts;
@@ -315,6 +354,7 @@ export async function saveCustomFont(
     name: cleanName,
     fileName,
     format,
+    fileSize: file.size,
     dataUrl,
     css: `'${cleanName}', sans-serif`,
     createdAt: Date.now(),

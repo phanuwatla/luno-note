@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { EditorContent, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -12,8 +12,20 @@ import {
   renderMarkdownToEditorHtml,
   collapseBlockWhitespace,
   escapeHtml,
+  InlineCodeHighlight,
+  navigateFootnoteOrAnchor,
 } from "@/components/Editor";
-import { Underline, Highlight, Superscript, Subscript, Kbd, TextAlign } from "@/lib/tiptapCustomMarks";
+import {
+  Underline,
+  Highlight,
+  Superscript,
+  Subscript,
+  TextColor,
+  FontFamily,
+  FontSize,
+  Kbd,
+  TextAlign,
+} from "@/lib/tiptapCustomMarks";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
@@ -27,12 +39,13 @@ import AudioExtension from "@/components/editor/AudioExtension";
 import { getTagColorClass } from "@/lib/tagColors";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import { useAppSettings, FONT_FAMILY_CSS } from "@/hooks/useAppSettings";
+import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
 
 export interface NoteEditorPreviewProps {
   content: string;
   title?: string;
   tags?: string[];
-  format?: "markdown" | "html" | "plain";
+  format?: "markdown" | "html" | "plain" | "css";
   fontSize?: number;
   lineHeight?: string;
   fontFamily?: string;
@@ -85,8 +98,9 @@ export default function NoteEditorPreview({
 
   // Extract frontmatter tags if available and none provided
   const displayTags = useMemo(() => {
+    if (format !== "markdown") return [];
     if (tags && Array.isArray(tags) && tags.length > 0) return tags;
-    if (format === "markdown" && content) {
+    if (content) {
       try {
         const parsedFm = parseFrontmatterAndTags(content);
         if (parsedFm?.hasFrontmatter && Array.isArray(parsedFm.allTags) && parsedFm.allTags.length > 0) {
@@ -99,17 +113,63 @@ export default function NoteEditorPreview({
     return [];
   }, [tags, content, format]);
 
+  // Extract custom frontmatter properties (e.g. status, author, category, date)
+  const frontmatterProperties = useMemo(() => {
+    if (format !== "markdown" || !content) return [];
+    try {
+      const parsedFm = parseFrontmatterAndTags(content);
+      if (!parsedFm?.hasFrontmatter || !parsedFm.frontmatterData) return [];
+      const ignoredKeys = new Set(["tags", "icon", "iconcolor", "icon_color", "favorite", "isfavorite", "title"]);
+      const entries: Array<{ key: string; value: string }> = [];
+      for (const [k, v] of Object.entries(parsedFm.frontmatterData)) {
+        if (ignoredKeys.has(k.toLowerCase())) continue;
+        if (v === undefined || v === null || v === "") continue;
+        const displayVal = Array.isArray(v) ? v.join(", ") : String(v);
+        entries.push({ key: k, value: displayVal });
+      }
+      return entries;
+    } catch {
+      return [];
+    }
+  }, [content, format]);
+
+  // Live HTML asset resolution and preview state
+  const [htmlSrcDoc, setHtmlSrcDoc] = useState(content);
+
+  useEffect(() => {
+    if (format !== "html") return;
+    let cancelled = false;
+    if (assetBlobUrlMap && assetBlobUrlMap.size > 0) {
+      rewriteHtmlForPreview(content, (path) => assetBlobUrlMap.get(path) || null)
+        .then((res) => {
+          if (!cancelled) setHtmlSrcDoc(res);
+        })
+        .catch(() => {
+          if (!cancelled) setHtmlSrcDoc(content);
+        });
+    } else {
+      setHtmlSrcDoc(content);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [content, format, assetBlobUrlMap]);
+
   // Compute HTML matching Editor.tsx parseEditorContent exactly
   const parsedHtml = useMemo(() => {
     if (!content) return "<p></p>";
 
     if (format === "html") {
-      return content;
+      return "<p></p>";
     }
 
     if (format === "plain") {
       const lines = content.split("\n");
       return lines.map((l) => `<p>${l ? escapeHtml(l) : "<br>"}</p>`).join("");
+    }
+
+    if (format === "css") {
+      return `<pre><code class="language-css">${escapeHtml(content)}</code></pre>`;
     }
 
     let cleanText = content;
@@ -126,7 +186,7 @@ export default function NoteEditorPreview({
       contentFormat: format,
     });
 
-    if (title) {
+    if (title && format === "markdown") {
       const titleH1Html = `<h1>${escapeHtml(title)}</h1>`;
       const firstH1Match = /^\s*(?:<p>(?:<br\s*\/?>|\s*)*<\/p>\s*)*<h1[^>]*>[\s\S]*?<\/h1>/i.exec(editorHtml);
       if (firstH1Match && firstH1Match[0] && typeof firstH1Match[0].length === "number") {
@@ -155,6 +215,27 @@ export default function NoteEditorPreview({
             : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
         }`,
       },
+      handleClick: (view, _pos, event) => {
+        const target = (event.target as HTMLElement).closest("a, [data-footnote-ref], [data-footnote-backref], [data-footnote-target], sup, .footnote-ref, .footnote-backref");
+        if (!target) return false;
+
+        const containerEl = (view.dom.closest(".editor-scroll-container") || view.dom.parentElement || document) as HTMLElement;
+        if (navigateFootnoteOrAnchor(target as HTMLElement, containerEl)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return true;
+        }
+
+        const href = target.getAttribute("href") || (target.querySelector("a")?.getAttribute("href") || "");
+        if (href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:") || href.startsWith("tel:"))) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        }
+
+        return false;
+      },
     },
     extensions: [
       StarterKit.configure({
@@ -175,10 +256,16 @@ export default function NoteEditorPreview({
         theme: resolvedTheme,
         tagColorStyle: resolvedTagColorStyle,
       }),
+      InlineCodeHighlight.configure({
+        enabled: settings.highlightInlineCode === true,
+      }),
       Underline,
       Highlight,
       Superscript,
       Subscript,
+      TextColor,
+      FontFamily,
+      FontSize,
       TextAlign,
       Kbd,
       Toggle,
@@ -229,6 +316,16 @@ export default function NoteEditorPreview({
         addAttributes() {
           return {
             ...this.parent?.(),
+            class: {
+              default: null,
+              parseHTML: (element) => element.getAttribute("class"),
+              renderHTML: (attributes) => {
+                if (!attributes.class) return {};
+                return {
+                  class: attributes.class,
+                };
+              },
+            },
             "data-wikilink": {
               default: null,
               parseHTML: (element) => element.getAttribute("data-wikilink"),
@@ -274,9 +371,15 @@ export default function NoteEditorPreview({
       }).configure({
         openOnClick: false,
         autolink: false,
+        protocols: ["wikilink"],
         validate: () => true,
+        isAllowedUri: (url, ctx) => {
+          if (!url) return false;
+          if (url.startsWith("wikilink:") || url.startsWith("#")) return true;
+          return ctx.defaultValidate(url);
+        },
         HTMLAttributes: {
-          class: "text-primary underline underline-offset-4",
+          class: "text-primary underline underline-offset-4 cursor-pointer",
           rel: "noopener noreferrer nofollow",
         },
       }),
@@ -307,6 +410,56 @@ export default function NoteEditorPreview({
                 if (!attributes["data-relative-src"]) return {};
                 return {
                   "data-relative-src": attributes["data-relative-src"],
+                };
+              },
+            },
+            "data-qr-code": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-code"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-code"]) return {};
+                return {
+                  "data-qr-code": attributes["data-qr-code"],
+                };
+              },
+            },
+            "data-qr-text": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-text"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-text"]) return {};
+                return {
+                  "data-qr-text": attributes["data-qr-text"],
+                };
+              },
+            },
+            "data-qr-color": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-color"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-color"]) return {};
+                return {
+                  "data-qr-color": attributes["data-qr-color"],
+                };
+              },
+            },
+            "data-qr-bg": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-bg"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-bg"]) return {};
+                return {
+                  "data-qr-bg": attributes["data-qr-bg"],
+                };
+              },
+            },
+            "data-qr-level": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-qr-level"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-qr-level"]) return {};
+                return {
+                  "data-qr-level": attributes["data-qr-level"],
                 };
               },
             },
@@ -353,10 +506,34 @@ export default function NoteEditorPreview({
       ? "max-w-none"
       : "max-w-4xl";
 
+  if (format === "html") {
+    return (
+      <div
+        ref={scrollRef as React.RefObject<HTMLDivElement>}
+        onScroll={onScroll}
+        className={`w-full h-full flex flex-col bg-white overflow-hidden select-auto ${className || ""}`}
+      >
+        <iframe
+          srcDoc={htmlSrcDoc || content}
+          className="w-full h-full border-0 bg-white block"
+          sandbox="allow-scripts allow-same-origin"
+          title={title || "HTML Preview"}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={scrollRef as React.RefObject<HTMLDivElement>}
       onScroll={onScroll}
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (navigateFootnoteOrAnchor(target, e.currentTarget)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
       className={`editor-scroll-container ${
         scrollable ? "overflow-y-auto overflow-x-hidden flex-1 h-full" : ""
       } w-full select-text bg-background ${className || ""}`}
@@ -366,9 +543,18 @@ export default function NoteEditorPreview({
           resolvedShowCodeLineNumbers ? "show-code-line-numbers" : ""
         } ${containerClassName || ""}`}
       >
-        {Array.isArray(displayTags) && displayTags.length > 0 && (
+        {((Array.isArray(displayTags) && displayTags.length > 0) || frontmatterProperties.length > 0) && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
-            {displayTags.map((tag, idx) => (
+            {frontmatterProperties.map((prop) => (
+              <span
+                key={prop.key}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium border border-border/70 bg-muted/40 text-muted-foreground"
+              >
+                <span className="font-semibold text-foreground/80">{prop.key}:</span>
+                <span>{prop.value}</span>
+              </span>
+            ))}
+            {Array.isArray(displayTags) && displayTags.map((tag, idx) => (
               <span
                 key={tag}
                 className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium border ${getTagColorClass(

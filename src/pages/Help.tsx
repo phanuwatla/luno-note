@@ -15,7 +15,7 @@ export default function Help() {
   }, [settings.theme]);
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-background">
+    <div className="h-full w-full max-h-full max-w-full overflow-hidden flex flex-col bg-background">
       <HelpTabView />
     </div>
   );

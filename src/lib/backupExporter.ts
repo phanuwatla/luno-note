@@ -81,7 +81,9 @@ export async function exportWorkspaceBackupZip(
     }
 
     if (!fileAdded) {
-      const content = note.content || "";
+      const content = (note.isLocked && note.encryptedContent)
+        ? note.encryptedContent
+        : (note.content || "");
       zip.file(zipEntryPath, content, { date: fileDate });
     }
 

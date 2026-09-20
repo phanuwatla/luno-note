@@ -38,7 +38,12 @@ import { NOTE_TEMPLATE_METADATA, getTemplateIcon, type NoteTemplateType } from "
 interface HomeViewProps {
   notes: Note[];
   onOpenNote: (noteId: string) => void;
-  onCreateWithTemplate?: (templateType: NoteTemplateType) => void;
+  onCreateWithTemplate?: (
+    templateType: NoteTemplateType,
+    format?: "markdown" | "html" | "plain",
+    templateIcon?: string,
+    templateColor?: string
+  ) => void;
   onCreateBlankNote?: () => void;
   onToggleFavorite?: (noteId: string) => void;
   onOpenSearch?: () => void;
@@ -435,7 +440,7 @@ export default function HomeView({
                   if (isBlank && onCreateBlankNote) {
                     onCreateBlankNote();
                   } else if (onCreateWithTemplate) {
-                    onCreateWithTemplate(tmpl.type);
+                    onCreateWithTemplate(tmpl.type, (tmpl as any).format, iconStr, colorStr);
                   }
                 };
 
