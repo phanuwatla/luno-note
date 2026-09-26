@@ -652,7 +652,7 @@ function RightPanelComponent({
                       <span className="font-medium text-foreground">{formatFileSize(resolvedFileSize)}</span>
                     </div>
                   )}
-                  {Boolean(currentIcon) && (
+                  {Boolean(currentIcon) && settings?.showFileIcons !== false && (
                     <div className="flex items-center justify-between py-0.5">
                       <span className="text-muted-foreground">{t("sidebar.changeNoteIcon") || "Icon"}</span>
                       <button
@@ -889,7 +889,7 @@ function RightPanelComponent({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                 >
                   {renderIcon("trash", "h-4 w-4 shrink-0 text-destructive")}
-                  <span>{t("common.delete")}</span>
+                  <span>{t("sidebar.deleteFileAction")}</span>
                 </button>
               </div>
             </div>

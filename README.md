@@ -6,45 +6,28 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.3.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.1)
+[![Version](https://img.shields.io/badge/version-1.3.2-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.2)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.3.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.3.2-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.3.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.1](#what-is-new-in-version-131) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.3.2](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.2](#what-is-new-in-version-132) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.3.1
+## What Is New in Version 1.3.2
 
-- <img src="./assets/icons/video.svg" width="16" height="16" align="center" /> **Embedded Video Support & Playback**: Native HTML5 video embedding (`video` tag) inside notes with offline local asset caching (`videoLocalCache`), alignment settings, and responsive width controls.
-- <img src="./assets/icons/qr-code.svg" width="16" height="16" align="center" /> **In-Place QR Code Editing & Scanning**: Hover over any QR code in your note to edit content, colors, and error correction levels directly, with automatic QR decoding from existing images.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **OWASP-Recommended PBKDF2 (600,000 Iterations)**: Upgraded key derivation to 600,000 PBKDF2-HMAC-SHA256 iterations with unique cryptographic salts, making offline dictionary attacks computationally unfeasible.
-- <img src="./assets/icons/lock.svg" width="16" height="16" align="center" /> **Progressive Anti-Brute Force Lockout**: Escalating timeouts (3s -> 30s -> 120s) protect against automated PIN guessing, persisting seamlessly across tab switches and app restarts.
-- <img src="./assets/icons/lock.svg" width="16" height="16" align="center" /> **Multi-Format Text File Protection**: Full AES-GCM encryption support extended beyond Markdown to `.txt`, `.html`, and `.css` workspace files.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Floating Footnote Popover**: Minimalist floating popover anchored directly at the cursor insertion point to insert and link footnote references quickly without losing focus.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Interactive What's New Hub**: Dedicated release notes view accessible anytime via Settings/Help or automatically upon first launch after an update.
-- <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History & Split-Diff Enhancements**: Dual-pane comparison viewer with lockstep synchronized scrolling and accurate character and word statistics.
-
----
-
-## Key Features
-
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text and Markdown Editing**: Full formatting support including headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Integrated Luno AI Assistant**: Context-aware artificial intelligence assistant supporting note attachments, voice dictation, automated summarization, language translation, and editing refinements.
-- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Hierarchical Workspaces and Folders**: Multi-level folder structuring with workspace separation and quick workspace switching.
-- <img src="./assets/icons/tags.svg" width="16" height="16" align="center" /> **Tags and Quick Switcher**: Organize content using tags and jump directly to any document with the keyboard-driven Quick Switcher (`Ctrl+P` / `Cmd+P`).
-- <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Media and Audio Attachments**: Attach images, documents, and audio recordings with an integrated audio player and client-side image compression.
-- <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
-- <img src="./assets/icons/eye.svg" width="16" height="16" align="center" /> **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
-- <img src="./assets/icons/template.svg" width="16" height="16" align="center" /> **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
-- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Customization and Visual Themes**: Select from Dark, Light, Sepia, Minimal, and Custom themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
+- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **Real File Path & External Browser Launch**: The HTML preview address bar now displays workspace relative paths and `file:///` URLs, with an **Open in default browser** button and reliable, multi-tier clipboard copy.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Comprehensive Tooltip Overhaul**: Replaced browser-native `title` attributes across the application with responsive, accessible Shadcn/Radix UI tooltips (Sidebar, TabBar, Breadcrumb, Panels, and Node Views).
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Configurable Slash Command (/) & Clean Placeholders**: Enable or disable Slash Commands in **Settings > Editor > Formatting Helpers**. When disabled, empty lines display a distraction-free placeholder without prompting for `/`.
+- <img src="./assets/icons/video.svg" width="16" height="16" align="center" /> **Global Video Picture-in-Picture (PiP) & Media Pickers**: Floating cross-tab video playback, dedicated workspace video/image pickers with context menus, and native `luno-asset://` media caching in Electron.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **High-Fidelity PDF & Document Exporting**: Print-to-PDF waits for web fonts, math formulas, and images to decode completely before printing, alongside DOCX document export generation.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Expanded Tip of the Day & Editing Polish**: New modern workflow tips, preserved multi-selection drag-and-drop in Sidebar, and guaranteed 1:1 blank line retention around headings.
 
 ---
 
@@ -56,7 +39,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.3.1.exe`** | Automated Windows installer with differential update support | [![Download v1.3.1](https://img.shields.io/badge/Download-v1.3.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.1/luno-note-setup-1.3.1.exe) |
+| **`luno-note-setup-1.3.2.exe`** | Automated Windows installer with differential update support | [![Download v1.3.2](https://img.shields.io/badge/Download-v1.3.2-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.2/luno-note-setup-1.3.2.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

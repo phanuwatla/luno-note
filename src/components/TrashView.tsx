@@ -346,6 +346,7 @@ export default function TrashView({
   };
 
   const renderNoteIcon = (note: TrashedNote, cls = "h-4 w-4 shrink-0") => {
+    if (settings.showFileIcons === false) return null;
     if (note.icon) {
       const custom = renderCustomIcon(note.icon, cls, { color: note.iconColor });
       if (custom) return custom;
@@ -356,7 +357,9 @@ export default function TrashView({
   };
 
   const getNoteSnippet = (content?: string, isLocked?: boolean) => {
-    if (isLocked || isEncryptedNote(content)) return "••••••";
+    if (isLocked || isEncryptedNote(content)) {
+      return t("trash.lockedContent") || (isTh ? "เนื้อหานี้ถูกล็อกไว้" : "This content is locked");
+    }
     if (!content) return "";
     return stripHtmlAndMarkdown(content).slice(0, 90);
   };
@@ -733,9 +736,11 @@ export default function TrashView({
 
                         {/* Note Info: Icon + Title + Tag Pill + Snippet */}
                         <div className="flex-1 min-w-[140px] px-2 flex items-center gap-2.5 overflow-hidden">
-                          <div className="shrink-0">
-                            {renderNoteIcon(note, "h-4 w-4")}
-                          </div>
+                          {settings.showFileIcons !== false && (
+                            <div className="shrink-0">
+                              {renderNoteIcon(note, "h-4 w-4")}
+                            </div>
+                          )}
                           <div className="min-w-0 flex-1 overflow-hidden">
                             <div className="flex items-center gap-1.5 truncate">
                               <span className="font-semibold text-foreground text-xs truncate">
@@ -768,9 +773,16 @@ export default function TrashView({
                         {/* Original Location (without >) */}
                         <div className="w-44 lg:w-56 hidden md:flex items-center gap-1.5 px-2 text-muted-foreground overflow-hidden shrink-0">
                           <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-                          <span className="truncate text-xs font-normal" title={originalLoc}>
-                            {originalLoc}
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="truncate text-xs font-normal cursor-default">
+                                {originalLoc}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {originalLoc}
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
 
                         {/* Deleted Timestamp */}
@@ -842,8 +854,16 @@ export default function TrashView({
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {pendingDeleteIds.length === 1
-                  ? (t("trash.deletePermanentDesc") || (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้" : "This file will be permanently deleted and cannot be recovered."))
-                  : (t("trash.deletePermanentBatchDesc", { count: pendingDeleteIds.length }) || (isTh ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteIds.length} รายการจะถูกลบอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้` : `These ${pendingDeleteIds.length} files will be permanently deleted and cannot be recovered.`))}
+                  ? (() => {
+                      const note = trashedNotes.find((n) => n.id === pendingDeleteIds[0]);
+                      const name = note?.fileName || note?.title;
+                      return name
+                        ? (t("trash.deletePermanentDesc", { file: name }) || (isTh ? `ไฟล์ "${name}" จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก` : `The file "${name}" will be permanently deleted and cannot be recovered.`))
+                        : (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก" : "This file will be permanently deleted and cannot be recovered.");
+                    })()
+                  : (t("trash.deletePermanentBatchDesc", { count: pendingDeleteIds.length }) || (isTh
+                      ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteIds.length} รายการจะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
+                      : `These ${pendingDeleteIds.length} files will be permanently deleted and cannot be recovered.`))}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -852,7 +872,7 @@ export default function TrashView({
                 className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
                 onClick={handleConfirmPermanentDelete}
               >
-                {t("common.delete") || (isTh ? "ลบ" : "Delete")}
+                {t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -863,10 +883,12 @@ export default function TrashView({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {t("trash.emptyTrashTitle") || (isTh ? "ล้างถังขยะทั้งหมดหรือไม่?" : "Empty all trash?")}
+                {t("trash.emptyTrashTitle") || (isTh ? "แน่ใจใช่ไหมที่จะล้างถังขยะทั้งหมด?" : "Are you sure you want to empty all trash?")}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {t("trash.emptyTrashDesc", { count: trashedNotes.length }) || (isTh ? `ไฟล์ทั้งหมดที่อยู่ในถังขยะจะถูกลบอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้` : `All files in the trash will be permanently deleted. This action cannot be undone.`)}
+                {t("trash.emptyTrashDesc", { count: trashedNotes.length }) || (isTh
+                  ? `ไฟล์ทั้งหมดที่อยู่ในถังขยะ (${trashedNotes.length} รายการ) จะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
+                  : `All ${trashedNotes.length} files in the trash will be permanently deleted. This action cannot be undone.`)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -879,7 +901,7 @@ export default function TrashView({
                   setEmptyTrashDialogOpen(false);
                 }}
               >
-                {t("common.delete") || (isTh ? "ลบ" : "Delete")}
+                {t("trash.emptyTrash") || (isTh ? "ล้างถังขยะทั้งหมด" : "Empty Trash")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

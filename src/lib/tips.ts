@@ -57,6 +57,18 @@ export const TIPS: TipItem[] = [
     th: "กด Ctrl + Shift + C เพื่อเปิด/ปิดหน้าต่างเครื่องคิดเลขลอยสำหรับคำนวณด่วน",
     en: "Press Ctrl + Shift + C to toggle the floating calculator widget.",
   },
+  {
+    id: "shortcut-floating-trans",
+    category: "shortcuts",
+    th: "กดปุ่มแปลภาษาลอยตัวที่มุมจอเพื่อแปลคำศัพท์หรือข้อความหลายภาษาได้สะดวก",
+    en: "Use the floating translator widget to quickly look up and translate text across languages.",
+  },
+  {
+    id: "shortcut-split-view",
+    category: "shortcuts",
+    th: "คลิกขวาที่แท็บแล้วเลือก 'แบ่งหน้าจอ' เพื่อเปิดดูและเปรียบเทียบสองโน้ตพร้อมกันแบบ Split View",
+    en: "Right-click any tab and choose 'Split View' to edit and compare two notes side-by-side.",
+  },
 
   // 2. Editor & Markdown Superpowers
   {
@@ -107,6 +119,24 @@ export const TIPS: TipItem[] = [
     th: "พิมพ์ /table หรือพิมพ์ตารางด้วย | หัวข้อ | เพื่อสร้างตารางข้อมูลพร้อมเมนูจัดการแถวและคอลัมน์",
     en: "Type /table or use markdown pipes | Header | to insert interactive tables with row/column tools.",
   },
+  {
+    id: "editor-audio-record",
+    category: "editor",
+    th: "กดปุ่มไมโครโฟนเพื่อบันทึกเสียงบรรยายหรือการประชุมลงในโน้ตได้โดยตรงอย่างสะดวก",
+    en: "Click the microphone button to record audio memos or lectures directly into your notes.",
+  },
+  {
+    id: "editor-video-pip",
+    category: "editor",
+    th: "แทรกวิดีโอลงในโน้ต พร้อมกดไอคอน PiP เพื่อเล่นวิดีโอลอยตัวขณะจดบันทึกต่อได้อย่างอิสระ",
+    en: "Insert videos into notes and click the PiP button to float the video while writing.",
+  },
+  {
+    id: "editor-qr-code",
+    category: "editor",
+    th: "สร้างและแทรก QR Code จากข้อความหรือลิงก์ลงในโน้ต พร้อมคัดลอกรูปภาพไปแชร์ต่อได้ทันที",
+    en: "Generate and insert QR Codes from text or URLs into notes, with easy one-click image copy.",
+  },
 
   // 3. Workspace & File Management
   {
@@ -132,6 +162,36 @@ export const TIPS: TipItem[] = [
     category: "workspace",
     th: "เปิดหลายโน้ตพร้อมกันด้วยแถบแท็บด้านบน สลับทำงานและอ้างอิงข้อมูลได้อย่างราบรื่น",
     en: "Open multiple notes simultaneously in top tabs to multitask and cross-reference information.",
+  },
+  {
+    id: "workspace-copy-path",
+    category: "workspace",
+    th: "คลิกขวาที่ไฟล์หรือโฟลเดอร์ในแถบข้าง แล้วเลือก 'คัดลอกพาธ' เพื่อคัดลอก Relative Path หรือ Full Path ลงคลิปบอร์ดได้ทันที",
+    en: "Right-click files or folders in the sidebar to copy relative or full paths directly to your clipboard.",
+  },
+  {
+    id: "workspace-pin-lock",
+    category: "workspace",
+    th: "ปกป้องโน้ตสำคัญด้วยการล็อก PIN 6 หลัก พร้อมการเข้ารหัสไฟล์แบบ AES-256 ปลอดภัยระดับสูงสุด",
+    en: "Protect sensitive notes with a 6-digit PIN and military-grade AES-256 file encryption.",
+  },
+  {
+    id: "workspace-version-history",
+    category: "workspace",
+    th: "เปิดแถบประวัติเวอร์ชัน (Version History) เพื่อดูประวัติย้อนหลัง เปรียบเทียบ Diff และกู้คืนข้อมูลได้ตลอดเวลา",
+    en: "Open Version History to view snapshot history, compare diffs, and restore prior versions anytime.",
+  },
+  {
+    id: "workspace-gdrive-sync",
+    category: "workspace",
+    th: "เชื่อมต่อ Google Drive เพื่อซิงค์และสำรองข้อมูล Workspace บนคลาวด์ เปิดอ่านและเขียนได้ทุกอุปกรณ์",
+    en: "Connect Google Drive to sync and backup your workspaces to the cloud across devices.",
+  },
+  {
+    id: "workspace-web-viewer",
+    category: "workspace",
+    th: "พรีวิวไฟล์ HTML ในเว็บเบราว์เซอร์ของ Luno พร้อมแสดงพาธ file:/// และเปิดในเบราว์เซอร์หลักของเครื่องได้ทันที",
+    en: "Preview HTML files directly inside Luno with file:/// path support and 1-click default browser launch.",
   },
   {
     id: "workspace-trash-recovery",
@@ -171,6 +231,18 @@ export const TIPS: TipItem[] = [
     th: "Luno บันทึกการเปลี่ยนแปลงให้อัตโนมัติในเบื้องหลังอย่างต่อเนื่อง หมดกังวลเรื่องข้อมูลสูญหาย",
     en: "Luno automatically saves your changes in the background as you write — never lose your work.",
   },
+  {
+    id: "productivity-export-docs",
+    category: "templates",
+    th: "ส่งออกโน้ตเป็นไฟล์ PDF, Word (.docx) หรือ HTML ด้วยรูปแบบการจัดหน้าที่สวยงามและสมบูรณ์แบบ",
+    en: "Export your notes as PDF, Word (.docx), or HTML with elegant typographic styling.",
+  },
+  {
+    id: "productivity-print",
+    category: "templates",
+    th: "กดพิมพ์ (Print) โน้ตของคุณเพื่อสั่งพิมพ์ออกเครื่องพิมพ์หรือบันทึกเป็น PDF ได้อย่างสะดวก",
+    en: "Print your notes directly to physical printers or save as print-ready PDF files.",
+  },
 
   // 5. Luno AI & Smart Assistance
   {
@@ -185,19 +257,37 @@ export const TIPS: TipItem[] = [
     th: "ให้ Luno AI ช่วยตรวจทาน ปรับสำนวน หรือขยายความเนื้อหาโน้ตของคุณได้อย่างมืออาชีพ",
     en: "Ask Luno AI to refine, polish, rephrase, or expand your note content with ease.",
   },
+  {
+    id: "ai-assistant-formula",
+    category: "ai",
+    th: "ใช้ Luno AI เพื่อสร้างและอธิบายสูตรคณิตศาสตร์ KaTeX หรือโค้ดโปรแกรมได้อย่างแม่นยำ",
+    en: "Use Luno AI to generate and explain complex KaTeX math formulas or code snippets.",
+  },
 
   // 6. Customization & Appearance
   {
     id: "customization-themes",
     category: "customization",
-    th: "เลือกเปลี่ยนธีม Light, Dark หรือตามระบบ (System) ได้อย่างอิสระในเมนู Settings",
-    en: "Switch between Light, Dark, or System theme anytime in the Settings menu.",
+    th: "เลือกเปลี่ยนธีม Light, Dark หรือธีมพิเศษอย่าง Classic, Nord และ Tokyo Night ในเมนู Settings",
+    en: "Choose from Light, Dark, or special themes like Classic, Nord, and Tokyo Night in Settings.",
   },
   {
     id: "customization-accents",
     category: "customization",
     th: "ปรับแต่งสี Accent ของโปรแกรมให้ตรงกับสไตล์การทำงานที่คุณชื่นชอบใน Settings",
     en: "Customize your workspace with your favorite accent color palette in Settings.",
+  },
+  {
+    id: "customization-icons",
+    category: "customization",
+    th: "เลือกปรับเปลี่ยนชุดไอคอน (Icon Pack) เช่น Lucide, Icons8, Flat หรือ Minimalist ได้ใน Settings",
+    en: "Switch icon packs (Lucide, Icons8, Flat, Minimalist) to match your visual taste in Settings.",
+  },
+  {
+    id: "customization-fonts",
+    category: "customization",
+    th: "ติดตั้งแบบอักษรเฉพาะของคุณ (Custom Fonts) เพื่อเปลี่ยนบรรยากาศการอ่านและเขียนโน้ตใน Settings",
+    en: "Install custom fonts in Settings to personalize your note reading and writing typography.",
   },
 ];
 

@@ -15,7 +15,7 @@ import {
   Info,
 } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
-import { buildNoteGraph, wrapNodeText, type GraphNode, type GraphEdge } from "@/lib/graphUtils";
+import { buildNoteGraph, wrapNodeText, getNodeBaseRadius, type GraphNode, type GraphEdge } from "@/lib/graphUtils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -56,11 +56,11 @@ function stepSimulation(
 
       const dx = n2.x - n1.x;
       const dy = n2.y - n1.y;
-      const distSq = Math.max(dx * dx + dy * dy, 600);
+      const distSq = Math.max(dx * dx + dy * dy, 350);
       const dist = Math.sqrt(distSq);
 
       const isOrphanPair = n1.degree === 0 || n2.degree === 0;
-      const repFactor = isOrphanPair ? 3800 : 2600;
+      const repFactor = isOrphanPair ? 2200 : 1350;
       const force = (alpha * repFactor) / distSq;
       const fx = (dx / dist) * force;
       const fy = (dy / dist) * force;
@@ -76,9 +76,9 @@ function stepSimulation(
     }
   }
 
-  // 2. Attraction along edges (Stronger spring pull towards idealDist = 195px)
-  const idealDist = 195;
-  const springStrength = 0.055 * alpha;
+  // 2. Attraction along edges (Natural spring pull towards idealDist = 115px)
+  const idealDist = 115;
+  const springStrength = 0.06 * alpha;
 
   edges.forEach((edge) => {
     const n1 = nodeMap.get(edge.source);
@@ -125,10 +125,10 @@ function stepSimulation(
 
       const dx = n.x - projX;
       const dy = n.y - projY;
-      const distSq = Math.max(dx * dx + dy * dy, 200);
-      if (distSq < 15000) {
+      const distSq = Math.max(dx * dx + dy * dy, 150);
+      if (distSq < 10000) {
         const dist = Math.sqrt(distSq);
-        const lineForce = (alpha * 1200) / distSq;
+        const lineForce = (alpha * 800) / distSq;
         const fx = (dx / dist) * lineForce;
         const fy = (dy / dist) * lineForce;
 
@@ -141,7 +141,7 @@ function stepSimulation(
   });
 
   // 4. Center Gravity & Damping (gentle inward pull)
-  const gravity = 0.0055 * alpha;
+  const gravity = 0.006 * alpha;
   nodes.forEach((n) => {
     if (visibleNodeMap.get(n.id) === false) return;
 
@@ -150,8 +150,8 @@ function stepSimulation(
       n.vy -= n.y * gravity;
 
       // Friction
-      n.vx *= 0.82;
-      n.vy *= 0.82;
+      n.vx *= 0.80;
+      n.vy *= 0.80;
 
       n.x += n.vx;
       n.y += n.vy;
@@ -161,8 +161,6 @@ function stepSimulation(
     }
   });
 }
-
-const RELATIONS_BASE_SCALE = 1.25;
 
 export function RelationsView({
   notes,
@@ -185,9 +183,10 @@ export function RelationsView({
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(activeNoteId || null);
 
-  // Transform: Pan (x, y) and Zoom (k)
-  const transformRef = useRef<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: RELATIONS_BASE_SCALE });
-  const targetTransformRef = useRef<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: RELATIONS_BASE_SCALE });
+  // Transform: Pan (x, y) and Zoom (k), with baseFitScale tracking 100% full fit scale
+  const baseFitScaleRef = useRef<number>(1.0);
+  const transformRef = useRef<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: 1.0 });
+  const targetTransformRef = useRef<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: 1.0 });
   const [zoomLevel, setZoomLevel] = useState(1);
   const hasInitialCenteredRef = useRef(false);
 
@@ -255,7 +254,8 @@ export function RelationsView({
       const container = containerRef.current;
       if (targetNode && container) {
         const { clientWidth, clientHeight } = container;
-        const currentK = targetTransformRef.current.k > 0 ? targetTransformRef.current.k : RELATIONS_BASE_SCALE;
+        const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+        const currentK = Math.max(targetTransformRef.current.k, baseK * 1.5);
         targetTransformRef.current = {
           x: clientWidth / 2 - targetNode.x * currentK,
           y: clientHeight / 2 - targetNode.y * currentK,
@@ -264,6 +264,7 @@ export function RelationsView({
         if (!enableAnimations) {
           transformRef.current = { ...targetTransformRef.current };
         }
+        setZoomLevel(currentK / baseK);
         setSelectedNodeId(nodeId);
       }
     },
@@ -284,7 +285,7 @@ export function RelationsView({
     focusNode(matchedNodes[prevIdx].id);
   }, [matchedNodes, currentMatchIndex, focusNode]);
 
-  // Center Graph with automatic bounding-box fitting
+  // Center Graph with automatic bounding-box fitting (100% fits entire graph neatly into viewport)
   const centerGraph = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -295,9 +296,10 @@ export function RelationsView({
     const visibleNodes = currentNodes.filter((n) => visibleNodeMap.get(n.id) !== false);
 
     if (visibleNodes.length === 0) {
-      targetTransformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: RELATIONS_BASE_SCALE };
+      baseFitScaleRef.current = 1.0;
+      targetTransformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       if (!enableAnimations) {
-        transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: RELATIONS_BASE_SCALE };
+        transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       }
       setZoomLevel(1);
       return;
@@ -317,9 +319,10 @@ export function RelationsView({
     });
 
     if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) {
-      targetTransformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: RELATIONS_BASE_SCALE };
+      baseFitScaleRef.current = 1.0;
+      targetTransformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       if (!enableAnimations) {
-        transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: RELATIONS_BASE_SCALE };
+        transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       }
       setZoomLevel(1);
       return;
@@ -328,12 +331,23 @@ export function RelationsView({
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
 
-    const k = RELATIONS_BASE_SCALE; // Always 100% zoom scale
+    const graphW = Math.max(maxX - minX, 100);
+    const graphH = Math.max(maxY - minY, 100);
+
+    // Padding around graph (e.g. 70px) so nodes on boundaries don't touch viewport edges
+    const padding = 70;
+    const availW = Math.max(clientWidth - padding * 2, 100);
+    const availH = Math.max(clientHeight - padding * 2, 100);
+
+    const fitScale = Math.min(availW / graphW, availH / graphH);
+    const fitK = Math.max(0.1, Math.min(1.5, fitScale));
+
+    baseFitScaleRef.current = fitK;
 
     targetTransformRef.current = {
-      x: clientWidth / 2 - cx * k,
-      y: clientHeight / 2 - cy * k,
-      k,
+      x: clientWidth / 2 - cx * fitK,
+      y: clientHeight / 2 - cy * fitK,
+      k: fitK,
     };
 
     if (!enableAnimations || transformRef.current.x === 0) {
@@ -474,7 +488,10 @@ export function RelationsView({
     const cx = clientWidth / 2;
     const cy = clientHeight / 2;
     const current = targetTransformRef.current.k > 0 ? targetTransformRef.current : transformRef.current;
-    const newK = Math.max(0.15 * RELATIONS_BASE_SCALE, Math.min(4.0 * RELATIONS_BASE_SCALE, current.k * factor));
+    const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+    const minK = 0.08 * baseK;
+    const maxK = 35.0 * baseK;
+    const newK = Math.max(minK, Math.min(maxK, current.k * factor));
 
     const newX = cx - (cx - current.x) * (newK / current.k);
     const newY = cy - (cy - current.y) * (newK / current.k);
@@ -483,7 +500,7 @@ export function RelationsView({
     if (!enableAnimations) {
       transformRef.current = { x: newX, y: newY, k: newK };
     }
-    setZoomLevel(newK / RELATIONS_BASE_SCALE);
+    setZoomLevel(newK / baseK);
   }, [enableAnimations]);
 
   // Reheat physics simulation & rearrange layout
@@ -526,8 +543,9 @@ export function RelationsView({
 
       // Default transform fallback to screen center if at (0, 0)
       if (transformRef.current.x === 0 && transformRef.current.y === 0) {
-        transformRef.current = { x: width / 2, y: height / 2, k: RELATIONS_BASE_SCALE };
-        targetTransformRef.current = { x: width / 2, y: height / 2, k: RELATIONS_BASE_SCALE };
+        const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+        transformRef.current = { x: width / 2, y: height / 2, k: baseK };
+        targetTransformRef.current = { x: width / 2, y: height / 2, k: baseK };
       }
 
       // Smooth camera interpolation when animations enabled
@@ -582,7 +600,12 @@ export function RelationsView({
       const hoveredNode = hoveredNodeId ? nodesRef.current.find((n) => n.id === hoveredNodeId) : null;
       const hoveredNeighbors = hoveredNode ? hoveredNode.connectionIds : null;
 
-      const BASE_NODE_RADIUS = 5.2;
+      const currentNodes = nodesRef.current.length > 0 ? nodesRef.current : rawGraph.nodes;
+      const visibleNodesCount = currentNodes.filter((n) => visibleNodeMap.get(n.id) !== false).length;
+      const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+      const currentZoomRatio = k / baseK;
+      // Smooth sub-linear zoom growth factor so nodes stay sleek while scaling gracefully at deep zoom
+      const zoomGrowthFactor = Math.max(0.85, Math.min(3.2, Math.pow(Math.max(0.2, currentZoomRatio), 0.25)));
 
       // Draw Edges (Trimmed to node borders so lines never pass inside node bodies)
       const nodeMap = new Map<string, GraphNode>();
@@ -602,8 +625,8 @@ export function RelationsView({
         const dx = n2.x - n1.x;
         const dy = n2.y - n1.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const r1 = BASE_NODE_RADIUS;
-        const r2 = BASE_NODE_RADIUS;
+        const r1 = (getNodeBaseRadius(n1.degree) * zoomGrowthFactor) / k;
+        const r2 = (getNodeBaseRadius(n2.degree) * zoomGrowthFactor) / k;
 
         // Draw only the visible segment between the two node perimeters
         if (dist > r1 + r2) {
@@ -618,20 +641,22 @@ export function RelationsView({
 
           if (isHighlighted) {
             ctx.strokeStyle = accentEdge;
-            ctx.lineWidth = 1.0 / k;
+            ctx.lineWidth = 0.85 / k;
           } else if (isDimmed) {
-            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)";
-            ctx.lineWidth = 0.7 / k;
+            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.02)";
+            ctx.lineWidth = 0.55 / k;
           } else {
-            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.16)" : "rgba(0, 0, 0, 0.12)";
-            ctx.lineWidth = 1.0 / k;
+            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.09)";
+            ctx.lineWidth = 0.75 / k;
           }
           ctx.stroke();
         }
       });
 
       // Draw Nodes
-      const currentNodes = nodesRef.current.length > 0 ? nodesRef.current : rawGraph.nodes;
+      // Obsidian-style zoom-based label visibility: hide labels on full graph zoom-out with many nodes, show when zoomed in
+      const isZoomedInEnough = currentZoomRatio >= 1.35 || (visibleNodesCount <= 20 && currentZoomRatio >= 0.9);
+
       currentNodes.forEach((node) => {
         if (visibleNodeMap.get(node.id) === false) return;
 
@@ -658,66 +683,63 @@ export function RelationsView({
         }
         hoverProgressMap.current.set(node.id, currentProgress);
 
-        const radius = BASE_NODE_RADIUS * (1 + currentProgress * 0.3);
+        const rScreen = getNodeBaseRadius(node.degree) * zoomGrowthFactor;
+        const radiusWorld = (rScreen * (1 + currentProgress * 0.35)) / k;
 
         // 1. Solid Background Mask (Prevents ANY background/connection lines from shining through)
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, radiusWorld, 0, Math.PI * 2);
         ctx.fillStyle = canvasBg;
         ctx.fill();
 
-        // 2. Main Node Circle (Uniform equal sleek size, clean Obsidian style)
+        // 2. Main Node Circle (Clean borderless antialiased circle, pure Obsidian style)
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, radiusWorld, 0, Math.PI * 2);
 
         if (isDimmed) {
           ctx.fillStyle = isDark ? "rgba(113, 113, 122, 0.2)" : "rgba(148, 163, 184, 0.2)";
         } else if (isHighlighted || isSelected) {
           ctx.fillStyle = accentHsl; // Dynamic Accent color on hover/selected
         } else {
-          ctx.fillStyle = isDark ? "#94a3b8" : "#4b5563"; // Clean sleek charcoal slate
+          // Soft refined mineral graphite gray in light mode, clean light slate in dark mode
+          ctx.fillStyle = isDark ? "#94a3b8" : "#5a606d";
         }
         ctx.fill();
+        // Notice: No border/stroke outline on hover or normal, ensuring 100% borderless clean look
 
-        // Border ring (clean, crisp, and perfectly symmetrical)
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        ctx.strokeStyle = isHighlighted || isSelected
-          ? "#ffffff"
-          : isDark
-          ? (isDimmed ? "rgba(255, 255, 255, 0.08)" : "rgba(255, 255, 255, 0.3)")
-          : (isDimmed ? "rgba(0, 0, 0, 0.04)" : "rgba(0, 0, 0, 0.12)");
-        ctx.lineWidth = (isHighlighted || isSelected ? 1.5 : 1.0) / k;
-        ctx.stroke();
-
-        // Draw Labels (Clean typography, regular font weight without bolding)
+        // 3. Draw Labels (Clean typography, scales smoothly with zoom like Obsidian)
         const shouldShowLabel =
-          showLabels ||
           isHighlighted ||
           isSelected ||
-          (searchMatchedNodeIds && isSearchMatched);
+          (searchMatchedNodeIds && isSearchMatched) ||
+          (showLabels && isZoomedInEnough);
 
         if (shouldShowLabel) {
-          const fontSize = Math.max(10.5, Math.min(12.5, 11 / Math.sqrt(k)));
-          ctx.font = `400 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          const screenFontSize = Math.min(26.0, Math.max(11.0, 11.0 + Math.log2(Math.max(1, currentZoomRatio)) * 2.6));
+          const worldFontSize = screenFontSize / k;
+          ctx.font = `400 ${worldFontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
 
-          // Smooth label gap expansion on hover
-          const labelGap = (7.0 + currentProgress * 4.5) / k;
-          const textY = node.y + radius + labelGap;
-          const maxLabelWidth = Math.max(160, 210 / Math.sqrt(k));
-          const lines = wrapNodeText(ctx, node.label, maxLabelWidth, 2);
-          const lineHeight = fontSize * 1.25;
+          // Smooth label gap expansion on hover & zoom
+          const labelGapScreen = Math.min(14, 4.5 + Math.log2(Math.max(1, currentZoomRatio)) * 1.5 + currentProgress * 3.5);
+          const labelGapWorld = labelGapScreen / k;
+          const textY = node.y + radiusWorld + labelGapWorld;
+          const maxLabelWidthScreen = Math.min(360, 140 + Math.log2(Math.max(1, currentZoomRatio)) * 36);
+          const maxLabelWidthWorld = maxLabelWidthScreen / k;
+          const lines = wrapNodeText(ctx, node.label, maxLabelWidthWorld, 2);
+          const lineHeightWorld = worldFontSize * 1.24;
 
           if (isDimmed) {
-            ctx.fillStyle = isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(148, 163, 184, 0.35)";
+            ctx.fillStyle = isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(100, 116, 139, 0.25)";
+          } else if (isHighlighted || isSelected) {
+            ctx.fillStyle = isDark ? "#ffffff" : "#0f172a";
           } else {
-            ctx.fillStyle = isDark ? "rgba(241, 245, 249, 0.95)" : "#374151";
+            ctx.fillStyle = isDark ? "rgba(241, 245, 249, 0.92)" : "#475569";
           }
 
           lines.forEach((line, idx) => {
-            ctx.fillText(line, node.x, textY + idx * lineHeight);
+            ctx.fillText(line, node.x, textY + idx * lineHeightWorld);
           });
         }
       });
@@ -753,42 +775,91 @@ export function RelationsView({
 
   const findNodeAtPosition = useCallback(
     (screenX: number, screenY: number): GraphNode | null => {
-      const { x: wx, y: wy } = screenToWorld(screenX, screenY);
-      const k = transformRef.current.k;
+      const canvas = canvasRef.current || containerRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const px = screenX - rect.left;
+      const py = screenY - rect.top;
+      const { x: panX, y: panY, k } = transformRef.current;
+      if (k <= 0) return null;
 
       const currentNodes = nodesRef.current.length > 0 ? nodesRef.current : rawGraph.nodes;
-      for (let i = currentNodes.length - 1; i >= 0; i--) {
+      const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+      const currentZoomRatio = k / baseK;
+      const zoomGrowthFactor = Math.max(0.85, Math.min(3.2, Math.pow(Math.max(0.2, currentZoomRatio), 0.25)));
+
+      // Step 1: Check node circle hits directly in SCREEN PIXELS.
+      // Pick the node whose circle center is closest to the cursor within its hit radius.
+      let closestNode: GraphNode | null = null;
+      let minCircleDist = Infinity;
+
+      for (let i = 0; i < currentNodes.length; i++) {
         const node = currentNodes[i];
         if (visibleNodeMap.get(node.id) === false) continue;
 
-        const baseRadius = 5.2;
-        // Generous, accurate hit testing radius in screen pixels (minimum 16px radius for effortless hover/click)
-        const hitRadiusScreen = Math.max(baseRadius * k + 6, 16);
-        const hitRadiusWorld = hitRadiusScreen / k;
+        const screenNodeX = node.x * k + panX;
+        const screenNodeY = node.y * k + panY;
+        const dist = Math.hypot(px - screenNodeX, py - screenNodeY);
 
-        const dx = node.x - wx;
-        const dy = node.y - wy;
-        if (dx * dx + dy * dy <= hitRadiusWorld * hitRadiusWorld) {
-          return node;
-        }
+        const rScreen = getNodeBaseRadius(node.degree) * zoomGrowthFactor;
+        // Generous screen hit radius: node radius + 6px (minimum 13px for effortless targeting)
+        const hitRadiusScreen = Math.max(rScreen + 6, 13);
 
-        // Also check if mouse is on the text label directly below the node
-        const maxLabelWidth = Math.max(160, 210 / Math.sqrt(k));
-        const labelHalfWidth = maxLabelWidth / 2;
-        const labelTop = node.y + baseRadius;
-        const labelBottom = labelTop + 42 / Math.sqrt(k);
-
-        if (
-          Math.abs(dx) <= labelHalfWidth &&
-          wy >= labelTop &&
-          wy <= labelBottom
-        ) {
-          return node;
+        if (dist <= hitRadiusScreen && dist < minCircleDist) {
+          minCircleDist = dist;
+          closestNode = node;
         }
       }
-      return null;
+
+      if (closestNode) {
+        return closestNode;
+      }
+
+      // Step 2: Only if no node circle was hit, check if mouse is on a currently-visible text label
+      const visibleNodesCount = currentNodes.filter((n) => visibleNodeMap.get(n.id) !== false).length;
+      const isZoomedInEnough = currentZoomRatio >= 1.35 || (visibleNodesCount <= 20 && currentZoomRatio >= 0.9);
+
+      let closestLabelNode: GraphNode | null = null;
+      let minLabelDist = Infinity;
+
+      const screenFontSize = Math.min(26.0, Math.max(11.0, 11.0 + Math.log2(Math.max(1, currentZoomRatio)) * 2.6));
+
+      for (let i = 0; i < currentNodes.length; i++) {
+        const node = currentNodes[i];
+        if (visibleNodeMap.get(node.id) === false) continue;
+
+        const isLabelVisible =
+          (searchMatchedNodeIds && searchMatchedNodeIds.has(node.id)) ||
+          node.id === selectedNodeId ||
+          (showLabels && isZoomedInEnough);
+
+        if (!isLabelVisible) continue;
+
+        const screenNodeX = node.x * k + panX;
+        const screenNodeY = node.y * k + panY;
+        const rScreen = getNodeBaseRadius(node.degree) * zoomGrowthFactor;
+
+        // Label box in screen pixels
+        const labelHalfWidthScreen = Math.min(180, (node.label.length * (screenFontSize * 0.6)) / 2 + 8);
+        const labelTopScreen = screenNodeY + rScreen + 2;
+        const labelBottomScreen = labelTopScreen + screenFontSize * 1.35;
+
+        if (
+          Math.abs(px - screenNodeX) <= labelHalfWidthScreen &&
+          py >= labelTopScreen &&
+          py <= labelBottomScreen
+        ) {
+          const dist = Math.hypot(px - screenNodeX, py - (labelTopScreen + screenFontSize * 0.5));
+          if (dist < minLabelDist) {
+            minLabelDist = dist;
+            closestLabelNode = node;
+          }
+        }
+      }
+
+      return closestLabelNode;
     },
-    [screenToWorld, visibleNodeMap, rawGraph.nodes]
+    [visibleNodeMap, rawGraph.nodes, showLabels, searchMatchedNodeIds, selectedNodeId]
   );
 
   const handleMouseDown = useCallback(
@@ -869,14 +940,17 @@ export function RelationsView({
 
       const zoomFactor = Math.exp(-e.deltaY * 0.0015);
       const current = transformRef.current;
-      const newK = Math.max(0.15 * RELATIONS_BASE_SCALE, Math.min(4.0 * RELATIONS_BASE_SCALE, current.k * zoomFactor));
+      const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
+      const minK = 0.08 * baseK;
+      const maxK = 35.0 * baseK;
+      const newK = Math.max(minK, Math.min(maxK, current.k * zoomFactor));
 
       const newX = mouseX - (mouseX - current.x) * (newK / current.k);
       const newY = mouseY - (mouseY - current.y) * (newK / current.k);
 
       transformRef.current = { x: newX, y: newY, k: newK };
       targetTransformRef.current = { x: newX, y: newY, k: newK };
-      setZoomLevel(newK / RELATIONS_BASE_SCALE);
+      setZoomLevel(newK / baseK);
     },
     []
   );
@@ -1031,14 +1105,14 @@ export function RelationsView({
                   )}
                   <span className="sr-only">
                     {showOrphans
-                      ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide orphan notes"))
+                      ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide unlinked notes"))
                       : (t("relations.showOrphans") || (isTh ? "แสดงโน้ตทั้งหมด" : "Show all notes"))}
                   </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {showOrphans
-                  ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide orphan notes"))
+                  ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide unlinked notes"))
                   : (t("relations.showOrphans") || (isTh ? "แสดงโน้ตทั้งหมด" : "Show all notes"))}
               </TooltipContent>
             </Tooltip>

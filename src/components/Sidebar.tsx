@@ -46,6 +46,7 @@ import {
   Filter,
   MoreHorizontal,
   LayoutTemplate,
+  Link as LinkIcon,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
@@ -54,7 +55,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from "@/components/ui/context-menu";
+import { toast } from "@/hooks/use-toast";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -73,6 +75,7 @@ import { renderCustomIcon, getToolbarIcon, getAutoFolderIconAndColor } from "@/l
 import IconPickerDialog from "@/components/IconPickerDialog";
 import LunoAiView from "@/components/LunoAiView";
 import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES, setPendingTemplatePreview } from "@/components/TemplatesView";
+import { copyToClipboard } from "@/lib/clipboardUtils";
 
 interface SidebarProps {
   notes: Note[];
@@ -95,6 +98,7 @@ interface SidebarProps {
   onRenameFile?: (note: Note, nextName: string) => void;
   onRenameFolder?: (folderPath: string, nextName: string) => void;
   onMoveFile?: (note: Note, targetFolderPath: string) => void;
+  onMoveFiles?: (notes: Note[], targetFolderPath: string) => void;
   onMoveFolder?: (sourceFolderPath: string, targetFolderPath: string) => void;
   canPaste?: boolean;
   onDeleteFile?: (note: Note) => void;
@@ -453,6 +457,9 @@ function getFileType(note: Note): "txt" | "md" | "html" | "css" | "image" | "bin
 
 function NoteIcon({ note, active }: { note: Note; active: boolean }) {
   const { settings } = useAppSettings();
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
   const pack = settings?.iconPack || "lucide";
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
@@ -513,6 +520,7 @@ function SidebarComponent({
   onRenameFile,
   onRenameFolder,
   onMoveFile,
+  onMoveFiles,
   onMoveFolder,
   canPaste = false,
   onDeleteFile,
@@ -914,6 +922,7 @@ function SidebarComponent({
   };
 
   const renderTrashedNoteIcon = (note: TrashedNote, cls = "h-3.5 w-3.5 shrink-0") => {
+    if (settings?.showFileIcons === false) return null;
     if (note.icon) {
       const custom = renderCustomIcon(note.icon, cls, { color: note.iconColor });
       if (custom) return custom;
@@ -1046,6 +1055,7 @@ function SidebarComponent({
   const [renameTargetNote, setRenameTargetNote] = useState<Note | null>(null);
   const [renameTargetFolderPath, setRenameTargetFolderPath] = useState<string>("");
   const [draggedItem, setDraggedItem] = useState<{ kind: "file" | "folder"; note?: Note; notes?: Note[]; folderPath?: string } | null>(null);
+  const potentialDragNoteIdRef = useRef<string | null>(null);
   const [dropTargetFolderPath, setDropTargetFolderPath] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirmTargets, setDeleteConfirmTargets] = useState<Note[]>([]);
@@ -1401,6 +1411,13 @@ function SidebarComponent({
       });
       setLastSelectedNoteId(noteId);
     } else {
+      if (selectedNoteIds.has(noteId) && selectedNoteIds.size > 1) {
+        // Multi-selection exists and user clicked down on one of the selected files:
+        // Do NOT unselect immediately; keep multi-selection in case the user starts dragging.
+        potentialDragNoteIdRef.current = noteId;
+        return;
+      }
+      potentialDragNoteIdRef.current = null;
       setSingleSelectedNote(noteId);
     }
   };
@@ -1417,6 +1434,74 @@ function SidebarComponent({
     if (targets.length > 1) onCopyFiles?.(targets);
     else onCopyFile?.(targets[0]);
   };
+
+  const getWorkspacePath = useCallback(async () => {
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        return (saved?.folderPath || saved?.path || "") as string;
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  }, []);
+
+  const handleCopyNoteRelativePath = useCallback(async (note: Note) => {
+    const targets = getContextTargetNotes(note);
+    if (!targets.length) return;
+    const paths = targets.map((n) => {
+      const fileName = n.fileName || n.title;
+      return n.folderPath ? `${n.folderPath}/${fileName}` : fileName;
+    });
+    const text = paths.join("\n");
+    await copyToClipboard(text);
+    toast({
+      title: t("sidebar.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+      description: text,
+    });
+  }, [getContextTargetNotes, t]);
+
+  const handleCopyNoteAbsolutePath = useCallback(async (note: Note) => {
+    const targets = getContextTargetNotes(note);
+    if (!targets.length) return;
+    const ws = await getWorkspacePath();
+    const paths = targets.map((n) => {
+      const fileName = n.fileName || n.title;
+      const rel = n.folderPath ? `${n.folderPath}/${fileName}` : fileName;
+      if (!ws) return rel;
+      const cleanWs = ws.replace(/[\\/]+$/, "");
+      return `${cleanWs}/${rel.replace(/^[\\/]+/, "")}`;
+    });
+    const text = paths.join("\n");
+    await copyToClipboard(text);
+    toast({
+      title: t("sidebar.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+      description: text,
+    });
+  }, [getContextTargetNotes, getWorkspacePath, t]);
+
+  const handleCopyFolderRelativePath = useCallback(async (folderPath: string) => {
+    const rel = folderPath === "__opened_root__" ? "" : folderPath;
+    await copyToClipboard(rel);
+    toast({
+      title: t("sidebar.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+      description: rel,
+    });
+  }, [t]);
+
+  const handleCopyFolderAbsolutePath = useCallback(async (folderPath: string) => {
+    const ws = await getWorkspacePath();
+    const rel = folderPath === "__opened_root__" ? "" : folderPath;
+    const cleanWs = ws.replace(/[\\/]+$/, "");
+    const full = cleanWs ? (rel ? `${cleanWs}/${rel.replace(/^[\\/]+/, "")}` : cleanWs) : rel;
+    await copyToClipboard(full);
+    toast({
+      title: t("sidebar.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+      description: full,
+    });
+  }, [getWorkspacePath, t]);
 
   const handleDuplicateFromContext = (note: Note) => {
     const targets = getContextTargetNotes(note);
@@ -1449,12 +1534,18 @@ function SidebarComponent({
     const targetFolderPath = rawTargetFolderPath === "__opened_root__" ? "" : rawTargetFolderPath;
 
     if (draggedItem.kind === "file") {
-      if (draggedItem.notes && draggedItem.notes.length > 0) {
-        for (const n of draggedItem.notes) {
+      const dragNotes = draggedItem.notes && draggedItem.notes.length > 0
+        ? draggedItem.notes
+        : draggedItem.note
+        ? [draggedItem.note]
+        : [];
+
+      if (dragNotes.length > 1 && onMoveFiles) {
+        onMoveFiles(dragNotes, targetFolderPath);
+      } else if (dragNotes.length > 0) {
+        for (const n of dragNotes) {
           onMoveFile?.(n, targetFolderPath);
         }
-      } else if (draggedItem.note) {
-        onMoveFile?.(draggedItem.note, targetFolderPath);
       }
     }
 
@@ -1647,18 +1738,52 @@ function SidebarComponent({
                 if (event.shiftKey || event.ctrlKey || event.metaKey) {
                   return;
                 }
+                if (potentialDragNoteIdRef.current === note.id) {
+                  setSingleSelectedNote(note.id);
+                  potentialDragNoteIdRef.current = null;
+                }
                 onSelect(note.id);
                 if (isMobile) onClose?.();
               }}
               draggable
-              onDragStart={() => {
+              onDragStart={(event) => {
+                potentialDragNoteIdRef.current = null;
                 const isMulti = selectedNoteIds.has(note.id) && selectedNoteIds.size > 1;
                 const dragNotes = isMulti ? notes.filter((n) => selectedNoteIds.has(n.id)) : [note];
                 setDraggedItem({ kind: "file", note, notes: dragNotes });
+                if (event.dataTransfer) {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", dragNotes.map((n) => n.fileName || n.title).join("\n"));
+                  if (dragNotes.length > 1) {
+                    const badge = document.createElement("div");
+                    badge.id = "luno-drag-ghost";
+                    badge.style.position = "absolute";
+                    badge.style.top = "-9999px";
+                    badge.style.left = "-9999px";
+                    badge.style.padding = "4px 10px";
+                    badge.style.borderRadius = "9999px";
+                    badge.style.background = "var(--primary, #0d9488)";
+                    badge.style.color = "#ffffff";
+                    badge.style.fontSize = "12px";
+                    badge.style.fontWeight = "600";
+                    badge.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
+                    badge.style.pointerEvents = "none";
+                    badge.style.zIndex = "99999";
+                    badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files") || "files"}`;
+                    document.body.appendChild(badge);
+                    event.dataTransfer.setDragImage(badge, 20, 15);
+                    requestAnimationFrame(() => {
+                      badge.remove();
+                    });
+                  }
+                }
               }}
               onDragEnd={() => {
+                potentialDragNoteIdRef.current = null;
                 setDraggedItem(null);
                 setDropTargetFolderPath(null);
+                const ghost = document.getElementById("luno-drag-ghost");
+                if (ghost) ghost.remove();
               }}
               onMouseDown={(event) => handleNoteSelection(note.id, event)}
               onContextMenu={() => {
@@ -1688,7 +1813,7 @@ function SidebarComponent({
             </button>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-52 rounded-xl">
-            {!isMultiSelected && (
+            {!isMultiSelected && settings?.showFileIcons !== false && (
               <>
                 <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
                   {note.icon ? (
@@ -1736,6 +1861,22 @@ function SidebarComponent({
               <Copy className="h-4 w-4" />
               <span>{isMultiSelected ? `${t("sidebar.copyAction")} (${targetCount})` : t("sidebar.copyAction")}</span>
             </ContextMenuItem>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger className="gap-2">
+                <LinkIcon className="h-4 w-4" />
+                <span>{isMultiSelected ? `${t("sidebar.copyPath")} (${targetCount})` : t("sidebar.copyPath")}</span>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-52 rounded-xl">
+                <ContextMenuItem onClick={() => handleCopyNoteRelativePath(note)} className="gap-2.5 cursor-pointer">
+                  <FileText className="h-4 w-4" />
+                  <span>{t("sidebar.copyRelativePath")}</span>
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => void handleCopyNoteAbsolutePath(note)} className="gap-2.5 cursor-pointer">
+                  <Folder className="h-4 w-4" />
+                  <span>{t("sidebar.copyAbsolutePath")}</span>
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
             <ContextMenuItem onClick={() => onPasteToFolder?.(note.folderPath || "")} className="gap-2" disabled={!canPaste}>
               <ClipboardList className="h-4 w-4" />
               <span>{t("sidebar.pasteAction")}</span>
@@ -1797,18 +1938,52 @@ function SidebarComponent({
               if (event.shiftKey || event.ctrlKey || event.metaKey) {
                 return;
               }
+              if (potentialDragNoteIdRef.current === note.id) {
+                setSingleSelectedNote(note.id);
+                potentialDragNoteIdRef.current = null;
+              }
               onSelect(note.id);
               if (isMobile) onClose?.();
             }}
             draggable
-            onDragStart={() => {
+            onDragStart={(event) => {
+              potentialDragNoteIdRef.current = null;
               const isMulti = selectedNoteIds.has(note.id) && selectedNoteIds.size > 1;
               const dragNotes = isMulti ? notes.filter((n) => selectedNoteIds.has(n.id)) : [note];
               setDraggedItem({ kind: "file", note, notes: dragNotes });
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", dragNotes.map((n) => n.fileName || n.title).join("\n"));
+                if (dragNotes.length > 1) {
+                  const badge = document.createElement("div");
+                  badge.id = "luno-drag-ghost";
+                  badge.style.position = "absolute";
+                  badge.style.top = "-9999px";
+                  badge.style.left = "-9999px";
+                  badge.style.padding = "4px 10px";
+                  badge.style.borderRadius = "9999px";
+                  badge.style.background = "var(--primary, #0d9488)";
+                  badge.style.color = "#ffffff";
+                  badge.style.fontSize = "12px";
+                  badge.style.fontWeight = "600";
+                  badge.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
+                  badge.style.pointerEvents = "none";
+                  badge.style.zIndex = "99999";
+                  badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files") || "files"}`;
+                  document.body.appendChild(badge);
+                  event.dataTransfer.setDragImage(badge, 20, 15);
+                  requestAnimationFrame(() => {
+                    badge.remove();
+                  });
+                }
+              }
             }}
             onDragEnd={() => {
+              potentialDragNoteIdRef.current = null;
               setDraggedItem(null);
               setDropTargetFolderPath(null);
+              const ghost = document.getElementById("luno-drag-ghost");
+              if (ghost) ghost.remove();
             }}
             onMouseDown={(event) => handleNoteSelection(note.id, event)}
             onContextMenu={() => {
@@ -1849,7 +2024,7 @@ function SidebarComponent({
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52 rounded-xl">
-          {!isMultiSelected && (
+          {!isMultiSelected && settings?.showFileIcons !== false && (
             <>
               <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
                 {note.icon ? (
@@ -1897,6 +2072,22 @@ function SidebarComponent({
             <Copy className="h-4 w-4" />
             <span>{isMultiSelected ? `${t("sidebar.copyAction")} (${targetCount})` : t("sidebar.copyAction")}</span>
           </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger className="gap-2">
+              <LinkIcon className="h-4 w-4" />
+              <span>{isMultiSelected ? `${t("sidebar.copyPath")} (${targetCount})` : t("sidebar.copyPath")}</span>
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-52 rounded-xl">
+              <ContextMenuItem onClick={() => handleCopyNoteRelativePath(note)} className="gap-2.5 cursor-pointer">
+                <FileText className="h-4 w-4" />
+                <span>{t("sidebar.copyRelativePath")}</span>
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => void handleCopyNoteAbsolutePath(note)} className="gap-2.5 cursor-pointer">
+                <Folder className="h-4 w-4" />
+                <span>{t("sidebar.copyAbsolutePath")}</span>
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
           <ContextMenuItem onClick={() => onPasteToFolder?.(note.folderPath || "")} className="gap-2" disabled={!canPaste}>
             <ClipboardList className="h-4 w-4" />
             <span>{t("sidebar.pasteAction")}</span>
@@ -1967,75 +2158,84 @@ function SidebarComponent({
       <ContextMenu key={node.path}>
         <ContextMenuTrigger asChild>
           <div className="group/tree-item relative w-full">
-            <button
-              onClick={() => {
-                setSelectedFolderPath(node.path);
-                toggleFolder(node.path);
-              }}
-              draggable
-              onDragStart={() => setDraggedItem({ kind: "folder", folderPath: node.path })}
-              onDragEnd={() => {
-                setDraggedItem(null);
-                setDropTargetFolderPath(null);
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDropTargetFolderPath(node.path);
-                scheduleFolderExpandOnDrag(node.path, isOpen);
-              }}
-              onDragLeave={() => {
-                if (dropTargetFolderPath === node.path) {
-                  setDropTargetFolderPath(null);
-                }
-                if (dragExpandTimeoutRef.current) {
-                  window.clearTimeout(dragExpandTimeoutRef.current);
-                  dragExpandTimeoutRef.current = null;
-                }
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                handleDropToFolder(node.path);
-              }}
-              onContextMenu={() => setSelectedFolderPath(node.path)}
-              className={`sticky flex w-full items-center gap-1.5 px-3 bg-sidebar/95 backdrop-blur-[2px] ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"} font-medium transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none ${
-                dropTargetFolderPath === node.path
-                  ? "bg-sidebar-accent/50 text-foreground"
-                  : "text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40"
-              }`}
+            <div
+              className="sticky w-full bg-sidebar"
               style={{
                 top: `${depth * (settings.sidebarDensity === "compact" ? 26 : 30)}px`,
                 zIndex: 35 - Math.min(depth, 25),
-                paddingLeft: `${12 + depth * 14}px`,
               }}
             >
-              {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
-                <span
-                  key={i}
-                  className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
-                  style={{ left: `${18 + i * 14}px` }}
-                />
-              ))}
-              {isOpen ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              {node.path === "__opened_root__" && isCloudWorkspace ? (
-                <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
-              ) : settings.folderIcons?.[node.path] ? (
-                renderCustomIcon(settings.folderIcons[node.path].icon, "h-3.5 w-3.5 shrink-0", { color: settings.folderIcons[node.path].color })
-              ) : isOpen ? (
-                React.createElement(getToolbarIcon("folderOpen", settings.iconPack), { className: "h-3.5 w-3.5 shrink-0 text-primary" })
-              ) : (
-                React.createElement(getToolbarIcon("folder", settings.iconPack), { className: "h-3.5 w-3.5 shrink-0 text-primary" })
-              )}
-              <span className="truncate">{node.name}</span>
-              {node.path === "__opened_root__" && isLoadingWorkspace ? (
-                <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
-              ) : hasContent ? (
-                <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">{node.notes.length + node.children.length}</span>
-              ) : null}
-            </button>
+              <button
+                onClick={() => {
+                  setSelectedFolderPath(node.path);
+                  toggleFolder(node.path);
+                }}
+                draggable
+                onDragStart={() => setDraggedItem({ kind: "folder", folderPath: node.path })}
+                onDragEnd={() => {
+                  setDraggedItem(null);
+                  setDropTargetFolderPath(null);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDropTargetFolderPath(node.path);
+                  scheduleFolderExpandOnDrag(node.path, isOpen);
+                }}
+                onDragLeave={() => {
+                  if (dropTargetFolderPath === node.path) {
+                    setDropTargetFolderPath(null);
+                  }
+                  if (dragExpandTimeoutRef.current) {
+                    window.clearTimeout(dragExpandTimeoutRef.current);
+                    dragExpandTimeoutRef.current = null;
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleDropToFolder(node.path);
+                }}
+                onContextMenu={() => setSelectedFolderPath(node.path)}
+                className={`relative flex w-full items-center gap-1.5 px-3 bg-sidebar ${settings.sidebarDensity === "compact" ? "py-1 text-[12.5px]" : "py-1.5 text-[13.5px]"} font-medium transition-colors rounded-lg outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 select-none ${
+                  dropTargetFolderPath === node.path
+                    ? "bg-sidebar-accent/50 text-foreground"
+                    : "text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/50"
+                }`}
+                style={{
+                  paddingLeft: `${12 + depth * 14}px`,
+                }}
+              >
+                {settings.showGuideLines && Array.from({ length: depth }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="absolute top-0 bottom-0 w-[1px] bg-sidebar-border/40 group-hover/tree-item:bg-sidebar-border/80 transition-colors pointer-events-none z-10"
+                    style={{ left: `${18 + i * 14}px` }}
+                  />
+                ))}
+                {isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                {settings?.showFileIcons !== false && (
+                  node.path === "__opened_root__" && isCloudWorkspace ? (
+                    <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
+                  ) : settings.folderIcons?.[node.path] ? (
+                    renderCustomIcon(settings.folderIcons[node.path].icon, "h-3.5 w-3.5 shrink-0", { color: settings.folderIcons[node.path].color })
+                  ) : isOpen ? (
+                    React.createElement(getToolbarIcon("folderOpen", settings.iconPack), { className: "h-3.5 w-3.5 shrink-0 text-primary" })
+                  ) : (
+                    React.createElement(getToolbarIcon("folder", settings.iconPack), { className: "h-3.5 w-3.5 shrink-0 text-primary" })
+                  )
+                )}
+                <span className="truncate">{node.name}</span>
+                {node.path === "__opened_root__" && isLoadingWorkspace ? (
+                  <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+                ) : hasContent ? (
+                  <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">{node.notes.length + node.children.length}</span>
+                ) : null}
+              </button>
+            </div>
             {isOpen && (
               <div className="relative w-full">
                 <div
@@ -2050,6 +2250,7 @@ function SidebarComponent({
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
+                    event.stopPropagation();
                     handleDropToFolder(node.path);
                   }}
                   className={`w-full ${dropTargetFolderPath === node.path ? "rounded-md bg-sidebar-accent/30" : ""}`}
@@ -2062,28 +2263,57 @@ function SidebarComponent({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52 rounded-xl">
-          <ContextMenuItem onClick={() => setIconPickerTarget({ type: "folder", path: node.path })} className="gap-2">
-            {settings.folderIcons?.[node.path] ? (
-              renderCustomIcon(settings.folderIcons[node.path].icon, "h-4 w-4 shrink-0 text-primary", { color: settings.folderIcons[node.path].color })
-            ) : (
-              (() => {
-                const FolderIconComp = getToolbarIcon("folder", pack);
-                return <FolderIconComp className="h-4 w-4 shrink-0 text-primary" />;
-              })()
-            )}
-            <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
-          </ContextMenuItem>
-          {settings.folderIcons?.[node.path] && (
-            <ContextMenuItem onClick={() => removeFolderIcon(node.path)} className="gap-2 text-muted-foreground hover:text-foreground">
-              <Trash2 className="h-4 w-4" />
-              <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
-            </ContextMenuItem>
+          {settings?.showFileIcons !== false && (
+            <>
+              <ContextMenuItem onClick={() => setIconPickerTarget({ type: "folder", path: node.path })} className="gap-2">
+                {settings.folderIcons?.[node.path] ? (
+                  renderCustomIcon(settings.folderIcons[node.path].icon, "h-4 w-4 shrink-0 text-primary", { color: settings.folderIcons[node.path].color })
+                ) : (
+                  (() => {
+                    const FolderIconComp = getToolbarIcon("folder", pack);
+                    return <FolderIconComp className="h-4 w-4 shrink-0 text-primary" />;
+                  })()
+                )}
+                <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
+              </ContextMenuItem>
+              {settings.folderIcons?.[node.path] && (
+                <ContextMenuItem onClick={() => removeFolderIcon(node.path)} className="gap-2 text-muted-foreground hover:text-foreground">
+                  <Trash2 className="h-4 w-4" />
+                  <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+            </>
           )}
           <ContextMenuSeparator />
           {node.path !== "__opened_root__" && (
             <ContextMenuItem onClick={() => onCopyFolder?.(node.path)} className="gap-2">
               <Copy className="h-4 w-4" />
               <span>{t("sidebar.copyAction")}</span>
+            </ContextMenuItem>
+          )}
+          {node.path !== "__opened_root__" && (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger className="gap-2">
+                <LinkIcon className="h-4 w-4" />
+                <span>{t("sidebar.copyPath")}</span>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-52 rounded-xl">
+                <ContextMenuItem onClick={() => handleCopyFolderRelativePath(node.path)} className="gap-2.5 cursor-pointer">
+                  <FileText className="h-4 w-4" />
+                  <span>{t("sidebar.copyRelativePath")}</span>
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => void handleCopyFolderAbsolutePath(node.path)} className="gap-2.5 cursor-pointer">
+                  <Folder className="h-4 w-4" />
+                  <span>{t("sidebar.copyAbsolutePath")}</span>
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          )}
+          {node.path === "__opened_root__" && (
+            <ContextMenuItem onClick={() => void handleCopyFolderAbsolutePath(node.path)} className="gap-2 cursor-pointer">
+              <Folder className="h-4 w-4" />
+              <span>{t("sidebar.copyAbsolutePath")}</span>
             </ContextMenuItem>
           )}
           <ContextMenuItem onClick={() => onPasteToFolder?.(node.path)} className="gap-2" disabled={!canPaste}>
@@ -2637,6 +2867,7 @@ function SidebarComponent({
                       }}
                       onDrop={(event) => {
                         event.preventDefault();
+                        event.stopPropagation();
                         handleDropToFolder("__opened_root__");
                       }}
                       className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
@@ -3548,34 +3779,34 @@ function SidebarComponent({
                           })}
                         </div>
                       )}
-
-                      {/* Selected Items Quick Action Bar */}
-                      {selectedTrashIds.length > 0 && (
-                        <div className="mt-2 pt-2 px-1 border-t border-sidebar-border/40 flex items-center justify-between gap-1.5 shrink-0 select-none">
-                          <span className="text-[11px] font-medium text-muted-foreground truncate">
-                            {isTh ? `เลือก ${selectedTrashIds.length} รายการ` : `${selectedTrashIds.length} selected`}
-                          </span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={handleRestoreSelectedTrash}
-                              className="px-2.5 py-1 rounded-[10px] bg-transparent text-foreground hover:bg-sidebar-accent hover:text-foreground text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
-                            >
-                              <RotateCcw className="h-3 w-3" />
-                              <span>{isTh ? "กู้คืน" : "Restore"}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handlePromptDeleteSelectedTrash()}
-                              className="px-2.5 py-1 rounded-[10px] bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                              <span>{isTh ? "ลบถาวร" : "Delete"}</span>
-                            </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
+
+                    {/* Selected Items Quick Action Bar (Fixed at bottom, outside scroll area) */}
+                    {selectedTrashIds.length > 0 && (
+                      <div className="px-3 py-2 border-t border-sidebar-border/60 bg-sidebar flex items-center justify-between gap-1.5 shrink-0 select-none">
+                        <span className="text-[11px] font-medium text-muted-foreground truncate">
+                          {isTh ? `เลือก ${selectedTrashIds.length} รายการ` : `${selectedTrashIds.length} selected`}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleRestoreSelectedTrash}
+                            className="px-2.5 py-1 rounded-[10px] bg-transparent text-foreground hover:bg-sidebar-accent hover:text-foreground text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span>{isTh ? "กู้คืน" : "Restore"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePromptDeleteSelectedTrash()}
+                            className="px-2.5 py-1 rounded-[10px] bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>{isTh ? "ลบถาวร" : "Delete"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -4006,6 +4237,7 @@ function SidebarComponent({
               }}
               onDrop={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
                 handleDropToFolder("__opened_root__");
               }}
               className={`flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg transition-colors ${
@@ -4345,7 +4577,15 @@ function SidebarComponent({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
-          <AlertDialogDescription>{t("sidebar.deleteFilesDescription")}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {deleteConfirmTargets.length === 1
+              ? (isTh
+                  ? `แน่ใจไหมที่จะย้ายไฟล์ "${deleteConfirmTargets[0].fileName || deleteConfirmTargets[0].title || "ไม่มีชื่อ"}" ไปที่ถังขยะ?`
+                  : `Are you sure you want to move "${deleteConfirmTargets[0].fileName || deleteConfirmTargets[0].title || "Untitled"}" to trash?`)
+              : (isTh
+                  ? `แน่ใจไหมที่จะย้ายไฟล์ที่เลือกจำนวน ${deleteConfirmTargets.length} รายการไปที่ถังขยะ?`
+                  : `Are you sure you want to move ${deleteConfirmTargets.length} selected files to trash?`)}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -4353,7 +4593,7 @@ function SidebarComponent({
             className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
             onClick={handleDeleteConfirmed}
           >
-            {t("common.delete")}
+            {t("sidebar.deleteFileAction")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -4363,7 +4603,11 @@ function SidebarComponent({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("sidebar.deleteFolderAction")}</AlertDialogTitle>
-          <AlertDialogDescription>{t("sidebar.deleteFilesDescription")}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {isTh
+              ? `แน่ใจไหมที่จะย้ายโฟลเดอร์ "${deleteFolderTargetPath ? deleteFolderTargetPath.split("/").pop() : ""}" และเนื้อหาทั้งหมดไปที่ถังขยะ?`
+              : `Are you sure you want to move folder "${deleteFolderTargetPath ? deleteFolderTargetPath.split("/").pop() : ""}" and all its contents to trash?`}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
@@ -4371,7 +4615,7 @@ function SidebarComponent({
             className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
             onClick={handleDeleteFolderConfirmed}
           >
-            {t("common.delete")}
+            {t("sidebar.deleteFolderAction")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -4381,9 +4625,11 @@ function SidebarComponent({
     <AlertDialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("trash.emptyTrashConfirmTitle") || "Empty all trash?"}</AlertDialogTitle>
+          <AlertDialogTitle>{t("trash.emptyTrashConfirmTitle") || (isTh ? "แน่ใจใช่ไหมที่จะล้างถังขยะทั้งหมด?" : "Are you sure you want to empty all trash?")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("trash.emptyTrashConfirmDesc") || "All files in the trash will be permanently deleted. This action cannot be undone."}
+            {t("trash.emptyTrashConfirmDesc", { count: currentTrashList.length }) || (isTh
+              ? `ไฟล์ทั้งหมดที่อยู่ในถังขยะ (${currentTrashList.length} รายการ) จะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
+              : `All ${currentTrashList.length} files in the trash will be permanently deleted. This action cannot be undone.`)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -4406,13 +4652,21 @@ function SidebarComponent({
     <AlertDialog open={deletePermanentDialogOpen} onOpenChange={setDeletePermanentDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("trash.deleteConfirmTitle") || (isTh ? "ลบถาวรหรือไม่?" : "Delete permanently?")}</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("trash.deleteConfirmTitle") || (isTh ? "ลบไฟล์อย่างถาวรหรือไม่?" : "Delete file permanently?")}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            {pendingDeleteTrashIds.length > 1
-              ? (t("trash.deleteBatchConfirmDesc")?.replace("{count}", String(pendingDeleteTrashIds.length)) ||
-                 (isTh ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteTrashIds.length} รายการจะถูกลบอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้` : `${pendingDeleteTrashIds.length} selected files will be permanently deleted.`))
-              : (t("trash.deleteConfirmDesc") ||
-                 (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร การกระทำนี้ไม่สามารถย้อนกลับได้" : "This file will be permanently deleted and cannot be recovered."))}
+            {pendingDeleteTrashIds.length === 1
+              ? (() => {
+                  const note = currentTrashList.find((n) => n.id === pendingDeleteTrashIds[0]);
+                  const name = note?.fileName || note?.title;
+                  return name
+                    ? (t("trash.deleteConfirmDesc", { file: name }) || (isTh ? `ไฟล์ "${name}" จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก` : `The file "${name}" will be permanently deleted and cannot be recovered.`))
+                    : (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก" : "This file will be permanently deleted and cannot be recovered.");
+                })()
+              : (t("trash.deleteBatchConfirmDesc", { count: pendingDeleteTrashIds.length }) || (isTh
+                  ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteTrashIds.length} รายการจะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
+                  : `These ${pendingDeleteTrashIds.length} files will be permanently deleted and cannot be recovered.`))}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

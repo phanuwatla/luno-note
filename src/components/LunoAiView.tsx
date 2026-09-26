@@ -212,6 +212,9 @@ export function WorkspaceNoteIcon({
   className?: string;
 }) {
   const { settings } = useAppSettings();
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
   const pack = settings?.iconPack || "lucide";
   const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
   const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
@@ -242,6 +245,9 @@ export function WorkspaceFolderIcon({
   className?: string;
 }) {
   const { settings } = useAppSettings();
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
   const customFolderIcon = settings?.folderIcons?.[path];
 
   if (customFolderIcon) {
@@ -266,6 +272,9 @@ export function AttachedFileChipIcon({
   className?: string;
 }) {
   const { settings } = useAppSettings();
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
   if (dataUrl) {
     return <img src={dataUrl} alt={fileName} className="h-4 w-4 rounded object-cover shrink-0" />;
   }

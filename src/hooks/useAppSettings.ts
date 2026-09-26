@@ -92,6 +92,73 @@ export function hexToHsl(hex: string): { h: number; s: number; l: number; hslStr
   return { h, s: sPct, l: lPct, hslString: `${h} ${sPct}% ${lPct}%` };
 }
 
+/**
+ * Generates an accessible, harmonized syntax highlighting palette based on any custom accent color.
+ */
+export function getCustomCodeHighlightVars(hex: string, isDark: boolean): {
+  hlTag: string;
+  hlKeyword: string;
+  hlAttr: string;
+  hlString: string;
+  hlNumber: string;
+  hlPunct: string;
+} {
+  const { h, s } = hexToHsl(hex);
+  const isCoolGreen = h >= 80 && h <= 185;
+  const isBlueOrSky = h > 185 && h <= 235;
+  const isPurple = h > 235 && h <= 315;
+
+  if (isDark) {
+    // Dark mode: vibrant, lively and crisp without neon glare (ไม่จืด และไม่แสบตา)
+    // 1. Tag & Keyword: Theme accent with healthy saturation (~70-88%) and comfortable lightness (~64%)
+    const kwSat = Math.min(Math.max(s, 68), 88);
+    const hlKeyword = `hsl(${h} ${kwSat}% 64%)`;
+    const hlTag = hlKeyword;
+
+    // 2. Attribute: Crisp, luminous sky/periwinkle or lavender (stands out cleanly from tag)
+    const attrHue = isCoolGreen ? 208 : isBlueOrSky ? 268 : isPurple ? 195 : 214;
+    const hlAttr = `hsl(${attrHue} 82% 70%)`;
+
+    // 3. String: Fresh, vibrant mint green (or warm golden honey for green accents so they don't blend)
+    const strHue = isCoolGreen ? 38 : 156;
+    const strSat = isCoolGreen ? 88 : 72;
+    const hlString = `hsl(${strHue} ${strSat}% 67%)`;
+
+    // 4. Number: Bright warm peach/amber (or sky for warm tags)
+    const numHue = isCoolGreen ? 22 : isBlueOrSky ? 36 : isPurple ? 38 : (h >= 10 && h <= 45 ? 198 : 36);
+    const hlNumber = `hsl(${numHue} 85% 68%)`;
+
+    // 5. Punctuation: Clean, legible light slate
+    const hlPunct = `hsl(215 25% 68%)`;
+
+    return { hlTag, hlKeyword, hlAttr, hlString, hlNumber, hlPunct };
+  } else {
+    // Light mode: clean, vivid, and bright (ไม่คล้ำ ไม่ทึบ คมชัดอ่านง่าย)
+    // 1. Tag & Keyword: Theme accent in vibrant primary tone (~44% lightness, ~80% sat)
+    const kwSat = Math.min(Math.max(s, 65), 88);
+    const hlKeyword = `hsl(${h} ${kwSat}% 44%)`;
+    const hlTag = hlKeyword;
+
+    // 2. Attribute: Crisp royal blue or vivid violet
+    const attrHue = isCoolGreen ? 218 : isBlueOrSky ? 268 : isPurple ? 210 : 222;
+    const hlAttr = `hsl(${attrHue} 82% 48%)`;
+
+    // 3. String: Fresh, bright leaf emerald (or warm crisp amber for green themes)
+    const strHue = isCoolGreen ? 32 : 152;
+    const strSat = isCoolGreen ? 88 : 76;
+    const hlString = `hsl(${strHue} ${strSat}% 38%)`;
+
+    // 4. Number: Crisp warm orange/amber (or bright blue for warm tags)
+    const numHue = isCoolGreen ? 20 : isBlueOrSky ? 28 : isPurple ? 28 : (h >= 10 && h <= 45 ? 210 : 28);
+    const hlNumber = `hsl(${numHue} 86% 45%)`;
+
+    // 5. Punctuation: Medium clean slate
+    const hlPunct = `hsl(215 22% 52%)`;
+
+    return { hlTag, hlKeyword, hlAttr, hlString, hlNumber, hlPunct };
+  }
+}
+
 export function getThemeLogoFilter(theme: AppTheme = "emerald", customAccentColor?: string): string {
   switch (theme) {
     case "teal":
@@ -172,6 +239,7 @@ export const DEFAULT_TOOLBAR_ORDER: string[] = [
   "table",
   "link",
   "image",
+  "video",
   "qrCode",
   "emoji",
   "audio",
@@ -237,6 +305,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "table",
       "link",
       "image",
+      "video",
       "qrCode",
       "emoji",
       "audio",
@@ -261,6 +330,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "table",
       "link",
       "image",
+      "video",
       "qrCode",
       "emoji",
       "audio",
@@ -301,6 +371,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "footnote",
       "link",
       "image",
+      "video",
       "qrCode",
       "emoji",
       "translator",
@@ -321,6 +392,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "footnote",
       "link",
       "image",
+      "video",
       "qrCode",
       "emoji",
       "translator",
@@ -351,6 +423,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "toggle",
       "link",
       "image",
+      "video",
       "translator",
       "aiAssistant",
       "strike",
@@ -370,6 +443,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "qrCode",
       "emoji",
       "audio",
+      "video",
       "calculator",
       "clock",
       "fixLanguage",
@@ -389,6 +463,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "horizontalRule",
       "link",
       "image",
+      "video",
       "fixLanguage",
       "aiAssistant",
       "fontFamily",
@@ -428,6 +503,7 @@ export const TOOLBAR_PRESETS: ToolbarPreset[] = [
       "qrCode",
       "emoji",
       "audio",
+      "video",
       "calculator",
       "translator",
       "clock",
@@ -640,6 +716,7 @@ export interface AppSettings {
   defaultTemplateTxt: "blank" | "notes" | "todo" | "meeting" | "journal" | "readme" | "daily" | "project" | "study" | "bug";
   defaultTemplateHtml: "blank" | "basic-website" | "landing-page" | "portfolio" | "blog" | "dashboard" | "meeting" | "daily" | "project" | "todo" | "study" | "bug";
   autoFolderIcons: boolean;
+  showFileIcons: boolean;
 
   // Appearance Settings
   interfaceScale: number;
@@ -655,6 +732,7 @@ export interface AppSettings {
   customAccentColor?: string;
 
   // Editor Settings
+  showToolbar: boolean;
   showWordCount: boolean;
   autoPairBrackets: boolean;
   showCodeLineNumbers: boolean;
@@ -662,6 +740,7 @@ export interface AppSettings {
   spellCheck: boolean;
   wrongLanguageSuggestion: boolean;
   smartTypography: boolean;
+  enableSlashCommand: boolean;
   toolbarItemsOrder: string[];
   hiddenToolbarItems: string[];
 
@@ -769,7 +848,7 @@ function detectSystemLanguage(): "th" | "en" {
   return "en";
 }
 
-const DEFAULT_SETTINGS: AppSettings = {
+export const DEFAULT_SETTINGS: AppSettings = {
   editorFontSize: 15,
   sidebarWidth: FIXED_SIDEBAR_WIDTH,
   confirmBeforeDelete: true,
@@ -801,6 +880,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultTemplateTxt: "blank",
   defaultTemplateHtml: "blank",
   autoFolderIcons: true,
+  showFileIcons: true,
 
   interfaceScale: 100,
   iconPack: "lucide",
@@ -814,6 +894,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   accentHeadings: false,
   customAccentColor: "#26A295",
 
+  showToolbar: true,
   showWordCount: true,
   autoPairBrackets: true,
   showCodeLineNumbers: false,
@@ -821,6 +902,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   spellCheck: true,
   wrongLanguageSuggestion: true,
   smartTypography: true,
+  enableSlashCommand: true,
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
@@ -880,6 +962,8 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const tagColorStyle = raw?.tagColorStyle === "accent" ? "accent" : "multicolor";
   const accentHeadings = raw?.accentHeadings === true;
 
+  const showToolbar = raw?.showToolbar !== false;
+  const showFileIcons = raw?.showFileIcons !== false;
   const showWordCount = raw?.showWordCount !== false;
   const autoPairBrackets = raw?.autoPairBrackets !== false;
   const showCodeLineNumbers = raw?.showCodeLineNumbers === true;
@@ -1016,6 +1100,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     defaultTemplateTxt,
     defaultTemplateHtml,
     autoFolderIcons: raw?.autoFolderIcons !== false,
+    showFileIcons,
 
     interfaceScale,
     appLayout,
@@ -1030,6 +1115,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     accentHeadings,
     customAccentColor,
 
+    showToolbar,
     showWordCount,
     autoPairBrackets,
     showCodeLineNumbers,
@@ -1037,6 +1123,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     spellCheck: raw?.spellCheck !== undefined ? Boolean(raw.spellCheck) : DEFAULT_SETTINGS.spellCheck,
     wrongLanguageSuggestion: raw?.wrongLanguageSuggestion !== undefined ? Boolean(raw.wrongLanguageSuggestion) : DEFAULT_SETTINGS.wrongLanguageSuggestion,
     smartTypography: raw?.smartTypography !== undefined ? Boolean(raw.smartTypography) : DEFAULT_SETTINGS.smartTypography,
+    enableSlashCommand: raw?.enableSlashCommand !== undefined ? Boolean(raw.enableSlashCommand) : DEFAULT_SETTINGS.enableSlashCommand,
     toolbarItemsOrder,
     hiddenToolbarItems,
     geminiApiKey,
@@ -1433,7 +1520,11 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const hex = settings.customAccentColor || "#26A295";
       document.documentElement.setAttribute("data-custom-accent-color", hex);
       const { h, s, l, hslString } = hexToHsl(hex);
-      const isDark = document.documentElement.classList.contains("dark");
+      const isDark =
+        settings.colorScheme === "dark" ||
+        (settings.colorScheme === "system" && typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) ||
+        (typeof document !== "undefined" && document.documentElement.classList.contains("dark"));
+
       const effectiveHsl = isDark
         ? `${h} ${Math.min(s + 5, 100)}% ${Math.min(Math.max(l, 55), 70)}%`
         : hslString;
@@ -1443,8 +1534,14 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       document.documentElement.style.setProperty("--ring", effectiveHsl);
       document.documentElement.style.setProperty("--sidebar-primary", effectiveHsl);
       document.documentElement.style.setProperty("--sidebar-ring", effectiveHsl);
-      document.documentElement.style.setProperty("--hl-tag", hex);
-      document.documentElement.style.setProperty("--hl-keyword", hex);
+
+      const hl = getCustomCodeHighlightVars(hex, isDark);
+      document.documentElement.style.setProperty("--hl-tag", hl.hlTag);
+      document.documentElement.style.setProperty("--hl-keyword", hl.hlKeyword);
+      document.documentElement.style.setProperty("--hl-attr", hl.hlAttr);
+      document.documentElement.style.setProperty("--hl-string", hl.hlString);
+      document.documentElement.style.setProperty("--hl-number", hl.hlNumber);
+      document.documentElement.style.setProperty("--hl-punct", hl.hlPunct);
     } else {
       document.documentElement.removeAttribute("data-custom-accent-color");
       document.documentElement.style.removeProperty("--primary");
@@ -1454,6 +1551,10 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       document.documentElement.style.removeProperty("--sidebar-ring");
       document.documentElement.style.removeProperty("--hl-tag");
       document.documentElement.style.removeProperty("--hl-keyword");
+      document.documentElement.style.removeProperty("--hl-attr");
+      document.documentElement.style.removeProperty("--hl-string");
+      document.documentElement.style.removeProperty("--hl-number");
+      document.documentElement.style.removeProperty("--hl-punct");
     }
   }, [settings.theme, settings.customAccentColor, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily, settings.colorScheme]);
 

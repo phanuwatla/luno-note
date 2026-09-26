@@ -9,7 +9,7 @@ export interface AudioOptions {
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     audio: {
-      setAudio: (options: { src: string; title?: string }) => ReturnType;
+      setAudio: (options: { src: string; title?: string; "data-relative-src"?: string }) => ReturnType;
     };
   }
 }
@@ -37,6 +37,16 @@ export const AudioExtension = Node.create<AudioOptions>({
         renderHTML: (attributes) => {
           if (!attributes.src) return {};
           return { src: attributes.src };
+        },
+      },
+      "data-relative-src": {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-relative-src") || element.getAttribute("src"),
+        renderHTML: (attributes) => {
+          if (!attributes["data-relative-src"]) return {};
+          return {
+            "data-relative-src": attributes["data-relative-src"],
+          };
         },
       },
       title: {

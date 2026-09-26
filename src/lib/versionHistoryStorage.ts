@@ -14,6 +14,7 @@ import {
   isMarkdownNote,
 } from "./frontmatter";
 import { isEncryptedNote } from "./noteCrypto";
+import { formatDate } from "./dateTimeFormatter";
 
 export interface NoteVersionSnapshot {
   id: string;
@@ -518,4 +519,93 @@ export async function loadWorkspaceHistoryFromDisk(
 
   return null;
 }
+
+export interface HistoryDateGroup {
+  id: string;
+  title: string;
+  items: NoteVersionSnapshot[];
+}
+
+/**
+ * Groups version snapshots chronologically into categorized subheadings:
+ * - Today (วันนี้)
+ * - Yesterday (เมื่อวาน)
+ * - Specific dates within past 7 days (formatted with user's dateFormat e.g. "2026-09-19" or "19/09/2026")
+ * - Last week (สัปดาห์ที่แล้ว)
+ * - Last month (เดือนที่แล้ว)
+ * - Older (เก่ากว่านี้)
+ */
+export function groupVersionSnapshots(
+  snapshots: NoteVersionSnapshot[],
+  dateFormat: string = "YYYY-MM-DD",
+  language: string = "en",
+  translations?: {
+    today?: string;
+    yesterday?: string;
+    lastWeek?: string;
+    lastMonth?: string;
+    older?: string;
+  }
+): HistoryDateGroup[] {
+  if (!snapshots || snapshots.length === 0) return [];
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 86400000;
+  const sevenDaysAgo = todayStart - 6 * 86400000;
+  const fourteenDaysAgo = todayStart - 13 * 86400000;
+  const thirtyDaysAgo = todayStart - 29 * 86400000;
+
+  const isTh = language === "th";
+  const labelToday = translations?.today || (isTh ? "วันนี้" : "Today");
+  const labelYesterday = translations?.yesterday || (isTh ? "เมื่อวาน" : "Yesterday");
+  const labelLastWeek = translations?.lastWeek || (isTh ? "สัปดาห์ที่แล้ว" : "Last week");
+  const labelLastMonth = translations?.lastMonth || (isTh ? "เดือนที่แล้ว" : "Last month");
+  const labelOlder = translations?.older || (isTh ? "เก่ากว่านี้" : "Older");
+
+  const groupMap = new Map<string, HistoryDateGroup>();
+  const groupOrder: string[] = [];
+
+  for (const item of snapshots) {
+    const ts = item.timestamp || 0;
+    let groupId: string;
+    let groupTitle: string;
+
+    if (ts >= todayStart) {
+      groupId = "today";
+      groupTitle = labelToday;
+    } else if (ts >= yesterdayStart) {
+      groupId = "yesterday";
+      groupTitle = labelYesterday;
+    } else if (ts >= sevenDaysAgo) {
+      const d = new Date(ts);
+      const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      groupId = `date_${dayKey}`;
+      groupTitle = formatDate(ts, dateFormat, language);
+    } else if (ts >= fourteenDaysAgo) {
+      groupId = "lastWeek";
+      groupTitle = labelLastWeek;
+    } else if (ts >= thirtyDaysAgo) {
+      groupId = "lastMonth";
+      groupTitle = labelLastMonth;
+    } else {
+      groupId = "older";
+      groupTitle = labelOlder;
+    }
+
+    if (!groupMap.has(groupId)) {
+      groupMap.set(groupId, {
+        id: groupId,
+        title: groupTitle,
+        items: [],
+      });
+      groupOrder.push(groupId);
+    }
+
+    groupMap.get(groupId)!.items.push(item);
+  }
+
+  return groupOrder.map((id) => groupMap.get(id)!);
+}
+
 

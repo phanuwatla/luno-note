@@ -584,15 +584,17 @@ export default function FavoritesTabView({
                         <div>
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                              {note.icon ? (
-                                <span className="shrink-0 flex items-center justify-center">
-                                  {renderCustomIcon(note.icon, "h-4 w-4", { color: note.iconColor })}
-                                </span>
-                              ) : (() => {
-                                const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType, note.contentFormat);
-                                const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
-                                return <IconComp className="h-4 w-4 shrink-0 text-primary" />;
-                              })()}
+                              {settings?.showFileIcons !== false && (
+                                note.icon ? (
+                                  <span className="shrink-0 flex items-center justify-center">
+                                    {renderCustomIcon(note.icon, "h-4 w-4", { color: note.iconColor })}
+                                  </span>
+                                ) : (() => {
+                                  const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType, note.contentFormat);
+                                  const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
+                                  return <IconComp className="h-4 w-4 shrink-0 text-primary" />;
+                                })()
+                              )}
                               <span className="font-semibold text-xs text-foreground group-hover:text-primary transition-colors truncate">
                                 {note.fileName || note.title || t("editor.untitled")}
                               </span>
@@ -652,7 +654,7 @@ export default function FavoritesTabView({
                               ))
                             ) : note.folderPath ? (
                               <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
-                                <Folder className="h-3 w-3 shrink-0" />
+                                {settings?.showFileIcons !== false && <Folder className="h-3 w-3 shrink-0" />}
                                 <span className="truncate">{note.folderPath}</span>
                               </span>
                             ) : null}

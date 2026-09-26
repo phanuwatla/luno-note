@@ -20,6 +20,7 @@ import { RelationsView } from "@/components/RelationsView";
 import FavoritesTabView from "@/components/FavoritesTabView";
 import TagsTabView from "@/components/TagsTabView";
 import { WorkspaceLauncher } from "@/components/WorkspaceLauncher";
+import GlobalVideoPip from "@/components/editor/GlobalVideoPip";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
@@ -43,7 +44,7 @@ import { encryptNoteContent, decryptNoteContent, isEncryptedNote, getRemainingLo
 import { clearNoteVersionHistory } from "@/lib/versionHistoryStorage";
 import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, replaceFirstH1InMarkdown, type NoteTemplateType } from "@/lib/templates";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
-import { clearNoteEditorState } from "@/components/Editor";
+import { clearNoteEditorState, noteEditorStateMap } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { setCustomFontWorkspaceHandle, loadCustomFonts } from "@/lib/customFontStore";
@@ -239,7 +240,7 @@ export default function Index() {
     }
   }, [autoCleanExpired, settings.autoEmptyTrash, settings.trashRetentionDays]);
 
-  const [webTabs, setWebTabs] = useState<Record<string, { id: string; url: string; title: string }>>(() => {
+  const [webTabs, setWebTabs] = useState<Record<string, { id: string; url: string; title: string; displayUrl?: string; filePath?: string; faviconUrl?: string }>>(() => {
     try {
       const raw = localStorage.getItem("luno-web-tabs-state");
       if (raw) return JSON.parse(raw);
@@ -268,7 +269,7 @@ export default function Index() {
           faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(u.hostname)}&sz=32`;
         }
       } catch {
-        if (!displayTitle) displayTitle = url;
+        if (!displayTitle) displayTitle = url.startsWith("data:") ? "HTML Preview" : url;
       }
       return {
         id,
@@ -317,13 +318,27 @@ export default function Index() {
   useEffect(() => {
     if (activeTabId && !isSystemOrWebTab(activeTabId)) {
       setLastActiveNoteId(activeTabId);
+    } else if (lastActiveNoteId && !openTabIds.includes(lastActiveNoteId)) {
+      const fallbackId = openTabIds.find((id) => !isSystemOrWebTab(id)) ?? null;
+      setLastActiveNoteId(fallbackId);
     }
-  }, [activeTabId]);
+  }, [activeTabId, openTabIds, lastActiveNoteId]);
 
-  const activeEditorNote =
-    isSystemOrWebTab(activeTabId || "")
-      ? (notes.find((n) => n.id === lastActiveNoteId) ?? notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id))) ?? notes[0] ?? null)
-      : (notes.find((n) => n.id === activeTabId) ?? null);
+  const activeEditorNote = useMemo(() => {
+    if (isSystemOrWebTab(activeTabId || "")) {
+      const validLast = lastActiveNoteId && openTabIds.includes(lastActiveNoteId) && !isSystemOrWebTab(lastActiveNoteId)
+        ? notes.find((n) => n.id === lastActiveNoteId)
+        : null;
+      if (validLast) return validLast;
+
+      const fallbackId = openTabIds.find((id) => !isSystemOrWebTab(id));
+      if (fallbackId) {
+        return notes.find((n) => n.id === fallbackId) ?? null;
+      }
+      return null;
+    }
+    return notes.find((n) => n.id === activeTabId) ?? null;
+  }, [activeTabId, lastActiveNoteId, openTabIds, notes]);
 
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -341,8 +356,27 @@ export default function Index() {
   useEffect(() => {
     if (splitTabId && !isSystemOrWebTab(splitTabId)) {
       setLastActiveSplitNoteId(splitTabId);
+    } else if (lastActiveSplitNoteId && !openTabIds.includes(lastActiveSplitNoteId)) {
+      const fallbackId = openTabIds.find((id) => !isSystemOrWebTab(id)) ?? null;
+      setLastActiveSplitNoteId(fallbackId);
     }
-  }, [splitTabId]);
+  }, [splitTabId, openTabIds, lastActiveSplitNoteId]);
+
+  const splitEditorNote = useMemo(() => {
+    if (isSystemOrWebTab(splitTabId || "")) {
+      const validLast = lastActiveSplitNoteId && openTabIds.includes(lastActiveSplitNoteId) && !isSystemOrWebTab(lastActiveSplitNoteId)
+        ? notes.find((n) => n.id === lastActiveSplitNoteId)
+        : null;
+      if (validLast) return validLast;
+
+      const fallbackId = openTabIds.find((id) => !isSystemOrWebTab(id));
+      if (fallbackId) {
+        return notes.find((n) => n.id === fallbackId) ?? null;
+      }
+      return null;
+    }
+    return notes.find((n) => n.id === splitTabId) ?? null;
+  }, [splitTabId, lastActiveSplitNoteId, openTabIds, notes]);
 
   // Automatically close tabs that cannot be opened in compact (Activity Bar) layout when switched
   useEffect(() => {
@@ -379,10 +413,6 @@ export default function Index() {
       ? getWebTabNote(splitTabId)
       : (notes.find((n) => n.id === splitTabId) ?? null);
 
-  const splitEditorNote =
-    isSystemOrWebTab(splitTabId || "")
-      ? (notes.find((n) => n.id === lastActiveSplitNoteId) ?? notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id) && id !== activeTabId)) ?? notes[0] ?? null)
-      : (notes.find((n) => n.id === splitTabId) ?? null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>(() => {
@@ -459,22 +489,57 @@ export default function Index() {
   }, [openTab]);
 
   const handleOpenWebTab = useCallback(
-    (rawUrl: string, initialTitle?: string) => {
+    (rawUrl: string, initialTitle?: string, customDisplayUrl?: string, filePath?: string) => {
       const trimmed = (rawUrl || "").trim();
       if (!trimmed) return;
-      const fullUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-      const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const tabId = `web:${uniqueSuffix}`;
+      const isSpecialScheme = /^(https?|blob|data|file):/i.test(trimmed);
+      const fullUrl = isSpecialScheme ? trimmed : `https://${trimmed}`;
 
       let fallbackTitle = initialTitle;
       if (!fallbackTitle) {
-        try {
-          const u = new URL(fullUrl);
-          fallbackTitle = u.hostname.replace(/^www\./, "");
-        } catch {
-          fallbackTitle = fullUrl;
+        if (fullUrl.startsWith("data:")) {
+          fallbackTitle = "HTML Preview";
+        } else {
+          try {
+            const u = new URL(fullUrl);
+            fallbackTitle = u.hostname.replace(/^www\./, "");
+          } catch {
+            fallbackTitle = fullUrl;
+          }
         }
       }
+
+      let displayUrl = customDisplayUrl;
+      if (displayUrl && !displayUrl.startsWith("http://") && !displayUrl.startsWith("https://") && !displayUrl.startsWith("file:///") && (fullUrl.startsWith("data:") || displayUrl.endsWith(".html") || displayUrl.endsWith(".htm"))) {
+        displayUrl = `file:///${displayUrl.replace(/^[/\\]+/, "").replace(/\\/g, "/")}`;
+      } else if (!displayUrl && fullUrl.startsWith("data:")) {
+        const safeFile = `${(fallbackTitle || "index.html").trim().replace(/\.html$/i, "")}.html`;
+        displayUrl = `file:///${safeFile.replace(/^[/\\]+/, "").replace(/\\/g, "/")}`;
+      }
+
+      // If an existing preview tab for this HTML preview exists, update and focus it
+      if (fullUrl.startsWith("data:") && fallbackTitle) {
+        const existingTabEntry = Object.entries(webTabs).find(
+          ([_, tab]) => tab.title === fallbackTitle && tab.url.startsWith("data:")
+        );
+        if (existingTabEntry) {
+          const [existingId] = existingTabEntry;
+          setWebTabs((prev) => ({
+            ...prev,
+            [existingId]: {
+              ...prev[existingId],
+              url: fullUrl,
+              displayUrl,
+              filePath: filePath || prev[existingId]?.filePath,
+            },
+          }));
+          openTab(existingId);
+          return;
+        }
+      }
+
+      const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const tabId = `web:${uniqueSuffix}`;
 
       setWebTabs((prev) => ({
         ...prev,
@@ -482,12 +547,14 @@ export default function Index() {
           id: tabId,
           url: fullUrl,
           title: fallbackTitle || t("webViewer.title") || "Web Viewer",
+          displayUrl,
+          filePath,
         },
       }));
 
       openTab(tabId);
     },
-    [openTab, t]
+    [openTab, t, webTabs]
   );
 
   const handleWebTabUrlChange = useCallback((tabId: string, newUrl: string) => {
@@ -498,9 +565,16 @@ export default function Index() {
           [tabId]: { id: tabId, url: newUrl, title: newUrl },
         };
       }
+      const isNavigatingAwayFromPreview =
+        prev[tabId].url.startsWith("data:") && !newUrl.startsWith("data:");
       return {
         ...prev,
-        [tabId]: { ...prev[tabId], url: newUrl },
+        [tabId]: {
+          ...prev[tabId],
+          url: newUrl,
+          displayUrl: isNavigatingAwayFromPreview ? undefined : prev[tabId].displayUrl,
+          filePath: isNavigatingAwayFromPreview ? undefined : prev[tabId].filePath,
+        },
       };
     });
   }, []);
@@ -514,8 +588,8 @@ export default function Index() {
         [tabId]: {
           id: tabId,
           url: existing?.url || (tabId.startsWith("web:http") ? tabId.replace(/^web:/, "") : "https://www.google.com"),
+          ...existing,
           title: newTitle,
-          faviconUrl: existing?.faviconUrl,
         },
       };
     });
@@ -531,6 +605,7 @@ export default function Index() {
         [tabId]: {
           id: tabId,
           url: existing?.url || (tabId.startsWith("web:http") ? tabId.replace(/^web:/, "") : "https://www.google.com"),
+          ...existing,
           title: existing?.title || "Web Viewer",
           faviconUrl,
         },
@@ -540,21 +615,90 @@ export default function Index() {
 
   const handleInsertLinkToActiveNote = useCallback(
     (url: string, title?: string) => {
+      const cleanUrl = (url || "").trim();
+      if (!cleanUrl) return;
+      const cleanTitle = (title || "").trim();
+      const linkMd = cleanTitle && cleanTitle !== cleanUrl ? `[${cleanTitle}](${cleanUrl})` : cleanUrl;
+
+      // Smart resolution of target note:
+      // 1. If split pane is currently showing a note, that's the visible companion note!
+      // 2. If main active tab is currently a note (and web viewer is in split pane)
+      // 3. Last active note the user was working on
+      // 4. Any currently open note in tabs
+      // 5. First note in workspace
       const targetNote =
-        notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ??
-        notes[0];
-      if (targetNote) {
-        const linkMd = title ? `[${title}](${url})` : url;
-        const existing = targetNote.content || "";
-        const updated = existing.trim() ? `${existing}\n\n${linkMd}` : linkMd;
-        updateNote(targetNote.id, { content: updated });
+        (splitTabId && !isSystemOrWebTab(splitTabId) ? notes.find((n) => n.id === splitTabId) : null) ??
+        (activeTabId && !isSystemOrWebTab(activeTabId) ? notes.find((n) => n.id === activeTabId) : null) ??
+        (lastActiveNoteId && !isSystemOrWebTab(lastActiveNoteId) ? notes.find((n) => n.id === lastActiveNoteId) : null) ??
+        notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id))) ??
+        notes[0] ??
+        null;
+
+      if (!targetNote) {
+        // If no note exists in workspace, create a new note with the web link
+        const newNote = createNote();
+        if (newNote?.id) {
+          const newTitle = cleanTitle || "Web Note";
+          updateNote(newNote.id, { title: newTitle, content: linkMd });
+        }
         toast({
-          title: t("webViewer.insertToNote") || "Link Inserted",
-          description: t("webViewer.linkInserted") || "Inserted link into note",
+          title: t("webViewer.insertToNote") || "Insert link to active note",
+          description: t("webViewer.linkInserted") || "Created new note with link",
         });
+        return;
       }
+
+      // 1. Dispatch custom event so any active mounted Editor instances insert directly into ProseMirror state
+      let wasHandled = false;
+      window.dispatchEvent(
+        new CustomEvent("luno:insert-to-active-editor", {
+          detail: {
+            noteId: targetNote.id,
+            text: linkMd,
+            url: cleanUrl,
+            title: cleanTitle,
+            onHandled: () => {
+              wasHandled = true;
+            },
+          },
+        })
+      );
+
+      // 2. If no mounted editor handled it (e.g. note was in a background tab), update note in state and disk
+      if (!wasHandled) {
+        const existing = (targetNote.content || "").trimEnd();
+        const updated = existing ? `${existing}\n\n${linkMd}` : linkMd;
+        updateNote(targetNote.id, { content: updated });
+
+        // Clear cached ProseMirror state so unmounted editor will re-parse updated markdown fresh
+        noteEditorStateMap.delete(targetNote.id);
+
+        // Persist to disk if running in Electron with workspace opened
+        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && targetNote.fileName && isMarkdownNote(targetNote)) {
+          void (async () => {
+            try {
+              const saved = await electronAPI.getSavedWorkspace();
+              if (saved?.folderPath) {
+                const fullPath = targetNote.folderPath
+                  ? `${saved.folderPath}/${targetNote.folderPath}/${targetNote.fileName}`
+                  : `${saved.folderPath}/${targetNote.fileName}`;
+                await electronAPI.writeFileContent({ fullPath, content: updated });
+              }
+            } catch (err) {
+              console.warn("Failed persisting inserted link to disk:", err);
+            }
+          })();
+        }
+      }
+
+      const noteDisplayName = targetNote.fileName || targetNote.title || "Note";
+      toast({
+        title: t("webViewer.insertToNote") || "Insert link to active note",
+        description: `${t("webViewer.linkInserted") || "Link inserted into note"} (${noteDisplayName})`,
+      });
     },
-    [notes, openTabIds, updateNote, t]
+    [notes, splitTabId, activeTabId, lastActiveNoteId, openTabIds, updateNote, createNote, t]
   );
 
   const handleUpdateNote = useCallback(
@@ -775,7 +919,7 @@ export default function Index() {
 
     toast({
       title: t("pinLock.lockSuccess") || "Note locked successfully",
-      description: target.fileName || target.title || "",
+      description: target.fileName || target.title || (settings.language === "th" ? "ตั้งรหัส PIN และล็อคโน้ตเรียบร้อยแล้ว" : "Note locked with PIN"),
     });
   }, [t, updateNote]);
 
@@ -829,7 +973,7 @@ export default function Index() {
 
     toast({
       title: t("pinLock.removeLockSuccess") || "PIN lock removed",
-      description: target.fileName || target.title || "",
+      description: target.fileName || target.title || (settings.language === "th" ? "ปลดล็อคและถอดรหัส PIN เรียบร้อยแล้ว" : "PIN protection removed from note"),
     });
   }, [t, updateNote]);
 
@@ -888,7 +1032,7 @@ export default function Index() {
 
     toast({
       title: t("pinLock.changePinSuccess") || "PIN updated successfully",
-      description: target.fileName || target.title || "",
+      description: target.fileName || target.title || (settings.language === "th" ? "เปลี่ยนรหัส PIN เรียบร้อยแล้ว" : "PIN updated successfully"),
     });
   }, [t, updateNote]);
 
@@ -981,7 +1125,7 @@ export default function Index() {
 
     toast({
       title: t("pinLock.noteRelocked") || "Note locked",
-      description: target?.fileName || target?.title || "",
+      description: target?.fileName || target?.title || (settings.language === "th" ? "ล็อคโน้ตอีกครั้งเรียบร้อยแล้ว" : "Note relocked"),
     });
   }, [t, updateNote]);
 
@@ -2435,6 +2579,137 @@ export default function Index() {
     } catch (error) {
       console.error("Move file failed", error);
       clearDeletedRelativePath(oldRelPath);
+    }
+  };
+
+  const moveFilesToFolder = async (targetNotes: Note[], targetFolderPath: string) => {
+    const validNotes = targetNotes.filter(
+      (n) => n.fileName && (n.folderPath || "") !== targetFolderPath
+    );
+    if (validNotes.length === 0) return;
+
+    if (validNotes.length === 1) {
+      await moveFileToFolder(validNotes[0], targetFolderPath);
+      return;
+    }
+
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const movedIds = new Set<string>();
+          for (const note of validNotes) {
+            const sourcePath = note.folderPath || "";
+            const oldRelPath = getRelativePath(sourcePath, note.fileName!);
+            trackDeletedRelativePath(oldRelPath);
+
+            const oldFullPath = sourcePath
+              ? `${saved.folderPath}/${sourcePath}/${note.fileName}`
+              : `${saved.folderPath}/${note.fileName}`;
+            const newFullPath = targetFolderPath
+              ? `${saved.folderPath}/${targetFolderPath}/${note.fileName}`
+              : `${saved.folderPath}/${note.fileName}`;
+
+            const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
+            if (ok) {
+              movedIds.add(note.id);
+            }
+          }
+
+          if (movedIds.size > 0) {
+            const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
+            setOpenedFolderPaths(folderPaths);
+
+            const currentNotes = notesRef.current;
+            const existingByPath = new Map(
+              currentNotes
+                .filter((n) => n.fileName)
+                .map((n) => [n.folderPath ? `${n.folderPath}/${n.fileName}` : (n.fileName as string), n] as const)
+            );
+
+            const nextItems = entries.map((e: any) => {
+              const relPath = e.relativePath;
+              const existing = existingByPath.get(relPath);
+              const movedNote = validNotes.find(
+                (vn) =>
+                  movedIds.has(vn.id) &&
+                  relPath === (targetFolderPath ? `${targetFolderPath}/${vn.fileName}` : vn.fileName)
+              );
+              return mapTreeEntryToItem(e, existing, movedNote ? movedNote.id : undefined);
+            });
+
+            replaceNotes(nextItems);
+            toast({
+              title: t("sidebar.filesMovedTitle") || "Files Moved",
+              description: t("sidebar.filesMoved", { count: movedIds.size }) || `Moved ${movedIds.size} files`,
+              duration: 2500,
+            });
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Electron move files failed", error);
+      }
+    }
+
+    if (openedRootDirHandle) {
+      try {
+        const targetDir = await getDirectoryHandleByPath(targetFolderPath);
+        if (!targetDir) return;
+
+        let movedCount = 0;
+        for (const note of validNotes) {
+          const sourcePath = note.folderPath || "";
+          const oldRelPath = getRelativePath(sourcePath, note.fileName!);
+          trackDeletedRelativePath(oldRelPath);
+
+          const sourceDir = await getDirectoryHandleByPath(sourcePath);
+          if (!sourceDir) continue;
+
+          const sourceHandle = await sourceDir.getFileHandle(note.fileName!);
+          const targetName = await resolveUniqueFileName(targetDir, note.fileName!);
+          const newRelPath = getRelativePath(targetFolderPath, targetName);
+          clearDeletedRelativePath(newRelPath);
+
+          await copyFileHandleToDirectory(sourceHandle, targetDir, targetName);
+          const targetHandle = await targetDir.getFileHandle(targetName);
+          await setStoredFileHandle(note.id, targetHandle);
+          updateNote(note.id, {
+            folderPath: targetFolderPath,
+            fileName: targetName,
+          });
+
+          await sourceDir.removeEntry(note.fileName!);
+          movedCount++;
+        }
+
+        if (movedCount > 0) {
+          await syncFolderFromDisk(openedRootDirHandle);
+          toast({
+            title: t("sidebar.filesMovedTitle") || "Files Moved",
+            description: t("sidebar.filesMoved", { count: movedCount }) || `Moved ${movedCount} files`,
+            duration: 2500,
+          });
+        }
+      } catch (error) {
+        console.error("Move files failed", error);
+      }
+      return;
+    }
+
+    // Fallback for mock/in-memory notes
+    let count = 0;
+    for (const note of validNotes) {
+      updateNote(note.id, { folderPath: targetFolderPath });
+      count++;
+    }
+    if (count > 0) {
+      toast({
+        title: t("sidebar.filesMovedTitle") || "Files Moved",
+        description: t("sidebar.filesMoved", { count }) || `Moved ${count} files`,
+        duration: 2500,
+      });
     }
   };
 
@@ -3979,7 +4254,18 @@ export default function Index() {
 
   const handleCloseTab = useCallback(
     (id: string) => {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
+      }
       clearNoteEditorHistory(id);
+      if (lastActiveNoteId === id) {
+        const nextValid = openTabIds.find((t) => t !== id && !isSystemOrWebTab(t)) ?? null;
+        setLastActiveNoteId(nextValid);
+      }
+      if (lastActiveSplitNoteId === id) {
+        const nextValid = openTabIds.find((t) => t !== id && !isSystemOrWebTab(t)) ?? null;
+        setLastActiveSplitNoteId(nextValid);
+      }
       closeTab(id, notes.map((n) => n.id));
       if (id.startsWith("web:")) {
         setWebTabs((prev) => {
@@ -3989,15 +4275,24 @@ export default function Index() {
         });
       }
     },
-    [closeTab, notes]
+    [closeTab, notes, lastActiveNoteId, lastActiveSplitNoteId, openTabIds]
   );
 
   const handleCloseOtherTabs = useCallback(
     (keepId: string) => {
       const tabsToClose = openTabIds.filter((id) => id !== keepId);
       tabsToClose.forEach((id) => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
+        }
         clearNoteEditorHistory(id);
       });
+      if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
+        setLastActiveNoteId(!isSystemOrWebTab(keepId) ? keepId : null);
+      }
+      if (lastActiveSplitNoteId && tabsToClose.includes(lastActiveSplitNoteId)) {
+        setLastActiveSplitNoteId(!isSystemOrWebTab(keepId) ? keepId : null);
+      }
       closeOtherTabs(keepId);
       if (tabsToClose.some((id) => id.startsWith("web:"))) {
         setWebTabs((prev) => {
@@ -4009,13 +4304,18 @@ export default function Index() {
         });
       }
     },
-    [openTabIds, closeOtherTabs]
+    [openTabIds, closeOtherTabs, lastActiveNoteId, lastActiveSplitNoteId]
   );
 
   const handleCloseAllTabs = useCallback(() => {
     openTabIds.forEach((id) => {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
+      }
       clearNoteEditorHistory(id);
     });
+    setLastActiveNoteId(null);
+    setLastActiveSplitNoteId(null);
     closeAllTabs();
     setWebTabs({});
   }, [openTabIds, closeAllTabs]);
@@ -4026,8 +4326,19 @@ export default function Index() {
       if (idx === -1) return;
       const tabsToClose = openTabIds.slice(idx + 1);
       tabsToClose.forEach((id) => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
+        }
         clearNoteEditorHistory(id);
       });
+      if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
+        const remaining = openTabIds.slice(0, idx + 1).filter((t) => !isSystemOrWebTab(t));
+        setLastActiveNoteId(remaining[remaining.length - 1] ?? null);
+      }
+      if (lastActiveSplitNoteId && tabsToClose.includes(lastActiveSplitNoteId)) {
+        const remaining = openTabIds.slice(0, idx + 1).filter((t) => !isSystemOrWebTab(t));
+        setLastActiveSplitNoteId(remaining[remaining.length - 1] ?? null);
+      }
       closeTabsToRight(targetId);
       if (tabsToClose.some((id) => id.startsWith("web:"))) {
         setWebTabs((prev) => {
@@ -4039,7 +4350,7 @@ export default function Index() {
         });
       }
     },
-    [openTabIds, closeTabsToRight]
+    [openTabIds, closeTabsToRight, lastActiveNoteId, lastActiveSplitNoteId]
   );
 
   const handleDuplicateTab = useCallback(
@@ -4596,6 +4907,7 @@ export default function Index() {
           onRenameFile={renameFileInFolder}
           onRenameFolder={renameFolderInFolder}
           onMoveFile={moveFileToFolder}
+          onMoveFiles={moveFilesToFolder}
           onMoveFolder={moveFolderToFolder}
           onDeleteFiles={deleteFilesInFolder}
           canPaste={Boolean(clipboardItem)}
@@ -4850,6 +5162,9 @@ export default function Index() {
                         <WebViewerView
                           tabId={webId}
                           initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
+                          title={webTabs[webId]?.title}
+                          displayUrl={webTabs[webId]?.displayUrl}
+                          filePath={webTabs[webId]?.filePath}
                           onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
                           onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
                           onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
@@ -5077,6 +5392,9 @@ export default function Index() {
                     <WebViewerView
                       tabId={splitTabId}
                       initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
+                      title={splitTabId ? webTabs[splitTabId]?.title : undefined}
+                      displayUrl={splitTabId ? webTabs[splitTabId]?.displayUrl : undefined}
+                      filePath={splitTabId ? webTabs[splitTabId]?.filePath : undefined}
                       onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
                       onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
                       onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
@@ -5352,6 +5670,9 @@ export default function Index() {
                       <WebViewerView
                         tabId={webId}
                         initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
+                        title={webTabs[webId]?.title}
+                        displayUrl={webTabs[webId]?.displayUrl}
+                        filePath={webTabs[webId]?.filePath}
                         onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
                         onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
                         onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
@@ -5413,6 +5734,9 @@ export default function Index() {
         onConfirmRemovePin={handleConfirmRemovePin}
         onConfirmChangePin={handleConfirmChangePin}
       />
+
+      {/* Global In-App Video Picture-in-Picture Player (Floats across all tabs/workspaces) */}
+      <GlobalVideoPip onNavigateToNote={(noteId) => openTab(noteId)} />
     </div>
   );
 }

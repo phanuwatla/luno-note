@@ -42,6 +42,12 @@ function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
   const pack = settings?.iconPack || "lucide";
   const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
   if (note.fileType === "web-viewer") return <Globe className={cls} />;
+  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
+    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
+  }
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
   const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
   const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
   const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
@@ -63,16 +69,22 @@ function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
 
 function MarkdownIndicator({ active, className = "" }: { active: boolean; className?: string }) {
   return (
-    <span
-      className={`flex shrink-0 items-center justify-end gap-[1px] text-[10px] font-bold leading-none select-none cursor-default ${
-        active ? "text-primary opacity-90" : "text-muted-foreground/70"
-      } ${className}`}
-      title="Markdown"
-      aria-label="Markdown"
-    >
-      <span>M</span>
-      <ArrowDown className="h-2.5 w-2.5 shrink-0 stroke-[2.5]" />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`flex shrink-0 items-center justify-end gap-[1px] text-[10px] font-bold leading-none select-none cursor-default ${
+            active ? "text-primary opacity-90" : "text-muted-foreground/70"
+          } ${className}`}
+          aria-label="Markdown"
+        >
+          <span>M</span>
+          <ArrowDown className="h-2.5 w-2.5 shrink-0 stroke-[2.5]" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        Markdown
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -251,12 +263,14 @@ function BreadcrumbTreeView({
           ) : (
             <ChevRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          {customFolderIcon ? (
-            renderCustomIcon(customFolderIcon.icon, "h-3.5 w-3.5 shrink-0", { color: customFolderIcon.color })
-          ) : isOpen ? (
-            <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-          ) : (
-            <FolderIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          {settings.showFileIcons !== false && (
+            customFolderIcon ? (
+              renderCustomIcon(customFolderIcon.icon, "h-3.5 w-3.5 shrink-0", { color: customFolderIcon.color })
+            ) : isOpen ? (
+              <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+            ) : (
+              <FolderIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            )
           )}
           <span className="truncate flex-1 text-left font-semibold text-foreground/90">{node.name}</span>
           {hasContent && (
@@ -345,13 +359,15 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                         type="button"
                         className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer transition-colors outline-none shrink-0"
                       >
-                        {isCloudWorkspace || rootFolderName === "Google Drive" ? (
-                          <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
-                        ) : (
-                          (() => {
-                            const HomeIcon = getToolbarIcon("home", settings.iconPack);
-                            return <HomeIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
-                          })()
+                        {settings.showFileIcons !== false && (
+                          isCloudWorkspace || rootFolderName === "Google Drive" ? (
+                            <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            (() => {
+                              const HomeIcon = getToolbarIcon("home", settings.iconPack);
+                              return <HomeIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
+                            })()
+                          )
                         )}
                         {rootFolderName && <span className="text-muted-foreground/90 font-normal truncate max-w-[100px]">{rootFolderName}</span>}
                       </button>

@@ -15,6 +15,8 @@ import {
   Copy,
   ArrowRightToLine,
   Layers,
+  Folder,
+  Link as LinkIcon,
 } from "lucide-react";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import type { Note } from "@/hooks/useNotes";
@@ -27,6 +29,9 @@ import {
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuTrigger,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
 } from "@/components/ui/context-menu";
 import WindowControls from "@/components/WindowControls";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
@@ -35,6 +40,7 @@ import { useAppSettings } from "@/hooks/useAppSettings";
 import { toast } from "@/hooks/use-toast";
 import { APP_VERSION } from "@/lib/appVersion";
 import lunoLogo from "@/assets/luno-logo.png";
+import { copyToClipboard } from "@/lib/clipboardUtils";
 
 interface TabBarProps {
   tabs: Note[];
@@ -84,13 +90,6 @@ function WebFaviconIcon({ note, isActive }: { note: Note; isActive: boolean }) {
 
 function NoteIcon({ note, isActive, pack, settings }: { note: Note; isActive: boolean; pack: any; settings: any }) {
   const cls = `h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-primary" : "text-muted-foreground/70"}`;
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
   if (note.id === "home" || note.id.startsWith("home:") || note.fileType === "home") {
     const HomeIcon = getToolbarIcon("home", pack);
     return <HomeIcon className={cls} />;
@@ -131,6 +130,19 @@ function NoteIcon({ note, isActive, pack, settings }: { note: Note; isActive: bo
     return <TagIcon className={cls} />;
   }
   if (note.fileType === "web-viewer" || note.id.startsWith("web:")) return <WebFaviconIcon note={note} isActive={isActive} />;
+
+  if (settings?.showFileIcons === false) {
+    return null;
+  }
+
+  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+  if (customIcon) {
+    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
+    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+  }
+
   const defaultKey = getNoteDefaultIconKey(note);
   const IconComp = getToolbarIcon(defaultKey, pack);
   return <IconComp className={cls} />;
@@ -228,7 +240,7 @@ const TabItem = React.memo(function TabItem({
   const handleCopyUrl = useCallback(() => {
     const url = note.url || (note.id.startsWith("web:") ? note.id.replace(/^web:/, "") : "");
     if (url) {
-      void navigator.clipboard.writeText(url);
+      void copyToClipboard(url);
       toast({
         title: t("common.copied") || "Copied",
         description: url,
@@ -236,14 +248,36 @@ const TabItem = React.memo(function TabItem({
     }
   }, [note, t]);
 
-  const handleCopyPath = useCallback(() => {
+  const handleCopyRelativePath = useCallback(async () => {
     if (isSystemTab) return;
     const path = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
     if (path) {
-      void navigator.clipboard.writeText(path);
+      await copyToClipboard(path);
       toast({
-        title: t("common.copied") || "Copied",
+        title: t("editor.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
         description: path,
+      });
+    }
+  }, [isSystemTab, note, t]);
+
+  const handleCopyAbsolutePath = useCallback(async () => {
+    if (isSystemTab) return;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    let ws = "";
+    if (electronAPI?.getSavedWorkspace) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        ws = (saved?.folderPath || saved?.path || "") as string;
+      } catch {}
+    }
+    const rel = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+    const cleanWs = ws.replace(/[\\/]+$/, "");
+    const full = cleanWs ? (rel ? `${cleanWs}/${rel.replace(/^[\\/]+/, "")}` : cleanWs) : rel;
+    if (full) {
+      await copyToClipboard(full);
+      toast({
+        title: t("editor.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+        description: full,
       });
     }
   }, [isSystemTab, note, t]);
@@ -380,13 +414,28 @@ const TabItem = React.memo(function TabItem({
         ) : (!isSystemTab && note.fileName) ? (
           <>
             <ContextMenuSeparator className="my-1 bg-border/60" />
-            <ContextMenuItem
-              className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer"
-              onClick={handleCopyPath}
-            >
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1">{t("editor.copyPath") || "Copy file path"}</span>
-            </ContextMenuItem>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer">
+                <LinkIcon className="h-4 w-4 text-muted-foreground" />
+                <span className="flex-1">{t("sidebar.copyPath") || "Copy Path"}</span>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48 rounded-xl">
+                <ContextMenuItem
+                  className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer"
+                  onClick={handleCopyRelativePath}
+                >
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="flex-1">{t("editor.copyRelativePath") || "Copy Relative Path"}</span>
+                </ContextMenuItem>
+                <ContextMenuItem
+                  className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer"
+                  onClick={() => void handleCopyAbsolutePath()}
+                >
+                  <Folder className="h-4 w-4 text-muted-foreground" />
+                  <span className="flex-1">{t("editor.copyAbsolutePath") || "Copy Full Path"}</span>
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
           </>
         ) : null}
 

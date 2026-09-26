@@ -164,8 +164,17 @@ export default function VersionHistorySplitDiffView({
     try {
       await navigator.clipboard.writeText(version.content || "");
       setCopied(true);
+      const timeLabel = formatSnapshotTime(version.timestamp);
+      const triggerLabel =
+        version.label ||
+        (version.trigger === "manual"
+          ? t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")
+          : version.trigger === "pre-restore"
+          ? t("versionHistoryPanel.preRestoreBackup") || (isTh ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
+          : t("versionHistoryPanel.autoSnapshot") || (isTh ? "บันทึกอัตโนมัติ" : "Auto-save"));
       toast({
         title: t("versionHistoryPanel.contentCopied"),
+        description: `${triggerLabel} • ${timeLabel}`,
       });
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {

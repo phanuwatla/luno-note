@@ -892,6 +892,24 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
             />
           </div>
         </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-showFileIcons`} className="text-sm font-medium text-foreground">
+              {t("settings.showFileIcons")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.showFileIconsDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.showFileIcons !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-showFileIcons`}
+              checked={settings.showFileIcons !== false}
+              onCheckedChange={(checked) => updateSetting("showFileIcons", checked)}
+            />
+          </div>
+        </div>
       </div>
 
       {/* 4. Editor & Writing */}
@@ -915,6 +933,25 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               id={`${idPrefix}-highlightInlineCode`}
               checked={settings.highlightInlineCode}
               onCheckedChange={(checked) => updateSetting("highlightInlineCode", checked)}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-showToolbar`} className="text-sm font-medium text-foreground">
+              {t("settings.showToolbar")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.showToolbarDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.showToolbar !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-showToolbar`}
+              checked={settings.showToolbar !== false}
+              onCheckedChange={(checked) => updateSetting("showToolbar", checked)}
             />
           </div>
         </div>

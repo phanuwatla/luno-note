@@ -29,8 +29,9 @@ import {
 import type { Note } from "@/hooks/useNotes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getStoredFileHandle, requestPermissionIfAvailable } from "@/lib/fileHandles";
+import { imageLocalCache, dataUrlToBlobUrl } from "./ImageNodeView";
 
-const IMAGE_EXTENSIONS = new Set([
+export const IMAGE_EXTENSIONS = new Set([
   ".jpg",
   ".jpeg",
   ".png",
@@ -47,6 +48,7 @@ export interface ScannedImageItem {
   fileName: string;
   folderPath: string;
   relativePath: string;
+  fullPath?: string;
   src?: string;
   fileHandle?: FileSystemFileHandle;
   isAttachment: boolean;
@@ -126,6 +128,145 @@ interface WorkspaceImagePickerDialogProps {
   assetBlobUrlMap?: React.MutableRefObject<Map<string, string>>;
   onSelectImage: (targetNote: Note, relativePath: string, blobUrl?: string) => void;
 }
+
+export const ImageItemThumbnail: React.FC<{
+  item: ScannedImageItem;
+  previewUrl?: string;
+  isListMode?: boolean;
+  onResolved?: (id: string, url: string) => void;
+}> = ({ item, previewUrl, isListMode, onResolved }) => {
+  const [src, setSrc] = useState<string | undefined>(() => {
+    return (
+      previewUrl ||
+      item.src ||
+      imageLocalCache.get(item.relativePath) ||
+      (item.fullPath ? imageLocalCache.get(item.fullPath) : undefined)
+    );
+  });
+  const [loading, setLoading] = useState(!src);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const candidate =
+      previewUrl ||
+      item.src ||
+      imageLocalCache.get(item.relativePath) ||
+      (item.fullPath ? imageLocalCache.get(item.fullPath) : undefined);
+
+    if (candidate) {
+      setSrc(candidate);
+      setLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setLoading(true);
+
+    const resolve = async () => {
+      try {
+        // 1. Direct Web File System Handle
+        if (item.fileHandle) {
+          const file = await item.fileHandle.getFile();
+          const blobUrl = URL.createObjectURL(file);
+          imageLocalCache.set(item.relativePath, blobUrl);
+          if (item.fullPath) imageLocalCache.set(item.fullPath, blobUrl);
+          if (!isCancelled) {
+            setSrc(blobUrl);
+            setLoading(false);
+            onResolved?.(item.id, blobUrl);
+          }
+          return;
+        }
+
+        // 2. Electron Desktop Workspace
+        const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+        if (electronAPI) {
+          let fullPath = item.fullPath;
+          if (!fullPath && electronAPI.getSavedWorkspace) {
+            const saved = await electronAPI.getSavedWorkspace();
+            const ws = saved?.folderPath || saved?.path;
+            if (ws) fullPath = `${ws}/${item.relativePath}`;
+          }
+
+          if (fullPath) {
+            // High-speed buffer read
+            if (electronAPI.readFileBuffer) {
+              try {
+                const buf = await electronAPI.readFileBuffer(fullPath);
+                if (buf && buf.byteLength > 0 && !isCancelled) {
+                  const ext = item.fileName.split(".").pop()?.toLowerCase() || "png";
+                  const mime = ext === "svg" ? "image/svg+xml" : `image/${ext}`;
+                  const blob = new Blob([buf], { type: mime });
+                  const blobUrl = URL.createObjectURL(blob);
+                  imageLocalCache.set(item.relativePath, blobUrl);
+                  imageLocalCache.set(fullPath, blobUrl);
+                  setSrc(blobUrl);
+                  setLoading(false);
+                  onResolved?.(item.id, blobUrl);
+                  return;
+                }
+              } catch {
+                // fall through to readImageDataUrl
+              }
+            }
+
+            if (electronAPI.readImageDataUrl) {
+              const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+              if (dataUrl && !isCancelled) {
+                const blobUrl = dataUrlToBlobUrl(dataUrl);
+                imageLocalCache.set(item.relativePath, blobUrl);
+                imageLocalCache.set(fullPath, blobUrl);
+                setSrc(blobUrl);
+                setLoading(false);
+                onResolved?.(item.id, blobUrl);
+                return;
+              }
+            }
+          }
+        }
+
+        if (!isCancelled) {
+          setLoading(false);
+          setFailed(true);
+        }
+      } catch {
+        if (!isCancelled) {
+          setLoading(false);
+          setFailed(true);
+        }
+      }
+    };
+
+    void resolve();
+    return () => {
+      isCancelled = true;
+    };
+  }, [item, previewUrl, onResolved]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center w-full h-full bg-muted/20">
+        <Loader2 className={`${isListMode ? "h-3.5 w-3.5" : "h-4 w-4"} animate-spin text-muted-foreground/30`} />
+      </div>
+    );
+  }
+
+  if (failed || !src) {
+    return <FileImage className={`${isListMode ? "h-5 w-5" : "h-6 w-6"} text-muted-foreground/40`} />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={item.fileName}
+      className={`h-full w-full object-contain select-none transition-transform duration-200 ${
+        isListMode ? "" : "group-hover:scale-105"
+      }`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+};
 
 export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProps> = ({
   isOpen,
@@ -240,7 +381,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
 
       // 2. Electron Desktop Workspace: Recursively scan workspace
       const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
-      if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles && electronAPI?.readFileBase64) {
+      if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
         try {
           const saved = await electronAPI.getSavedWorkspace();
           const workspacePath = saved?.folderPath || saved?.path;
@@ -263,29 +404,25 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                       const relPath = folder ? `${folder}/${f.name}` : f.name;
                       const key = `el_${relPath}`;
 
+                      const preview =
+                        imageLocalCache.get(relPath) ||
+                        (f.fullPath ? imageLocalCache.get(f.fullPath) : undefined) ||
+                        assetBlobUrlMap?.current?.get(relPath);
+
+                      if (preview) {
+                        previewsMap[key] = preview;
+                      }
+
                       if (!itemsMap.has(key)) {
-                        try {
-                          const base64 = await electronAPI.readFileBase64(f.fullPath);
-                          if (base64) {
-                            const ext = f.name.split(".").pop()?.toLowerCase() || "png";
-                            const mime = ext === "svg" ? "image/svg+xml" : `image/${ext}`;
-                            const dataUrl = `data:${mime};base64,${base64}`;
-                            previewsMap[key] = dataUrl;
-
-                            cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, dataUrl);
-
-                            itemsMap.set(key, {
-                              id: key,
-                              fileName: f.name,
-                              folderPath: folder,
-                              relativePath: relPath,
-                              src: dataUrl,
-                              isAttachment: isAttachmentPath(folder, f.name),
-                            });
-                          }
-                        } catch (err) {
-                          console.warn("Failed reading electron image:", f.name, err);
-                        }
+                        itemsMap.set(key, {
+                          id: key,
+                          fileName: f.name,
+                          folderPath: folder,
+                          relativePath: relPath,
+                          fullPath: f.fullPath,
+                          src: preview,
+                          isAttachment: isAttachmentPath(folder, f.name),
+                        });
                       }
                     }
                   }
@@ -435,13 +572,50 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
   }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery]);
 
   const handleSelectAndInsert = useCallback(
-    (item: ScannedImageItem) => {
+    async (item: ScannedImageItem) => {
       const relPath = getRelativePathBetween(
         currentNote?.folderPath,
         item.folderPath,
         item.fileName
       );
-      const preview = item.src || previewUrls[item.id];
+      let preview = item.src || previewUrls[item.id];
+      if (preview?.startsWith("luno-asset:")) preview = undefined;
+
+      if (!preview && assetBlobUrlMap?.current) {
+        preview =
+          assetBlobUrlMap.current.get(relPath) ||
+          assetBlobUrlMap.current.get(item.relativePath) ||
+          assetBlobUrlMap.current.get(encodeURI(relPath));
+      }
+
+      if (!preview) {
+        if (item.fileHandle) {
+          try {
+            const file = await item.fileHandle.getFile();
+            preview = URL.createObjectURL(file);
+          } catch (err) {
+            console.warn("Failed reading image file handle:", err);
+          }
+        } else if (item.fullPath) {
+          const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+          if (electronAPI?.readImageDataUrl) {
+            try {
+              const dataUrl = await electronAPI.readImageDataUrl(item.fullPath);
+              if (dataUrl) preview = dataUrlToBlobUrl(dataUrl);
+            } catch (e) {
+              console.warn("readImageDataUrl failed in image picker:", e);
+            }
+          }
+        }
+      }
+
+      if (preview) {
+        cacheBlobUrlInMap(assetBlobUrlMap?.current, relPath, preview);
+        cacheBlobUrlInMap(assetBlobUrlMap?.current, item.relativePath, preview);
+        imageLocalCache.set(relPath, preview);
+        imageLocalCache.set(item.relativePath, preview);
+        if (item.fullPath) imageLocalCache.set(item.fullPath, preview);
+      }
 
       const syntheticNote: Note = {
         id: item.id,
@@ -457,7 +631,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
       onSelectImage(syntheticNote, relPath, preview);
       onClose();
     },
-    [currentNote?.folderPath, previewUrls, onSelectImage, onClose]
+    [currentNote?.folderPath, previewUrls, assetBlobUrlMap, onSelectImage, onClose]
   );
 
   return (
@@ -588,16 +762,13 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                     >
                       {/* Image Thumbnail */}
                       <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-muted/30 border border-border/30 flex items-center justify-center">
-                        {preview ? (
-                          <img
-                            src={preview}
-                            alt={item.fileName}
-                            className="h-full w-full object-contain select-none transition-transform duration-200 group-hover:scale-105"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <FileImage className="h-6 w-6 text-muted-foreground/40" />
-                        )}
+                        <ImageItemThumbnail
+                          item={item}
+                          previewUrl={item.src || previewUrls[item.id]}
+                          onResolved={(id, url) => {
+                            setPreviewUrls((prev) => (prev[id] === url ? prev : { ...prev, [id]: url }));
+                          }}
+                        />
                       </div>
 
                       {/* Details */}
@@ -617,7 +788,6 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
             ) : (
               <div className="space-y-1 min-w-0">
                 {displayedItems.map((item) => {
-                  const preview = item.src || previewUrls[item.id];
                   const isSelected = selectedItemId === item.id;
 
                   return (
@@ -634,16 +804,14 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                       <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
                         {/* Thumbnail */}
                         <div className="h-9 w-9 rounded-lg overflow-hidden bg-muted/30 border border-border/30 shrink-0 flex items-center justify-center">
-                          {preview ? (
-                            <img
-                              src={preview}
-                              alt={item.fileName}
-                              className="h-full w-full object-contain select-none transition-transform duration-200 group-hover:scale-105"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <FileImage className="h-5 w-5 text-muted-foreground/40" />
-                          )}
+                          <ImageItemThumbnail
+                            item={item}
+                            previewUrl={item.src || previewUrls[item.id]}
+                            isListMode
+                            onResolved={(id, url) => {
+                              setPreviewUrls((prev) => (prev[id] === url ? prev : { ...prev, [id]: url }));
+                            }}
+                          />
                         </div>
 
                         {/* Text */}

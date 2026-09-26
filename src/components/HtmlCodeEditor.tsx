@@ -43,19 +43,25 @@ function highlightAttrs(raw: string): string {
       result += `<span style="color:var(--hl-attr)">${escHtml(m[1])}</span>`;
     }
     if (m[2]) {
-      result += escHtml(m[2]);
+      result += `<span style="color:var(--hl-punct)">${escHtml(m[2])}</span>`;
     }
     if (m[3]) {
-      result += `<span style="color:var(--hl-string)">${escHtml(m[3])}</span>`;
+      const val = m[3];
+      const isNumOrBool = /^["']?(?:true|false|null|\d+(?:\.\d+)?%?|#[0-9a-fA-F]{3,8})["']?$/i.test(val);
+      if (isNumOrBool) {
+        result += `<span style="color:var(--hl-number, var(--hl-string))">${escHtml(val)}</span>`;
+      } else {
+        result += `<span style="color:var(--hl-string)">${escHtml(val)}</span>`;
+      }
     }
   }
   result += escHtml(raw.slice(lastIndex));
   return result;
 }
 
-// Very fast, zero-dependency HTML highlighter
+// Fast HTML highlighter with embedded CSS <style> support
 function highlightHtml(code: string): string {
-  const TOKEN_RE = /<!--[\s\S]*?-->|<!\w[^>]*>|<\/[\w-]+\s*>|<[\w-][^>]*\/?>|[^<]+/g;
+  const TOKEN_RE = /<!--[\s\S]*?-->|<!\w[^>]*>|<\/[\w-]+\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<[\w-][^>]*\/?>|[^<]+/gi;
   let result = "";
   let m: RegExpExecArray | null;
   while ((m = TOKEN_RE.exec(code)) !== null) {
@@ -64,6 +70,22 @@ function highlightHtml(code: string): string {
       result += `<span style="color:var(--hl-comment)">${escHtml(token)}</span>`;
     } else if (token.startsWith("<!")) {
       result += `<span style="color:var(--hl-keyword)">${escHtml(token)}</span>`;
+    } else if (/^<style\b/i.test(token)) {
+      const openTagMatch = token.match(/^<style\b[^>]*>/i);
+      const closeTagMatch = token.match(/<\/style>$/i);
+      if (openTagMatch && closeTagMatch) {
+        const openTag = openTagMatch[0];
+        const closeTag = closeTagMatch[0];
+        const cssContent = token.slice(openTag.length, token.length - closeTag.length);
+        result += `<span style="color:var(--hl-punct)">&lt;</span><span style="color:var(--hl-tag)">style</span>`;
+        const restOfOpen = openTag.slice(6, -1);
+        if (restOfOpen) result += highlightAttrs(restOfOpen);
+        result += `<span style="color:var(--hl-punct)">&gt;</span>`;
+        result += highlightCss(cssContent);
+        result += `<span style="color:var(--hl-punct)">&lt;/</span><span style="color:var(--hl-tag)">style</span><span style="color:var(--hl-punct)">&gt;</span>`;
+      } else {
+        result += escHtml(token);
+      }
     } else if (token.startsWith("</")) {
       const nm = token.match(/^<\/([\w-]+)(\s*)>$/);
       if (nm) {
@@ -127,7 +149,7 @@ function highlightCss(code: string): string {
     } else if (token.startsWith("--")) {
       result += `<span style="color:var(--hl-attr)">${escHtml(token)}</span>`;
     } else if (/^#[0-9a-fA-F]{3,8}$/.test(token) || /^\d/.test(token)) {
-      result += `<span style="color:var(--hl-string)">${escHtml(token)}</span>`;
+      result += `<span style="color:var(--hl-number, var(--hl-string))">${escHtml(token)}</span>`;
     } else if (inBlock) {
       if (!inProp) {
         result += `<span style="color:var(--hl-attr)">${escHtml(token)}</span>`;
@@ -162,6 +184,7 @@ export default function HtmlCodeEditor({
   const preRef = useRef<HTMLPreElement>(null);
 
   const [localVal, setLocalVal] = useState(value);
+  const [activeLine, setActiveLine] = useState(0);
   const lastInternalValRef = useRef(value);
   const lastNoteIdRef = useRef(noteId);
 
@@ -244,8 +267,12 @@ export default function HtmlCodeEditor({
     }
   }, [isVisible, noteId, restoreScrollPosition]);
 
+  const onBlurRef = useRef(onBlur);
+  onBlurRef.current = onBlur;
+
   useEffect(() => {
     return () => {
+      onBlurRef.current?.();
       if (restoreScrollTimeoutRef.current) {
         clearTimeout(restoreScrollTimeoutRef.current);
       }
@@ -260,13 +287,16 @@ export default function HtmlCodeEditor({
 
   const updateCursorPos = useCallback(() => {
     const ta = textareaRef.current;
-    if (!ta || !onCursorChange) return;
+    if (!ta) return;
     const pos = ta.selectionStart ?? 0;
     const textBefore = ta.value.slice(0, pos);
     const splitLines = textBefore.split("\n");
-    const line = splitLines.length;
-    const col = (splitLines[splitLines.length - 1]?.length ?? 0) + 1;
-    onCursorChange(line, col);
+    setActiveLine(splitLines.length - 1);
+    if (onCursorChange) {
+      const line = splitLines.length;
+      const col = (splitLines[splitLines.length - 1]?.length ?? 0) + 1;
+      onCursorChange(line, col);
+    }
   }, [onCursorChange]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -467,11 +497,17 @@ export default function HtmlCodeEditor({
       <div
         ref={lineNumbersRef}
         aria-hidden
-        className="no-scrollbar select-none overflow-hidden bg-transparent py-4 text-right text-muted-foreground/30 shrink-0"
-        style={{ fontSize: `${Math.max(10, Math.round(fontSize * 0.72))}px`, lineHeight: computedLineHeight, width: `${Math.max(24, String(lines.length).length * Math.round(fontSize * 0.48) + 12)}px`, paddingLeft: "4px", paddingRight: "6px" }}
+        className="no-scrollbar select-none overflow-hidden bg-transparent py-4 text-right text-muted-foreground/35 border-r border-border/20 shrink-0"
+        style={{ fontSize: `${Math.max(10, Math.round(fontSize * 0.72))}px`, lineHeight: computedLineHeight, width: `${Math.max(24, String(lines.length).length * Math.round(fontSize * 0.48) + 12)}px`, paddingLeft: "4px", paddingRight: "8px" }}
       >
         {lines.map((_, i) => (
-          <div key={i} style={{ lineHeight: computedLineHeight }}>{i + 1}</div>
+          <div
+            key={i}
+            className={i === activeLine ? "text-primary font-semibold transition-colors duration-150" : ""}
+            style={{ lineHeight: computedLineHeight }}
+          >
+            {i + 1}
+          </div>
         ))}
       </div>
 

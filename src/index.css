@@ -63,6 +63,7 @@ aside [role="button"]:focus-visible {
     --hl-string: #047857;
     --hl-comment: hsl(var(--muted-foreground));
     --hl-keyword: #1d6fa4;
+    --hl-number: #d97706;
     --hl-punct: hsl(var(--muted-foreground));
 
     --card: 0 0% 100%;
@@ -109,10 +110,12 @@ aside [role="button"]:focus-visible {
   --ring: 174 62% 39%;
   --sidebar-primary: 174 62% 39%;
   --sidebar-ring: 174 62% 39%;
-  --hl-tag: #17756b;
-  --hl-attr: #7c3aed;
-  --hl-string: #047857;
-  --hl-keyword: #17756b;
+  --hl-tag: #0d9488;
+  --hl-attr: #2563eb;
+  --hl-string: #d97706;
+  --hl-keyword: #0d9488;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='teal'] {
@@ -121,10 +124,12 @@ aside [role="button"]:focus-visible {
   --ring: 166 72% 36%;
   --sidebar-primary: 166 72% 36%;
   --sidebar-ring: 166 72% 36%;
-  --hl-tag: #0f766e;
-  --hl-attr: #6366f1;
-  --hl-string: #059669;
-  --hl-keyword: #0f766e;
+  --hl-tag: #0d9488;
+  --hl-attr: #2563eb;
+  --hl-string: #d97706;
+  --hl-keyword: #0d9488;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='cyan'] {
@@ -137,6 +142,8 @@ aside [role="button"]:focus-visible {
   --hl-attr: #7c3aed;
   --hl-string: #059669;
   --hl-keyword: #0891b2;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='sky'] {
@@ -146,9 +153,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 199 89% 48%;
   --sidebar-ring: 199 89% 48%;
   --hl-tag: #0284c7;
-  --hl-attr: #8b5cf6;
+  --hl-attr: #7c3aed;
   --hl-string: #059669;
   --hl-keyword: #0284c7;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='blue'] {
@@ -161,6 +170,8 @@ aside [role="button"]:focus-visible {
   --hl-attr: #7c3aed;
   --hl-string: #059669;
   --hl-keyword: #2563eb;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='indigo'] {
@@ -170,9 +181,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 239 84% 67%;
   --sidebar-ring: 239 84% 67%;
   --hl-tag: #4f46e5;
-  --hl-attr: #0891b2;
+  --hl-attr: #0284c7;
   --hl-string: #059669;
   --hl-keyword: #4f46e5;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='violet'] {
@@ -181,10 +194,12 @@ aside [role="button"]:focus-visible {
   --ring: 262 83% 58%;
   --sidebar-primary: 262 83% 58%;
   --sidebar-ring: 262 83% 58%;
-  --hl-tag: #6d28d9;
-  --hl-attr: #0369a1;
-  --hl-string: #047857;
-  --hl-keyword: #6d28d9;
+  --hl-tag: #7c3aed;
+  --hl-attr: #0284c7;
+  --hl-string: #059669;
+  --hl-keyword: #7c3aed;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='lavender'] {
@@ -197,6 +212,8 @@ aside [role="button"]:focus-visible {
   --hl-attr: #0284c7;
   --hl-string: #059669;
   --hl-keyword: #7c3aed;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='fuchsia'] {
@@ -206,9 +223,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 292 84% 61%;
   --sidebar-ring: 292 84% 61%;
   --hl-tag: #c026d3;
-  --hl-attr: #2563eb;
+  --hl-attr: #0284c7;
   --hl-string: #059669;
   --hl-keyword: #c026d3;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='rose'] {
@@ -217,10 +236,12 @@ aside [role="button"]:focus-visible {
   --ring: 347 77% 50%;
   --sidebar-primary: 347 77% 50%;
   --sidebar-ring: 347 77% 50%;
-  --hl-tag: #be123c;
-  --hl-attr: #1d4ed8;
-  --hl-string: #7c3aed;
-  --hl-keyword: #be123c;
+  --hl-tag: #e11d48;
+  --hl-attr: #2563eb;
+  --hl-string: #059669;
+  --hl-keyword: #e11d48;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='ruby'] {
@@ -230,9 +251,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 346 84% 50%;
   --sidebar-ring: 346 84% 50%;
   --hl-tag: #e11d48;
-  --hl-attr: #4f46e5;
+  --hl-attr: #2563eb;
   --hl-string: #059669;
   --hl-keyword: #e11d48;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='crimson'] {
@@ -242,9 +265,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 350 89% 60%;
   --sidebar-ring: 350 89% 60%;
   --hl-tag: #dc2626;
-  --hl-attr: #7c3aed;
+  --hl-attr: #2563eb;
   --hl-string: #059669;
   --hl-keyword: #dc2626;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='coral'] {
@@ -254,9 +279,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 14 90% 63%;
   --sidebar-ring: 14 90% 63%;
   --hl-tag: #ea580c;
-  --hl-attr: #4f46e5;
+  --hl-attr: #2563eb;
   --hl-string: #059669;
   --hl-keyword: #ea580c;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='orange'] {
@@ -265,10 +292,12 @@ aside [role="button"]:focus-visible {
   --ring: 25 95% 60%;
   --sidebar-primary: 25 95% 60%;
   --sidebar-ring: 25 95% 60%;
-  --hl-tag: #c2410c;
-  --hl-attr: #0f766e;
-  --hl-string: #7c3aed;
-  --hl-keyword: #c2410c;
+  --hl-tag: #ea580c;
+  --hl-attr: #2563eb;
+  --hl-string: #059669;
+  --hl-keyword: #ea580c;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='amber'] {
@@ -278,9 +307,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 38 92% 50%;
   --sidebar-ring: 38 92% 50%;
   --hl-tag: #d97706;
-  --hl-attr: #4f46e5;
+  --hl-attr: #2563eb;
   --hl-string: #059669;
   --hl-keyword: #d97706;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='gold'] {
@@ -290,9 +321,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 45 93% 47%;
   --sidebar-ring: 45 93% 47%;
   --hl-tag: #ca8a04;
-  --hl-attr: #4f46e5;
+  --hl-attr: #2563eb;
   --hl-string: #059669;
   --hl-keyword: #ca8a04;
+  --hl-number: #0284c7;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='lime'] {
@@ -302,9 +335,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 84 81% 44%;
   --sidebar-ring: 84 81% 44%;
   --hl-tag: #65a30d;
-  --hl-attr: #7c3aed;
-  --hl-string: #0d9488;
+  --hl-attr: #2563eb;
+  --hl-string: #d97706;
   --hl-keyword: #65a30d;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='mint'] {
@@ -314,9 +349,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 158 64% 52%;
   --sidebar-ring: 158 64% 52%;
   --hl-tag: #059669;
-  --hl-attr: #7c3aed;
-  --hl-string: #0d9488;
+  --hl-attr: #2563eb;
+  --hl-string: #d97706;
   --hl-keyword: #059669;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 :root[data-app-theme='slate'] {
@@ -325,10 +362,12 @@ aside [role="button"]:focus-visible {
   --ring: 215 16% 40%;
   --sidebar-primary: 215 16% 40%;
   --sidebar-ring: 215 16% 40%;
-  --hl-tag: #374151;
-  --hl-attr: #0369a1;
-  --hl-string: #047857;
-  --hl-keyword: #374151;
+  --hl-tag: #334155;
+  --hl-attr: #2563eb;
+  --hl-string: #059669;
+  --hl-keyword: #334155;
+  --hl-number: #ea580c;
+  --hl-punct: #64748b;
 }
 
 /* =========================================================================
@@ -662,6 +701,7 @@ aside [role="button"]:focus-visible {
   --hl-string: #34d399;
   --hl-comment: hsl(var(--muted-foreground));
   --hl-keyword: #36c6b6;
+  --hl-number: #fbbf24;
   --hl-punct: hsl(var(--muted-foreground));
 
   --card: 222 14% 12%;
@@ -705,10 +745,12 @@ aside [role="button"]:focus-visible {
   --ring: 174 62% 44%;
   --sidebar-primary: 174 62% 44%;
   --sidebar-ring: 174 62% 44%;
-  --hl-tag: #36c6b6;
-  --hl-attr: #c084fc;
-  --hl-string: #34d399;
-  --hl-keyword: #36c6b6;
+  --hl-tag: #2dd4bf;
+  --hl-attr: #7dd3fc;
+  --hl-string: #fde047;
+  --hl-keyword: #2dd4bf;
+  --hl-number: #fb923c;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='teal'] {
@@ -718,9 +760,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 166 72% 44%;
   --sidebar-ring: 166 72% 44%;
   --hl-tag: #2dd4bf;
-  --hl-attr: #a78bfa;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #fde047;
   --hl-keyword: #2dd4bf;
+  --hl-number: #fb923c;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='cyan'] {
@@ -731,8 +775,10 @@ aside [role="button"]:focus-visible {
   --sidebar-ring: 189 94% 52%;
   --hl-tag: #22d3ee;
   --hl-attr: #c084fc;
-  --hl-string: #34d399;
+  --hl-string: #6ee7b7;
   --hl-keyword: #22d3ee;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='sky'] {
@@ -743,8 +789,10 @@ aside [role="button"]:focus-visible {
   --sidebar-ring: 199 89% 60%;
   --hl-tag: #38bdf8;
   --hl-attr: #c084fc;
-  --hl-string: #34d399;
+  --hl-string: #6ee7b7;
   --hl-keyword: #38bdf8;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='blue'] {
@@ -755,8 +803,10 @@ aside [role="button"]:focus-visible {
   --sidebar-ring: 217 91% 65%;
   --hl-tag: #60a5fa;
   --hl-attr: #c084fc;
-  --hl-string: #34d399;
+  --hl-string: #6ee7b7;
   --hl-keyword: #60a5fa;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='indigo'] {
@@ -766,9 +816,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 239 84% 72%;
   --sidebar-ring: 239 84% 72%;
   --hl-tag: #818cf8;
-  --hl-attr: #38bdf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #818cf8;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='violet'] {
@@ -777,10 +829,12 @@ aside [role="button"]:focus-visible {
   --ring: 262 83% 68%;
   --sidebar-primary: 262 83% 68%;
   --sidebar-ring: 262 83% 68%;
-  --hl-tag: #c084fc;
-  --hl-attr: #38bdf8;
-  --hl-string: #34d399;
-  --hl-keyword: #c084fc;
+  --hl-tag: #a78bfa;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
+  --hl-keyword: #a78bfa;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='lavender'] {
@@ -790,9 +844,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 255 92% 80%;
   --sidebar-ring: 255 92% 80%;
   --hl-tag: #c4b5fd;
-  --hl-attr: #38bdf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #c4b5fd;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='fuchsia'] {
@@ -802,9 +858,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 292 84% 70%;
   --sidebar-ring: 292 84% 70%;
   --hl-tag: #e879f9;
-  --hl-attr: #60a5fa;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #e879f9;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='rose'] {
@@ -814,9 +872,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 347 77% 60%;
   --sidebar-ring: 347 77% 60%;
   --hl-tag: #fb7185;
-  --hl-attr: #60a5fa;
-  --hl-string: #c084fc;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #fb7185;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='ruby'] {
@@ -826,9 +886,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 346 84% 60%;
   --sidebar-ring: 346 84% 60%;
   --hl-tag: #f43f5e;
-  --hl-attr: #818cf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #f43f5e;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='crimson'] {
@@ -837,10 +899,12 @@ aside [role="button"]:focus-visible {
   --ring: 350 89% 65%;
   --sidebar-primary: 350 89% 65%;
   --sidebar-ring: 350 89% 65%;
-  --hl-tag: #fb7185;
-  --hl-attr: #c084fc;
-  --hl-string: #34d399;
-  --hl-keyword: #fb7185;
+  --hl-tag: #f87171;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
+  --hl-keyword: #f87171;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='coral'] {
@@ -850,9 +914,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 14 90% 68%;
   --sidebar-ring: 14 90% 68%;
   --hl-tag: #fb923c;
-  --hl-attr: #818cf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #fb923c;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='orange'] {
@@ -862,9 +928,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 25 95% 65%;
   --sidebar-ring: 25 95% 65%;
   --hl-tag: #fb923c;
-  --hl-attr: #2dd4bf;
-  --hl-string: #c084fc;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #fb923c;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='amber'] {
@@ -874,9 +942,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 38 92% 58%;
   --sidebar-ring: 38 92% 58%;
   --hl-tag: #fbbf24;
-  --hl-attr: #818cf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #fbbf24;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='gold'] {
@@ -886,9 +956,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 45 93% 54%;
   --sidebar-ring: 45 93% 54%;
   --hl-tag: #facc15;
-  --hl-attr: #818cf8;
-  --hl-string: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
   --hl-keyword: #facc15;
+  --hl-number: #38bdf8;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='lime'] {
@@ -898,9 +970,11 @@ aside [role="button"]:focus-visible {
   --sidebar-primary: 84 81% 54%;
   --sidebar-ring: 84 81% 54%;
   --hl-tag: #a3e635;
-  --hl-attr: #c084fc;
-  --hl-string: #2dd4bf;
+  --hl-attr: #7dd3fc;
+  --hl-string: #fde047;
   --hl-keyword: #a3e635;
+  --hl-number: #fb923c;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='mint'] {
@@ -909,10 +983,12 @@ aside [role="button"]:focus-visible {
   --ring: 158 64% 58%;
   --sidebar-primary: 158 64% 58%;
   --sidebar-ring: 158 64% 58%;
-  --hl-tag: #4ade80;
-  --hl-attr: #c084fc;
-  --hl-string: #2dd4bf;
-  --hl-keyword: #4ade80;
+  --hl-tag: #34d399;
+  --hl-attr: #7dd3fc;
+  --hl-string: #fde047;
+  --hl-keyword: #34d399;
+  --hl-number: #fb923c;
+  --hl-punct: #94a3b8;
 }
 
 .dark:root[data-app-theme='slate'] {
@@ -921,10 +997,12 @@ aside [role="button"]:focus-visible {
   --ring: 215 16% 55%;
   --sidebar-primary: 215 16% 55%;
   --sidebar-ring: 215 16% 55%;
-  --hl-tag: #94a3b8;
-  --hl-attr: #38bdf8;
-  --hl-string: #34d399;
-  --hl-keyword: #94a3b8;
+  --hl-tag: #cbd5e1;
+  --hl-attr: #7dd3fc;
+  --hl-string: #6ee7b7;
+  --hl-keyword: #cbd5e1;
+  --hl-number: #fcd34d;
+  --hl-punct: #94a3b8;
 }
 
 .font-mono {
@@ -2509,14 +2587,14 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-subst {
-  color: #a855f7;
+  color: var(--hl-keyword, #a855f7);
   font-weight: 500;
 }
 
 .dark .hljs-keyword,
 .dark .hljs-selector-tag,
 .dark .hljs-subst {
-  color: #c084fc;
+  color: var(--hl-keyword, #c084fc);
 }
 
 /* Inline Hashtag Pill Badges in Editor & Content */
@@ -2537,58 +2615,62 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .hljs-string,
 .hljs-title.class_,
 .hljs-section,
-.hljs-attribute,
 .hljs-template-tag,
 .hljs-template-variable,
 .hljs-type,
 .hljs-addition {
-  color: #10b981;
+  color: var(--hl-string, #10b981);
 }
 
 .dark .hljs-string,
 .dark .hljs-title.class_,
 .dark .hljs-section,
-.dark .hljs-attribute,
 .dark .hljs-template-tag,
 .dark .hljs-template-variable,
 .dark .hljs-type,
 .dark .hljs-addition {
-  color: #34d399;
+  color: var(--hl-string, #34d399);
 }
 
 .hljs-title,
 .hljs-title.function_,
-.hljs-name,
-.hljs-built_in {
-  color: #2563eb;
+.hljs-name {
+  color: var(--hl-tag, #2563eb);
 }
 
 .dark .hljs-title,
 .dark .hljs-title.function_,
-.dark .hljs-name,
+.dark .hljs-name {
+  color: var(--hl-tag, #60a5fa);
+}
+
+.hljs-built_in {
+  color: var(--hl-attr, #2563eb);
+}
+
 .dark .hljs-built_in {
-  color: #60a5fa;
+  color: var(--hl-attr, #60a5fa);
 }
 
 .hljs-variable,
-.hljs-template-variable,
 .hljs-attr,
+.hljs-attribute,
 .hljs-property {
-  color: #475569;
+  color: var(--hl-attr, #475569);
 }
 
 .dark .hljs-variable,
-.dark .hljs-template-variable,
 .dark .hljs-attr,
+.dark .hljs-attribute,
 .dark .hljs-property {
-  color: #cbd5e1;
+  color: var(--hl-attr, #cbd5e1);
 }
 
 .hljs-comment,
 .hljs-quote,
 .hljs-deletion,
 .hljs-meta {
-  color: #94a3b8;
+  color: var(--hl-comment, #94a3b8);
   font-style: italic;
 }
 
@@ -2596,7 +2678,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .dark .hljs-quote,
 .dark .hljs-deletion,
 .dark .hljs-meta {
-  color: #64748b;
+  color: var(--hl-comment, #64748b);
 }
 
 .hljs-number,
@@ -2604,7 +2686,7 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .hljs-bullet,
 .hljs-literal,
 .hljs-link {
-  color: #f59e0b;
+  color: var(--hl-number, #f59e0b);
 }
 
 .dark .hljs-number,
@@ -2612,7 +2694,17 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 .dark .hljs-bullet,
 .dark .hljs-literal,
 .dark .hljs-link {
-  color: #fbbf24;
+  color: var(--hl-number, #fbbf24);
+}
+
+.hljs-punctuation,
+.hljs-operator {
+  color: var(--hl-punct, #64748b);
+}
+
+.dark .hljs-punctuation,
+.dark .hljs-operator {
+  color: var(--hl-punct, #94a3b8);
 }
 
 mark,

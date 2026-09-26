@@ -49,6 +49,7 @@ import {
   Clock,
   Link2,
   ImagePlus,
+  Video,
   Mic,
   Wrench,
   Underline as UnderlineIcon,
@@ -143,6 +144,7 @@ const TOOLBAR_TOOL_DEFS: Record<
   clock: { labelKey: "editor.clock", icon: Clock, categoryKey: "settings.toolCategoryMedia" },
   link: { labelKey: "editor.link", icon: Link2, categoryKey: "settings.toolCategoryMedia" },
   image: { labelKey: "editor.image", icon: ImagePlus, categoryKey: "settings.toolCategoryMedia" },
+  video: { labelKey: "editor.video", icon: Video, categoryKey: "settings.toolCategoryMedia" },
   qrCode: { labelKey: "editor.qrCode", icon: QrCode, categoryKey: "settings.toolCategoryMedia" },
   audio: { labelKey: "editor.recordAudio", icon: Mic, categoryKey: "settings.toolCategoryMedia" },
   fixLanguage: { labelKey: "editor.fixLanguage", icon: Wrench, categoryKey: "settings.toolCategoryMedia" },
@@ -1104,6 +1106,18 @@ export default function SettingsTabView({
                         );
                       })}
                     </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-3 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.showFileIcons")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showFileIconsDesc")}</p>
+                      </div>
+                      <Switch
+                        checked={settings.showFileIcons !== false}
+                        onCheckedChange={(checked) => updateSetting("showFileIcons", checked)}
+                        className="scale-85 origin-right"
+                      />
+                    </div>
                   </div>
 
                     {/* Typography */}
@@ -1391,10 +1405,10 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.confirmBeforeDelete")}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.confirmBeforeDeleteDesc")}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.showToolbar")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showToolbarDesc")}</p>
                       </div>
-                      <Switch checked={settings.confirmBeforeDelete} onCheckedChange={(v) => updateSetting("confirmBeforeDelete", v)} className="scale-85 origin-right" />
+                      <Switch checked={settings.showToolbar !== false} onCheckedChange={(v) => updateSetting("showToolbar", v)} className="scale-85 origin-right" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
@@ -1431,6 +1445,14 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.autoPairBracketsHint")}</p>
                       </div>
                       <Switch checked={settings.autoPairBrackets} onCheckedChange={(v) => updateSetting("autoPairBrackets", v)} className="scale-85 origin-right" />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.enableSlashCommands") || "Slash commands menu (/)"}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.enableSlashCommandsDesc") || "Type / in the editor to open quick command palette"}</p>
+                      </div>
+                      <Switch checked={settings.enableSlashCommand !== false} onCheckedChange={(v) => updateSetting("enableSlashCommand", v)} className="scale-85 origin-right cursor-pointer" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
@@ -2028,15 +2050,22 @@ export default function SettingsTabView({
                             {t("settings.aiModelResetQuota")}
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => void loadAiModels()}
-                          disabled={isLoadingModels}
-                          title={t("settings.aiModelRefresh")}
-                          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw className={`h-3.5 w-3.5 ${isLoadingModels ? "animate-spin" : ""}`} />
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => void loadAiModels()}
+                              disabled={isLoadingModels}
+                              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingModels ? "animate-spin" : ""}`} />
+                              <span className="sr-only">{t("settings.aiModelRefresh")}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {t("settings.aiModelRefresh")}
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                     </div>
 

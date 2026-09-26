@@ -477,17 +477,23 @@ export default function HelpTabView({
                           return (
                             <div key={idx} className="flex justify-between items-center py-2 gap-4">
                               <span className="text-muted-foreground">{item.label}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleCopy(item.syntax, codeId)}
-                                className="px-2 py-0.5 rounded-md bg-muted hover:bg-muted/80 active:scale-95 transition-all font-mono text-[11px] font-semibold text-foreground cursor-pointer shrink-0 flex items-center gap-1.5"
-                                title="Click to copy syntax"
-                              >
-                                <span>{item.syntax}</span>
-                                {copiedCode === codeId ? (
-                                  <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                                ) : null}
-                              </button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(item.syntax, codeId)}
+                                    className="px-2 py-0.5 rounded-md bg-muted hover:bg-muted/80 active:scale-95 transition-all font-mono text-[11px] font-semibold text-foreground cursor-pointer shrink-0 flex items-center gap-1.5"
+                                  >
+                                    <span>{item.syntax}</span>
+                                    {copiedCode === codeId ? (
+                                      <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                                    ) : null}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs">
+                                  {copiedCode === codeId ? (isTh ? "คัดลอกแล้ว!" : "Copied!") : (isTh ? "คลิกเพื่อคัดลอกไวยากรณ์" : "Click to copy syntax")}
+                                </TooltipContent>
+                              </Tooltip>
                             </div>
                           );
                         })}

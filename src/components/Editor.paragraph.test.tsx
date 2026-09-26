@@ -13,6 +13,8 @@ import { createTurndownService, preprocessMarkdownForEditor, normalizeSerialized
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import Link from "@tiptap/extension-link";
 import { Kbd, Highlight, Underline, Superscript, Subscript, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
+import { VideoExtension } from "@/components/editor/VideoExtension";
+import { AudioExtension } from "@/components/editor/AudioExtension";
 import fs from "fs";
 
 describe("Markdown empty paragraphs and blank lines semantics and roundtrip", () => {
@@ -2133,6 +2135,95 @@ This is HTML with inline styling.
       expect(reloadedHtml).toContain('data-qr-bg="white"');
       expect(reloadedHtml).toContain('data-qr-level="H"');
       expect(reloadedHtml).toContain('width="250"');
+    });
+
+    it("Test 37 — Video and Audio blank line fidelity: 0, 1, and 2 blank lines preserve exact 1:1 count and roundtrip cleanly", () => {
+      // 1. Zero blank lines adjacent to video: preserves 0 blank lines (no synthesized empty paragraphs)
+      const zeroVideoMd = "Line 1\n![[attachments/test.mp4]]\nLine 2";
+      const zeroVideoHtml = renderMarkdownToEditorHtml(zeroVideoMd);
+      expect(zeroVideoHtml).not.toContain("<p></p>");
+      const editorV0 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: zeroVideoHtml,
+      });
+      expect(editorV0.state.doc.childCount).toBe(3);
+      expect(editorV0.state.doc.child(0).textContent).toBe("Line 1");
+      expect(editorV0.state.doc.child(1).type.name).toBe("video");
+      expect(editorV0.state.doc.child(2).textContent).toBe("Line 2");
+      expect(normalizeSaved(td.turndown(editorV0.getHTML()))).toBe(zeroVideoMd);
+      editorV0.destroy();
+
+      // 2. Zero blank lines adjacent to audio: preserves 0 blank lines
+      const zeroAudioMd = "Line 1\n![[attachments/test.mp3]]\nLine 2";
+      const zeroAudioHtml = renderMarkdownToEditorHtml(zeroAudioMd);
+      expect(zeroAudioHtml).not.toContain("<p></p>");
+      const editorA0 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: zeroAudioHtml,
+      });
+      expect(editorA0.state.doc.childCount).toBe(3);
+      expect(editorA0.state.doc.child(0).textContent).toBe("Line 1");
+      expect(editorA0.state.doc.child(1).type.name).toBe("audio");
+      expect(editorA0.state.doc.child(2).textContent).toBe("Line 2");
+      expect(normalizeSaved(td.turndown(editorA0.getHTML()))).toBe(zeroAudioMd);
+      editorA0.destroy();
+
+      // 3. Exactly 1 blank line above and below video: preserves 1 blank line (have 1 show 1)
+      const oneVideoMd = "Line 1\n\n![[attachments/test.mp4]]\n\nLine 2";
+      const oneVideoHtml = renderMarkdownToEditorHtml(oneVideoMd);
+      const editorV1 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: oneVideoHtml,
+      });
+      expect(editorV1.state.doc.childCount).toBe(5);
+      expect(editorV1.state.doc.child(0).textContent).toBe("Line 1");
+      expect(editorV1.state.doc.child(1).textContent).toBe("");
+      expect(editorV1.state.doc.child(2).type.name).toBe("video");
+      expect(editorV1.state.doc.child(3).textContent).toBe("");
+      expect(editorV1.state.doc.child(4).textContent).toBe("Line 2");
+      expect(normalizeSaved(td.turndown(editorV1.getHTML()))).toBe(oneVideoMd);
+      editorV1.destroy();
+
+      // 4. Exactly 1 blank line above and below audio: preserves 1 blank line (have 1 show 1)
+      const oneAudioMd = "Line 1\n\n![[attachments/test.mp3]]\n\nLine 2";
+      const oneAudioHtml = renderMarkdownToEditorHtml(oneAudioMd);
+      const editorA1 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: oneAudioHtml,
+      });
+      expect(editorA1.state.doc.childCount).toBe(5);
+      expect(editorA1.state.doc.child(0).textContent).toBe("Line 1");
+      expect(editorA1.state.doc.child(1).textContent).toBe("");
+      expect(editorA1.state.doc.child(2).type.name).toBe("audio");
+      expect(editorA1.state.doc.child(3).textContent).toBe("");
+      expect(editorA1.state.doc.child(4).textContent).toBe("Line 2");
+      expect(normalizeSaved(td.turndown(editorA1.getHTML()))).toBe(oneAudioMd);
+      editorA1.destroy();
+
+      // 5. Preserves 2 blank lines (have 2 show 2)
+      const twoVideoMd = "Line 1\n\n\n![[attachments/test.mp4]]\n\n\nLine 2";
+      const twoVideoHtml = renderMarkdownToEditorHtml(twoVideoMd);
+      const editorV2 = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: twoVideoHtml,
+      });
+      expect(editorV2.state.doc.childCount).toBe(7);
+      expect(normalizeSaved(td.turndown(editorV2.getHTML()))).toBe(twoVideoMd);
+      editorV2.destroy();
+
+      // 6. Heading followed immediately by video without blank lines
+      const headingVideoMd = "## Video Section\n![[attachments/test.mp4]]\nLine after";
+      const headingVideoHtml = renderMarkdownToEditorHtml(headingVideoMd);
+      const editorHV = new CoreEditor({
+        extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, VideoExtension, AudioExtension],
+        content: headingVideoHtml,
+      });
+      expect(editorHV.state.doc.childCount).toBe(3);
+      expect(editorHV.state.doc.child(0).type.name).toBe("heading");
+      expect(editorHV.state.doc.child(1).type.name).toBe("video");
+      expect(editorHV.state.doc.child(2).type.name).toBe("paragraph");
+      expect(normalizeSaved(td.turndown(editorHV.getHTML()))).toBe(headingVideoMd);
+      editorHV.destroy();
     });
   });
 });

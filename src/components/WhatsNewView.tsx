@@ -20,6 +20,13 @@ import {
   Zap,
   Video,
   QrCode,
+  Archive,
+  Mic,
+  RefreshCw,
+  FolderSync,
+  Languages,
+  Cloud,
+  Download,
 } from "lucide-react";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -61,9 +68,186 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.3.1",
+    version: "1.3.2",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "HTML Browser & URL Navigation, Comprehensive Tooltip System, Slash Command Toggle, Media PiP & High-Fidelity Exports",
+      th: "พรีวิวไฟล์ HTML พร้อมแถบ URL นำทาง, ปรับระบบ Tooltip ทั้งโปรแกรม, ตั้งค่าเปิด-ปิด Slash Command, หน้าต่างวิดีโอลอยตัว (PiP) และปรับปรุงระบบส่งออกเอกสาร",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Real File Path & Browser Navigation in HTML Preview",
+          th: "แสดงพาธจริงและเปิดในเบราว์เซอร์จากหน้าพรีวิว HTML",
+        },
+        description: {
+          en: "URL bar displays actual relative workspace paths or file:/// URLs with quick 'Open in Default Browser' and robust clipboard copy actions.",
+          th: "แถบ URL แสดง Relative Path หรือ file:/// พร้อมปุ่มเปิดในเบราว์เซอร์หลักของเครื่อง และปุ่มคัดลอกพาธลงคลิปบอร์ดที่ทำงานได้จริงทุกสภาพแวดล้อม",
+        },
+        icon: FileCode,
+        badge: { en: "HTML Preview", th: "พรีวิว HTML", variant: "default" },
+      },
+      {
+        title: {
+          en: "Unified & Accessible Tooltip Overhaul",
+          th: "ยกเครื่องระบบ Tooltip ทั่วทั้งโปรแกรม",
+        },
+        description: {
+          en: "Replaced legacy browser title attributes with polished, accessible UI tooltips across the Sidebar, TabBar, Breadcrumb, Node Views, and Panels.",
+          th: "เปลี่ยนป้ายกำกับ title ดั้งเดิมของเบราว์เซอร์เป็น Tooltip ที่สวยงาม สม่ำเสมอ และรองรับ Accessibility ทั้งแถบข้าง, แถบแท็บ, แถบเส้นทาง และแผงควบคุมต่าง ๆ",
+        },
+        icon: Layers,
+        badge: { en: "UI / UX", th: "หน้าตาโปรแกรม", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Customizable Slash Command (/) & Clean Placeholders",
+          th: "เปิด-ปิด Slash Command (/) พร้อม Placeholder ที่สะอาดตา",
+        },
+        description: {
+          en: "Toggle Slash Commands on or off in Settings > Editor. When disabled, empty lines display a distraction-free placeholder without prompting for '/'.",
+          th: "ตั้งค่าเปิดหรือปิดการเรียกใช้ Slash Command ได้ที่การตั้งค่าเอดิเตอร์ เมื่อปิดใช้งาน บรรทัดว่างจะแสดงข้อความเริ่มต้นที่สะอาดตาโดยไม่มีข้อความชวนพิมพ์ /",
+        },
+        icon: Settings,
+        badge: { en: "Editor", th: "เอดิเตอร์", variant: "default" },
+      },
+      {
+        title: {
+          en: "Floating Video Picture-in-Picture (PiP) & Media Pickers",
+          th: "หน้าต่างวิดีโอลอยตัวข้ามแท็บ (PiP) และระบบเลือกสื่อ",
+        },
+        description: {
+          en: "Watch videos seamlessly across tabs with floating Picture-in-Picture playback, dedicated workspace video pickers, and custom protocol caching.",
+          th: "รับชมวิดีโอต่อเนื่องได้ทุกแท็บด้วยหน้าต่างลอยตัว (Picture-in-Picture) พร้อมหน้าต่างเลือกวิดีโอจากโฟลเดอร์งาน และโปรโตคอล luno-asset:// ที่รวดเร็วปลอดภัย",
+        },
+        icon: Video,
+        badge: { en: "Media", th: "มัลติมีเดีย", variant: "default" },
+      },
+      {
+        title: {
+          en: "High-Fidelity PDF & Document Exporting",
+          th: "ส่งออกเอกสารและ PDF คุณภาพสูง",
+        },
+        description: {
+          en: "Enhanced PDF rendering engine synchronizes web fonts, images, and math formulas before printing, paired with rich DOCX export capabilities.",
+          th: "ระบบพิมพ์เป็น PDF โฉมใหม่ รอการโหลดฟอนต์ รูปภาพ และสูตรคณิตศาสตร์ให้เสร็จสิ้นก่อนเรนเดอร์ พร้อมตัวสร้างเอกสาร Word (DOCX) ที่สมบูรณ์แบบ",
+        },
+        icon: Download,
+        badge: { en: "Export", th: "การส่งออก", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Updated Tip of the Day & Editing Polish",
+          th: "เกร็ดความรู้ประจำวันใหม่และปรับปรุงการจัดหน้า",
+        },
+        description: {
+          en: "Expanded modern workflow tips, refined multi-file drag-and-drop in the sidebar, and accurate blank line preservation around headings.",
+          th: "เพิ่มเคล็ดลับการใช้งานที่หลากหลายและทันสมัยขึ้น ปรับปรุงการลากย้ายหลายไฟล์พร้อมกันใน Sidebar และรักษาบรรทัดว่างรอบหัวข้อได้อย่างแม่นยำ 1:1",
+        },
+        icon: Sparkles,
+        badge: { en: "Improvement", th: "การปรับปรุง", variant: "outline" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "HTML & Web Viewer", th: "การพรีวิว HTML และเว็บ" },
+        items: [
+          {
+            en: "Display relative file paths and file:/// URLs directly in the preview address bar.",
+            th: "แสดงพาธสัมพันธ์ (Relative Path) และ URL แบบ file:/// ในแถบที่อยู่ของหน้าพรีวิว",
+          },
+          {
+            en: "Added 'Open in default browser' button to launch the rendered HTML document externally.",
+            th: "เพิ่มปุ่ม 'เปิดในเบราว์เซอร์หลัก' เพื่อเปิดดูเอกสาร HTML ในเว็บเบราว์เซอร์ภายนอกทันที",
+          },
+          {
+            en: "Fixed 'Copy path' action with robust clipboard utilities and document.execCommand fallback.",
+            th: "แก้ไขปุ่ม 'คัดลอกพาธ' ให้บันทึกลงคลิปบอร์ดจริงได้อย่างแม่นยำ พร้อมระบบ Fallback รองรับทุกสภาวะ",
+          },
+          {
+            en: "Automatic live refresh and state persistence when editing linked HTML files.",
+            th: "อัปเดตการแสดงผลอัตโนมัติทันทีที่แก้ไขไฟล์ HTML พร้อมจดจำสถานะและบันทึกข้อมูลอย่างปลอดภัย",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor & Formatting", th: "เอดิเตอร์และการจัดรูปแบบ" },
+        items: [
+          {
+            en: "Added enableSlashCommand setting under Editor > Formatting Helpers to toggle slash commands on or off.",
+            th: "เพิ่มการตั้งค่าเปิด-ปิด Slash Command ในเมนูการตั้งค่า > เอดิเตอร์ > เครื่องมือช่วยจัดรูปแบบ",
+          },
+          {
+            en: "Dynamic line placeholder hides '/' prompt when slash command is disabled, showing a clean prompt.",
+            th: "ปรับแต่ง Placeholder อัตโนมัติ ไม่แสดงข้อความชวนพิมพ์ / เมื่อปิดการใช้งาน Slash Command",
+          },
+          {
+            en: "Suppressed 'Type to search...' placeholder when slash commands are turned off.",
+            th: "ปิดการแสดงคำใบ้ 'พิมพ์เพื่อค้นหา...' เมื่อปิดฟังก์ชัน Slash Command",
+          },
+          {
+            en: "Refined Toggle list header title placeholder to show clean, localized labels.",
+            th: "ปรับแต่ง Placeholder บนหัวข้อ Toggle list ให้กระชับ สวยงาม และตรงตามภาษาที่เลือก",
+          },
+          {
+            en: "Guaranteed 1:1 blank line and paragraph spacing preservation around headings and blockquotes across tab switching.",
+            th: "คงจำนวนบรรทัดว่างและย่อหน้าก่อนและหลังหัวข้อ/ข้อความอ้างอิงให้แม่นยำ 1:1 เสมอเมื่อสลับแท็บ",
+          },
+        ],
+      },
+      {
+        category: { en: "User Interface & Experience", th: "อินเทอร์เฟซและประสบการณ์ผู้ใช้" },
+        items: [
+          {
+            en: "System-wide conversion from native title labels to accessible Shadcn/Radix tooltip components.",
+            th: "ปรับเปลี่ยนป้ายกำกับ title ทั่วทั้งโปรแกรมให้เป็น Tooltip ที่สวยงาม คมชัด และเป็นมิตรกับผู้ใช้งาน",
+          },
+          {
+            en: "Polished tooltips across Sidebar navigation, TabBar, Breadcrumb, RelationsView, TrashView, and Settings.",
+            th: "ปรับแต่ง Tooltip บนแถบข้าง, แถบแท็บ, แถบนำทาง, แผนผังความสัมพันธ์, ถังขยะ และหน้าตั้งค่า",
+          },
+          {
+            en: "Preserved multi-selection state during drag-and-drop operations in the Sidebar tree.",
+            th: "คงสถานะการเลือกหลายไฟล์พร้อมกันเมื่อลากย้าย (Drag and drop) ในรายการไฟล์ของแถบข้าง",
+          },
+          {
+            en: "Expanded Tip of the Day library with modern, practical productivity and workflow tips.",
+            th: "อัปเดตคลังเกร็ดความรู้ประจำวัน (Tip of the day) ด้วยคำแนะนำการใช้งานและเทคนิคการทำงานใหม่ ๆ",
+          },
+        ],
+      },
+      {
+        category: { en: "Media, Export & Platform", th: "มัลติมีเดีย การส่งออก และระบบภายใน" },
+        items: [
+          {
+            en: "Introduced Global Video Picture-in-Picture (PiP) floating player across tab navigations.",
+            th: "เพิ่มระบบเล่นวิดีโอแบบ Picture-in-Picture (PiP) ลอยตัวข้ามหน้าต่างและสลับแท็บได้อย่างต่อเนื่อง",
+          },
+          {
+            en: "Registered custom luno-asset:// protocol in Electron for fast, sandbox-safe local media streaming.",
+            th: "ลงทะเบียนโปรโตคอล luno-asset:// ใน Electron สำหรับโหลดไฟล์สื่อในเครื่องอย่างรวดเร็วและปลอดภัย",
+          },
+          {
+            en: "Added dedicated Workspace Video and Image picker dialogs with context menus.",
+            th: "เพิ่มหน้าต่างเลือกไฟล์วิดีโอและรูปภาพจากโฟลเดอร์งาน พร้อมเมนูคลิกขวาจัดการสื่อ",
+          },
+          {
+            en: "Enhanced print-to-PDF pipeline with font and image pre-rendering guarantees.",
+            th: "ปรับปรุงกระบวนการส่งออก PDF ให้รอโหลดฟอนต์และรูปภาพทั้งหมดให้สมบูรณ์ก่อนสร้างไฟล์",
+          },
+          {
+            en: "Added native window fullscreen toggle controls via IPC.",
+            th: "เพิ่มคำสั่งควบคุมโหมดเต็มหน้าจอ (Fullscreen) ผ่าน IPC บนระบบเดสก์ท็อป",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.3.1",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "Security & Media Enhancements: Video Playback, In-Place QR Code Editing, OWASP PBKDF2 600k PIN Encryption, and Anti-Brute Force Lockout",
       th: "อัปเกรดระบบความปลอดภัยและมัลติมีเดีย: เล่นวิดีโอในตัว, แก้ไข QR Code จากในโน้ต, เข้ารหัส PIN 6 หลักตามมาตรฐาน OWASP PBKDF2 และระบบป้องกัน Brute Force",
@@ -313,6 +497,276 @@ const RELEASES: ReleaseVersion[] = [
     ],
   },
   {
+    version: "1.2.7",
+    releaseDate: "2026",
+    tagline: {
+      en: "Native OAuth Tab Closer, Omni-Channel Image Pasting & UI Improvements",
+      th: "ปิดแท็บ OAuth อัตโนมัติ, วางรูปภาพได้ครอบคลุมทุกจุด และปรับปรุงส่วนติดต่อผู้ใช้",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Native OAuth Auto-Close & Window Focus",
+          th: "ปิดแท็บ OAuth อัตโนมัติและโฟกัสหน้าต่าง Luno",
+        },
+        description: {
+          en: "Browser tab automatically closes upon completing Google OAuth authentication, seamlessly refocusing the Luno Note desktop window.",
+          th: "ปิดแท็บเบราว์เซอร์ให้อัตโนมัติเมื่อยืนยันสิทธิ์ Google OAuth สำเร็จ พร้อมสลับโฟกัสกลับมายังหน้าต่างโปรแกรม Luno Note ทันที",
+        },
+        icon: ShieldCheck,
+      },
+      {
+        title: {
+          en: "Omni-Channel Clipboard Image Pasting",
+          th: "วางรูปภาพจากคลิปบอร์ดได้ทุกตำแหน่ง",
+        },
+        description: {
+          en: "Paste copied images directly anywhere across the editor with automatic asset naming and reliable inline embedding.",
+          th: "คัดลอกรูปภาพแล้วกดวางลงในตัวแก้ไขข้อความได้โดยตรงจากทุกที่ พร้อมตั้งชื่อไฟล์แนบและแสดงผลในบรรทัดทันที",
+        },
+        icon: FileText,
+      },
+      {
+        title: {
+          en: "Automated Release Workflow Polish",
+          th: "ปรับปรุงกระบวนการปล่อยอัปเดตและเสถียรภาพ",
+        },
+        description: {
+          en: "Refined CI/CD automated build pipelines with pre-clean steps and bash release note generation.",
+          th: "ปรับปรุงระบบ CI/CD สร้างตัวติดตั้งเวอร์ชันใหม่อัตโนมัติพร้อมบันทึกประวัติการเปลี่ยนแปลง",
+        },
+        icon: Sparkles,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Authentication & Cloud", th: "การยืนยันตัวตนและคลาวด์" },
+        items: [
+          {
+            en: "Added native browser tab closer and instant desktop focus on Google Drive OAuth completion.",
+            th: "เพิ่มระบบปิดแท็บเบราว์เซอร์อัตโนมัติและโฟกัสแอปทันทีเมื่อยืนยัน Google Drive OAuth เสร็จสิ้น",
+          },
+          {
+            en: "Optimized loopback local server port handling for OAuth callbacks.",
+            th: "ปรับปรุงการจัดการพอร์ต Local Server สำหรับรับผลการยืนยัน OAuth ให้เสถียรยิ่งขึ้น",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor & Media", th: "ตัวแก้ไขและสื่อมัลติมีเดีย" },
+        items: [
+          {
+            en: "Enhanced synchronous and asynchronous clipboard image pasting with fallback mechanisms.",
+            th: "ยกระดับการวางรูปภาพจากคลิปบอร์ดทั้งแบบ Synchronous และ Asynchronous พร้อมระบบสำรองกรณีฉุกเฉิน",
+          },
+          {
+            en: "Refined local attachment path resolution in markdown view.",
+            th: "ปรับปรุงการแปลงพาธไฟล์แนบภายในเครื่องเพื่อแสดงผลรูปภาพในมุมมอง Markdown",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.2.6",
+    releaseDate: "2026",
+    tagline: {
+      en: "Instant Image Pasting with Block Fallback & Dynamic OAuth Security",
+      th: "วางรูปภาพทันทีพร้อมระบบ Block Fallback และระบบยืนยันตัวตน Google Drive OAuth",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Instant Image Pasting with Block Fallback",
+          th: "วางรูปภาพทันใจพร้อมระบบ Block Fallback",
+        },
+        description: {
+          en: "Paste image files or clipboard screenshots directly at cursor position with robust node-level block fallbacks.",
+          th: "วางไฟล์รูปภาพหรือภาพหน้าจอจากคลิปบอร์ดลงตรงตำแหน่งเคอร์เซอร์ได้ทันที พร้อมระบบจัดการบล็อกสำรอง",
+        },
+        icon: FileText,
+      },
+      {
+        title: {
+          en: "Dynamic OAuth Client Secrets",
+          th: "ระบบจัดการกุญแจ Google OAuth แบบไดนามิก",
+        },
+        description: {
+          en: "Secure dynamic resolution of Google Drive OAuth client credentials ensuring permanent sync reliability.",
+          th: "จัดการและดึงกุญแจเชื่อมต่อ Google OAuth อย่างปลอดภัย ช่วยให้ระบบซิงก์ทำงานได้อย่างต่อเนื่อง",
+        },
+        icon: ShieldCheck,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Editor", th: "ตัวแก้ไขข้อความ" },
+        items: [
+          {
+            en: "Added instant clipboard image paste handler with custom node insert fallback.",
+            th: "เพิ่มระบบตรวจจับการวางรูปภาพจากคลิปบอร์ดพร้อมตัวแทรกบล็อกรูปภาพอัตโนมัติ",
+          },
+          {
+            en: "Resolved image attachment local storage path resolution.",
+            th: "แก้ปัญหาการระบุตำแหน่งบันทึกไฟล์รูปภาพแนบในเครื่อง",
+          },
+        ],
+      },
+      {
+        category: { en: "Cloud & Security", th: "คลาวด์และความปลอดภัย" },
+        items: [
+          {
+            en: "Implemented dynamic resolution for Google Drive OAuth client secrets.",
+            th: "พัฒนาระบบตรวจสอบ Client Secret ของ Google Drive OAuth แบบไดนามิก",
+          },
+          {
+            en: "Added OAuth completion confirmation landing page.",
+            th: "เพิ่มหน้าเว็บแจ้งสถานะเมื่อยืนยันตัวตน OAuth สำเร็จ",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.2.2",
+    releaseDate: "2026",
+    tagline: {
+      en: "Workspace ZIP Backup, Superscript/Subscript, Gemini Auto-Fallback & Google Drive OAuth Sync",
+      th: "สำรองข้อมูล Workspace เป็นไฟล์ ZIP, รองรับตัวยก/ตัวห้อย, ระบบสลับโมเดล Gemini อัตโนมัติ และ Google Drive Sync",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Full Workspace ZIP Backup & Export",
+          th: "สำรองข้อมูลทั้ง Workspace เป็นไฟล์ ZIP",
+        },
+        description: {
+          en: "Export and back up your entire notes workspace, folders, and attachments into a compressed ZIP file with one click.",
+          th: "ส่งออกและสำรองข้อมูลโน้ต โฟลเดอร์ และไฟล์แนบทั้งหมดใน Workspace เป็นไฟล์ ZIP บีบอัดได้ในคลิกเดียว",
+        },
+        icon: Archive,
+      },
+      {
+        title: {
+          en: "Superscript and Subscript Formatting",
+          th: "จัดรูปแบบตัวยกและตัวห้อย (Superscript / Subscript)",
+        },
+        description: {
+          en: "Write mathematical formulas, chemical compounds, and footnotes with dedicated superscript and subscript controls.",
+          th: "พิมพ์สูตรคณิตศาสตร์ สมการเคมี และเชิงอรรถได้สะดวกด้วยปุ่มและคีย์ลัดตัวยก (x²) และตัวห้อย (H₂O)",
+        },
+        icon: FileCode,
+      },
+      {
+        title: {
+          en: "Intelligent Gemini Model Auto-Fallback",
+          th: "ระบบสลับโมเดล AI Gemini อัตโนมัติเมื่อมีปัญหา",
+        },
+        description: {
+          en: "Automatically falls back to alternative Gemini models if the primary model encounters quota or network errors.",
+          th: "สลับไปใช้โมเดล Gemini สำรองโดยอัตโนมัติหากโมเดลหลักติดโควตาหรือมีปัญหาการเชื่อมต่อ",
+        },
+        icon: Sparkles,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Backup & Export", th: "การสำรองข้อมูลและส่งออก" },
+        items: [
+          {
+            en: "Added one-click Workspace ZIP export in Settings.",
+            th: "เพิ่มปุ่มส่งออก Workspace ทั้งหมดเป็นไฟล์ ZIP ในหน้าการตั้งค่า",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor & Formatting", th: "ตัวแก้ไขและการจัดรูปแบบ" },
+        items: [
+          {
+            en: "Added Superscript (Ctrl+.) and Subscript (Ctrl+,) custom marks.",
+            th: "เพิ่มปุ่มและคีย์ลัดสำหรับตัวยก (Ctrl+.) และตัวห้อย (Ctrl+,)",
+          },
+        ],
+      },
+      {
+        category: { en: "AI Assistant", th: "ผู้ช่วย AI" },
+        items: [
+          {
+            en: "Implemented automatic fallback strategy for Gemini 2.5 Flash / Pro models.",
+            th: "เพิ่มระบบสลับโมเดลอัตโนมัติระหว่าง Gemini 2.5 Flash / Pro เพื่อความต่อเนื่องในการใช้งาน",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.2.1",
+    releaseDate: "2026",
+    tagline: {
+      en: "Gemini Voice Dictation, Custom Icon Support, Folder Sync & English README",
+      th: "พิมพ์ด้วยเสียงผ่าน Gemini AI (Voice Dictation), รองรับไอคอนกำหนดเอง และซิงก์โฟลเดอร์",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Gemini Voice Dictation",
+          th: "พิมพ์ด้วยเสียงผ่าน Gemini AI (Voice Dictation)",
+        },
+        description: {
+          en: "Speak naturally and let Gemini AI transcribe and punctuate your speech directly into clean markdown notes.",
+          th: "พูดบันทึกเสียงแล้วให้ Gemini AI ถอดความและจัดรูปแบบเป็นข้อความลงในโน้ตให้อัตโนมัติ",
+        },
+        icon: Mic,
+      },
+      {
+        title: {
+          en: "Custom File & Folder Icons",
+          th: "ปรับแต่งไอคอนไฟล์และโฟลเดอร์",
+        },
+        description: {
+          en: "Assign customized Lucide, Tabler, and Phosphor icons to any folder or note for visual categorization.",
+          th: "เลือกไอคอนที่ต้องการให้กับโฟลเดอร์และไฟล์โน้ตเพื่อจัดหมวดหมู่อย่างสวยงาม",
+        },
+        icon: Layers,
+      },
+      {
+        title: {
+          en: "Hierarchical Folder Sync",
+          th: "ซิงก์โฟลเดอร์แบบลำดับชั้น",
+        },
+        description: {
+          en: "Full recursive directory sync preserving nested folder trees with Google Drive cloud storage.",
+          th: "ซิงก์โครงสร้างโฟลเดอร์ย่อยหลายชั้นกับ Google Drive ได้อย่างแม่นยำและเป็นระเบียบ",
+        },
+        icon: FolderSync,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "AI & Audio", th: "ระบบ AI และเสียง" },
+        items: [
+          {
+            en: "Integrated Gemini multimodal audio transcription for speech-to-text dictation.",
+            th: "เชื่อมต่อระบบถอดเสียงด้วย Gemini Multimodal Audio สำหรับพิมพ์งานด้วยเสียง",
+          },
+        ],
+      },
+      {
+        category: { en: "File Management", th: "การจัดการไฟล์" },
+        items: [
+          {
+            en: "Added Icon Picker dialog for folder and file customization.",
+            th: "เพิ่มหน้าต่างเลือกไอคอนสำหรับกำหนดไอคอนเฉพาะของแต่ละโฟลเดอร์และไฟล์",
+          },
+          {
+            en: "Enhanced recursive directory tree sync with Google Drive.",
+            th: "ปรับปรุงการซิงก์โฟลเดอร์แบบ Recursive กับ Google Drive",
+          },
+        ],
+      },
+    ],
+  },
+  {
     version: "1.2.0",
     releaseDate: "2026",
     tagline: {
@@ -369,6 +823,124 @@ const RELEASES: ReleaseVersion[] = [
           {
             en: "Added Split View support for all notes and system views.",
             th: "รองรับ Split View สำหรับเอกสารและมุมมองระบบทั้งหมด",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.1.2",
+    releaseDate: "2026",
+    tagline: {
+      en: "Desktop Auto-Updater with In-App Notifications & Stability Guards",
+      th: "ระบบอัปเดตอัตโนมัติบนเดสก์ท็อปพร้อมการแจ้งเตือนแบบ Toast และปรับปรุงเสถียรภาพ",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Background Desktop Auto-Updater",
+          th: "ระบบตรวจหาและดาวน์โหลดอัปเดตเบื้องหลัง",
+        },
+        description: {
+          en: "Automatically detects new releases on startup and downloads them silently in the background.",
+          th: "ตรวจหาเวอร์ชันใหม่จาก GitHub เมื่อเปิดโปรแกรม และดาวน์โหลดไฟล์อัปเดตในเบื้องหลังโดยอัตโนมัติ",
+        },
+        icon: RefreshCw,
+      },
+      {
+        title: {
+          en: "Updater Error Recovery & Guards",
+          th: "ระบบป้องกันข้อผิดพลาดของ Auto-Updater",
+        },
+        description: {
+          en: "Robust guards against updater initialization errors and clear human-readable update notifications.",
+          th: "เพิ่มระบบป้องกันความผิดพลาดในการเริ่มต้นตัวอัปเดตและแสดงข้อความแจ้งเตือนที่เข้าใจง่าย",
+        },
+        icon: ShieldCheck,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Auto-Updater", th: "ระบบอัปเดตอัตโนมัติ" },
+        items: [
+          {
+            en: "Integrated electron-updater with background download and restart-to-install flow.",
+            th: "ติดตั้ง electron-updater พร้อมระบบดาวน์โหลดเบื้องหลังและปุ่มรีสตาร์ทเพื่อติดตั้ง",
+          },
+          {
+            en: "Added toast notifications for update available, downloading, and update ready states.",
+            th: "เพิ่มการแจ้งเตือนสถานะเมื่อพบอัปเดตใหม่ กำลังดาวน์โหลด และพร้อมติดตั้ง",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.1.1",
+    releaseDate: "2026",
+    tagline: {
+      en: "GitHub Update Checker, Wrong-Language Detector & HTML Preview Enhancements",
+      th: "ระบบตรวจหาอัปเดตจาก GitHub, เครื่องมือแก้ภาษาผิดอัตโนมัติ และปรับปรุง HTML Preview",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Wrong Language Auto-Detector & Converter",
+          th: "ระบบตรวจจับและแปลงภาษาผิดอัตโนมัติ (ไทย-อังกฤษ)",
+        },
+        description: {
+          en: "Detects when text was typed with the wrong keyboard layout (e.g. Kedmanee vs QWERTY) and converts it with a single click.",
+          th: "ตรวจจับข้อความที่พิมพ์ผิดภาษา (เช่น ลืมเปลี่ยนภาษาไทย/อังกฤษ) และกดแปลงข้อความที่ถูกต้องได้ทันที",
+        },
+        icon: Languages,
+      },
+      {
+        title: {
+          en: "Interactive HTML & CSS Code Editor with Preview",
+          th: "ตัวแก้ไขและพรีวิวโค้ด HTML/CSS ในตัว",
+        },
+        description: {
+          en: "Write and preview standalone HTML and CSS files directly with live syntax highlighting and responsive device previews.",
+          th: "เขียนและดูตัวอย่างผลลัพธ์ไฟล์ HTML และ CSS ได้ในโปรแกรม พร้อมไฮไลต์โค้ดและปรับขนาดหน้าจอพรีวิว",
+        },
+        icon: FileCode,
+      },
+      {
+        title: {
+          en: "Dynamic Version Synchronization",
+          th: "ซิงก์เวอร์ชันแอปอัตโนมัติ",
+        },
+        description: {
+          en: "App version dynamically reflects package metadata across Settings, Help, and Launcher views.",
+          th: "ซิงก์เลขเวอร์ชันของแอปพลิเคชันจาก package.json ไปยังหน้าตั้งค่า คู่มือ และหน้าแรกอย่างถูกต้อง",
+        },
+        icon: Sparkles,
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Editor Tools", th: "เครื่องมือในตัวแก้ไข" },
+        items: [
+          {
+            en: "Added wrong language detection and Thai-English keyboard mapper utility.",
+            th: "เพิ่มระบบวิเคราะห์และแปลงภาษาแป้นพิมพ์ไทย-อังกฤษ (Thai Keyboard Mapper)",
+          },
+          {
+            en: "Added dedicated HtmlCodeEditor with line numbering and responsive preview pane.",
+            th: "เพิ่มตัวแก้ไข HtmlCodeEditor พร้อมเลขบรรทัดและหน้าต่างพรีวิว Responsive",
+          },
+        ],
+      },
+      {
+        category: { en: "System & UI", th: "ระบบและหน้าตาโปรแกรม" },
+        items: [
+          {
+            en: "Added GitHub update checker with action toast and direct release links.",
+            th: "เพิ่มระบบตรวจสอบอัปเดตจาก GitHub พร้อมปุ่มลิงก์ไปยัง Release Notes",
+          },
+          {
+            en: "Added dedicated TabViews for Tags and Favorites.",
+            th: "เพิ่มหน้าต่างแท็บเฉพาะสำหรับจัดการ Tags และ Favorites",
           },
         ],
       },
@@ -636,7 +1208,7 @@ export default function WhatsNewView({
                 {activeRelease.changes.map((group, gIdx) => (
                   <div key={gIdx} className="rounded-2xl border border-border/50 bg-muted/20 p-4 space-y-2.5">
                     <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
                       <span>{isTh ? group.category.th : group.category.en}</span>
                     </h4>
                     <ul className="space-y-1.5 text-xs text-muted-foreground">

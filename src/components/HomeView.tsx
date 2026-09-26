@@ -178,6 +178,7 @@ export default function HomeView({
   }, [notes, normalizedQuery]);
 
   const getNoteIcon = (note: Note) => {
+    if (settings?.showFileIcons === false) return null;
     const cls = "h-4 w-4 text-muted-foreground shrink-0";
     const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
     const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);

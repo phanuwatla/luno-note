@@ -1,3 +1,48 @@
+## Release Notes - Luno Note v1.3.2
+
+### Overview
+Luno Note version 1.3.2 introduces direct workspace path and browser navigation in the HTML Viewer, a comprehensive application-wide tooltip system migration, a configurable Slash Command (`/`) setting with clean dynamic placeholders, a global Picture-in-Picture (PiP) video player, high-fidelity PDF and Word (DOCX) export pipelines, and modernized tips and editing polish.
+
+### Key Improvements & New Features
+
+#### 1. HTML & Web Preview Navigation
+- **Real File Path & Protocol Display**: The preview address bar displays relative workspace paths and `file:///` URLs instead of abstract preview identifiers.
+- **Open in Default Browser**: Seamlessly launch the rendered HTML document in the operating system's default web browser with a single click.
+- **True Clipboard Copy**: Resolved clipboard copying with robust multi-tiered fallback (`navigator.clipboard` and `document.execCommand`), ensuring paths are copied reliably across all desktop and browser environments.
+- **Live Sync & Editing Persistence**: Automatic reload and state retention when editing workspace HTML documents.
+
+#### 2. Comprehensive Tooltip System Overhaul
+- **Modern UI Tooltips**: Fully replaced legacy browser `title` attributes with accessible, responsive Shadcn/Radix UI tooltips across the application.
+- **Everywhere Navigation**: Polished tooltips for Sidebar file tree, TabBar actions, Breadcrumbs, Relations View graph controls, Trash actions, and Settings panels.
+- **Clean Labeling**: Eliminated redundant dual-labels, ensuring singular, high-clarity tooltip hints for all icon buttons.
+
+#### 3. Configurable Slash Command (/) & Clean Dynamic Placeholders
+- **Slash Command Toggle**: Added `enableSlashCommand` setting under **Settings > Editor > Formatting Helpers** (default: enabled).
+- **Distraction-Free Placeholders**: When Slash Commands are disabled, empty lines display a clean "Start writing here..." / "เริ่มเขียนข้อความที่นี่..." placeholder without prompting to use `/`.
+- **Search Prompt Suppression**: When typing `/` while slash commands are disabled, the "Type to search..." placeholder is gracefully suppressed.
+- **Polished Toggle List Headers**: Standardized toggle list title placeholders to clean, localized labels.
+
+#### 4. Global Picture-in-Picture (PiP) & Media Enhancements
+- **Cross-Tab Video PiP**: Floating Picture-in-Picture player lets you continue watching videos while writing or switching tabs.
+- **Native `luno-asset://` Protocol**: High-performance local media streaming and caching in Electron for secure offline playback.
+- **Workspace Media Pickers**: Dedicated dialogs for picking workspace videos and images with media context menus.
+- **WebM Classifier**: Intelligent header detection distinguishing audio-only and video WebM containers.
+
+#### 5. High-Fidelity PDF & Document Export
+- **Resource-Synchronized Print-to-PDF**: Electron PDF export waits for web fonts, images (`img.decode()`), and math formulas to finish loading before rendering, eliminating blank images or un-styled fonts.
+- **Rich Document Generation**: Robust DOCX document generation preserving document formatting.
+
+#### 6. Productivity & Workflow Polish
+- **Updated Tip of the Day**: Expanded and modernized tips library providing valuable shortcuts, markdown tricks, and feature guides.
+- **Sidebar Multi-Drag**: Preserved multi-item selections during folder drag-and-drop operations in the sidebar.
+- **Heading Line Spacing Preservation**: Guaranteed 1:1 blank line retention around headings across tab switches and saves.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.3.2.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.1
 
 ### Overview

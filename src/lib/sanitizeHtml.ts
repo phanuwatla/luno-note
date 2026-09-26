@@ -44,6 +44,7 @@ export function sanitizeHtml(rawHtml: string): string {
           "data-footnote-target",
           "data-footnote-backref",
           "data-wikilink",
+          "data-wikilink-embed",
           "data-type",
           "data-checked",
           "data-color",
@@ -67,9 +68,12 @@ export function sanitizeHtml(rawHtml: string): string {
           "type",
           "checked",
           "disabled",
+          "data-text-align",
+          "data-title",
+          "title",
         ],
         ALLOWED_URI_REGEXP:
-          /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|wikilink):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$)|data:image\/|blob:)/i,
+          /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|wikilink|luno-asset):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$)|data:(?:image|video|audio)\/|blob:)/i,
       });
     }
   } catch (err) {

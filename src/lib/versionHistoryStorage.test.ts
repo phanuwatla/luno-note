@@ -5,6 +5,7 @@ import {
   deleteVersionSnapshot,
   clearNoteHistory,
   getVersionSnapshot,
+  groupVersionSnapshots,
 } from "./versionHistoryStorage";
 import type { Note } from "@/hooks/useNotes";
 
@@ -284,6 +285,70 @@ describe("versionHistoryStorage", () => {
     expect(eventDetail?.noteId).toBe(dummyNote.id);
 
     window.removeEventListener("luno:version-snapshot-saved", handler);
+  });
+
+  describe("groupVersionSnapshots", () => {
+    it("should return empty array for empty snapshots", () => {
+      expect(groupVersionSnapshots([])).toEqual([]);
+    });
+
+    it("should correctly categorize snapshots into Today, Yesterday, specific dates, Last week, Last month, and Older", () => {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const today = todayStart + 1000;
+      const yesterday = todayStart - 1000;
+      const threeDaysAgo = todayStart - 3 * 86400000 + 1000;
+      const nineDaysAgo = todayStart - 9 * 86400000 + 1000;
+      const twentyDaysAgo = todayStart - 20 * 86400000 + 1000;
+      const fiftyDaysAgo = todayStart - 50 * 86400000 + 1000;
+
+      const mockSnapshots = [
+        { id: "1", noteId: "n1", timestamp: today, title: "1", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+        { id: "2", noteId: "n1", timestamp: yesterday, title: "2", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+        { id: "3", noteId: "n1", timestamp: threeDaysAgo, title: "3", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+        { id: "4", noteId: "n1", timestamp: nineDaysAgo, title: "4", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+        { id: "5", noteId: "n1", timestamp: twentyDaysAgo, title: "5", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+        { id: "6", noteId: "n1", timestamp: fiftyDaysAgo, title: "6", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+      ];
+
+      const groups = groupVersionSnapshots(mockSnapshots, "YYYY-MM-DD", "en");
+      expect(groups.length).toBeGreaterThanOrEqual(4);
+
+      // Verify Today group
+      const todayGroup = groups.find((g) => g.id === "today");
+      expect(todayGroup).toBeDefined();
+      expect(todayGroup?.title).toBe("Today");
+      expect(todayGroup?.items[0].id).toBe("1");
+
+      // Verify Last week group
+      const lastWeekGroup = groups.find((g) => g.id === "lastWeek");
+      expect(lastWeekGroup).toBeDefined();
+      expect(lastWeekGroup?.title).toBe("Last week");
+
+      // Verify Older group
+      const olderGroup = groups.find((g) => g.id === "older");
+      expect(olderGroup).toBeDefined();
+      expect(olderGroup?.title).toBe("Older");
+    });
+
+    it("should honor custom Thai translations and custom date format", () => {
+      const now = Date.now();
+      const mockSnapshots = [
+        { id: "1", noteId: "n1", timestamp: now, title: "1", content: "", wordCount: 0, charCount: 0, trigger: "auto" as const },
+      ];
+
+      const groups = groupVersionSnapshots(mockSnapshots, "DD/MM/YYYY", "th", {
+        today: "วันนี้",
+        yesterday: "เมื่อวาน",
+        lastWeek: "สัปดาห์ที่แล้ว",
+        lastMonth: "เดือนที่แล้ว",
+        older: "เก่ากว่านี้",
+      });
+
+      expect(groups.length).toBe(1);
+      expect(groups[0].id).toBe("today");
+      expect(groups[0].title).toBe("วันนี้");
+    });
   });
 });
 

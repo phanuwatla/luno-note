@@ -221,5 +221,51 @@ describe("Toolbar Configuration - Superscript & Subscript", () => {
       expect(getToolbarIcon("codeBlock", pack)).toBeDefined();
     }
   });
+
+  it("defaults showToolbar to true in normalized settings", () => {
+    const loaded = normalizeSettings({});
+    expect(loaded.showToolbar).toBe(true);
+  });
+
+  it("respects showToolbar when explicitly set to false", () => {
+    const loaded = normalizeSettings({ showToolbar: false });
+    expect(loaded.showToolbar).toBe(false);
+  });
+
+  it("respects showToolbar when set to true", () => {
+    const loaded = normalizeSettings({ showToolbar: true });
+    expect(loaded.showToolbar).toBe(true);
+  });
+
+  it("includes video in DEFAULT_TOOLBAR_ORDER right after image", () => {
+    expect(DEFAULT_TOOLBAR_ORDER).toContain("video");
+    const imageIdx = DEFAULT_TOOLBAR_ORDER.indexOf("image");
+    const videoIdx = DEFAULT_TOOLBAR_ORDER.indexOf("video");
+    expect(videoIdx).toBe(imageIdx + 1);
+  });
+
+  it("resolves video icon across all icon packs", () => {
+    const packs = ["lucide", "tabler", "phosphor"] as const;
+    for (const pack of packs) {
+      const VideoIcon = getToolbarIcon("video", pack);
+      expect(VideoIcon).toBeDefined();
+    }
+  });
+
+  it("defaults showFileIcons to true in normalized settings", () => {
+    const loaded = normalizeSettings({});
+    expect(loaded.showFileIcons).toBe(true);
+  });
+
+  it("respects showFileIcons when explicitly set to false", () => {
+    const loaded = normalizeSettings({ showFileIcons: false });
+    expect(loaded.showFileIcons).toBe(false);
+  });
+
+  it("respects showFileIcons when set to true", () => {
+    const loaded = normalizeSettings({ showFileIcons: true });
+    expect(loaded.showFileIcons).toBe(true);
+  });
 });
+
 

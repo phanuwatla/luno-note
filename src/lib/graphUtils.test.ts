@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractNoteLinks, resolveLinkedNoteId, buildNoteGraph, wrapNodeText } from "./graphUtils";
+import { extractNoteLinks, resolveLinkedNoteId, buildNoteGraph, wrapNodeText, getNodeBaseRadius } from "./graphUtils";
 import type { Note } from "@/hooks/useNotes";
 
 describe("graphUtils", () => {
@@ -122,6 +122,27 @@ And markdown link [Fifth Note](Fifth%20Note.md).
     expect(lines[1].endsWith("...")).toBe(true);
     // Make sure total line 2 length including ... fits within maxWidth
     expect(measure(lines[1])).toBeLessThanOrEqual(150);
+  });
+
+  describe("getNodeBaseRadius", () => {
+    it("returns base radius of 2.6 for 0 or negative degree", () => {
+      expect(getNodeBaseRadius(0)).toBe(2.6);
+      expect(getNodeBaseRadius(-1)).toBe(2.6);
+    });
+
+    it("scales radius proportionally with higher degrees", () => {
+      const r1 = getNodeBaseRadius(1);
+      const r2 = getNodeBaseRadius(4);
+      const r3 = getNodeBaseRadius(9);
+
+      expect(r1).toBeGreaterThan(2.6);
+      expect(r2).toBeGreaterThan(r1);
+      expect(r3).toBeGreaterThan(r2);
+    });
+
+    it("caps max radius at 7.5", () => {
+      expect(getNodeBaseRadius(100)).toBe(7.5);
+    });
   });
 });
 

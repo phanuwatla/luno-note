@@ -338,3 +338,13 @@ export function wrapNodeText(
   return lines.map((l) => l.trim()).filter(Boolean).slice(0, maxLines);
 }
 
+/**
+ * Calculates the dynamic base radius of a node based on its connection degree.
+ * Nodes with more links/edges are larger so hubs stand out clearly while staying sleek and proportional.
+ */
+export function getNodeBaseRadius(degree: number): number {
+  if (degree <= 0) return 2.6;
+  // Scaled smoothly using square root so high-degree nodes grow elegantly without overwhelming the canvas
+  return Math.min(7.5, 2.6 + Math.sqrt(degree) * 0.95);
+}
+

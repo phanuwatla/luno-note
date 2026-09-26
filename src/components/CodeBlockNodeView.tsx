@@ -103,7 +103,7 @@ const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
                 aria-label="Copy code"
               >
                 {copied ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  <Check className="h-3.5 w-3.5 text-primary" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}

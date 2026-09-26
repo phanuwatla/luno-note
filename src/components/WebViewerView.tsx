@@ -13,13 +13,49 @@ import {
   FilePlus2,
   Frown,
   OctagonX,
+  FileCode,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { copyToClipboard } from "@/lib/clipboardUtils";
 
-function getHostFromUrl(url: string): string {
+export function getFriendlyDisplayUrl(rawUrl: string, title?: string, customDisplayUrl?: string): string {
+  if (!rawUrl) return "";
+  if (customDisplayUrl && (rawUrl.startsWith("data:") || rawUrl.startsWith("blob:") || rawUrl.startsWith("file:"))) {
+    if (customDisplayUrl.startsWith("file:///") || customDisplayUrl.startsWith("http://") || customDisplayUrl.startsWith("https://")) {
+      return customDisplayUrl;
+    }
+    const clean = customDisplayUrl.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    return `file:///${clean}`;
+  }
+  if (rawUrl.startsWith("file:")) {
+    return rawUrl;
+  }
+  if (rawUrl.startsWith("data:text/html") || rawUrl.startsWith("data:")) {
+    const safeTitle = (title || "index.html").trim();
+    const fileName = safeTitle.endsWith(".html") || safeTitle.endsWith(".htm") ? safeTitle : `${safeTitle}.html`;
+    const clean = fileName.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    return customDisplayUrl || `file:///${clean}`;
+  }
+  if (rawUrl.startsWith("blob:")) {
+    const safeTitle = (title || "preview.html").trim();
+    const clean = safeTitle.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    return customDisplayUrl || `file:///${clean}`;
+  }
+  if (rawUrl.includes("luno-preview")) {
+    const safeTitle = (title || "preview.html").trim();
+    const clean = safeTitle.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    return customDisplayUrl || `file:///${clean}`;
+  }
+  return rawUrl;
+}
+
+function getHostFromUrl(url: string, title?: string): string {
   if (!url) return "";
+  if (url.startsWith("data:") || url.startsWith("blob:") || url.includes("luno-preview")) {
+    return title ? `${title}.html` : "Local Preview";
+  }
   try {
     const formatted = url.startsWith("http") ? url : `https://${url}`;
     const parsed = new URL(formatted);
@@ -43,6 +79,9 @@ declare global {
 interface WebViewerViewProps {
   tabId?: string;
   initialUrl: string;
+  title?: string;
+  displayUrl?: string;
+  filePath?: string;
   onUrlChange?: (url: string) => void;
   onTitleChange?: (title: string) => void;
   onFaviconChange?: (faviconUrl: string) => void;
@@ -55,6 +94,9 @@ interface WebViewerViewProps {
 export default function WebViewerView({
   tabId,
   initialUrl,
+  title,
+  displayUrl,
+  filePath,
   onUrlChange,
   onTitleChange,
   onFaviconChange,
@@ -65,12 +107,13 @@ export default function WebViewerView({
 }: WebViewerViewProps) {
   const { t } = useTranslation();
   const [currentUrl, setCurrentUrl] = useState(initialUrl || "https://www.google.com");
-  const [inputUrl, setInputUrl] = useState(initialUrl || "https://www.google.com");
-  const [pageTitle, setPageTitle] = useState("");
+  const [inputUrl, setInputUrl] = useState(() => getFriendlyDisplayUrl(initialUrl || "https://www.google.com", title, displayUrl));
+  const [pageTitle, setPageTitle] = useState(title || "");
   const [isLoading, setIsLoading] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
+  const [hasInserted, setHasInserted] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
@@ -78,6 +121,7 @@ export default function WebViewerView({
   const isElectron = Boolean(window.electronAPI?.isElectron);
   const webviewRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const initialSrcRef = useRef(initialUrl || "https://www.google.com");
   const currentUrlRef = useRef(initialUrl || "https://www.google.com");
 
@@ -119,7 +163,7 @@ export default function WebViewerView({
     if (initialUrl && initialUrl !== currentUrlRef.current) {
       currentUrlRef.current = initialUrl;
       setCurrentUrl(initialUrl);
-      setInputUrl(initialUrl);
+      setInputUrl(getFriendlyDisplayUrl(initialUrl, title, displayUrl));
       setLoadError(null);
       if (isElectron && webviewRef.current) {
         try {
@@ -129,14 +173,29 @@ export default function WebViewerView({
         }
       }
     }
-  }, [initialUrl, isElectron]);
+  }, [initialUrl, title, displayUrl, isElectron]);
+
+  const isLocalPreview =
+    currentUrl.startsWith("data:") ||
+    currentUrl.startsWith("blob:") ||
+    currentUrl.startsWith("file:") ||
+    currentUrl.includes("luno-preview") ||
+    Boolean(filePath) ||
+    Boolean(displayUrl && (displayUrl.startsWith("file:") || displayUrl.includes("luno-preview") || displayUrl.endsWith(".html") || displayUrl.endsWith(".htm")));
+
+  // Keep inputUrl in sync if title or displayUrl updates for local preview
+  useEffect(() => {
+    if (isLocalPreview && document.activeElement !== inputRef.current) {
+      setInputUrl(getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl));
+    }
+  }, [title, displayUrl, isLocalPreview, currentUrl, pageTitle]);
 
   const normalizeUrl = (raw: string): string => {
     const trimmed = raw.trim();
     if (!trimmed) return "https://www.google.com";
 
-    // If it's already http:// or https://
-    if (/^https?:\/\//i.test(trimmed)) {
+    // If it's already http://, https://, data:, blob:, or file:
+    if (/^(https?|data|blob|file):/i.test(trimmed)) {
       return trimmed;
     }
 
@@ -153,7 +212,7 @@ export default function WebViewerView({
     const validUrl = normalizeUrl(targetUrl);
     currentUrlRef.current = validUrl;
     setCurrentUrl(validUrl);
-    setInputUrl(validUrl);
+    setInputUrl(getFriendlyDisplayUrl(validUrl, title || pageTitle, displayUrl));
     setLoadError(null);
     onUrlChange?.(validUrl);
 
@@ -168,7 +227,22 @@ export default function WebViewerView({
 
   const handleSubmitUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    handleNavigate(inputUrl);
+    const trimmed = inputUrl.trim();
+    if (
+      trimmed.startsWith("preview://") ||
+      trimmed === "preview:" ||
+      (displayUrl && trimmed === displayUrl) ||
+      (isLocalPreview && trimmed === displayUrl) ||
+      (isLocalPreview &&
+        (trimmed.endsWith(".html") || trimmed.endsWith(".htm")) &&
+        !trimmed.startsWith("http://") &&
+        !trimmed.startsWith("https://") &&
+        trimmed.replace(/^file:\/\/\/?/, "") === (displayUrl || "").replace(/^file:\/\/\/?/, ""))
+    ) {
+      handleReloadOrStop();
+      return;
+    }
+    handleNavigate(trimmed);
   };
 
   const handleReloadOrStop = () => {
@@ -233,35 +307,68 @@ export default function WebViewerView({
     handleNavigate("https://www.google.com");
   };
 
+  const handleClearInput = () => {
+    setInputUrl("");
+    inputRef.current?.focus();
+  };
+
   const handleCopyUrl = async () => {
+    if (!currentUrl) return;
+    const urlToCopy = isLocalPreview
+      ? getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl)
+      : currentUrl;
     try {
-      await navigator.clipboard.writeText(currentUrl);
+      await copyToClipboard(urlToCopy);
       setHasCopied(true);
       setTimeout(() => setHasCopied(false), 2000);
       toast({
         title: t("webViewer.copyUrl") || "Copy URL",
         description: t("webViewer.urlCopied") || "URL copied to clipboard",
       });
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.warn("Failed to copy URL:", err);
+      toast({
+        title: t("webViewer.copyUrl") || "Copy URL",
+        description: urlToCopy,
+      });
     }
   };
 
-  const handleOpenExternal = () => {
-    if (window.electronAPI?.openExternal) {
-      void window.electronAPI.openExternal(currentUrl);
-    } else {
-      window.open(currentUrl, "_blank", "noopener,noreferrer");
+  const handleOpenExternal = async () => {
+    if (!currentUrl) return;
+    let target = filePath
+      ? filePath.trim()
+      : currentUrl.startsWith("data:")
+      ? currentUrl.trim()
+      : (displayUrl && (displayUrl.startsWith("file:") || /^[a-zA-Z]:[/\\]/.test(displayUrl)))
+      ? displayUrl.trim()
+      : currentUrl.trim();
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target) && !/^[a-zA-Z]:[/\\]/.test(target)) {
+      target = "https://" + target;
     }
+    const electronAPI = (window as unknown as { electronAPI?: { openExternal?: (u: string) => Promise<boolean> } })?.electronAPI;
+    if (electronAPI?.openExternal) {
+      await electronAPI.openExternal(target);
+    } else {
+      const webTarget = /^[a-zA-Z]:[/\\]/.test(target)
+        ? `file:///${target.replace(/\\/g, "/")}`
+        : target;
+      window.open(webTarget, "_blank", "noopener,noreferrer");
+    }
+    toast({
+      title: t("webViewer.openExternal") || "Open in Default Browser",
+      description: t("webViewer.openedInBrowser") || "Opening in default browser...",
+    });
   };
 
   const handleInsertToNote = () => {
     if (onInsertToActiveNote) {
-      onInsertToActiveNote(currentUrl, pageTitle || undefined);
-      toast({
-        title: t("webViewer.insertToNote") || "Insert link to active note",
-        description: t("webViewer.linkInserted") || "Link inserted into note",
-      });
+      const linkUrl = isLocalPreview
+        ? getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl)
+        : currentUrl;
+      onInsertToActiveNote(linkUrl, pageTitle || title || undefined);
+      setHasInserted(true);
+      setTimeout(() => setHasInserted(false), 2000);
     }
   };
 
@@ -301,7 +408,7 @@ export default function WebViewerView({
       if (e.url) {
         currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
-        setInputUrl(e.url);
+        setInputUrl(getFriendlyDisplayUrl(e.url, title || pageTitle, displayUrl));
         onUrlChange?.(e.url);
         applyZoom();
       }
@@ -311,7 +418,7 @@ export default function WebViewerView({
       if (e.url) {
         currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
-        setInputUrl(e.url);
+        setInputUrl(getFriendlyDisplayUrl(e.url, title || pageTitle, displayUrl));
         onUrlChange?.(e.url);
       }
     };
@@ -373,10 +480,10 @@ export default function WebViewerView({
       webview.removeEventListener("dom-ready", applyZoom);
       webview.removeEventListener("did-finish-load", applyZoom);
     };
-  }, [isElectron, onUrlChange, onTitleChange, onFaviconChange]);
+  }, [isElectron, onUrlChange, onTitleChange, onFaviconChange, title, pageTitle, displayUrl]);
 
   useEffect(() => {
-    if (currentUrl) {
+    if (currentUrl && !currentUrl.startsWith("data:") && !currentUrl.startsWith("blob:")) {
       try {
         const u = new URL(currentUrl.startsWith("http") ? currentUrl : `https://${currentUrl}`);
         if (u.hostname) {
@@ -465,7 +572,9 @@ export default function WebViewerView({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center mr-1.5 shrink-0 cursor-default">
-                  {isHttps ? (
+                  {isLocalPreview ? (
+                    <FileCode className="h-3.5 w-3.5 text-blue-500" />
+                  ) : isHttps ? (
                     <Lock className="h-3.5 w-3.5 text-emerald-500" />
                   ) : (
                     <OctagonX className="h-3.5 w-3.5 text-destructive" />
@@ -473,29 +582,43 @@ export default function WebViewerView({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {isHttps
+                {isLocalPreview
+                  ? (t("webViewer.localPreview") || "Local Preview (HTML)")
+                  : isHttps
                   ? (t("webViewer.secure") || "Secure Connection (HTTPS)")
                   : (t("webViewer.notSecure") || "Not Secure (HTTP)")}
               </TooltipContent>
             </Tooltip>
 
             <input
+              ref={inputRef}
               type="text"
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}
               onFocus={(e) => e.target.select()}
+              onBlur={() => {
+                if (isLocalPreview) {
+                  setInputUrl(getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl));
+                }
+              }}
               placeholder={t("webViewer.searchOrUrl") || "Search Google or enter web address..."}
               className="flex-1 min-w-0 bg-transparent border-0 outline-none text-foreground text-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0"
             />
 
             {inputUrl && (
-              <button
-                type="button"
-                onClick={() => setInputUrl("")}
-                className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground shrink-0 ml-1 transition-colors cursor-pointer"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleClearInput}
+                    className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground shrink-0 ml-1 transition-colors cursor-pointer"
+                    aria-label={t("webViewer.clear") || "Clear"}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("webViewer.clear") || "Clear"}</TooltipContent>
+              </Tooltip>
             )}
           </form>
 
@@ -508,8 +631,13 @@ export default function WebViewerView({
                     type="button"
                     onClick={handleInsertToNote}
                     className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                    aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
                   >
-                    <FilePlus2 className="h-3.5 w-3.5" />
+                    {hasInserted ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
+                    ) : (
+                      <FilePlus2 className="h-3.5 w-3.5" />
+                    )}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
@@ -522,8 +650,13 @@ export default function WebViewerView({
                   type="button"
                   onClick={handleCopyUrl}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  aria-label={t("webViewer.copyUrl") || "Copy URL"}
                 >
-                  {hasCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {hasCopied ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent>{t("webViewer.copyUrl") || "Copy URL"}</TooltipContent>
@@ -535,6 +668,7 @@ export default function WebViewerView({
                   type="button"
                   onClick={handleOpenExternal}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  aria-label={t("webViewer.openExternal") || "Open in Default Browser"}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </button>

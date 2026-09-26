@@ -1,4 +1,21 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen, clipboard, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen, clipboard, session, protocol, net } = require("electron");
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "luno-asset",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      bypassCSP: true,
+    },
+  },
+]);
+// Disable QUIC protocol to avoid ERR_QUIC_PROTOCOL_ERROR on restricted/corporate networks
+app.commandLine.appendSwitch("disable-quic");
+
 let autoUpdater = null;
 try {
   const updaterModule = require("electron-updater");
@@ -697,8 +714,35 @@ function createWindow(initialWorkspacePath = null) {
   }
 
   // Open external links in user's default browser, but allow Google OAuth login popup
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url, disposition, frameName }) => {
     try {
+      if (
+        url === "about:blank" ||
+        !url ||
+        url.startsWith("about:") ||
+        disposition === "picture-in-picture" ||
+        frameName === "Picture-in-Picture"
+      ) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 480,
+            height: 270,
+            minWidth: 280,
+            minHeight: 160,
+            alwaysOnTop: true,
+            autoHideMenuBar: true,
+            frame: true,
+            minimizable: false,
+            fullscreenable: false,
+            icon: getAppIconPath(),
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+            },
+          },
+        };
+      }
       const parsedUrl = new URL(url);
       if (
         (parsedUrl.hostname === "accounts.google.com" || parsedUrl.hostname.endsWith(".google.com")) &&
@@ -852,33 +896,6 @@ function setupIpcHandlers() {
 
   ipcMain.on("read-clipboard-image-sync", (event) => {
     event.returnValue = getClipboardImagePayload();
-  });
-
-  ipcMain.handle("read-clipboard-text", async () => {
-    try {
-      return clipboard.readText();
-    } catch {
-      return "";
-    }
-  });
-
-  ipcMain.handle("write-clipboard-text", async (_, text) => {
-    try {
-      clipboard.writeText(text || "");
-      return true;
-    } catch {
-      return false;
-    }
-  });
-
-  ipcMain.handle("write-clipboard-image", async (_, dataUrl) => {
-    try {
-      const img = nativeImage.createFromDataURL(dataUrl);
-      clipboard.writeImage(img);
-      return true;
-    } catch {
-      return false;
-    }
   });
 
   const unpackCredential = (bytes, key = 42) => {
@@ -1772,54 +1789,60 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("google-oauth-refresh", async (event, payload) => {
-    const refreshToken = typeof payload === "string" ? payload : (payload?.refreshToken || payload?.refresh_token);
-    if (!refreshToken) {
-      throw new Error("No refresh token provided");
+    try {
+      const refreshToken = typeof payload === "string" ? payload : (payload?.refreshToken || payload?.refresh_token);
+      if (!refreshToken) {
+        return { error: "No refresh token provided" };
+      }
+      const { clientId, clientSecret } = resolveGoogleOAuthCredentials(payload);
+
+      const tokenBody = {
+        client_id: clientId,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      };
+      if (clientSecret) {
+        tokenBody.client_secret = clientSecret;
+      }
+      const tokenParams = new URLSearchParams(tokenBody);
+
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenParams.toString(),
+      });
+
+      if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        console.warn(`Token refresh failed (${tokenRes.status}): ${errText}`);
+        return { error: `Token refresh failed (${tokenRes.status}): ${errText}` };
+      }
+
+      const tokenData = await tokenRes.json();
+      const existing = getSavedGdriveAuth();
+      let updatedProfile = existing?.profile || null;
+      if (tokenData.access_token) {
+        const freshProfile = await fetchGoogleUserProfileFromMain(tokenData.access_token);
+        if (freshProfile) updatedProfile = freshProfile;
+      }
+      const tokenInfo = {
+        access_token: tokenData.access_token,
+        expires_at: Date.now() + (Number(tokenData.expires_in) || 3600) * 1000,
+        refresh_token: refreshToken,
+        scope: tokenData.scope,
+      };
+      saveGdriveAuthData({ tokenInfo, profile: updatedProfile, connected: true });
+
+      return {
+        access_token: tokenData.access_token,
+        expires_in: Number(tokenData.expires_in) || 3600,
+        scope: tokenData.scope,
+        profile: updatedProfile,
+      };
+    } catch (err) {
+      console.warn("Google OAuth token refresh skipped (offline or network error):", err?.message || err);
+      return { error: err?.message || "Token refresh failed" };
     }
-    const { clientId, clientSecret } = resolveGoogleOAuthCredentials(payload);
-
-    const tokenBody = {
-      client_id: clientId,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    };
-    if (clientSecret) {
-      tokenBody.client_secret = clientSecret;
-    }
-    const tokenParams = new URLSearchParams(tokenBody);
-
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: tokenParams.toString(),
-    });
-
-    if (!tokenRes.ok) {
-      const errText = await tokenRes.text();
-      throw new Error(`Token refresh failed (${tokenRes.status}): ${errText}`);
-    }
-
-    const tokenData = await tokenRes.json();
-    const existing = getSavedGdriveAuth();
-    let updatedProfile = existing?.profile || null;
-    if (tokenData.access_token) {
-      const freshProfile = await fetchGoogleUserProfileFromMain(tokenData.access_token);
-      if (freshProfile) updatedProfile = freshProfile;
-    }
-    const tokenInfo = {
-      access_token: tokenData.access_token,
-      expires_at: Date.now() + (Number(tokenData.expires_in) || 3600) * 1000,
-      refresh_token: refreshToken,
-      scope: tokenData.scope,
-    };
-    saveGdriveAuthData({ tokenInfo, profile: updatedProfile, connected: true });
-
-    return {
-      access_token: tokenData.access_token,
-      expires_in: Number(tokenData.expires_in) || 3600,
-      scope: tokenData.scope,
-      profile: updatedProfile,
-    };
   });
 
   ipcMain.handle("google-oauth-logout", async (_event, token) => {
@@ -1846,9 +1869,54 @@ function setupIpcHandlers() {
   ipcMain.handle("open-external", async (event, url) => {
     try {
       if (url && typeof url === "string") {
-        const parsed = new URL(url);
-        if (["http:", "https:", "mailto:", "tel:"].includes(parsed.protocol)) {
-          await shell.openExternal(url);
+        let clean = url.trim();
+        // If it's a data: URI (like data:text/html), write to temp preview file and open in default browser
+        if (clean.startsWith("data:text/html") || clean.startsWith("data:text/plain")) {
+          const previewDir = path.join(app.getPath("temp"), "luno-preview");
+          if (!fs.existsSync(previewDir)) {
+            fs.mkdirSync(previewDir, { recursive: true });
+          }
+          const isHtml = clean.startsWith("data:text/html");
+          const tempPath = path.join(previewDir, `preview-${Date.now()}.${isHtml ? "html" : "txt"}`);
+          const commaIdx = clean.indexOf(",");
+          const rawPayload = commaIdx >= 0 ? clean.slice(commaIdx + 1) : "";
+          const content = decodeURIComponent(rawPayload);
+          await fs.promises.writeFile(tempPath, content, "utf8");
+          await shell.openPath(tempPath);
+          return true;
+        }
+
+        // If it's a file:// URL or direct disk path, open with shell.openPath (which launches default browser for .html)
+        if (clean.startsWith("file://")) {
+          try {
+            let filePath = clean.replace(/^file:\/\/\/?/, "");
+            try {
+              filePath = decodeURIComponent(filePath);
+            } catch {}
+            const normalized = path.normalize(filePath);
+            if (fs.existsSync(normalized)) {
+              await shell.openPath(normalized);
+              return true;
+            }
+          } catch (e) {
+            console.warn("Failed shell.openPath for file URL:", clean, e);
+          }
+        }
+
+        if (/^[a-zA-Z]:[/\\]/.test(clean)) {
+          const normalized = path.normalize(clean);
+          if (fs.existsSync(normalized)) {
+            await shell.openPath(normalized);
+            return true;
+          }
+        }
+
+        if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(clean)) {
+          clean = "https://" + clean;
+        }
+        const parsed = new URL(clean);
+        if (["http:", "https:", "mailto:", "tel:", "file:"].includes(parsed.protocol)) {
+          await shell.openExternal(clean);
           return true;
         }
       }
@@ -1856,6 +1924,23 @@ function setupIpcHandlers() {
       console.warn("Failed opening external URL:", url, err);
     }
     return false;
+  });
+
+  ipcMain.handle("save-preview-file", async (_event, { fileName, content }) => {
+    try {
+      const previewDir = path.join(app.getPath("temp"), "luno-preview");
+      if (!fs.existsSync(previewDir)) {
+        fs.mkdirSync(previewDir, { recursive: true });
+      }
+      const safeName = (fileName || "index.html").replace(/[\\/:*?"<>|]/g, "_");
+      const targetName = safeName.endsWith(".html") || safeName.endsWith(".htm") ? safeName : `${safeName}.html`;
+      const tempPath = path.join(previewDir, targetName);
+      await fs.promises.writeFile(tempPath, content || "", "utf8");
+      return tempPath.replace(/\\/g, "/");
+    } catch (err) {
+      console.warn("Failed saving preview file:", err);
+      return null;
+    }
   });
 
   ipcMain.handle("open-path", async (_event, fullPath) => {
@@ -1939,6 +2024,22 @@ function setupIpcHandlers() {
         win.maximize();
       }
     }
+  });
+
+  ipcMain.on("window-set-fullscreen", (event, flag) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      if (typeof flag === "boolean") {
+        win.setFullScreen(flag);
+      } else {
+        win.setFullScreen(!win.isFullScreen());
+      }
+    }
+  });
+
+  ipcMain.handle("window-is-fullscreen", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return win && !win.isDestroyed() ? win.isFullScreen() : false;
   });
 
   ipcMain.on("window-snap", (event, boundsRatio) => {
@@ -2166,6 +2267,28 @@ function setupIpcHandlers() {
     return "";
   });
 
+  ipcMain.handle("read-file-buffer", async (event, fullPath) => {
+    try {
+      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+        return await fs.promises.readFile(fullPath);
+      }
+    } catch (err) {
+      console.warn("Failed reading file buffer:", fullPath, err);
+    }
+    return null;
+  });
+
+  ipcMain.handle("read-file-base64", (event, fullPath) => {
+    try {
+      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+        return fs.readFileSync(fullPath).toString("base64");
+      }
+    } catch (err) {
+      console.warn("Failed reading file as base64:", fullPath, err);
+    }
+    return "";
+  });
+
   ipcMain.handle("read-image-data-url", (event, fullPath) => {
     try {
       if (fs.existsSync(fullPath)) {
@@ -2180,6 +2303,19 @@ function setupIpcHandlers() {
           ".bmp": "image/bmp",
           ".ico": "image/x-icon",
           ".avif": "image/avif",
+          ".mp4": "video/mp4",
+          ".m4v": "video/mp4",
+          ".webm": "video/webm",
+          ".mov": "video/quicktime",
+          ".mkv": "video/x-matroska",
+          ".avi": "video/x-msvideo",
+          ".ogv": "video/ogg",
+          ".mp3": "audio/mpeg",
+          ".wav": "audio/wav",
+          ".ogg": "audio/ogg",
+          ".m4a": "audio/mp4",
+          ".flac": "audio/flac",
+          ".aac": "audio/aac",
           ".css": "text/css",
           ".js": "text/javascript",
           ".json": "application/json",
@@ -2247,6 +2383,24 @@ function setupIpcHandlers() {
     }
   });
 
+  ipcMain.handle("write-file-buffer", async (event, data) => {
+    try {
+      const fullPath = data?.fullPath;
+      const arrayBuffer = data?.buffer;
+      if (!fullPath || !arrayBuffer || isCriticalSystemPath(fullPath)) return false;
+      const parentDir = path.dirname(fullPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      const buffer = Buffer.from(arrayBuffer);
+      await fs.promises.writeFile(fullPath, buffer);
+      return true;
+    } catch (err) {
+      console.warn("Failed writing buffer to file:", data?.fullPath, err);
+      return false;
+    }
+  });
+
   ipcMain.handle("delete-file-or-folder", (event, fullPath) => {
     try {
       if (fullPath && typeof fullPath === "string" && !isCriticalSystemPath(fullPath) && fs.existsSync(fullPath)) {
@@ -2278,18 +2432,6 @@ function setupIpcHandlers() {
       console.warn("Failed reading directory files:", folderPath, err);
     }
     return [];
-  });
-
-  ipcMain.handle("read-file-base64", (event, fullPath) => {
-    try {
-      if (fs.existsSync(fullPath)) {
-        const buffer = fs.readFileSync(fullPath);
-        return buffer.toString("base64");
-      }
-    } catch (err) {
-      console.warn("Failed reading file base64:", fullPath, err);
-    }
-    return null;
   });
 
   ipcMain.handle("create-workspace-folder", (event, { workspacePath, folderPath, folderName }) => {
@@ -2524,7 +2666,37 @@ function setupIpcHandlers() {
       await fs.promises.writeFile(tempFilePath, html, "utf-8");
       await printWin.loadFile(tempFilePath);
 
-      // Brief delay to allow fonts and images to settle
+      // Wait for web fonts, images, and resources to be fully loaded and rendered
+      try {
+        await printWin.webContents.executeJavaScript(`
+          Promise.race([
+            Promise.all([
+              document.fonts ? document.fonts.ready : Promise.resolve(),
+              Promise.all(
+                Array.from(document.images).map((img) => {
+                  img.loading = "eager";
+                  img.decoding = "sync";
+                  if (img.complete) {
+                    return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+                  }
+                  return new Promise((resolve) => {
+                    img.onload = () => {
+                      if (img.decode) img.decode().catch(() => {}).then(resolve);
+                      else resolve();
+                    };
+                    img.onerror = resolve;
+                  });
+                })
+              )
+            ]),
+            new Promise((r) => setTimeout(r, 4000))
+          ])
+        `);
+      } catch (resourceErr) {
+        console.warn("PDF export resource wait warning:", resourceErr);
+      }
+
+      // Brief delay to allow rendering and images to settle
       await new Promise((resolve) => setTimeout(resolve, 350));
 
       const pdfBuffer = await printWin.webContents.printToPDF({
@@ -2873,6 +3045,25 @@ function startNativeKeyboardWatcher() {
 }
 
 app.whenReady().then(() => {
+  try {
+    protocol.handle("luno-asset", (request) => {
+      try {
+        const rawPath = request.url.replace(/^luno-asset:\/\//, "");
+        let decodedPath = decodeURIComponent(rawPath);
+        if (/^\/[a-zA-Z]:[\\/]/.test(decodedPath)) {
+          decodedPath = decodedPath.slice(1);
+        }
+        const fileUrl = url.pathToFileURL(decodedPath).toString();
+        return net.fetch(fileUrl);
+      } catch (err) {
+        console.warn("Failed resolving luno-asset URL:", request.url, err);
+        return new Response("Not Found", { status: 404 });
+      }
+    });
+  } catch (err) {
+    console.warn("Failed registering luno-asset protocol handler:", err);
+  }
+
   if (app.setAboutPanelOptions) {
     try {
       app.setAboutPanelOptions({

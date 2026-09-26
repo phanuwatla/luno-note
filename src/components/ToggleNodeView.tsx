@@ -101,7 +101,7 @@ function ToggleNodeViewComponent({ node, updateAttributes }: ToggleNodeViewProps
             event.stopPropagation();
           }}
           onClick={(event) => event.stopPropagation()}
-          placeholder={title ? undefined : t("editor.startWriting")}
+          placeholder={title ? undefined : (t("editor.toggle") || "Toggle")}
           className="flex-1 min-w-0 bg-transparent border-none p-0 text-left text-inherit outline-none focus:outline-none placeholder:text-muted-foreground/40 font-normal h-7 leading-7"
           spellCheck={false}
           autoComplete="off"

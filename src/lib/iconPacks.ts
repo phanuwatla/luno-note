@@ -232,6 +232,11 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconPhotoPlus || TablerIcons.IconPhoto,
     phosphor: PhosphorIcons.ImageSquare,
   },
+  video: {
+    lucide: LucideIcons.Video || LucideIcons.Film,
+    tabler: TablerIcons.IconVideo || TablerIcons.IconMovie,
+    phosphor: PhosphorIcons.VideoCamera || PhosphorIcons.Video,
+  },
   qrCode: {
     lucide: LucideIcons.QrCode,
     tabler: TablerIcons.IconQrcode,

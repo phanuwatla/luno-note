@@ -1,4 +1,5 @@
 import { Note } from "@/hooks/useNotes";
+import { isAudioMedia, isVideoMedia } from "./webmClassifier";
 
 /**
  * Returns the toolbar icon map key corresponding to a file's extension or type.
@@ -16,13 +17,18 @@ export function getDefaultFileIconKey(fileName?: string, fileType?: string, cont
     return "fileImage";
   }
 
+  // Handle WebM specifically to distinguish audio vs video
+  if (ext === "webm") {
+    return isAudioMedia(name, { fileType, contentFormat }) ? "fileAudio" : "fileVideo";
+  }
+
   // 2. Video
-  if (["mp4", "mkv", "webm", "avi", "mov", "wmv", "flv", "m4v", "3gp", "ogv", "m2ts", "mts", "mpg", "mpeg"].includes(ext)) {
+  if (["mp4", "mkv", "avi", "mov", "wmv", "flv", "m4v", "3gp", "ogv", "m2ts", "mts", "mpg", "mpeg"].includes(ext)) {
     return "fileVideo";
   }
 
   // 3. Audio
-  if (["mp3", "wav", "ogg", "m4a", "aac", "flac", "wma", "aiff", "opus", "mid", "midi"].includes(ext)) {
+  if (["mp3", "wav", "ogg", "m4a", "aac", "flac", "wma", "aiff", "opus", "mid", "midi", "weba"].includes(ext)) {
     return "fileAudio";
   }
 
@@ -104,12 +110,12 @@ export function getFileCategory(
   }
 
   // 3. Audio
-  if (["mp3", "wav", "ogg", "m4a", "aac", "flac", "wma", "aiff", "opus", "mid", "midi"].includes(ext)) {
+  if (["mp3", "wav", "ogg", "m4a", "aac", "flac", "wma", "aiff", "opus", "mid", "midi", "weba"].includes(ext)) {
     return "audio";
   }
   if (ext === "webm") {
-    // webm can be audio or video; voice notes recorded in app are .webm
-    return "audio";
+    // webm can be audio or video; accurately classify based on name, cache, and metadata
+    return isAudioMedia(note.fileName || note.title || "", note) ? "audio" : "video";
   }
   if (note.content?.startsWith("data:audio/")) {
     return "audio";
@@ -184,8 +190,13 @@ export function getFileFormatLabel(
   if (name.endsWith(".doc") || name.endsWith(".docx")) return "Word Document";
   if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "Excel Spreadsheet";
   if (name.endsWith(".ppt") || name.endsWith(".pptx")) return "PowerPoint Presentation";
-  if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac")) return "Audio File";
-  if (name.endsWith(".mp4") || name.endsWith(".webm") || name.endsWith(".mov") || name.endsWith(".avi")) return "Video File";
+  if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return isTh ? "ไฟล์เสียง" : "Audio File";
+  if (name.endsWith(".webm")) {
+    return isAudioMedia(name, note)
+      ? (isTh ? "ไฟล์เสียง WebM" : "WebM Audio")
+      : (isTh ? "วิดีโอ WebM" : "WebM Video");
+  }
+  if (name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv")) return isTh ? "ไฟล์วิดีโอ" : "Video File";
   if (note.fileType === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
 
   if (note.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";

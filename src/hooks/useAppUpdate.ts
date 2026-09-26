@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { UpdateInfo, UpdateProgress } from "@/vite-env";
 import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { APP_VERSION } from "@/lib/appVersion";
 
 export type UpdateStatus =
   | "idle"
@@ -43,7 +44,7 @@ export function useAppUpdate() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>("1.3.1");
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>(APP_VERSION);
   const manualCheckRef = useRef<boolean>(false);
 
   useEffect(() => {

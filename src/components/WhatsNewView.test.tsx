@@ -12,8 +12,8 @@ describe("WhatsNewView Component", () => {
       </AppSettingsProvider>
     );
     expect(screen.getAllByText(new RegExp(`Luno Note v${APP_VERSION}`)).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/PBKDF2/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/AES-GCM/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/HTML/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/Tooltip/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("calls onOpenHelp when help button is clicked", () => {

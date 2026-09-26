@@ -9,7 +9,7 @@ export interface VideoOptions {
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     video: {
-      setVideo: (options: { src: string; title?: string; width?: number; textAlign?: string }) => ReturnType;
+      setVideo: (options: { src: string; title?: string; width?: number; textAlign?: string; "data-relative-src"?: string }) => ReturnType;
     };
   }
 }
@@ -79,6 +79,17 @@ export const VideoExtension = Node.create<VideoOptions>({
           if (!attributes["data-relative-src"]) return {};
           return {
             "data-relative-src": attributes["data-relative-src"],
+          };
+        },
+      },
+      title: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("title") || element.getAttribute("data-title") || null,
+        renderHTML: (attributes) => {
+          if (!attributes.title) return {};
+          return {
+            title: attributes.title,
+            "data-title": attributes.title,
           };
         },
       },

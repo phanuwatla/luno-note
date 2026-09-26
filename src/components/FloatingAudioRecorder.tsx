@@ -6,11 +6,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatDateTime } from "@/lib/dateTimeFormatter";
+import { dataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
+import { audioLocalCache } from "@/components/editor/AudioNodeView";
 
 interface FloatingAudioRecorderProps {
   isOpen: boolean;
   onClose: () => void;
-  onInsertAudio: (audioData: { src: string; title: string }) => void;
+  onInsertAudio: (audioData: { src: string; title: string; relativeSrc?: string; blob?: Blob }) => void;
   zIndex?: number;
   onFocusWindow?: () => void;
   rootDirHandle?: FileSystemDirectoryHandle | null;
@@ -101,12 +103,15 @@ export default function FloatingAudioRecorder({
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const clipAudioRef = useRef<HTMLAudioElement | null>(null);
   const waveformContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastRecordedTargetNameRef = useRef<string>("");
+  const lastRecordedTitleRef = useRef<string>("");
+  const pendingSavePromiseRef = useRef<Promise<void> | null>(null);
 
   const loadClipsFromWorkspace = useCallback(async () => {
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
 
     // 1. Electron Desktop mode
-    if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles && electronAPI?.readFileBase64) {
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles && (electronAPI?.readFileBuffer || electronAPI?.readFileBase64)) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         const workspacePath = saved?.folderPath || saved?.path;
@@ -121,20 +126,39 @@ export default function FloatingAudioRecorder({
                 const isAudio = [".webm", ".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac"].some((ext) => lower.endsWith(ext));
                 if (isAudio) {
                   try {
-                    const rawBase64 = await electronAPI.readFileBase64(f.fullPath);
-                    if (rawBase64) {
-                      const mime = lower.endsWith(".mp3") ? "audio/mp3" : lower.endsWith(".wav") ? "audio/wav" : lower.endsWith(".ogg") ? "audio/ogg" : "audio/webm";
-                      const dataUrl = rawBase64.startsWith("data:") ? rawBase64 : `data:${mime};base64,${rawBase64}`;
+                    const mime = lower.endsWith(".mp3") ? "audio/mp3" : lower.endsWith(".wav") ? "audio/wav" : lower.endsWith(".ogg") ? "audio/ogg" : (lower.endsWith(".m4a") || lower.endsWith(".aac")) ? "audio/mp4" : "audio/webm";
+                    let objectUrl: string | null = null;
+
+                    if (electronAPI.readFileBuffer) {
+                      try {
+                        const buf = await electronAPI.readFileBuffer(f.fullPath);
+                        if (buf && buf.byteLength > 0) {
+                          const blob = new Blob([buf], { type: mime });
+                          objectUrl = URL.createObjectURL(blob);
+                        }
+                      } catch {}
+                    }
+
+                    if (!objectUrl && electronAPI.readFileBase64) {
+                      const rawBase64 = await electronAPI.readFileBase64(f.fullPath);
+                      if (rawBase64) {
+                        const dataUrl = rawBase64.startsWith("data:") ? rawBase64 : `data:${mime};base64,${rawBase64}`;
+                        objectUrl = dataUrlToBlobUrl(dataUrl);
+                      }
+                    }
+
+                    if (objectUrl) {
                       const titleWithoutExt = f.name.replace(/\.[^/.]+$/, "");
-                      const duration = await getAudioDuration(dataUrl);
+                      const duration = await getAudioDuration(objectUrl);
                       clips.push({
                         id: `attach_${f.name}`,
                         fileName: f.name,
                         title: titleWithoutExt,
-                        src: dataUrl,
+                        src: objectUrl,
                         duration,
                         createdAt: Date.now(),
                       });
+                      audioLocalCache.set(`attachments/${f.name}`, objectUrl);
                     }
                   } catch (err) {
                     console.warn("Failed reading audio file in electron attachments:", f.name, err);
@@ -167,25 +191,18 @@ export default function FloatingAudioRecorder({
             if (isAudio) {
               try {
                 const file = await (handle as FileSystemFileHandle).getFile();
-                const base64Data = await new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => resolve(reader.result as string);
-                  reader.onerror = reject;
-                  reader.readAsDataURL(file);
+                const objectUrl = URL.createObjectURL(file);
+                const titleWithoutExt = name.replace(/\.[^/.]+$/, "");
+                const duration = await getAudioDuration(objectUrl);
+                clips.push({
+                  id: `attach_${name}`,
+                  fileName: name,
+                  title: titleWithoutExt,
+                  src: objectUrl,
+                  duration,
+                  createdAt: file.lastModified,
                 });
-
-                if (base64Data) {
-                  const titleWithoutExt = name.replace(/\.[^/.]+$/, "");
-                  const duration = await getAudioDuration(base64Data);
-                  clips.push({
-                    id: `attach_${name}`,
-                    fileName: name,
-                    title: titleWithoutExt,
-                    src: base64Data,
-                    duration,
-                    createdAt: file.lastModified,
-                  });
-                }
+                audioLocalCache.set(`attachments/${name}`, objectUrl);
               } catch (err) {
                 console.warn("Failed to read audio attachment file:", name, err);
               }
@@ -294,58 +311,69 @@ export default function FloatingAudioRecorder({
         setRecordingState("preview");
 
         const clipTitle = audioTitle.trim() || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Data = reader.result as string;
-          if (base64Data) {
-            const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-            const sanitizedTitle = clipTitle.replace(/[\\/:*?"<>|]/g, "_");
-            const targetName = `${sanitizedTitle}.webm`;
+        const sanitizedTitle = clipTitle.replace(/[\\/:*?"<>|]/g, "_");
+        const targetName = `${sanitizedTitle}.webm`;
+        lastRecordedTitleRef.current = clipTitle;
+        lastRecordedTargetNameRef.current = targetName;
+        audioLocalCache.set(`attachments/${targetName}`, url);
 
-            // 1. Electron Desktop mode
-            if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64) {
-              try {
-                const saved = await electronAPI.getSavedWorkspace();
-                const workspacePath = saved?.folderPath || saved?.path;
-                if (workspacePath) {
-                  const fullPath = `${workspacePath}/attachments/${targetName}`;
+        const savePromise = (async () => {
+          const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+
+          // 1. Electron Desktop mode
+          if (electronAPI?.getSavedWorkspace && (electronAPI?.writeFileBuffer || electronAPI?.writeFileBase64)) {
+            try {
+              const saved = await electronAPI.getSavedWorkspace();
+              const workspacePath = saved?.folderPath || saved?.path;
+              if (workspacePath) {
+                const fullPath = `${workspacePath}/attachments/${targetName}`;
+                if (electronAPI.writeFileBuffer) {
+                  const arrayBuffer = await blob.arrayBuffer();
+                  await electronAPI.writeFileBuffer({ fullPath, buffer: arrayBuffer });
+                } else {
+                  const base64Data = await new Promise<string>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.readAsDataURL(blob);
+                  });
                   await electronAPI.writeFileBase64({ fullPath, base64: base64Data });
-                  await loadClipsFromWorkspace();
-                  return;
                 }
-              } catch (err) {
-                console.warn("Failed writing audio to electron attachments:", err);
-              }
-            }
-
-            // 2. Web File System Access API
-            if (rootDirHandle) {
-              try {
-                const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
-                const fileHandle = await attachmentsDir.getFileHandle(targetName, { create: true });
-                const writable = await fileHandle.createWritable();
-                await writable.write(blob);
-                await writable.close();
                 await loadClipsFromWorkspace();
                 return;
-              } catch (err) {
-                console.warn("Failed to write audio to attachments folder:", err);
               }
+            } catch (err) {
+              console.warn("Failed writing audio to electron attachments:", err);
             }
-
-            // Fallback in case no workspace is open
-            const newClip: RecordedClip = {
-              id: Date.now().toString(),
-              fileName: targetName,
-              title: clipTitle,
-              src: base64Data,
-              duration: finalSecs,
-              createdAt: Date.now(),
-            };
-            setRecordedClips((prev) => [newClip, ...prev.filter((c) => c.title !== clipTitle)].slice(0, 50));
           }
-        };
-        reader.readAsDataURL(blob);
+
+          // 2. Web File System Access API
+          if (rootDirHandle) {
+            try {
+              const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+              const fileHandle = await attachmentsDir.getFileHandle(targetName, { create: true });
+              const writable = await fileHandle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+              await loadClipsFromWorkspace();
+              return;
+            } catch (err) {
+              console.warn("Failed to write audio to attachments folder:", err);
+            }
+          }
+
+          // Fallback in case no workspace is open
+          const newClip: RecordedClip = {
+            id: Date.now().toString(),
+            fileName: targetName,
+            title: clipTitle,
+            src: url,
+            duration: finalSecs,
+            createdAt: Date.now(),
+          };
+          setRecordedClips((prev) => [newClip, ...prev.filter((c) => c.title !== clipTitle)].slice(0, 50));
+        })();
+
+        pendingSavePromiseRef.current = savePromise;
 
         if (timerRef.current) {
           clearInterval(timerRef.current);
@@ -448,9 +476,15 @@ export default function FloatingAudioRecorder({
   };
 
   const handleInsertClip = (clip: RecordedClip) => {
+    const relPath = clip.fileName ? `attachments/${clip.fileName}` : undefined;
+    const finalSrc = clip.src.startsWith("blob:") ? clip.src : dataUrlToBlobUrl(clip.src);
+    if (relPath) {
+      audioLocalCache.set(relPath, finalSrc);
+    }
     onInsertAudio({
-      src: clip.src,
+      src: finalSrc,
       title: clip.title,
+      relativeSrc: relPath,
     });
   };
 
@@ -657,20 +691,26 @@ export default function FloatingAudioRecorder({
     setIsProcessing(true);
 
     try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64Data = reader.result as string;
-        if (base64Data) {
-          onInsertAudio({
-            src: base64Data,
-            title: audioTitle.trim() || t("editor.audioRecording") || "Voice Recording",
-          });
-          onClose();
-        }
-        setIsProcessing(false);
-      };
-      reader.readAsDataURL(audioBlob);
-    } catch {
+      if (pendingSavePromiseRef.current) {
+        await pendingSavePromiseRef.current;
+      }
+      const clipTitle = audioTitle.trim() || lastRecordedTitleRef.current || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const sanitizedTitle = clipTitle.replace(/[\\/:*?"<>|]/g, "_");
+      const targetName = lastRecordedTargetNameRef.current || `${sanitizedTitle}.webm`;
+      const relativeSrc = `attachments/${targetName}`;
+      const blobUrl = audioUrl || URL.createObjectURL(audioBlob);
+
+      audioLocalCache.set(relativeSrc, blobUrl);
+      onInsertAudio({
+        src: blobUrl,
+        title: clipTitle,
+        relativeSrc,
+        blob: audioBlob,
+      });
+      onClose();
+    } catch (err) {
+      console.warn("handleInsert error:", err);
+    } finally {
       setIsProcessing(false);
     }
   };

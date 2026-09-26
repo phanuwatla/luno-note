@@ -107,6 +107,10 @@ import {
   AlignRight,
   AlignJustify,
   Pencil,
+  VideoOff,
+  Video,
+  Film,
+  Clapperboard,
 } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { ListTodoIcon } from "@/components/icons/ListTodoIcon";
@@ -124,6 +128,10 @@ import FloatingAudioRecorder from "@/components/FloatingAudioRecorder";
 import QrCodeDialog from "@/components/QrCodeDialog";
 import AudioExtension from "@/components/editor/AudioExtension";
 import AudioPlayer from "@/components/editor/AudioPlayer";
+import { audioLocalCache } from "@/components/editor/AudioNodeView";
+import VideoExtension from "@/components/editor/VideoExtension";
+import VideoPlayer from "@/components/editor/VideoPlayer";
+import { isAudioMedia, isVideoMedia, probeWebmMediaKind } from "@/lib/webmClassifier";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -162,6 +170,8 @@ import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare 
 import { getStoredTokenInfo, isGoogleDriveConnected, requestGoogleDriveAuth, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { syncEngine } from "@/lib/googleDriveSync";
 import { getTagColorClass } from "@/lib/tagColors";
+import { generatePdfHtml, inlineImagesForPdf } from "@/lib/pdfExportGenerator";
+import { generateDocHtml } from "@/lib/docExportGenerator";
 import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
 import { getWrongLanguageCandidate } from "@/lib/wrongLanguageDetector";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
@@ -172,7 +182,7 @@ import { EditorState, TextSelection, Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { InputRule, inputRules } from "@tiptap/pm/inputrules";
 import Image from "@tiptap/extension-image";
-import ImageNodeView, { dataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
+import ImageNodeView, { dataUrlToBlobUrl, asyncDataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
 import Link from "@tiptap/extension-link";
 import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
@@ -190,7 +200,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import { countWords, countCharacters } from "@/lib/wordCount";
-import { formatDateForFileName } from "@/lib/dateTimeFormatter";
+import { formatDateForFileName, formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { Underline, Highlight, Superscript, Subscript, Kbd, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
 
 marked.use({
@@ -221,6 +231,9 @@ marked.use({
 
 /** Preserves full ProseMirror undo/redo history and document state per note across tab switching */
 export const noteEditorStateMap = new Map<string, EditorState>();
+
+/** Preserves in-memory content for HTML & CSS code editors across tab switching and preview modes */
+export const codeEditorContentMap = new Map<string, string>();
 
 /** Set of note IDs that have been explicitly closed and should not be resurrected by transition saves */
 export const closedNoteIds = new Set<string>();
@@ -263,6 +276,7 @@ export function clearNoteEditorHistory(noteId: string) {
   if (!noteId) return;
   closedNoteIds.add(noteId);
   noteEditorStateMap.delete(noteId);
+  codeEditorContentMap.delete(noteId);
   noteScrollPositionMap.delete(noteId);
   try {
     sessionStorage.removeItem(`luno_scroll_${noteId}`);
@@ -641,7 +655,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
         inList = true;
       } else {
         inList = false;
-        const isStandaloneImageOrMedia = /^(!\[.*?\]\(.*?\)|<img\s|<video\s|<audio\s)/.test(line);
+        const isStandaloneImageOrMedia = /^(!\[.*?\]\(.*?\)|\!\[\[.*?\]\]|<img\s|<video\s|<audio\s)/.test(line);
         if (isStandaloneImageOrMedia && resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
           resultLines.push("");
         }
@@ -672,13 +686,58 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     }
 
     // Normalize broken/unescaped double quotes inside style="..." on HTML tags (e.g. <span style="font-family: "Font Name", sans-serif;">)
-    processedLine = processedLine.replace(/<([a-z0-9]+)\s+([^>]*?)style="([^">]*"[^">]*)"([^>]*)>/gi, (_m, tag, before, styleVal, after) => {
+    processedLine = processedLine.replace(/<([a-z0-9]+)\s+([^>]*?)style="([^">]*"[^">]*)"([^>]*)>/gi, (match, tag, before, styleVal, after) => {
+      if (/\s+[a-zA-Z0-9_-]+=/i.test(styleVal)) {
+        return match;
+      }
       const cleanStyle = styleVal.replace(/"/g, "'");
       return `<${tag} ${before}style="${cleanStyle}"${after}>`;
     });
 
-    // Convert Wikilinks [[Target]] or [[Target|Alias]] outside code blocks into standard HTML links
-    processedLine = processedLine.replace(/\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g, (_m, target, alias) => {
+    // 1. Convert Obsidian Embeds ![[Target]] or ![[Target|Width]] or ![[Target|Alias]] outside code blocks
+    processedLine = processedLine.replace(/!\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]+?))?\]\]/g, (_m, rawTarget, rawParam) => {
+      const target = (rawTarget || "").trim();
+      const param = (rawParam || "").trim();
+      if (!target) return "";
+
+      const widthMatch = param.match(/^(\d+)(?:x\d+)?$/);
+      const width = widthMatch ? widthMatch[1] : "";
+      const altOrTitle = !widthMatch ? param : "";
+
+      let cleanSrc = target;
+      if (cleanSrc && !/^(https?:\/\/|data:|blob:)/i.test(cleanSrc)) {
+        try {
+          cleanSrc = encodeURI(decodeURI(cleanSrc));
+        } catch {
+          cleanSrc = cleanSrc.replace(/ /g, "%20");
+        }
+      }
+
+      const isAudio = isAudioMedia(target);
+      const isVideo = isVideoMedia(target);
+      const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|tiff?)(?:[?#].*)?$/i.test(target);
+
+      if (isVideo) {
+        const titleAttr = altOrTitle ? ` title="${escapeHtml(altOrTitle)}" data-title="${escapeHtml(altOrTitle)}"` : "";
+        const widthAttr = width ? ` width="${width}"` : "";
+        return `<video src="${cleanSrc}" data-relative-src="${cleanSrc}" controls="true"${widthAttr}${titleAttr}></video>`;
+      }
+
+      if (isAudio) {
+        const titleAttr = altOrTitle ? ` data-title="${escapeHtml(altOrTitle)}"` : "";
+        return `<audio src="${cleanSrc}" data-relative-src="${cleanSrc}" controls="true"${titleAttr}></audio>`;
+      }
+
+      if (isImage || !target.includes(".")) {
+        const widthAttr = width ? ` width="${width}" style="width: ${width}px; max-width: 100%;"` : "";
+        return `<img src="${cleanSrc}" alt="${escapeHtml(altOrTitle)}" data-relative-src="${cleanSrc}" data-wikilink-embed="true"${widthAttr} />`;
+      }
+
+      return `<a href="wikilink:${encodeURIComponent(target)}" data-wikilink="${target}" class="internal-wikilink text-primary underline underline-offset-4 cursor-pointer">${altOrTitle || target}</a>`;
+    });
+
+    // 2. Convert standard Wikilinks [[Target]] or [[Target|Alias]] outside code blocks into standard HTML links
+    processedLine = processedLine.replace(/(?<!\!)\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g, (_m, target, alias) => {
       const cleanTarget = (target || "").trim();
       const cleanAlias = (alias || "").trim() || cleanTarget;
       return `<a href="wikilink:${encodeURIComponent(cleanTarget)}" data-wikilink="${cleanTarget}" class="internal-wikilink text-primary underline underline-offset-4 cursor-pointer">${cleanAlias}</a>`;
@@ -687,7 +746,7 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
     // Convert ==highlight== outside code blocks into standard HTML mark tags
     processedLine = processedLine.replace(/==((?:\\=|[^\r\n=]|=(?!=))+?)==/g, '<mark class="luno-highlight">$1</mark>');
 
-    // Convert sized Markdown images ![alt|300](url) outside code blocks into HTML img tags with width
+    // Convert sized Markdown images/media ![alt|300](url) outside code blocks into HTML tags with width
     processedLine = processedLine.replace(
       /!\[([^\]|\r\n]*)\|(\d+)(?:x\d+)?\]\(([^)\r\n]+)\)/g,
       (_m, alt, width, src) => {
@@ -700,11 +759,21 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
             cleanSrc = cleanSrc.replace(/ /g, "%20");
           }
         }
+        const isAudio = isAudioMedia(cleanSrc);
+        const isVideo = isVideoMedia(cleanSrc);
+        if (isVideo) {
+          const titleAttr = cleanAlt ? ` title="${escapeHtml(cleanAlt)}" data-title="${escapeHtml(cleanAlt)}"` : "";
+          return `<video src="${cleanSrc}" data-relative-src="${cleanSrc}" controls="true" width="${width}"${titleAttr}></video>`;
+        }
+        if (isAudio) {
+          const titleAttr = cleanAlt ? ` data-title="${escapeHtml(cleanAlt)}"` : "";
+          return `<audio src="${cleanSrc}" data-relative-src="${cleanSrc}" controls="true"${titleAttr}></audio>`;
+        }
         return `<img src="${cleanSrc}" alt="${cleanAlt}" width="${width}" data-relative-src="${cleanSrc}" style="width: ${width}px; max-width: 100%;" />`;
       }
     );
 
-    // Ensure spaces in standard Markdown images ![alt](url) are encoded as %20 so marked parses them properly
+    // Ensure standard Markdown images/media ![alt](url) are parsed properly
     processedLine = processedLine.replace(
       /!\[([^\]|\r\n]*)\]\(([^)\r\n]+)\)/g,
       (match, alt, src) => {
@@ -712,15 +781,28 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
         const titleMatch = trimmed.match(/^(\S+.*?)(?:\s+(["'][^"']*["']))?$/);
         if (titleMatch) {
           let urlPart = titleMatch[1];
-          const titlePart = titleMatch[2] ? ` ${titleMatch[2]}` : "";
+          const rawTitle = titleMatch[2] ? titleMatch[2].slice(1, -1) : "";
           if (urlPart && !/^(https?:\/\/|data:|blob:)/i.test(urlPart)) {
             try {
               urlPart = encodeURI(decodeURI(urlPart));
             } catch {
               urlPart = urlPart.replace(/ /g, "%20");
             }
-            return `![${alt}](${urlPart}${titlePart})`;
           }
+          const isAudio = isAudioMedia(urlPart);
+          const isVideo = isVideoMedia(urlPart);
+          if (isVideo) {
+            const displayTitle = rawTitle || alt || "";
+            const titleAttr = displayTitle ? ` title="${escapeHtml(displayTitle)}" data-title="${escapeHtml(displayTitle)}"` : "";
+            return `<video src="${urlPart}" data-relative-src="${urlPart}" controls="true"${titleAttr}></video>`;
+          }
+          if (isAudio) {
+            const displayTitle = rawTitle || alt || "";
+            const titleAttr = displayTitle ? ` data-title="${escapeHtml(displayTitle)}"` : "";
+            return `<audio src="${urlPart}" data-relative-src="${urlPart}" controls="true"${titleAttr}></audio>`;
+          }
+          const titlePart = titleMatch[2] ? ` ${titleMatch[2]}` : "";
+          return `![${alt}](${urlPart}${titlePart})`;
         }
         return match;
       }
@@ -896,49 +978,56 @@ export const prepareDomForEditor = (
     }
   });
 
-  // Unwrap paragraphs containing audio elements or image elements
+  // Normalize audio tags (ensure data-relative-src is set for data: or blob: audio with title)
+  root.querySelectorAll("audio").forEach((audio) => {
+    const src = audio.getAttribute("src") || "";
+    const title = audio.getAttribute("data-title") || audio.getAttribute("title") || "";
+    const relSrc = audio.getAttribute("data-relative-src");
+    if (!relSrc && title && (src.startsWith("data:audio/") || src.startsWith("blob:"))) {
+      const ext = title.includes(".") ? "" : ".webm";
+      audio.setAttribute("data-relative-src", `attachments/${title}${ext}`);
+    }
+  });
+
+  // Unwrap paragraphs containing audio elements, video elements, or image elements
   root.querySelectorAll("p").forEach((p) => {
     if (p.closest("table, td, th")) return;
-    const audio = p.querySelector("audio");
-    if (audio) {
-      if (p.children.length === 1 && !p.textContent?.trim()) {
-        p.replaceWith(audio);
-      } else {
-        p.parentElement?.insertBefore(audio, p);
-        if (!p.textContent?.trim() && !p.children.length) {
-          p.remove();
-        }
-      }
-    }
-    let img = p.querySelector("img");
-    while (img && p.contains(img)) {
+    let media = p.querySelector("img, audio, video");
+    while (media && p.contains(media)) {
       p.querySelectorAll("br").forEach((br) => {
-        if (br.nextElementSibling === img || br.previousElementSibling === img || !br.nextSibling || br.nextSibling === img) {
+        if (
+          br.nextElementSibling === media ||
+          br.previousElementSibling === media ||
+          !br.nextSibling ||
+          br.nextSibling === media ||
+          !br.previousSibling ||
+          br.previousSibling === media
+        ) {
           br.remove();
         }
       });
-      if (!p.textContent?.trim() && p.querySelectorAll("img, audio, input, label").length === 1) {
-        p.replaceWith(img);
+      if (!p.textContent?.trim() && p.querySelectorAll("img, audio, video, input, label").length === 1) {
+        p.replaceWith(media);
         break;
       } else {
         const childNodes = Array.from(p.childNodes);
-        const imgIdx = childNodes.indexOf(img);
-        const hasBefore = childNodes.slice(0, imgIdx).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|INPUT|LABEL)$/i.test(n.tagName)));
-        const hasAfter = childNodes.slice(imgIdx + 1).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|INPUT|LABEL)$/i.test(n.tagName)));
+        const mediaIdx = childNodes.indexOf(media);
+        const hasBefore = childNodes.slice(0, mediaIdx).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|VIDEO|INPUT|LABEL)$/i.test(n.tagName)));
+        const hasAfter = childNodes.slice(mediaIdx + 1).some((n) => (n.textContent || "").trim().length > 0 || (n instanceof Element && /^(IMG|AUDIO|VIDEO|INPUT|LABEL)$/i.test(n.tagName)));
 
         if (!hasBefore && hasAfter) {
-          p.before(img);
+          p.before(media);
         } else if (hasBefore && !hasAfter) {
-          p.after(img);
+          p.after(media);
         } else if (hasBefore && hasAfter) {
           const p2 = document.createElement("p");
-          while (img.nextSibling) {
-            p2.appendChild(img.nextSibling);
+          while (media.nextSibling) {
+            p2.appendChild(media.nextSibling);
           }
           p.after(p2);
-          p.after(img);
+          p.after(media);
         } else {
-          p.replaceWith(img);
+          p.replaceWith(media);
           break;
         }
         if (!p.textContent?.trim() && !p.children.length) {
@@ -946,7 +1035,61 @@ export const prepareDomForEditor = (
           break;
         }
       }
-      img = p.querySelector("img");
+      media = p.querySelector("img, audio, video");
+    }
+  });
+
+  // Preserve and resolve relative video sources
+  root.querySelectorAll("video").forEach((video) => {
+    const src = video.getAttribute("src") || "";
+    if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
+      let encodedRel = src;
+      try {
+        encodedRel = encodeURI(decodeURI(src));
+      } catch {
+        encodedRel = src.replace(/ /g, "%20");
+      }
+      let decodedRel = src;
+      try {
+        decodedRel = decodeURIComponent(src);
+      } catch {}
+      video.setAttribute("data-relative-src", encodedRel);
+      if (options?.assetBlobUrlMap) {
+        const cachedBlobUrl =
+          options.assetBlobUrlMap.get(encodedRel) ||
+          options.assetBlobUrlMap.get(decodedRel) ||
+          options.assetBlobUrlMap.get(src);
+        if (cachedBlobUrl) {
+          video.setAttribute("src", cachedBlobUrl);
+        }
+      }
+    }
+  });
+
+  // Preserve and resolve relative audio sources
+  root.querySelectorAll("audio").forEach((audio) => {
+    const src = audio.getAttribute("src") || "";
+    if (src && !/^(https?:\/\/|data:|blob:)/i.test(src)) {
+      let encodedRel = src;
+      try {
+        encodedRel = encodeURI(decodeURI(src));
+      } catch {
+        encodedRel = src.replace(/ /g, "%20");
+      }
+      let decodedRel = src;
+      try {
+        decodedRel = decodeURIComponent(src);
+      } catch {}
+      audio.setAttribute("data-relative-src", encodedRel);
+      if (options?.assetBlobUrlMap) {
+        const cachedBlobUrl =
+          options.assetBlobUrlMap.get(encodedRel) ||
+          options.assetBlobUrlMap.get(decodedRel) ||
+          options.assetBlobUrlMap.get(src);
+        if (cachedBlobUrl) {
+          audio.setAttribute("src", cachedBlobUrl);
+        }
+      }
     }
   });
 
@@ -1143,7 +1286,7 @@ export const prepareDomForEditor = (
 };
 
 const BLOCK_HTML_TAGS =
-  "address|article|aside|blockquote|canvas|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|noscript|ol|p|pre|section|table|tfoot|thead|tbody|tr|th|td|ul|video|details|summary";
+  "address|article|aside|blockquote|canvas|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|noscript|ol|p|pre|section|table|tfoot|thead|tbody|tr|th|td|ul|video|audio|details|summary";
 const BLOCK_TAG_REGEX = new RegExp(`^(?:\\/?(?:${BLOCK_HTML_TAGS})|hr\\/?)(?:[\\s\\/>]|$)`, "i");
 
 export function collapseBlockWhitespace(html: string): string {
@@ -1930,6 +2073,8 @@ export const WrongLanguageSuggestion = Extension.create<WrongLanguageSuggestionO
 import TurndownService from "turndown";
 import ToggleNodeView from "@/components/ToggleNodeView";
 import { WorkspaceImagePickerDialog } from "@/components/editor/WorkspaceImagePickerDialog";
+import { WorkspaceVideoPickerDialog } from "@/components/editor/WorkspaceVideoPickerDialog";
+import { videoLocalCache } from "@/components/editor/VideoNodeView";
 import { LockedNoteViewer } from "@/components/LockedNoteViewer";
 import { encryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
 import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
@@ -2100,6 +2245,9 @@ export type SlashMenuItem = {
       openImageDialog: () => void;
       openWorkspaceImageDialog?: () => void;
       triggerImageUpload: () => void;
+      openVideoDialog?: () => void;
+      openWorkspaceVideoDialog?: () => void;
+      triggerVideoUpload?: () => void;
       openAudioRecorder: () => void;
       openQrCodeDialog?: () => void;
       openEmojiPicker?: () => void;
@@ -2543,6 +2691,30 @@ export const SLASH_ITEMS: SlashMenuItem[] = [
     action: (_editor, helpers) => helpers.triggerImageUpload(),
   },
   {
+    id: "videoUrl",
+    titleKey: "editor.insertVideoByUrl",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Film className="mr-2 h-4 w-4" />,
+    keywords: ["video", "vid", "movie", "clip", "วิดีโอ", "คลิป", "หนัง", "url"],
+    action: (_editor, helpers) => helpers.openVideoDialog?.(),
+  },
+  {
+    id: "videoWorkspace",
+    titleKey: "editor.insertVideoFromWorkspace",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Video className="mr-2 h-4 w-4" />,
+    keywords: ["video", "workspace", "attachment", "attachments", "วิดีโอ", "ไฟล์แนบ", "คลังวิดีโอ"],
+    action: (_editor, helpers) => helpers.openWorkspaceVideoDialog?.(),
+  },
+  {
+    id: "videoUpload",
+    titleKey: "editor.uploadVideo",
+    categoryKey: "settings.toolCategoryMedia",
+    icon: <Upload className="mr-2 h-4 w-4" />,
+    keywords: ["upload", "file", "video", "vid", "อัปโหลด", "อัพโหลด", "วิดีโอ", "ไฟล์"],
+    action: (_editor, helpers) => helpers.triggerVideoUpload?.(),
+  },
+  {
     id: "qrCode",
     titleKey: "editor.qrCode",
     categoryKey: "settings.toolCategoryMedia",
@@ -2808,7 +2980,7 @@ export interface EditorProps {
   rightPanelOpen?: boolean;
   onCloseRightPanel?: () => void;
   onSelectNote?: (id: string) => void;
-  onOpenWebTab?: (url: string, initialTitle?: string) => void;
+  onOpenWebTab?: (url: string, initialTitle?: string, customDisplayUrl?: string, filePath?: string) => void;
   onUnlockNote?: (noteId: string, pin: string) => Promise<boolean>;
   onRelockNote?: (noteId: string) => void;
   onGetActivePin?: (noteId: string) => string | undefined;
@@ -3541,7 +3713,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       return (
         el.nodeName === "P" &&
         !el.textContent?.trim() &&
-        !el.querySelector("img, audio, input, label") &&
+        !el.querySelector("img, audio, video, input, label") &&
         !el.closest("table, li, blockquote, [data-type='taskItem']")
       );
     },
@@ -3557,8 +3729,8 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const align = h.style?.textAlign || h.getAttribute("align");
       const prev = h.previousElementSibling;
       const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
+        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
       );
       const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
       if (align && align !== "left") {
@@ -3575,7 +3747,7 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const el = node as HTMLElement;
       return (
         el.nodeName === "P" &&
-        Boolean(el.textContent?.trim() || el.querySelector("img, audio, input, label")) &&
+        Boolean(el.textContent?.trim() || el.querySelector("img, audio, video, input, label")) &&
         !el.closest("table, li, blockquote, [data-type='taskItem']")
       );
     },
@@ -3584,8 +3756,8 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const prev = el.previousElementSibling;
       const next = el.nextElementSibling;
       const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
+        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
       );
       const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
       const rawTag = el.getAttribute("data-raw-tag");
@@ -3597,8 +3769,8 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         return `${leadingNl}<p style="${style}">\n${content}\n</p>\n\n`;
       }
       const isNextNonEmptyBlock = next && (
-        /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
+        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
+        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
       );
       const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
       return `${leadingNl}${content}${trailingNl}`;
@@ -3894,13 +4066,18 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const qrColor = img.getAttribute("data-qr-color");
       const qrBg = img.getAttribute("data-qr-bg");
       const qrLevel = img.getAttribute("data-qr-level");
-      const isQr = qrCode === "true" || Boolean(qrText);
+      const isQr =
+        qrCode === "true" ||
+        Boolean(qrText) ||
+        alt === "QR Code" ||
+        alt?.toLowerCase().startsWith("qr code") ||
+        (typeof relSrc === "string" && relSrc.toLowerCase().includes("qrcode"));
 
       let md: string;
       if (isQr) {
         const qrAttrs = [
           `src="${relSrc}"`,
-          `alt="${escapeHtml(alt || "QR Code")}"`,
+          alt && alt !== "QR Code" ? `alt="${escapeHtml(alt)}"` : `alt="QR Code"`,
           width ? `width="${width}"` : "",
           `data-qr-code="true"`,
           qrText ? `data-qr-text="${escapeHtml(qrText)}"` : "",
@@ -3911,6 +4088,13 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
           .filter(Boolean)
           .join(" ");
         md = `<img ${qrAttrs} />`;
+      } else if (img.getAttribute("data-wikilink-embed") === "true") {
+        // Explicitly entered or loaded as Obsidian Wikilink embed ![[relSrc|width]]
+        let decodedRel = relSrc;
+        try {
+          decodedRel = decodeURIComponent(relSrc);
+        } catch {}
+        md = width ? `![[${decodedRel}|${width}]]` : `![[${decodedRel}]]`;
       } else {
         md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
       }
@@ -3928,14 +4112,14 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         const prev = img.previousElementSibling;
         const next = img.nextElementSibling;
         const isPrevNonEmptyBlock = prev && (
-          /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, input, label")))
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
+          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
         );
         const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
 
         const isNextNonEmptyBlock = next && (
-          /^H[1-6]|IMG|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, input, label")))
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
+          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
         );
         const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
 
@@ -3945,16 +4129,145 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     },
   });
 
-  // Convert HTML audio back to Markdown audio
+  // Convert HTML audio back to Markdown audio (Obsidian Wikilink embed for local files)
   td.addRule("audio", {
     filter: "audio",
     replacement: (_content, node) => {
       const el = node as HTMLElement;
-      const src = el.getAttribute("src") || "";
-      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
-      const titleAttr = title ? ` data-title="${title.replace(/"/g, "&quot;")}"` : "";
+      let src =
+        el.getAttribute("data-relative-src") ||
+        assetBlobUrlMap?.get(el.getAttribute("src") || "") ||
+        el.getAttribute("src") ||
+        "";
       if (!src) return "";
-      return `\n\n<audio controls src="${src}"${titleAttr}></audio>\n\n`;
+
+      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
+
+      // If src is a blob: URL and title exists, convert to attachments/title
+      if (src.startsWith("blob:") && title && !title.startsWith("blob:")) {
+        const ext = title.includes(".") ? "" : ".webm";
+        src = `attachments/${title}${ext}`;
+      }
+
+      // If src is a data:audio URL and title exists (e.g. from previously recorded/pasted audio),
+      // convert to attachments/title
+      if (src.startsWith("data:audio/") && title) {
+        const ext = title.includes(".") ? "" : ".webm";
+        src = `attachments/${title}${ext}`;
+      }
+
+      let md = "";
+      if (!/^(https?:\/\/|data:|blob:)/i.test(src)) {
+        let decodedRel = src;
+        try {
+          decodedRel = decodeURIComponent(src);
+        } catch {}
+        md = `![[${decodedRel}]]`;
+      } else {
+        const titleAttr = title ? ` data-title="${title.replace(/"/g, "&quot;")}"` : "";
+        md = `<audio controls src="${src}"${titleAttr}></audio>`;
+      }
+
+      const parent = el.parentElement;
+      const parentTag = parent?.nodeName?.toUpperCase() || "";
+      const isStandaloneBlock =
+        !parent ||
+        parentTag === "X-TURNDOWN" ||
+        parentTag === "DIV" ||
+        parentTag === "BODY" ||
+        parent.classList?.contains("ProseMirror") ||
+        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
+
+      if (isStandaloneBlock && parentTag !== "P") {
+        const prev = el.previousElementSibling;
+        const next = el.nextElementSibling;
+        const isPrevNonEmptyBlock = prev && (
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
+          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
+        );
+        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
+
+        const isNextNonEmptyBlock = next && (
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
+          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
+        );
+        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
+
+        return `${leadingNl}${md}${trailingNl}`;
+      }
+      return md;
+    },
+  });
+
+  // Convert HTML video back to Markdown video (Obsidian Wikilink embed for local files)
+  td.addRule("video", {
+    filter: "video",
+    replacement: (_content, node) => {
+      const el = node as HTMLElement;
+      let relSrc =
+        el.getAttribute("data-relative-src") ||
+        assetBlobUrlMap?.get(el.getAttribute("src") || "") ||
+        el.getAttribute("src") ||
+        "";
+
+      if (!relSrc) return "";
+
+      if (relSrc.startsWith("luno-asset://")) {
+        relSrc = decodeURIComponent(relSrc.replace(/^luno-asset:\/\//, ""));
+        if (/^\/[a-zA-Z]:[\\/]/.test(relSrc)) relSrc = relSrc.slice(1);
+      }
+
+      const rawWidth = el.getAttribute("width") || el.style?.width || "";
+      const widthMatch = rawWidth ? String(rawWidth).match(/\d+/) : null;
+      const width = widthMatch ? widthMatch[0] : "";
+
+      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
+
+      if (relSrc.startsWith("blob:") && title && !title.startsWith("blob:")) {
+        relSrc = `attachments/${title}`;
+      }
+
+      let md = "";
+      // Local / relative video attachment: serialize as Obsidian Wikilink embed ![[relSrc|width]]
+      if (!/^(https?:\/\/|data:|blob:)/i.test(relSrc)) {
+        let decodedRel = relSrc;
+        try {
+          decodedRel = decodeURIComponent(relSrc);
+        } catch {}
+        md = width ? `![[${decodedRel}|${width}]]` : `![[${decodedRel}]]`;
+      } else {
+        // External web URL: serialize as Markdown link with width or standard video
+        md = width ? `![${title || "video"}|${width}](${relSrc})` : `![${title || "video"}](${relSrc})`;
+      }
+
+      const parent = el.parentElement;
+      const parentTag = parent?.nodeName?.toUpperCase() || "";
+      const isStandaloneBlock =
+        !parent ||
+        parentTag === "X-TURNDOWN" ||
+        parentTag === "DIV" ||
+        parentTag === "BODY" ||
+        parent.classList?.contains("ProseMirror") ||
+        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
+
+      if (isStandaloneBlock && parentTag !== "P") {
+        const prev = el.previousElementSibling;
+        const next = el.nextElementSibling;
+        const isPrevNonEmptyBlock = prev && (
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
+          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
+        );
+        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
+
+        const isNextNonEmptyBlock = next && (
+          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
+          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
+        );
+        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
+
+        return `${leadingNl}${md}${trailingNl}`;
+      }
+      return md;
     },
   });
 
@@ -4714,6 +5027,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const debounceRenameTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRenameRef = useRef<{ note: Note; firstH1Text: string; newFileName: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const mobileToolbarAreaRef = useRef<HTMLDivElement>(null);
   const syncingFromNote = useRef(false);
   const loadingNoteIdRef = useRef<string | null>(null);
@@ -4746,6 +5060,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [workspaceImageDialogOpen, setWorkspaceImageDialogOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false);
+  const [workspaceVideoDialogOpen, setWorkspaceVideoDialogOpen] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
   const [audioRecorderOpen, setAudioRecorderOpen] = useState(false);
 
   const filteredWorkspaceNotes = useMemo(() => {
@@ -4773,6 +5090,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [mobileToolbarWidth, setMobileToolbarWidth] = useState(0);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
+  const [videoBlobUrl, setVideoBlobUrl] = useState<string | null>(null);
+  const [videoDimensions, setVideoDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [videoDuration, setVideoDuration] = useState<number | null>(null);
+  const [videoError, setVideoError] = useState(false);
   const [isImageZoomed, setIsImageZoomed] = useState(false);
   const [canZoomImage, setCanZoomImage] = useState(false);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
@@ -4937,10 +5258,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const isAudioFile = useCallback((targetNote: Note | null) => {
     if (!targetNote) return false;
-    const name = targetNote.fileName?.toLowerCase() ?? "";
-    if (/\.(mp3|wav|ogg|m4a|flac|aac|opus|wma|aiff)$/i.test(name)) return true;
-    if (targetNote.content?.startsWith("data:audio/")) return true;
-    return false;
+    return isAudioMedia(targetNote.fileName || targetNote.title || "", targetNote);
+  }, []);
+
+  const isVideoFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    return isVideoMedia(targetNote.fileName || targetNote.title || "", targetNote);
   }, []);
 
   const isCodeFile = useCallback((targetNote: Note | null) => {
@@ -4958,6 +5281,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }, []);
+
+  const formatVideoDuration = useCallback((seconds: number | null | undefined): string => {
+    if (seconds == null || isNaN(seconds) || !isFinite(seconds) || seconds < 0) return "--:--";
+    const totalSecs = Math.round(seconds);
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = Math.floor(totalSecs % 60);
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }, []);
 
   const getFileFormatLabel = useCallback((targetNote: Note | null): string => {
@@ -4982,9 +5317,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (name.endsWith(".pdf")) return "PDF Document";
     if (name.endsWith(".doc") || name.endsWith(".docx")) return "Word Document";
     if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "Excel Spreadsheet";
-    if (name.endsWith(".ppt") || name.endsWith(".pptx")) return "PowerPoint Presentation";
-    if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac")) return "Audio File";
-    if (name.endsWith(".mp4") || name.endsWith(".webm") || name.endsWith(".mov") || name.endsWith(".avi")) return "Video File";
+    if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return isTh ? "ไฟล์เสียง" : "Audio File";
+    if (name.endsWith(".webm")) {
+      return isAudioMedia(name, targetNote)
+        ? (isTh ? "ไฟล์เสียง WebM" : "WebM Audio")
+        : (isTh ? "วิดีโอ WebM" : "WebM Video");
+    }
+    if (name.endsWith(".mp4") || name.endsWith(".m4v")) return "MP4 Video";
+    if (name.endsWith(".mov")) return "QuickTime Video";
+    if (name.endsWith(".mkv")) return "Matroska Video";
+    if (name.endsWith(".avi")) return "AVI Video";
+    if (name.endsWith(".wmv") || name.endsWith(".flv") || name.endsWith(".ogv") || name.endsWith(".3gp") || name.endsWith(".mpg") || name.endsWith(".mpeg")) return "Video File";
+    if (targetNote.fileType === "video") return isTh ? "วิดีโอ" : "Video";
     if (targetNote.fileType === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
 
     if (targetNote.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
@@ -5076,11 +5420,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         console.warn("Open in system app failed:", err);
       }
     }
-    const src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
+    const src = videoBlobUrl || imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
     if (src) {
       window.open(src, "_blank");
     }
-  }, [note, imageBlobUrl]);
+  }, [note, imageBlobUrl, videoBlobUrl]);
 
   const handleRevealInFileExplorer = useCallback(async () => {
     if (!note) return;
@@ -5324,6 +5668,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const openImageDialogRef = useRef<(() => void) | null>(null);
   const openWorkspaceImageDialogRef = useRef<(() => void) | null>(null);
   const triggerImageUploadRef = useRef<(() => void) | null>(null);
+  const openVideoDialogRef = useRef<(() => void) | null>(null);
+  const openWorkspaceVideoDialogRef = useRef<(() => void) | null>(null);
+  const triggerVideoUploadRef = useRef<(() => void) | null>(null);
   const openAudioRecorderRef = useRef<(() => void) | null>(null);
   const openQrCodeDialogRef = useRef<(() => void) | null>(null);
   const openEmojiPickerRef = useRef<(() => void) | null>(null);
@@ -5340,10 +5687,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     tRef.current = t;
     isMobileRef.current = isMobile;
     noteRef.current = note;
+    if (typeof window !== "undefined") {
+      (window as any).__luno_rootDirHandle = rootDirHandle || null;
+    }
     if (note && (!activeNoteRef.current || activeNoteRef.current.id === note.id)) {
       activeNoteRef.current = note;
     }
-  }, [t, isMobile, note]);
+  }, [t, isMobile, note, rootDirHandle]);
 
   const executeSlashCommand = useCallback(
     (editorInstance: TiptapEditor, item: SlashMenuItem) => {
@@ -5360,6 +5710,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         openImageDialog: () => openImageDialogRef.current?.(),
         openWorkspaceImageDialog: () => openWorkspaceImageDialogRef.current?.(),
         triggerImageUpload: () => triggerImageUploadRef.current?.(),
+        openVideoDialog: () => openVideoDialogRef.current?.(),
+        openWorkspaceVideoDialog: () => openWorkspaceVideoDialogRef.current?.(),
+        triggerVideoUpload: () => triggerVideoUploadRef.current?.(),
         openAudioRecorder: () => openAudioRecorderRef.current?.(),
         openQrCodeDialog: () => openQrCodeDialogRef.current?.(),
         openEmojiPicker: () => {
@@ -5380,6 +5733,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const checkSlashCommand = useCallback(
     (editorInstance: TiptapEditor) => {
+      if (settings?.enableSlashCommand === false) {
+        if (slashMenuStateRef.current.open) {
+          slashMenuStateRef.current.open = false;
+          setSlashMenuState((prev) => ({ ...prev, open: false }));
+        }
+        return;
+      }
+
       const { selection } = editorInstance.state;
       if (!selection.empty) {
         if (slashMenuStateRef.current.open) {
@@ -5457,8 +5818,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       setSlashMenuState(newState);
     },
-    [t, executeSlashCommand],
+    [t, executeSlashCommand, settings?.enableSlashCommand],
   );
+
+  useEffect(() => {
+    if (settings?.enableSlashCommand === false && slashMenuStateRef.current.open) {
+      slashMenuStateRef.current.open = false;
+      setSlashMenuState((prev) => ({ ...prev, open: false }));
+    }
+  }, [settings?.enableSlashCommand]);
 
   const [editorTick, setEditorTick] = useState(0);
   const tickRafRef = useRef<number | null>(null);
@@ -5521,6 +5889,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   type ImageFileInput = File | { dataUrl?: string; file?: File; blob?: Blob; fileName?: string };
   const processAndInsertImageFileRef = useRef<((input: ImageFileInput) => Promise<void>) | null>(null);
+  const processAndInsertVideoFileRef = useRef<((file: File) => Promise<void>) | null>(null);
+  const processAndInsertAudioFileRef = useRef<((file: File) => Promise<void>) | null>(null);
   const debouncedContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const debouncedVersionSnapshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveContentRef = useRef<{ id: string; content: string } | null>(null);
@@ -5576,6 +5946,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         setNoteScrollPosition(note.id, container.scrollTop);
       }
     } else if (isVisible && !wasVisible && note?.id && !isHtmlFile(note) && !isCssFile(note)) {
+      if (editorInstanceRef.current && (editorActiveNoteIdRef.current !== note.id || closedNoteIds.has(note.id))) {
+        setEditorTick((v) => (v + 1) % 1000000);
+      }
       restoreScrollPosition(note.id);
     }
   }, [isVisible, note?.id, restoreScrollPosition, isHtmlFile, isCssFile]);
@@ -5666,6 +6039,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (userEditedRef.current && currentNote) {
       let contentToSave = pendingSaveContentRef.current?.content;
+      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote))) {
+        contentToSave = codeEditorContentMap.get(currentNote.id) ?? currentNote.content;
+      }
       if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current && !editorInstanceRef.current.isDestroyed) {
         try {
           contentToSave = serializeEditorContent(currentNote, editorInstanceRef.current);
@@ -5678,6 +6054,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       pendingSaveContentRef.current = null;
       if (contentToSave !== undefined && contentToSave !== null) {
+        if (isHtmlFile(currentNote) || isCssFile(currentNote)) {
+          codeEditorContentMap.set(currentNote.id, contentToSave);
+        }
         if (!currentNote.isLocked) {
           try {
             localStorage.setItem(`luno_backup_${currentNote.id}`, contentToSave);
@@ -5776,6 +6155,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       TaskList,
       TaskItem,
       AudioExtension,
+      VideoExtension,
       Table.configure({
         resizable: true,
       }),
@@ -5968,6 +6348,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 };
               },
             },
+            "data-wikilink-embed": {
+              default: null,
+              parseHTML: (element) => element.getAttribute("data-wikilink-embed"),
+              renderHTML: (attributes) => {
+                if (!attributes["data-wikilink-embed"]) return {};
+                return {
+                  "data-wikilink-embed": attributes["data-wikilink-embed"],
+                };
+              },
+            },
           };
         },
         addNodeView() {
@@ -5982,6 +6372,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 oldAttrs.src !== newAttrs.src ||
                 oldAttrs.width !== newAttrs.width ||
                 oldAttrs["data-relative-src"] !== newAttrs["data-relative-src"] ||
+                oldAttrs["data-wikilink-embed"] !== newAttrs["data-wikilink-embed"] ||
                 oldAttrs.alt !== newAttrs.alt ||
                 oldAttrs.title !== newAttrs.title ||
                 oldAttrs["data-qr-code"] !== newAttrs["data-qr-code"] ||
@@ -6040,10 +6431,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             return "";
           }
 
-          // If slash was typed in focused line, show "Type to search..."
+          const isSlashCommandEnabled = settingsRef.current?.enableSlashCommand !== false;
+
+          // If slash was typed in focused line, show "Type to search..." only when slash command is enabled
           const text = node.textContent;
-          if (hasAnchor && text.startsWith("/")) {
+          if (hasAnchor && text.startsWith("/") && isSlashCommandEnabled) {
             return tRef.current("editor.typeToSearch");
+          }
+
+          if (!isSlashCommandEnabled) {
+            return tRef.current("editor.startWritingNoSlash") || (settingsRef.current?.language === "th" ? "เริ่มเขียนข้อความที่นี่..." : "Start writing here...");
           }
 
           return isMobileRef.current
@@ -6146,6 +6543,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
         };
 
+        const isVideoFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          return isVideoMedia(file.name || "", { type: file.type });
+        };
+
+        const isAudioFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          return isAudioMedia(file.name || "", { type: file.type });
+        };
+
         const coordinates = _view.posAtCoords({ left: event.clientX, top: event.clientY });
         if (coordinates) {
           editorSelectionRef.current = { from: coordinates.pos, to: coordinates.pos };
@@ -6161,17 +6568,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 void processAndInsertImageFileRef.current?.(file);
                 return true;
               }
+              if (file && isAudioFile(file)) {
+                event.preventDefault();
+                void processAndInsertAudioFileRef.current?.(file);
+                return true;
+              }
+              if (file && isVideoFile(file)) {
+                event.preventDefault();
+                void processAndInsertVideoFileRef.current?.(file);
+                return true;
+              }
             }
           }
           const items = event.dataTransfer.items;
           if (items && items.length > 0) {
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
-              if (item && (item.kind === "file" || (item.type && item.type.startsWith("image/")))) {
+              if (item && (item.kind === "file" || (item.type && (item.type.startsWith("image/") || item.type.startsWith("video/") || item.type.startsWith("audio/"))))) {
                 const file = item.getAsFile();
                 if (file && isImageFile(file)) {
                   event.preventDefault();
                   void processAndInsertImageFileRef.current?.(file);
+                  return true;
+                }
+                if (file && isAudioFile(file)) {
+                  event.preventDefault();
+                  void processAndInsertAudioFileRef.current?.(file);
+                  return true;
+                }
+                if (file && isVideoFile(file)) {
+                  event.preventDefault();
+                  void processAndInsertVideoFileRef.current?.(file);
                   return true;
                 }
               }
@@ -6190,6 +6617,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (file.type && file.type.startsWith("image/")) return true;
           const name = file.name || "";
           return /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|avif)$/i.test(name);
+        };
+
+        const isVideoFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          return isVideoMedia(file.name || "", { type: file.type });
+        };
+
+        const isAudioFile = (file: { name?: string; type?: string } | null | undefined): boolean => {
+          if (!file) return false;
+          return isAudioMedia(file.name || "", { type: file.type });
         };
 
         const invokeImagePaste = (input: ImageFileInput) => {
@@ -6233,6 +6670,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 invokeImagePaste(file);
                 return true;
               }
+              if (file && isVideoFile(file)) {
+                event.preventDefault();
+                void (processAndInsertVideoFileRef.current || processAndInsertVideoFile)(file);
+                return true;
+              }
+              if (file && isAudioFile(file)) {
+                event.preventDefault();
+                void (processAndInsertAudioFileRef.current || processAndInsertAudioFile)(file);
+                return true;
+              }
             }
           }
           const items = event.clipboardData.items;
@@ -6244,6 +6691,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 if (file && isImageFile(file)) {
                   event.preventDefault();
                   invokeImagePaste(file);
+                  return true;
+                }
+              }
+              if (item && (item.kind === "file" || (item.type && item.type.startsWith("audio/")))) {
+                const file = item.getAsFile();
+                if (file && isAudioFile(file)) {
+                  event.preventDefault();
+                  void (processAndInsertAudioFileRef.current || processAndInsertAudioFile)(file);
+                  return true;
+                }
+              }
+              if (item && (item.kind === "file" || (item.type && item.type.startsWith("video/")))) {
+                const file = item.getAsFile();
+                if (file && isVideoFile(file)) {
+                  event.preventDefault();
+                  void (processAndInsertVideoFileRef.current || processAndInsertVideoFile)(file);
                   return true;
                 }
               }
@@ -6838,6 +7301,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     scheduleAutoSaveDiskRef.current = scheduleAutoSaveDisk;
   }, [scheduleAutoSaveDisk]);
 
+  const handleToggleHtmlPreview = useCallback((open: boolean) => {
+    if (note && (isHtmlFile(note) || note.contentFormat === "html")) {
+      flushDebouncedContentSave(note);
+      if (open && hasPendingDiskSaveRef.current && settings.autoSave) {
+        void saveLinkedFileToDisk(note);
+      }
+    }
+    setHtmlPreviewOpen(open);
+  }, [note, isHtmlFile, flushDebouncedContentSave, settings.autoSave, saveLinkedFileToDisk]);
+
 
   useEffect(() => {
     return () => {
@@ -7054,6 +7527,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const targetId = customEvent.detail?.noteId;
       if (!targetId) return;
 
+      closedNoteIds.add(targetId);
       if (editorActiveNoteIdRef.current === targetId || activeNoteRef.current?.id === targetId) {
         editorActiveNoteIdRef.current = null;
         activeNoteRef.current = null;
@@ -7079,6 +7553,106 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       window.removeEventListener("luno:clear-note-editor-history", handleClearHistory);
     };
   }, [editor]);
+
+  useEffect(() => {
+    const handleFlushBeforeClose = (e: Event) => {
+      const customEvent = e as CustomEvent<{ noteId: string }>;
+      const targetId = customEvent.detail?.noteId;
+      if (!targetId) return;
+
+      const target = targetId === note?.id ? note : (notes || []).find((n) => n.id === targetId);
+      if (!target) return;
+
+      if (
+        userEditedRef.current ||
+        hasPendingDiskSaveRef.current ||
+        ((isHtmlFile(target) || isCssFile(target)) && codeEditorContentMap.has(targetId))
+      ) {
+        flushDebouncedContentSave(target);
+        if (settings.autoSave) {
+          void saveLinkedFileToDisk(target);
+        }
+      }
+    };
+
+    window.addEventListener("luno:flush-note-before-close", handleFlushBeforeClose);
+    return () => {
+      window.removeEventListener("luno:flush-note-before-close", handleFlushBeforeClose);
+    };
+  }, [note, notes, isHtmlFile, isCssFile, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
+
+  useEffect(() => {
+    const handleInsertToActiveEditor = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        noteId?: string;
+        text?: string;
+        url?: string;
+        title?: string;
+        onHandled?: () => void;
+      }>;
+      const { noteId, text, url, title, onHandled } = customEvent.detail || {};
+      if (!editor || editor.isDestroyed) return;
+
+      // If noteId is specified, only handle if it matches this editor's note
+      if (noteId && note?.id && noteId !== note.id) return;
+
+      try {
+        const targetUrl = (url || "").trim() || (text || "").trim();
+        if (!targetUrl) return;
+
+        const displayText = (title || "").trim() || targetUrl;
+        const linkNode = {
+          type: "text",
+          text: displayText,
+          marks: [{ type: "link", attrs: { href: targetUrl } }],
+        };
+
+        const { state } = editor;
+        const { selection, doc } = state;
+        const isFocused = editor.isFocused;
+        const hasCustomSelection = isFocused && selection.from > 1;
+
+        if (hasCustomSelection) {
+          if (!selection.empty) {
+            editor.chain().focus().setLink({ href: targetUrl }).run();
+          } else {
+            editor.chain().focus().insertContent([linkNode, { type: "text", text: " " }]).run();
+          }
+        } else {
+          // If the last node in the document is an empty paragraph, insert directly into it
+          const lastChild = doc.lastChild;
+          if (lastChild && lastChild.type.name === "paragraph" && lastChild.content.size === 0) {
+            const pos = Math.max(1, doc.content.size - 1);
+            editor.chain().focus().insertContentAt(pos, linkNode).run();
+          } else {
+            // Append exactly one new paragraph with the link
+            const endPos = doc.content.size;
+            editor.chain().focus().insertContentAt(endPos, {
+              type: "paragraph",
+              content: [linkNode],
+            }).run();
+          }
+        }
+
+        userEditedRef.current = true;
+        hasPendingDiskSaveRef.current = true;
+        if (note) {
+          flushDebouncedContentSave(note);
+          if (settings.autoSave) {
+            void saveLinkedFileToDisk(note);
+          }
+        }
+        onHandled?.();
+      } catch (err) {
+        console.warn("Failed inserting link into editor:", err);
+      }
+    };
+
+    window.addEventListener("luno:insert-to-active-editor", handleInsertToActiveEditor);
+    return () => {
+      window.removeEventListener("luno:insert-to-active-editor", handleInsertToActiveEditor);
+    };
+  }, [editor, note, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
 
   useEffect(() => {
     if (!editor) return;
@@ -7185,6 +7759,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       editorActiveNoteIdRef.current = note.id;
       activeNoteRef.current = note;
       closedNoteIds.delete(note.id);
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      if (!note.content && !codeEditorContentMap.has(note.id)) {
+        try {
+          const backup = localStorage.getItem(`luno_backup_${note.id}`) ||
+                         (note.fileName ? localStorage.getItem(`luno_backup_fn_${note.fileName}`) : null);
+          if (backup) {
+            codeEditorContentMap.set(note.id, backup);
+            onUpdate(note.id, { content: backup });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       return;
     }
 
@@ -7291,7 +7879,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = false;
     loadingNoteIdRef.current = null;
     restoreScrollPosition(note.id);
-  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
+  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note, isVisible]);
 
   useEffect(() => {
     return () => {
@@ -7903,6 +8491,241 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
+  const insertVideoToEditor = (attrs: { src: string; title?: string; "data-relative-src"?: string; width?: number | null; textAlign?: string }): boolean => {
+    if (!editor) return false;
+
+    // 1. Focus editor and check selection
+    if (!editor.isFocused) {
+      editor.commands.focus();
+    }
+
+    const savedSelection = editorSelectionRef.current;
+    if (savedSelection) {
+      const docSize = editor.state.doc.content.size;
+      const { from, to } = savedSelection;
+      if (typeof from === "number" && typeof to === "number" && from >= 0 && to <= docSize && from <= to) {
+        editor.commands.setTextSelection({ from, to });
+      }
+      editorSelectionRef.current = null;
+    }
+
+    const { state } = editor;
+    const { selection } = state;
+    const { $from } = selection;
+    const parentNode = $from.parent;
+
+    const onInsertedSuccess = () => {
+      userEditedRef.current = true;
+      hasPendingDiskSaveRef.current = true;
+      setLastEditedTime(Date.now());
+      if (settings.autoSave) {
+        setSaveStatus("auto_saving");
+        scheduleAutoSaveDiskRef.current?.();
+      } else {
+        setSaveStatus("unsaved");
+      }
+      return true;
+    };
+
+    // 2. If inside a node that only accepts inline content (heading or codeBlock)
+    if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
+      try {
+        const afterPos = $from.after();
+        const success = editor.chain().focus().insertContentAt(afterPos, [
+          { type: "video", attrs },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt after heading/codeBlock failed:", err);
+      }
+    }
+
+    // 3. If inside an empty paragraph, replace it directly
+    if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
+      try {
+        const fromPos = $from.before();
+        const toPos = $from.after();
+        const success = editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
+          { type: "video", attrs },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt empty paragraph replacement failed:", err);
+      }
+    }
+
+    // 4. Try normal setVideo first
+    try {
+      const success = (editor.chain().focus() as any).setVideo(attrs).run();
+      if (success) return onInsertedSuccess();
+    } catch (e) {
+      console.warn("chain.setVideo error:", e);
+    }
+
+    // 5. Try insertContent at selection
+    try {
+      const success = editor.commands.insertContent({ type: "video", attrs });
+      if (success) return onInsertedSuccess();
+    } catch (e) {
+      console.warn("commands.insertContent error:", e);
+    }
+
+    // 6. Fallback: insert after current block
+    try {
+      const afterPos = $from.after();
+      const success = editor.chain().focus().insertContentAt(afterPos, [
+        { type: "video", attrs },
+      ]).run();
+      if (success) return onInsertedSuccess();
+    } catch (e) {
+      console.warn("insert afterPos failed:", e);
+    }
+
+    // 7. Direct ProseMirror schema transaction at top-level boundary
+    try {
+      const schema = editor.schema;
+      const videoType = schema.nodes.video;
+      if (videoType) {
+        const videoNode = videoType.create(attrs);
+        const nodesToInsert = [videoNode];
+
+        let insertPos = $from.after(1);
+        if (typeof insertPos !== "number" || insertPos > editor.state.doc.content.size || insertPos < 0) {
+          insertPos = editor.state.doc.content.size;
+        }
+        const tr = editor.state.tr.insert(insertPos, nodesToInsert);
+        editor.view.dispatch(tr);
+        return onInsertedSuccess();
+      }
+    } catch (e) {
+      console.warn("Direct ProseMirror transaction failed:", e);
+    }
+
+    // 8. Ultimate fallback: insert at end of document
+    try {
+      const docEnd = editor.state.doc.content.size;
+      const success = editor.commands.insertContentAt(docEnd, [
+        { type: "video", attrs },
+      ]);
+      return success ? onInsertedSuccess() : false;
+    } catch (err) {
+      console.warn("insertVideoToEditor fallback failed:", err);
+      return false;
+    }
+  };
+
+  const insertAudioToEditor = (attrs: { src: string; title?: string; "data-relative-src"?: string }): boolean => {
+    if (!editor) return false;
+
+    // 1. Focus editor and check selection
+    if (!editor.isFocused) {
+      editor.commands.focus();
+    }
+
+    const savedSelection = editorSelectionRef.current;
+    if (savedSelection) {
+      const docSize = editor.state.doc.content.size;
+      const { from, to } = savedSelection;
+      if (typeof from === "number" && typeof to === "number" && from >= 0 && to <= docSize && from <= to) {
+        editor.commands.setTextSelection({ from, to });
+      }
+      editorSelectionRef.current = null;
+    }
+
+    const { state } = editor;
+    const { selection } = state;
+    const { $from } = selection;
+    const parentNode = $from.parent;
+
+    const onInsertedSuccess = () => {
+      userEditedRef.current = true;
+      hasPendingDiskSaveRef.current = true;
+      setLastEditedTime(Date.now());
+      if (settings.autoSave) {
+        setSaveStatus("auto_saving");
+        scheduleAutoSaveDiskRef.current?.();
+      } else {
+        setSaveStatus("unsaved");
+      }
+      return true;
+    };
+
+    // 2. If inside a node that only accepts inline content (heading or codeBlock)
+    if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
+      try {
+        const afterPos = $from.after();
+        const success = editor.chain().focus().insertContentAt(afterPos, [
+          { type: "audio", attrs },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt after heading/codeBlock failed:", err);
+      }
+    }
+
+    // 3. If inside an empty paragraph, replace it directly
+    if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
+      try {
+        const fromPos = $from.before();
+        const toPos = $from.after();
+        const success = editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
+          { type: "audio", attrs },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt empty paragraph replacement failed:", err);
+      }
+    }
+
+    // 4. Try normal setAudio first
+    try {
+      const success = (editor.chain().focus() as any).setAudio(attrs).run();
+      if (success) return onInsertedSuccess();
+    } catch (e) {
+      console.warn("chain.setAudio error:", e);
+    }
+
+    // 5. Try insertContent at selection
+    try {
+      const success = editor.commands.insertContent({ type: "audio", attrs });
+      if (success) return onInsertedSuccess();
+    } catch (e) {
+      console.warn("insertContent audio error:", e);
+    }
+
+    // 6. Direct ProseMirror schema transaction at top-level boundary
+    try {
+      const schema = editor.schema;
+      const audioType = schema.nodes.audio;
+      if (audioType) {
+        const audioNode = audioType.create(attrs);
+        const nodesToInsert = [audioNode];
+
+        let insertPos = $from.after(1);
+        if (typeof insertPos !== "number" || insertPos > editor.state.doc.content.size || insertPos < 0) {
+          insertPos = editor.state.doc.content.size;
+        }
+        const tr = editor.state.tr.insert(insertPos, nodesToInsert);
+        editor.view.dispatch(tr);
+        return onInsertedSuccess();
+      }
+    } catch (e) {
+      console.warn("Direct ProseMirror transaction audio failed:", e);
+    }
+
+    // 7. Ultimate fallback: insert at end of document
+    try {
+      const docEnd = editor.state.doc.content.size;
+      const success = editor.commands.insertContentAt(docEnd, [
+        { type: "audio", attrs },
+      ]);
+      return success ? onInsertedSuccess() : false;
+    } catch (err) {
+      console.warn("insertAudioToEditor fallback failed:", err);
+      return false;
+    }
+  };
+
   const handleFixLanguage = () => {
     if (!editor) return;
     const {
@@ -8295,6 +9118,56 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     [insertImageToEditor]
   );
 
+  const openVideoDialog = () => {
+    rememberSelection();
+    setVideoUrl("");
+    setVideoDialogOpen(true);
+  };
+
+  const openWorkspaceVideoDialog = useCallback(() => {
+    rememberSelection();
+    setWorkspaceVideoDialogOpen(true);
+  }, [rememberSelection]);
+
+  const handleInsertWorkspaceVideo = useCallback(
+    (targetNote: Note, relativePath: string, blobUrl?: string) => {
+      const fileName = targetNote.fileName || targetNote.title || "video.mp4";
+      let encodedRelPath = relativePath;
+      try {
+        encodedRelPath = encodeURI(decodeURI(relativePath));
+      } catch {
+        encodedRelPath = relativePath.replace(/ /g, "%20");
+      }
+      let decodedRelPath = relativePath;
+      try {
+        decodedRelPath = decodeURIComponent(relativePath);
+      } catch {}
+
+      const finalBlobUrl =
+        (blobUrl && !blobUrl.startsWith("luno-asset:")) ? blobUrl :
+        assetBlobUrlMap.current.get(encodedRelPath) ||
+        assetBlobUrlMap.current.get(decodedRelPath) ||
+        assetBlobUrlMap.current.get(relativePath) ||
+        encodedRelPath;
+
+      if (blobUrl && !blobUrl.startsWith("luno-asset:")) {
+        assetBlobUrlMap.current.set(encodedRelPath, blobUrl);
+        assetBlobUrlMap.current.set(decodedRelPath, blobUrl);
+        assetBlobUrlMap.current.set(blobUrl, encodedRelPath);
+        videoLocalCache.set(encodedRelPath, blobUrl);
+        videoLocalCache.set(decodedRelPath, blobUrl);
+        videoLocalCache.set(relativePath, blobUrl);
+      }
+      insertVideoToEditor({ src: finalBlobUrl, title: fileName, "data-relative-src": encodedRelPath });
+    },
+    [insertVideoToEditor]
+  );
+
+  const triggerVideoUpload = useCallback(() => {
+    rememberSelection();
+    videoInputRef.current?.click();
+  }, [rememberSelection]);
+
   const openAudioRecorder = useCallback(() => {
     rememberSelection();
     setAudioRecorderOpen((prev) => {
@@ -8315,6 +9188,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     openImageDialogRef.current = openImageDialog;
     openWorkspaceImageDialogRef.current = openWorkspaceImageDialog;
     triggerImageUploadRef.current = triggerImageUpload;
+    openVideoDialogRef.current = openVideoDialog;
+    openWorkspaceVideoDialogRef.current = openWorkspaceVideoDialog;
+    triggerVideoUploadRef.current = triggerVideoUpload;
     openAudioRecorderRef.current = openAudioRecorder;
     openQrCodeDialogRef.current = () => setQrCodeDialogOpen(true);
     openEmojiPickerRef.current = () => setSlashEmojiState({ open: true, coords: { top: 200, left: 200 } });
@@ -8324,6 +9200,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     openClockRef.current = toggleClock;
     handleAiActionRef.current = (action) => handleAiAction(action || "improve");
     processAndInsertImageFileRef.current = processAndInsertImageFile;
+    processAndInsertVideoFileRef.current = processAndInsertVideoFile;
+    processAndInsertAudioFileRef.current = processAndInsertAudioFile;
   });
 
   const handleApplyImageUrl = () => {
@@ -8343,6 +9221,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     insertImageToEditor({ src: nextUrl, alt: "" });
     setImageDialogOpen(false);
     setImageUrl("");
+  };
+
+  const handleApplyVideoUrl = () => {
+    const nextUrl = normalizeUrl(videoUrl);
+    if (!nextUrl) {
+      showUiAlert(t("editor.invalidVideoUrl") || "Please enter a valid video URL.");
+      return;
+    }
+
+    try {
+      new URL(nextUrl, window.location.origin);
+    } catch {
+      showUiAlert(t("editor.invalidVideoUrl") || "Please enter a valid video URL.");
+      return;
+    }
+
+    insertVideoToEditor({ src: nextUrl, title: "" });
+    setVideoDialogOpen(false);
+    setVideoUrl("");
   };
 
   const getUniqueAttachmentFileName = async (attachmentsDir: FileSystemDirectoryHandle, originalName: string): Promise<string> => {
@@ -8378,6 +9275,119 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } catch {
       return rawPath.replace(/ /g, "%20");
     }
+  };
+
+  const saveQrCodeAttachment = async (
+    dataUrl: string,
+    qrText?: string,
+    existingRelPath?: string | null
+  ): Promise<{ relPath: string; blobUrl: string }> => {
+    let targetFileName = "";
+    if (existingRelPath) {
+      let cleanRel = decodeURIComponent(existingRelPath);
+      while (cleanRel.startsWith("../") || cleanRel.startsWith("./")) {
+        cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
+      }
+      if (cleanRel.startsWith("attachments/")) {
+        targetFileName = cleanRel.replace(/^attachments\//, "");
+      }
+    }
+
+    if (!targetFileName) {
+      const cleanSlug = (qrText || "qrcode")
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//i, "")
+        .replace(/[^a-zA-Z0-9_-]+/g, "_")
+        .slice(0, 30)
+        .replace(/^_+|_+$/g, "") || "code";
+      const timeTag = Date.now().toString().slice(-6);
+      targetFileName = `qrcode_${cleanSlug}_${timeTag}.png`;
+    }
+
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    let uniqueTargetName = targetFileName;
+    if (!existingRelPath && electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const attachmentsFolder = `${saved.folderPath}/attachments`;
+          const existingFiles = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const existingNames = new Set(existingFiles.map((f: any) => (typeof f === "string" ? f : f?.name)));
+          const lastDot = targetFileName.lastIndexOf(".");
+          const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
+          const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
+          let counter = 1;
+          while (existingNames.has(uniqueTargetName)) {
+            uniqueTargetName = `${baseName}_${counter}${ext}`;
+            counter++;
+          }
+        }
+      } catch (e) {
+        console.warn("Pre-checking attachments folder error for QR code:", e);
+      }
+    }
+
+    let blob: Blob | null = null;
+    try {
+      const res = await fetch(dataUrl);
+      blob = await res.blob();
+    } catch {}
+
+    const blobUrl = blob ? URL.createObjectURL(blob) : dataUrlToBlobUrl(dataUrl);
+    const relPath = getRelativeAttachmentPath(uniqueTargetName);
+    let decodedRel = relPath;
+    try {
+      decodedRel = decodeURIComponent(relPath);
+    } catch {}
+
+    if (blobUrl) {
+      assetBlobUrlMap.current.set(relPath, blobUrl);
+      assetBlobUrlMap.current.set(decodedRel, blobUrl);
+      assetBlobUrlMap.current.set(blobUrl, relPath);
+    }
+
+    // Save to Electron workspace on disk
+    if (electronAPI?.getSavedWorkspace) {
+      void (async () => {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
+            if (blob && electronAPI.writeFileBuffer) {
+              const buffer = await blob.arrayBuffer();
+              await electronAPI.writeFileBuffer({ fullPath: fullAttachmentPath, buffer });
+              return;
+            }
+            if (electronAPI.writeFileBase64) {
+              const rawBase64 = dataUrl.includes("base64,") ? dataUrl.split("base64,")[1] : dataUrl;
+              if (rawBase64) {
+                await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to save QR attachment in Electron:", err);
+        }
+      })();
+    }
+
+    // Save to Web File System Access API
+    if (rootDirHandle && blob) {
+      void (async () => {
+        try {
+          const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+          const fileHandle = await attachmentsDir.getFileHandle(uniqueTargetName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        } catch (err) {
+          console.warn("Failed to save QR attachment via Web FileSystem:", err);
+        }
+      })();
+    }
+
+    return { relPath, blobUrl };
   };
 
   const processAndInsertImageFile = async (rawInput: ImageFileInput) => {
@@ -8490,19 +9500,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
     let uniqueTargetName = targetFileName;
     if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
           const attachmentsFolder = `${saved.folderPath}/attachments`;
-          const existing: string[] = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const existingFiles = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const existingNames = new Set(existingFiles.map((f: any) => (typeof f === "string" ? f : f?.name)));
           const lastDot = targetFileName.lastIndexOf(".");
           const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
           const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
           let counter = 1;
-          while (existing.includes(uniqueTargetName)) {
+          while (existingNames.has(uniqueTargetName)) {
             uniqueTargetName = `${baseName} ${counter}${ext}`;
             counter++;
           }
@@ -8529,8 +9540,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       assetBlobUrlMap.current.set(decodedRel, finalDataUrl);
     }
 
-    // Insert into editor immediately: use dataUrl so it renders 100% reliably in both dev and production (file://)
-    const insertSrc = finalDataUrl || blobUrl;
+    // Insert into editor immediately: prefer lightweight blobUrl so editor state does not bloat
+    const insertSrc = blobUrl || finalDataUrl;
     const inserted = insertImageToEditor({
       src: insertSrc,
       alt: uniqueTargetName,
@@ -8546,15 +9557,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     // 2. Electron Desktop Workspace Support - save file to disk asynchronously in background
-    if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64 && finalDataUrl) {
+    if (electronAPI?.getSavedWorkspace) {
       void (async () => {
         try {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath) {
-            const rawBase64 = finalDataUrl.includes("base64,") ? finalDataUrl.split("base64,")[1] : finalDataUrl;
-            if (rawBase64) {
-              const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
-              await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
+            const nativeSourcePath = file ? (electronAPI.getPathForFile?.(file) || (file as any).path) : null;
+            if (nativeSourcePath && electronAPI.copyFileOrFolder) {
+              await electronAPI.copyFileOrFolder({ sourceFullPath: nativeSourcePath, targetFullPath: fullAttachmentPath });
+              return;
+            }
+
+            if (finalBlob && electronAPI.writeFileBuffer) {
+              const buffer = await finalBlob.arrayBuffer();
+              await electronAPI.writeFileBuffer({ fullPath: fullAttachmentPath, buffer });
+              return;
+            }
+
+            if (electronAPI.writeFileBase64 && finalDataUrl) {
+              const rawBase64 = finalDataUrl.includes("base64,") ? finalDataUrl.split("base64,")[1] : finalDataUrl;
+              if (rawBase64) {
+                await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+              }
             }
           }
         } catch (err) {
@@ -8606,6 +9631,281 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const file = event.target.files?.[0];
     if (!file) return;
     await processAndInsertImageFile(file);
+    event.target.value = "";
+  };
+
+  const processAndInsertVideoFile = async (file: File) => {
+    const isVid = (f: { name?: string; type?: string } | null | undefined): boolean => {
+      if (!f) return false;
+      return isVideoMedia(f.name || "", { type: f.type });
+    };
+
+    if (!isVid(file)) {
+      showUiAlert(t("editor.invalidVideoFile") || "Please choose a valid video file.");
+      return;
+    }
+
+    const targetFileName = file.name || `video_${Date.now()}.mp4`;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    let uniqueTargetName = targetFileName;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const attachmentsFolder = `${saved.folderPath}/attachments`;
+          const existingFiles = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const existingNames = new Set(existingFiles.map((f: any) => (typeof f === "string" ? f : f?.name)));
+          const lastDot = targetFileName.lastIndexOf(".");
+          const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
+          const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
+          let counter = 1;
+          while (existingNames.has(uniqueTargetName)) {
+            uniqueTargetName = `${baseName} ${counter}${ext}`;
+            counter++;
+          }
+        }
+      } catch (e) {
+        console.warn("Pre-checking attachments folder error:", e);
+      }
+    }
+
+    const blobUrl = URL.createObjectURL(file);
+    const relPath = getRelativeAttachmentPath(uniqueTargetName);
+    let decodedRel = relPath;
+    try {
+      decodedRel = decodeURIComponent(relPath);
+    } catch {}
+
+    assetBlobUrlMap.current.set(relPath, blobUrl);
+    assetBlobUrlMap.current.set(decodedRel, blobUrl);
+    assetBlobUrlMap.current.set(blobUrl, relPath);
+    videoLocalCache.set(relPath, blobUrl);
+    videoLocalCache.set(decodedRel, blobUrl);
+
+    const inserted = insertVideoToEditor({
+      src: blobUrl,
+      title: uniqueTargetName,
+      "data-relative-src": relPath,
+    });
+    if (!inserted) {
+      showUiAlert(t("editor.invalidVideoFile") || "Failed to insert video.");
+    }
+
+    // 2. Electron Desktop Workspace Support - save file to disk asynchronously in background
+    if (electronAPI?.getSavedWorkspace) {
+      void (async () => {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
+            const nativeSourcePath = electronAPI.getPathForFile?.(file) || (file as any).path;
+            if (nativeSourcePath && electronAPI.copyFileOrFolder) {
+              await electronAPI.copyFileOrFolder({ sourceFullPath: nativeSourcePath, targetFullPath: fullAttachmentPath });
+              return;
+            }
+
+            if (electronAPI.writeFileBuffer) {
+              const buffer = await file.arrayBuffer();
+              await electronAPI.writeFileBuffer({ fullPath: fullAttachmentPath, buffer });
+              return;
+            }
+
+            if (electronAPI.writeFileBase64) {
+              const rawBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === "string" ? reader.result : "";
+                  resolve(res.includes("base64,") ? res.split("base64,")[1] : res);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+              if (rawBase64) {
+                await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to save video attachment in Electron workspace:", err);
+        }
+      })();
+    }
+
+    // 3. Web File System Access API Support
+    if (rootDirHandle) {
+      void (async () => {
+        try {
+          const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+          const attachmentFileName = await getUniqueAttachmentFileName(attachmentsDir, targetFileName);
+          const fileHandle = await attachmentsDir.getFileHandle(attachmentFileName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(file);
+          await writable.close();
+        } catch (err) {
+          console.warn("Failed to save video attachment to workspace folder:", err);
+        }
+      })();
+    }
+
+    // 4. Google Drive background sync upload
+    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      void (async () => {
+        try {
+          const accessToken = await getValidAccessToken();
+          const structure = await syncEngine.initializeSync();
+          if (accessToken && structure?.attachmentsId) {
+            await uploadDriveAttachmentFile(
+              accessToken,
+              structure.attachmentsId,
+              file,
+              targetFileName
+            );
+          }
+        } catch (err) {
+          console.warn("Failed to background upload video to Google Drive attachments:", err);
+        }
+      })();
+    }
+  };
+
+  const processAndInsertAudioFile = async (file: File) => {
+    const isAudio = (f: { name?: string; type?: string } | null | undefined): boolean => {
+      if (!f) return false;
+      return isAudioMedia(f.name || "", { type: f.type });
+    };
+
+    if (!isAudio(file)) {
+      showUiAlert(t("editor.invalidAudioFile") || "Please choose a valid audio file.");
+      return;
+    }
+
+    const targetFileName = file.name || `audio_${Date.now()}.mp3`;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    let uniqueTargetName = targetFileName;
+    if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath) {
+          const attachmentsFolder = `${saved.folderPath}/attachments`;
+          const existingFiles = (await electronAPI.readDirectoryFiles(attachmentsFolder)) || [];
+          const existingNames = new Set(existingFiles.map((f: any) => (typeof f === "string" ? f : f?.name)));
+          const lastDot = targetFileName.lastIndexOf(".");
+          const baseName = lastDot > 0 ? targetFileName.slice(0, lastDot) : targetFileName;
+          const ext = lastDot > 0 ? targetFileName.slice(lastDot) : "";
+          let counter = 1;
+          while (existingNames.has(uniqueTargetName)) {
+            uniqueTargetName = `${baseName} ${counter}${ext}`;
+            counter++;
+          }
+        }
+      } catch (e) {
+        console.warn("Pre-checking attachments folder error:", e);
+      }
+    }
+
+    const blobUrl = URL.createObjectURL(file);
+    const relPath = getRelativeAttachmentPath(uniqueTargetName);
+    let decodedRel = relPath;
+    try {
+      decodedRel = decodeURIComponent(relPath);
+    } catch {}
+
+    assetBlobUrlMap.current.set(relPath, blobUrl);
+    assetBlobUrlMap.current.set(decodedRel, blobUrl);
+    assetBlobUrlMap.current.set(blobUrl, relPath);
+    audioLocalCache.set(relPath, blobUrl);
+    audioLocalCache.set(decodedRel, blobUrl);
+
+    const inserted = insertAudioToEditor({
+      src: blobUrl,
+      title: uniqueTargetName,
+      "data-relative-src": relPath,
+    });
+    if (!inserted) {
+      showUiAlert(t("editor.invalidAudioFile") || "Failed to insert audio.");
+    }
+
+    // 1. Electron Desktop Workspace Support - save file to disk asynchronously in background
+    if (electronAPI?.getSavedWorkspace) {
+      void (async () => {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          if (saved?.folderPath) {
+            const fullAttachmentPath = `${saved.folderPath}/attachments/${uniqueTargetName}`;
+            const nativeSourcePath = electronAPI.getPathForFile?.(file) || (file as any).path;
+            if (nativeSourcePath && electronAPI.copyFileOrFolder) {
+              await electronAPI.copyFileOrFolder({ sourceFullPath: nativeSourcePath, targetFullPath: fullAttachmentPath });
+              return;
+            }
+
+            if (electronAPI.writeFileBuffer) {
+              const buffer = await file.arrayBuffer();
+              await electronAPI.writeFileBuffer({ fullPath: fullAttachmentPath, buffer });
+              return;
+            }
+
+            if (electronAPI.writeFileBase64) {
+              const rawBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const res = typeof reader.result === "string" ? reader.result : "";
+                  resolve(res.includes("base64,") ? res.split("base64,")[1] : res);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+              if (rawBase64) {
+                await electronAPI.writeFileBase64({ fullPath: fullAttachmentPath, base64: rawBase64 });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to save audio attachment in Electron workspace:", err);
+        }
+      })();
+    }
+
+    // 2. Web File System Access API Support
+    if (rootDirHandle) {
+      void (async () => {
+        try {
+          const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+          const attachmentFileName = await getUniqueAttachmentFileName(attachmentsDir, targetFileName);
+          const fileHandle = await attachmentsDir.getFileHandle(attachmentFileName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(file);
+          await writable.close();
+        } catch (err) {
+          console.warn("Failed to save audio attachment to workspace folder:", err);
+        }
+      })();
+    }
+
+    // 3. Google Drive background sync upload
+    if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+      void (async () => {
+        try {
+          const accessToken = await getValidAccessToken();
+          const structure = await syncEngine.initializeSync();
+          if (accessToken && structure?.attachmentsId) {
+            await uploadDriveAttachmentFile(
+              accessToken,
+              structure.attachmentsId,
+              file,
+              targetFileName
+            );
+          }
+        } catch (err) {
+          console.warn("Failed to background upload audio to Google Drive attachments:", err);
+        }
+      })();
+    }
+  };
+
+  const handleVideoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await processAndInsertVideoFile(file);
     event.target.value = "";
   };
 
@@ -8729,14 +10029,43 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!resolvedRelPath) return null;
 
     // 1. Electron Desktop Native Support
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-    if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+    if (electronAPI?.getSavedWorkspace && (electronAPI?.readFileBuffer || electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
           const fullPath = `${saved.folderPath}/${resolvedRelPath}`;
-          const dataUrl = await electronAPI.readImageDataUrl(fullPath);
-          if (dataUrl) return dataUrlToBlobUrl(dataUrl);
+          if (electronAPI.readFileBuffer) {
+            try {
+              const buf = await electronAPI.readFileBuffer(fullPath);
+              if (buf && buf.byteLength > 0) {
+                const ext = resolvedRelPath.split(".").pop()?.toLowerCase() || "";
+                let mime = "application/octet-stream";
+                if (["mp4", "m4v"].includes(ext)) mime = "video/mp4";
+                else if (ext === "webm") mime = "video/webm";
+                else if (ext === "mov") mime = "video/quicktime";
+                else if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+                  mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+                }
+                const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+                videoLocalCache.set(resolvedRelPath, blobUrl);
+                return blobUrl;
+              }
+            } catch {}
+          }
+          let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
+          if (!dataUrl && electronAPI.readFileBase64) {
+            const b64 = await electronAPI.readFileBase64(fullPath);
+            if (b64) {
+              const ext = resolvedRelPath.split(".").pop()?.toLowerCase() || "";
+              let mime = "application/octet-stream";
+              if (["mp4", "m4v"].includes(ext)) mime = "video/mp4";
+              else if (ext === "webm") mime = "video/webm";
+              else if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) mime = `image/${ext === "jpg" ? "jpeg" : ext}`;
+              dataUrl = `data:${mime};base64,${b64}`;
+            }
+          }
+          if (dataUrl) return await asyncDataUrlToBlobUrl(dataUrl);
         }
       } catch (err) {
         console.warn("Electron asset resolution failed:", assetPath, err);
@@ -8766,21 +10095,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!instance || instance.isDestroyed || !note) return;
 
     const { doc } = instance.state;
-    // Fast check: avoid traversing documents that do not contain any image nodes
-    let hasImageNode = false;
+    // Fast check: avoid traversing documents that do not contain any image or video nodes
+    let hasMediaNode = false;
     doc.descendants((node) => {
-      if (node.type.name === "image") {
-        hasImageNode = true;
+      if (node.type.name === "image" || node.type.name === "video") {
+        hasMediaNode = true;
         return false;
       }
       return true;
     });
-    if (!hasImageNode) return;
+    if (!hasMediaNode) return;
 
     const tasks: string[] = [];
 
     doc.descendants((node) => {
-      if (node.type.name === "image") {
+      if (node.type.name === "image" || node.type.name === "video") {
         const src = (node.attrs.src as string) || "";
         const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
         const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
@@ -8824,7 +10153,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             assetBlobUrlMap.current.set(blobUrl, encodedRel);
           }
         } catch (err) {
-          console.warn("Failed to resolve relative image in ProseMirror doc:", relPath, err);
+          console.warn("Failed to resolve relative media in ProseMirror doc:", relPath, err);
         }
       }
 
@@ -8841,7 +10170,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let modified = false;
 
       currentDoc.descendants((node, pos) => {
-        if (node.type.name === "image") {
+        if (node.type.name === "image" || node.type.name === "video") {
           const src = (node.attrs.src as string) || "";
           const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
           const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
@@ -8953,10 +10282,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSaveStatus("auto_saving");
     scheduleAutoSaveDiskRef.current?.();
 
+    const timeLabel = formatRelativeDateTime(ver.timestamp, settings.dateFormat, settings.timeFormat, settings.language);
+    const triggerLabel =
+      ver.label ||
+      (ver.trigger === "manual"
+        ? t("versionHistoryPanel.manualSnapshot") || (lang === "th" ? "บันทึกด้วยตนเอง" : "Manual save")
+        : ver.trigger === "pre-restore"
+        ? t("versionHistoryPanel.preRestoreBackup") || (lang === "th" ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
+        : t("versionHistoryPanel.autoSnapshot") || (lang === "th" ? "บันทึกอัตโนมัติ" : "Auto-save"));
+
     toast({
       title: t("versionHistoryPanel.restoreSuccess"),
+      description: `${triggerLabel} • ${timeLabel}`,
     });
-  }, [note, onUpdate, editor, getBaseTitle, parseEditorContent, isTxtFile, isHtmlFile, isCssFile, serializeEditorContent, resolveRelativeImagesInEditor, t, toast]);
+  }, [note, onUpdate, editor, getBaseTitle, parseEditorContent, isTxtFile, isHtmlFile, isCssFile, serializeEditorContent, resolveRelativeImagesInEditor, t, toast, settings.dateFormat, settings.timeFormat, settings.language, lang]);
 
   const handleManualVersionSnapshot = useCallback((): NoteVersionSnapshot | null => {
     if (!note) return null;
@@ -8980,11 +10319,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleCodeEditorChange = useCallback((val: string) => {
     if (!note) return;
+    codeEditorContentMap.set(note.id, val);
     pendingSaveContentRef.current = { id: note.id, content: val };
     userEditedRef.current = true;
     hasPendingDiskSaveRef.current = true;
     setLastEditedTime(Date.now());
     setSaveStatus("unsaved");
+
+    try {
+      localStorage.setItem(`luno_backup_${note.id}`, val);
+      if (note.fileName) {
+        localStorage.setItem(`luno_backup_fn_${note.fileName}`, val);
+      }
+    } catch {
+      /* ignore localStorage quota */
+    }
 
     if (debouncedContentSaveTimeoutRef.current) {
       clearTimeout(debouncedContentSaveTimeoutRef.current);
@@ -8997,8 +10346,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       const latestContent = (pendingSaveContentRef.current?.id === currentNote.id
         ? pendingSaveContentRef.current.content
-        : null) ?? val;
+        : null) ?? codeEditorContentMap.get(currentNote.id) ?? val;
 
+      codeEditorContentMap.set(currentNote.id, latestContent);
       try {
         if (latestContent) {
           localStorage.setItem(`luno_backup_${currentNote.id}`, latestContent);
@@ -9062,8 +10412,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return nRel === normRel || nFile === normRel;
     });
 
-    if (matchedNote && typeof matchedNote.content === "string") {
-      return matchedNote.content;
+    if (matchedNote) {
+      if (codeEditorContentMap.has(matchedNote.id)) {
+        return codeEditorContentMap.get(matchedNote.id)!;
+      }
+      if (typeof matchedNote.content === "string") {
+        return matchedNote.content;
+      }
     }
 
     // 2. Electron Desktop direct file read
@@ -9101,13 +10456,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let cancelled = false;
 
     const loadPreviewHtml = async () => {
-      if (!note || note.contentFormat !== "html" || !note.content) {
+      if (!note || (note.contentFormat !== "html" && !isHtmlFile(note))) {
+        if (!cancelled) setPreviewHtml("");
+        return;
+      }
+
+      const rawHtml = codeEditorContentMap.get(note.id) ?? pendingSaveContentRef.current?.content ?? note.content ?? "";
+      if (!rawHtml) {
         if (!cancelled) setPreviewHtml("");
         return;
       }
 
       const rewritten = await rewriteHtmlForPreview(
-        note.content,
+        rawHtml,
         async (assetPath) => {
           return await resolveAssetDataUrl(assetPath);
         },
@@ -9123,13 +10484,57 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return () => {
       cancelled = true;
     };
-  }, [note?.id, note?.content, note?.contentFormat, note?.folderPath, rootDirHandle, notes]);
+  }, [note?.id, note?.content, note?.contentFormat, note?.folderPath, rootDirHandle, notes, isHtmlFile]);
 
-  const openHtmlPreviewInNewTab = () => {
+  const openHtmlPreviewInNewTab = async () => {
     if (!note) return;
 
-    const contentToOpen = note.contentFormat === "html" ? (previewHtml || note.content) : (editor?.getHTML() ?? note.content);
+    const rawHtml = codeEditorContentMap.get(note.id) ?? note.content;
+    const contentToOpen = note.contentFormat === "html" || isHtmlFile(note) ? (previewHtml || rawHtml) : (editor?.getHTML() ?? note.content);
     if (!contentToOpen) return;
+
+    const rawTitle = note.fileName || note.title || "HTML Preview";
+    const safeName = rawTitle.endsWith(".html") || rawTitle.endsWith(".htm") ? rawTitle : `${rawTitle}.html`;
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(contentToOpen)}`;
+
+    let realFilePath: string | null = null;
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+
+    if (electronAPI?.getSavedWorkspace) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        if (saved?.folderPath && note.fileName) {
+          const fullPath = note.folderPath
+            ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
+            : `${saved.folderPath}/${note.fileName}`;
+
+          if (electronAPI.writeFileContent) {
+            await electronAPI.writeFileContent({ fullPath, content: contentToOpen });
+          }
+          realFilePath = fullPath.replace(/\\/g, "/");
+        }
+      } catch (err) {
+        console.warn("Failed saving note to workspace on html preview:", err);
+      }
+    }
+
+    if (!realFilePath && electronAPI?.savePreviewFile) {
+      try {
+        realFilePath = await electronAPI.savePreviewFile({ fileName: safeName, content: contentToOpen });
+      } catch (err) {
+        console.warn("Failed writing preview file to temp:", err);
+      }
+    }
+
+    // Relative path with file:/// for clean display in omnibox
+    const relativePath = note.folderPath ? `${note.folderPath}/${safeName}` : safeName;
+    const cleanRelative = relativePath.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    const displayUrl = `file:///${cleanRelative}`;
+
+    if (onOpenWebTab) {
+      onOpenWebTab(dataUrl, rawTitle, displayUrl, realFilePath || undefined);
+      return;
+    }
 
     const blob = new Blob([contentToOpen], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -9160,9 +10565,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css", targetNote?: Note): string => {
     const n = targetNote || activeNoteRef.current || note;
     if (!n) return "";
-    if (isHtmlFile(n) || isCssFile(n) || targetExt === "css") {
+    if (isHtmlFile(n) || isCssFile(n) || targetExt === "css" || targetExt === "html") {
       if (pendingSaveContentRef.current && pendingSaveContentRef.current.id === n.id) {
         return pendingSaveContentRef.current.content;
+      }
+      if (codeEditorContentMap.has(n.id)) {
+        return codeEditorContentMap.get(n.id)!;
+      }
+      try {
+        const backup = localStorage.getItem(`luno_backup_${n.id}`) ||
+                       (n.fileName ? localStorage.getItem(`luno_backup_fn_${n.fileName}`) : null);
+        if (backup !== null && backup !== undefined && !isEncryptedNote(backup)) {
+          return backup;
+        }
+      } catch {
+        /* ignore */
       }
       return n.content || "";
     }
@@ -9360,7 +10777,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (ok) {
           if (saveOpIdRef.current === currentOpId) {
             hasPendingDiskSaveRef.current = false;
-            if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+            if (isHtmlFile(n) || isCssFile(n)) {
+              codeEditorContentMap.set(n.id, normalizedContent);
+            }
+            if (n.content !== normalizedContent && !userEditedRef.current) {
               onUpdate(n.id, { content: normalizedContent });
             }
           }
@@ -9384,7 +10804,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!existingHandle?.createWritable) {
       if (saveOpIdRef.current === currentOpId) {
         hasPendingDiskSaveRef.current = false;
-        if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+        if (isHtmlFile(n) || isCssFile(n)) {
+          codeEditorContentMap.set(n.id, normalizedContent);
+        }
+        if (n.content !== normalizedContent && !userEditedRef.current) {
           onUpdate(n.id, { content: normalizedContent });
         }
         setSavedSnapshot(n.id, ext, normalizedContent);
@@ -9417,7 +10840,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       writable = null;
       if (saveOpIdRef.current === currentOpId) {
         hasPendingDiskSaveRef.current = false;
-        if (n.content !== normalizedContent && !userEditedRef.current && !isHtmlFile(n) && !isCssFile(n)) {
+        if (isHtmlFile(n) || isCssFile(n)) {
+          codeEditorContentMap.set(n.id, normalizedContent);
+        }
+        if (n.content !== normalizedContent && !userEditedRef.current) {
           onUpdate(n.id, { content: normalizedContent });
         }
       }
@@ -9588,6 +11014,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let cancelled = false;
     let objectUrl: string | null = null;
     let audioObjectUrl: string | null = null;
+    let videoObjectUrl: string | null = null;
 
     const initialUrl =
       note.content?.startsWith("data:image/") ||
@@ -9600,6 +11027,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     setImageBlobUrl(initialUrl);
     setAudioBlobUrl(note.content?.startsWith("data:audio/") ? note.content : null);
+    setVideoBlobUrl(
+      note.content?.startsWith("data:video/") ||
+      (isVideoFile(note) && (note.content?.startsWith("blob:") || note.content?.startsWith("http")))
+        ? note.content
+        : null
+    );
+    setVideoDimensions(null);
+    setVideoDuration(null);
+    setVideoError(false);
     setIsImageZoomed(false);
     setCanZoomImage(false);
     setImageDimensions(null);
@@ -9674,17 +11110,91 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const blob = new Blob([byteNumbers], { type: mime });
                   audioObjectUrl = URL.createObjectURL(blob);
                   setAudioBlobUrl(audioObjectUrl);
+                  setVideoBlobUrl(null);
+                  if (ext.endsWith(".webm")) {
+                    probeWebmMediaKind(audioObjectUrl, note.fileName).then((kind) => {
+                      if (cancelled) return;
+                      if (kind === "video") {
+                        setVideoBlobUrl(audioObjectUrl);
+                        setAudioBlobUrl(null);
+                      }
+                    });
+                  }
                 } catch {
                   const padding = (b64.match(/=/g) || []).length;
                   setActiveFileSize(Math.max(0, Math.floor((b64.length * 3) / 4 - padding)));
-                  setAudioBlobUrl(`data:${mime};base64,${b64}`);
+                  const dataUrl = `data:${mime};base64,${b64}`;
+                  setAudioBlobUrl(dataUrl);
+                  setVideoBlobUrl(null);
+                  if (ext.endsWith(".webm")) {
+                    probeWebmMediaKind(dataUrl, note.fileName).then((kind) => {
+                      if (cancelled) return;
+                      if (kind === "video") {
+                        setVideoBlobUrl(dataUrl);
+                        setAudioBlobUrl(null);
+                      }
+                    });
+                  }
+                }
+                return;
+              }
+            }
+
+            const isVid = isVideoFile(note);
+            if (isVid && electronAPI.readFileBase64) {
+              const b64 = await electronAPI.readFileBase64(fullPath);
+              if (b64 && !cancelled) {
+                const ext = (note.fileName || "").toLowerCase();
+                let mime = "video/mp4";
+                if (ext.endsWith(".webm")) mime = "video/webm";
+                else if (ext.endsWith(".mov")) mime = "video/quicktime";
+                else if (ext.endsWith(".mkv")) mime = "video/x-matroska";
+                else if (ext.endsWith(".avi")) mime = "video/x-msvideo";
+                else if (ext.endsWith(".ogv")) mime = "video/ogg";
+                else if (ext.endsWith(".m4v") || ext.endsWith(".3gp") || ext.endsWith(".mpg") || ext.endsWith(".mpeg")) mime = "video/mp4";
+
+                try {
+                  const byteCharacters = atob(b64);
+                  setActiveFileSize(byteCharacters.length);
+                  const byteNumbers = new Uint8Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  const blob = new Blob([byteNumbers], { type: mime });
+                  videoObjectUrl = URL.createObjectURL(blob);
+                  setVideoBlobUrl(videoObjectUrl);
+                  setAudioBlobUrl(null);
+                  if (ext.endsWith(".webm")) {
+                    probeWebmMediaKind(videoObjectUrl, note.fileName).then((kind) => {
+                      if (cancelled) return;
+                      if (kind === "audio") {
+                        setAudioBlobUrl(videoObjectUrl);
+                        setVideoBlobUrl(null);
+                      }
+                    });
+                  }
+                } catch {
+                  const padding = (b64.match(/=/g) || []).length;
+                  setActiveFileSize(Math.max(0, Math.floor((b64.length * 3) / 4 - padding)));
+                  const dataUrl = `data:${mime};base64,${b64}`;
+                  setVideoBlobUrl(dataUrl);
+                  setAudioBlobUrl(null);
+                  if (ext.endsWith(".webm")) {
+                    probeWebmMediaKind(dataUrl, note.fileName).then((kind) => {
+                      if (cancelled) return;
+                      if (kind === "audio") {
+                        setAudioBlobUrl(dataUrl);
+                        setVideoBlobUrl(null);
+                      }
+                    });
+                  }
                 }
                 return;
               }
             }
 
             // For other binary / raw files in Electron, load file size from base64 if not known yet
-            if (!isImg && !isAud && electronAPI.readFileBase64) {
+            if (!isImg && !isAud && !isVid && electronAPI.readFileBase64) {
               try {
                 const b64 = await electronAPI.readFileBase64(fullPath);
                 if (b64 && !cancelled) {
@@ -9736,7 +11246,37 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
           if (isAudioFile(note)) {
             audioObjectUrl = URL.createObjectURL(file);
-            if (!cancelled) setAudioBlobUrl(audioObjectUrl);
+            if (!cancelled) {
+              setAudioBlobUrl(audioObjectUrl);
+              setVideoBlobUrl(null);
+            }
+            if ((note.fileName || "").toLowerCase().endsWith(".webm")) {
+              probeWebmMediaKind(audioObjectUrl, note.fileName).then((kind) => {
+                if (cancelled) return;
+                if (kind === "video") {
+                  setVideoBlobUrl(audioObjectUrl);
+                  setAudioBlobUrl(null);
+                }
+              });
+            }
+            return;
+          }
+
+          if (isVideoFile(note)) {
+            videoObjectUrl = URL.createObjectURL(file);
+            if (!cancelled) {
+              setVideoBlobUrl(videoObjectUrl);
+              setAudioBlobUrl(null);
+            }
+            if ((note.fileName || "").toLowerCase().endsWith(".webm")) {
+              probeWebmMediaKind(videoObjectUrl, note.fileName).then((kind) => {
+                if (cancelled) return;
+                if (kind === "audio") {
+                  setAudioBlobUrl(videoObjectUrl);
+                  setVideoBlobUrl(null);
+                }
+              });
+            }
             return;
           }
 
@@ -9782,6 +11322,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
+      if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
     };
   }, [note?.id, note?.fileName, note?.folderPath, note?.fileType, (note as any)?.fullPath, canUseNativeFs, rootDirHandle]);
 
@@ -9802,40 +11343,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }
 
-  async function inlineImagesToDataUrls(html: string): Promise<string> {
-    if (!html || !html.includes("<img")) return html;
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-      const images = Array.from(doc.querySelectorAll("img"));
-      if (images.length === 0) return html;
-
-      await Promise.all(
-        images.map(async (img) => {
-          const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:")) return;
-          try {
-            const res = await fetch(src);
-            const blob = await res.blob();
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-            img.setAttribute("src", dataUrl);
-          } catch (err) {
-            console.warn("inlineImagesToDataUrls failed for:", src, err);
-          }
-        })
-      );
-
-      return doc.body ? doc.body.innerHTML : html;
-    } catch (err) {
-      console.warn("inlineImagesToDataUrls parse error:", err);
-      return html;
-    }
-  }
 
   function printHtmlInBrowser(html: string) {
     const iframe = document.createElement("iframe");
@@ -9881,26 +11388,39 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     };
 
-    const images = Array.from(iframeDoc.images);
-    if (images.length === 0) {
-      setTimeout(executePrint, 250);
-    } else {
-      let loaded = 0;
-      const checkAllLoaded = () => {
-        loaded++;
-        if (loaded >= images.length) {
-          setTimeout(executePrint, 250);
-        }
-      };
-      images.forEach((img) => {
-        if (img.complete) {
-          checkAllLoaded();
-        } else {
-          img.onload = checkAllLoaded;
-          img.onerror = checkAllLoaded;
-        }
-      });
-    }
+    const waitForResourcesAndPrint = async () => {
+      try {
+        const docWithFonts = iframeDoc as unknown as { fonts?: { ready: Promise<void> } };
+        const images = Array.from(iframeDoc.images);
+        await Promise.race([
+          Promise.all([
+            docWithFonts?.fonts?.ready ? docWithFonts.fonts.ready : Promise.resolve(),
+            Promise.all(
+              images.map((img) => {
+                img.loading = "eager";
+                img.decoding = "sync";
+                if (img.complete) {
+                  return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+                }
+                return new Promise((resolve) => {
+                  img.onload = () => {
+                    if (img.decode) img.decode().catch(() => {}).then(resolve);
+                    else resolve();
+                  };
+                  img.onerror = resolve;
+                });
+              })
+            ),
+          ]),
+          new Promise((r) => setTimeout(r, 4000)),
+        ]);
+      } catch {
+        // continue to print
+      }
+      setTimeout(executePrint, 200);
+    };
+
+    void waitForResourcesAndPrint();
   }
 
   function escapeHtml(str: string): string {
@@ -9998,46 +11518,141 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   async function handleExportPdf() {
     if (!note) return;
-    const rawContent = isHtmlFile(note)
-      ? (previewHtml || note.content)
-      : (editor?.getHTML() ?? note.content);
-
-    if (!rawContent) return;
-
-    const content = await inlineImagesToDataUrls(rawContent);
     const baseName = getExportBaseName();
     const docTitle = note.fileName?.replace(/\.[^/.]+$/, "") || note.title?.trim() || t("editor.untitled");
 
-    const hasH1 = /^\s*<h1[^>]*>/i.test(content.trim());
-    const titleHeader = (!isHtmlFile(note) && !hasH1 && docTitle) ? `<h1 class="doc-title">${escapeHtml(docTitle)}</h1>` : "";
+    let rawContent = "";
+    if (isHtmlFile(note)) {
+      rawContent = previewHtml || note.content;
+    } else if (editor && !editor.isDestroyed && editor.view?.dom) {
+      // 1. Clone live rendered Editor DOM to preserve syntax highlighting spans (lowlight) and React node views
+      const clone = editor.view.dom.cloneNode(true) as HTMLElement;
 
-    const fullHtml = isHtmlFile(note)
-      ? (content.includes("<html") ? content : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title></head><body>${content}</body></html>`)
-      : `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title>` +
-        `<style>` +
-        `@page { size: A4; margin: 15mm 15mm 20mm 15mm; } ` +
-        `body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Thai", sans-serif; padding: 20px 40px; max-width: 800px; margin: 0 auto; line-height: 1.6; color: #1e293b; background: #fff; } ` +
-        `.doc-title { font-size: 2rem; font-weight: 700; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0; color: #0f172a; } ` +
-        `h1, h2, h3, h4, h5, h6 { color: #0f172a; margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 600; } ` +
-        `h1 { font-size: 1.75rem; } h2 { font-size: 1.4rem; } h3 { font-size: 1.2rem; } ` +
-        `p { margin: 0.75em 0; } ` +
-        `pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 1em; border-radius: 6px; overflow-x: auto; font-family: Consolas, Monaco, "Courier New", monospace; font-size: 0.9em; margin: 1em 0; } ` +
-        `code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 4px; font-family: Consolas, Monaco, "Courier New", monospace; font-size: 0.875em; color: #0f172a; } ` +
-        `pre code { background: transparent; padding: 0; border-radius: 0; } ` +
-        `blockquote { border-left: 4px solid #cbd5e1; margin: 1em 0; padding: 0.5em 1em; color: #64748b; background: #f8fafc; border-radius: 0 6px 6px 0; } ` +
-        `table { border-collapse: collapse; width: 100%; margin: 1.5em 0; } ` +
-        `th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; font-size: 0.95em; } ` +
-        `th { background: #f1f5f9; font-weight: 600; color: #0f172a; } ` +
-        `img { max-width: 100%; height: auto; border-radius: 6px; margin: 1em 0; } ` +
-        `ul, ol { padding-left: 1.75em; margin: 0.75em 0; } ` +
-        `li { margin: 0.35em 0; } ` +
-        `input[type="checkbox"] { margin-right: 0.5em; } ` +
-        `hr { border: none; border-top: 1px solid #e2e8f0; margin: 2em 0; } ` +
-        `@media print { body { padding: 0; max-width: 100%; } h1, h2, h3 { page-break-after: avoid; } pre, blockquote, table, img { page-break-inside: avoid; } }` +
-        `</style>` +
-        `</head><body>${titleHeader}${content}</body></html>`;
+      // 2. Remove interactive UI elements not meant for PDF (copy buttons, dropdowns, resize handles, control overlays)
+      clone
+        .querySelectorAll(
+          "button, [role='button'], .column-resize-handle, .prosemirror-dropcursor, [data-resize-handle], .table-resize-handle, .table-column-handle, .table-row-handle, .cursor-se-resize, [title*='resize'], .node-image .absolute"
+        )
+        .forEach((el) => el.remove());
+
+      // 3. Reset any content-visibility, contain, and 3D transforms that break Chromium printing
+      clone.querySelectorAll("*").forEach((node) => {
+        const el = node as HTMLElement;
+        if (el.style) {
+          if (el.style.contentVisibility) el.style.contentVisibility = "visible";
+          if (el.style.contain) el.style.contain = "none";
+          if (el.style.containIntrinsicSize) el.style.containIntrinsicSize = "none";
+          if (el.style.transform && el.style.transform.includes("translateZ")) {
+            el.style.transform = "none";
+          }
+        }
+      });
+
+      // 4. Synchronize live image src and force eager loading for print
+      const origImgs = editor.view.dom.querySelectorAll<HTMLImageElement>("img");
+      const clonedImgs = clone.querySelectorAll<HTMLImageElement>("img");
+      clonedImgs.forEach((clonedImg, idx) => {
+        const orig = origImgs[idx];
+        if (orig) {
+          const liveSrc = orig.currentSrc || orig.src;
+          if (liveSrc && (!clonedImg.getAttribute("src") || !clonedImg.getAttribute("src")?.startsWith("data:"))) {
+            clonedImg.setAttribute("src", liveSrc);
+          }
+        }
+        clonedImg.removeAttribute("loading");
+        clonedImg.setAttribute("loading", "eager");
+        clonedImg.setAttribute("decoding", "sync");
+      });
+
+      // 5. Preserve checked state on checkboxes
+      const originalCheckboxes = editor.view.dom.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+      const clonedCheckboxes = clone.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+      clonedCheckboxes.forEach((cb, idx) => {
+        const orig = originalCheckboxes[idx];
+        const isChecked = orig ? orig.checked : cb.closest('[data-checked="true"]') !== null;
+        if (isChecked) {
+          cb.setAttribute("checked", "checked");
+          cb.checked = true;
+        } else {
+          cb.removeAttribute("checked");
+          cb.checked = false;
+        }
+      });
+
+      // 6. Synchronize live computed styles on inline hashtag badges for 100% editor parity
+      const origBadges = editor.view.dom.querySelectorAll<HTMLElement>(".inline-tag-badge");
+      const clonedBadges = clone.querySelectorAll<HTMLElement>(".inline-tag-badge");
+      clonedBadges.forEach((clonedBadge, idx) => {
+        const orig = origBadges[idx];
+        if (orig) {
+          const comp = window.getComputedStyle(orig);
+          clonedBadge.style.backgroundColor = comp.backgroundColor;
+          clonedBadge.style.color = comp.color;
+          clonedBadge.style.borderColor = comp.borderColor;
+          clonedBadge.style.borderWidth = comp.borderWidth || "1px";
+          clonedBadge.style.borderStyle = comp.borderStyle || "solid";
+          clonedBadge.style.borderRadius = comp.borderRadius || "0.375rem";
+          clonedBadge.style.padding = comp.padding || "0.05rem 0.4rem";
+          clonedBadge.style.fontSize = comp.fontSize || "0.85em";
+          clonedBadge.style.fontWeight = comp.fontWeight || "500";
+          clonedBadge.style.lineHeight = comp.lineHeight || "1.25";
+          clonedBadge.style.display = "inline-flex";
+          clonedBadge.style.alignItems = "center";
+          clonedBadge.style.margin = comp.margin || "0 0.15rem";
+          clonedBadge.style.verticalAlign = comp.verticalAlign || "baseline";
+          clonedBadge.style.boxDecorationBreak = "clone";
+          (clonedBadge.style as any).webkitBoxDecorationBreak = "clone";
+        }
+      });
+
+      rawContent = clone.innerHTML;
+    } else {
+      rawContent = editor?.getHTML() ?? note.content ?? "";
+    }
+
+    if (!rawContent) return;
 
     const electronAPI = (window as any).electronAPI;
+    let workspacePath = "";
+    if (electronAPI?.getSavedWorkspace) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        workspacePath = saved?.folderPath || "";
+      } catch {}
+    }
+
+    // Inline all images (including QR codes, blob: URLs, and workspace attachments) to data: base64 URLs
+    const content = await inlineImagesForPdf(rawContent, {
+      readImageDataUrl: electronAPI?.readImageDataUrl
+        ? (p: string) => electronAPI.readImageDataUrl(p)
+        : undefined,
+      workspacePath,
+    });
+
+    // Extract custom font CSS if registered
+    const customFontsCss = typeof document !== "undefined"
+      ? document.getElementById("luno-custom-fonts")?.textContent || ""
+      : "";
+
+    // Generate editor-parity PDF HTML
+    const fullHtml = isHtmlFile(note) && content.includes("<html")
+      ? content
+      : generatePdfHtml({
+          title: docTitle,
+          bodyHtml: content,
+          tags: isMarkdownNote(note) ? note.tags : undefined,
+          editorFontFamily: settings.editorFontFamily || settings.fontFamily,
+          editorFontSize: settings.editorFontSize || editorFontSize || 15,
+          lineHeight: settings.lineHeight || "1.6",
+          theme: settings.theme,
+          accentHeadings: settings.accentHeadings,
+          showCodeLineNumbers: settings.showCodeLineNumbers,
+          tagColorStyle: settings.tagColorStyle,
+          customAccentColor: settings.customAccentColor,
+          customFontsCss,
+          lang: settings.language || "th",
+        });
+
     if (electronAPI?.exportPdf) {
       try {
         const res = await electronAPI.exportPdf({
@@ -10051,7 +11666,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (res.success && res.filePath) {
           const justName = res.filePath.replace(/\\/g, "/").split("/").pop() || `${baseName}.pdf`;
           toast({
-            title: t("editor.exportPdfSuccess") || "Exported PDF successfully",
+            title: t("editor.exportPdfSuccess") || "Exported PDF",
             description: justName,
             action: electronAPI.showItemInFolder ? (
               <ToastAction
@@ -10082,27 +11697,214 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }
 
-  function handleExportWord() {
+  async function handleExportWord() {
     if (!note) return;
-    const content = isHtmlFile(note) ? note.content : (editor?.getHTML() ?? note.content);
-    const html =
-      `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
-      `<head><meta charset="UTF-8"></head><body>${content}</body></html>`;
-    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const baseName = getExportBaseName();
+    const docTitle = note.fileName?.replace(/\.[^/.]+$/, "") || note.title?.trim() || t("editor.untitled");
+
+    let rawContent = "";
+    if (isHtmlFile(note)) {
+      rawContent = previewHtml || note.content;
+    } else if (editor && !editor.isDestroyed && editor.view?.dom) {
+      // 1. Clone live rendered Editor DOM to preserve syntax highlighting spans (lowlight) and React node views
+      const clone = editor.view.dom.cloneNode(true) as HTMLElement;
+
+      // 2. Remove interactive UI elements not meant for Word export
+      clone
+        .querySelectorAll(
+          "button, [role='button'], .column-resize-handle, .prosemirror-dropcursor, [data-resize-handle], .table-resize-handle, .table-column-handle, .table-row-handle, .cursor-se-resize, [title*='resize'], .node-image .absolute"
+        )
+        .forEach((el) => el.remove());
+
+      // 3. Reset any content-visibility, contain, and 3D transforms
+      clone.querySelectorAll("*").forEach((node) => {
+        const el = node as HTMLElement;
+        if (el.style) {
+          if (el.style.contentVisibility) el.style.contentVisibility = "visible";
+          if (el.style.contain) el.style.contain = "none";
+          if (el.style.containIntrinsicSize) el.style.containIntrinsicSize = "none";
+          if (el.style.transform && el.style.transform.includes("translateZ")) {
+            el.style.transform = "none";
+          }
+        }
+      });
+
+      // 4. Synchronize live image src and force eager loading
+      const origImgs = editor.view.dom.querySelectorAll<HTMLImageElement>("img");
+      const clonedImgs = clone.querySelectorAll<HTMLImageElement>("img");
+      clonedImgs.forEach((clonedImg, idx) => {
+        const orig = origImgs[idx];
+        if (orig) {
+          const liveSrc = orig.currentSrc || orig.src;
+          if (liveSrc && (!clonedImg.getAttribute("src") || !clonedImg.getAttribute("src")?.startsWith("data:"))) {
+            clonedImg.setAttribute("src", liveSrc);
+          }
+        }
+        clonedImg.removeAttribute("loading");
+        clonedImg.setAttribute("loading", "eager");
+        clonedImg.setAttribute("decoding", "sync");
+      });
+
+      // 5. Preserve checked state on checkboxes
+      const originalCheckboxes = editor.view.dom.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+      const clonedCheckboxes = clone.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+      clonedCheckboxes.forEach((cb, idx) => {
+        const orig = originalCheckboxes[idx];
+        const isChecked = orig ? orig.checked : cb.closest('[data-checked="true"]') !== null;
+        if (isChecked) {
+          cb.setAttribute("checked", "checked");
+          cb.checked = true;
+        } else {
+          cb.removeAttribute("checked");
+          cb.checked = false;
+        }
+      });
+
+      // 6. Synchronize live computed styles on inline hashtag badges
+      const origBadges = editor.view.dom.querySelectorAll<HTMLElement>(".inline-tag-badge");
+      const clonedBadges = clone.querySelectorAll<HTMLElement>(".inline-tag-badge");
+      clonedBadges.forEach((clonedBadge, idx) => {
+        const orig = origBadges[idx];
+        if (orig) {
+          const comp = window.getComputedStyle(orig);
+          clonedBadge.style.backgroundColor = comp.backgroundColor;
+          clonedBadge.style.color = comp.color;
+          clonedBadge.style.borderColor = comp.borderColor;
+          clonedBadge.style.borderWidth = comp.borderWidth || "1px";
+          clonedBadge.style.borderStyle = comp.borderStyle || "solid";
+          clonedBadge.style.borderRadius = comp.borderRadius || "0.375rem";
+          clonedBadge.style.padding = comp.padding || "0.05rem 0.4rem";
+          clonedBadge.style.fontSize = comp.fontSize || "0.85em";
+          clonedBadge.style.fontWeight = comp.fontWeight || "500";
+          clonedBadge.style.lineHeight = comp.lineHeight || "1.25";
+          clonedBadge.style.display = "inline-flex";
+          clonedBadge.style.alignItems = "center";
+          clonedBadge.style.margin = comp.margin || "0 0.15rem";
+          clonedBadge.style.verticalAlign = comp.verticalAlign || "baseline";
+          clonedBadge.style.boxDecorationBreak = "clone";
+          (clonedBadge.style as any).webkitBoxDecorationBreak = "clone";
+        }
+      });
+
+      rawContent = clone.innerHTML;
+    } else {
+      rawContent = editor?.getHTML() ?? note.content ?? "";
+    }
+
+    if (!rawContent) return;
+
+    const electronAPI = (window as any).electronAPI;
+    let workspacePath = "";
+    if (electronAPI?.getSavedWorkspace) {
+      try {
+        const saved = await electronAPI.getSavedWorkspace();
+        workspacePath = saved?.folderPath || "";
+      } catch {}
+    }
+
+    // Inline all images (including QR codes, blob: URLs, and workspace attachments) to data: base64 URLs
+    const content = await inlineImagesForPdf(rawContent, {
+      readImageDataUrl: electronAPI?.readImageDataUrl
+        ? (p: string) => electronAPI.readImageDataUrl(p)
+        : undefined,
+      workspacePath,
+    });
+
+    // Generate editor-parity Word HTML document
+    const fullDocHtml = generateDocHtml({
+      title: docTitle,
+      bodyHtml: content,
+      tags: isMarkdownNote(note) ? note.tags : undefined,
+      editorFontFamily: settings.editorFontFamily || settings.fontFamily,
+      editorFontSize: settings.editorFontSize || editorFontSize || 15,
+      lineHeight: settings.lineHeight || "1.6",
+      theme: settings.theme,
+      accentHeadings: settings.accentHeadings,
+      showCodeLineNumbers: settings.showCodeLineNumbers,
+      tagColorStyle: settings.tagColorStyle,
+      customAccentColor: settings.customAccentColor,
+      lang: settings.language || "th",
+    });
+
+    if (electronAPI?.showSaveDialog && electronAPI?.writeFileContent) {
+      try {
+        const filePath = await electronAPI.showSaveDialog({
+          title: t("editor.exportWord") || "Export as Word (.doc)",
+          defaultPath: `${baseName}.doc`,
+          filters: [
+            { name: "Word Document (*.doc)", extensions: ["doc"] },
+            { name: "All Files (*.*)", extensions: ["*"] },
+          ],
+        });
+
+        if (!filePath) return;
+
+        const ok = await electronAPI.writeFileContent({
+          fullPath: filePath,
+          content: "\ufeff" + fullDocHtml,
+        });
+
+        if (ok) {
+          const justName = filePath.replace(/\\/g, "/").split("/").pop() || `${baseName}.doc`;
+          toast({
+            title: t("editor.exportWordSuccess") || "Exported Word",
+            description: justName,
+            action: electronAPI.showItemInFolder ? (
+              <ToastAction
+                altText={t("editor.showInFolder") || "Show in folder"}
+                onClick={() => electronAPI.showItemInFolder?.(filePath)}
+              >
+                {t("editor.showInFolder") || "Show in folder"}
+              </ToastAction>
+            ) : undefined,
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Native Word export error:", err);
+      }
+    }
+
+    // Fallback: Web browser download
+    const blob = new Blob(["\ufeff", fullDocHtml], { type: "application/msword;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${getExportBaseName()}.doc`;
+    a.download = `${baseName}.doc`;
     a.click();
     URL.revokeObjectURL(url);
+    toast({
+      title: t("editor.exportWordSuccess") || "Exported Word",
+      description: `${baseName}.doc`,
+    });
   }
 
   async function handleSaveFile() {
     if (!note) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
+    if (debouncedContentSaveTimeoutRef.current) {
+      clearTimeout(debouncedContentSaveTimeoutRef.current);
+      debouncedContentSaveTimeoutRef.current = null;
+    }
+
     const ext = getPreferredExtension() as "md" | "txt" | "html" | "css";
     const content = getContentToSave(ext);
+
+    if (isHtmlFile(note) || isCssFile(note) || ext === "html" || ext === "css") {
+      codeEditorContentMap.set(note.id, content);
+      try {
+        localStorage.setItem(`luno_backup_${note.id}`, content);
+        if (note.fileName) {
+          localStorage.setItem(`luno_backup_fn_${note.fileName}`, content);
+        }
+      } catch {
+        /* ignore */
+      }
+      userEditedRef.current = false;
+      hasPendingDiskSaveRef.current = false;
+      pendingSaveContentRef.current = null;
+    }
 
     // 1. Electron Desktop Native Direct Save to Disk
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
@@ -10117,6 +11919,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const ok = await electronAPI.writeFileContent({ fullPath, content });
         if (ok) {
           hasPendingDiskSaveRef.current = false;
+          userEditedRef.current = false;
+          pendingSaveContentRef.current = null;
+          if (isHtmlFile(note) || isCssFile(note) || ext === "html" || ext === "css") {
+            codeEditorContentMap.set(note.id, content);
+          }
           onUpdate(note.id, { content });
           setSaveStatus("manually_saved");
           setSavedSnapshot(note.id, ext, content);
@@ -10422,7 +12229,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <div className="flex items-center rounded-lg bg-muted/70 p-0.5 text-[11px] font-medium border border-border/50 select-none">
               <button
                 type="button"
-                onClick={() => setHtmlPreviewOpen(false)}
+                onClick={() => handleToggleHtmlPreview(false)}
                 className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                   !htmlPreviewOpen
                     ? "bg-background text-foreground shadow-xs font-semibold"
@@ -10434,7 +12241,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </button>
               <button
                 type="button"
-                onClick={() => setHtmlPreviewOpen(true)}
+                onClick={() => handleToggleHtmlPreview(true)}
                 className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                   htmlPreviewOpen
                     ? "bg-background text-foreground shadow-xs font-semibold"
@@ -10883,10 +12690,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) && !isMobile) ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+          <div className={settings.showToolbar === false || isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isVideoFile(note) || isBinaryFile(note)) && !isMobile) ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
-          {!isReadingMode && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
+          {!isReadingMode && settings.showToolbar !== false && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
               group: "history" | "heading" | "typography" | "inline" | "block" | "media" | "ai";
@@ -10919,6 +12726,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               { id: "clock", group: "media", labelKey: "editor.clock" },
               { id: "link", group: "media", labelKey: "editor.link" },
               { id: "image", group: "media", labelKey: "editor.insertImageByUrl" },
+              { id: "video", group: "media", labelKey: "editor.insertVideoByUrl" },
               { id: "qrCode", group: "media", labelKey: "editor.qrCode" },
               { id: "audio", group: "media", labelKey: "editor.recordAudio" },
               { id: "fixLanguage", group: "media", labelKey: "editor.fixLanguage" },
@@ -12301,6 +14109,48 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   );
+                case "video":
+                  return (
+                    <DropdownMenu key="video">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                              disabled={!editor}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              {renderToolIcon("video")}
+                              <span className="sr-only">{t("editor.video")}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("editor.video")}</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align="start" className="w-60">
+                        <DropdownMenuItem onClick={openVideoDialog}>
+                          <Film className="h-4 w-4" />
+                          <span>{t("editor.insertVideoByUrl")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={openWorkspaceVideoDialog}>
+                          <Video className="h-4 w-4" />
+                          <span>{t("editor.insertVideoFromWorkspace")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            rememberSelection();
+                            videoInputRef.current?.click();
+                          }}
+                        >
+                          <Upload className="h-4 w-4" />
+                          <span>{t("editor.uploadVideo")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
                 case "qrCode":
                   return (
                     <Tooltip key="qrCode">
@@ -13212,6 +15062,35 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                   );
+                case "video":
+                  return (
+                    <DropdownMenuSub key="video" open={overflowSubmenu === "video"}>
+                      <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "video" ? null : "video")}>
+                        {renderDropdownIcon("video")}
+                        <span>{t("editor.video") || "Video"}</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56 rounded-xl p-1.5 shadow-md">
+                        <DropdownMenuItem onClick={openVideoDialog} className="flex items-center gap-2 cursor-pointer">
+                          <Film className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.insertVideoByUrl")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={openWorkspaceVideoDialog} className="flex items-center gap-2 cursor-pointer">
+                          <Video className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.insertVideoFromWorkspace")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            rememberSelection();
+                            videoInputRef.current?.click();
+                          }}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <Upload className="h-4 w-4 text-muted-foreground" />
+                          <span className="flex-1">{t("editor.uploadVideo")}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  );
                 case "qrCode":
                   return (
                     <DropdownMenuItem key="qrCode" onClick={() => setQrCodeDialogOpen(true)}>
@@ -13339,6 +15218,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
         <div className={`flex w-full shrink-0 items-center justify-between gap-1 ${isMobile ? "order-1 pt-0" : "pt-1"} lg:w-auto lg:justify-self-end lg:justify-end lg:pt-0`}>
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          <input ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-matroska,video/*" className="hidden" onChange={handleVideoUpload} />
           <div className="ml-auto flex items-center gap-1">
           {effectiveStatusPortalTarget && createPortal(renderSaveStatusIndicator(), effectiveStatusPortalTarget)}
           {effectivePortalTarget && createPortal(renderActionButtons(), effectivePortalTarget)}
@@ -13464,7 +15344,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }}
           className={`flex flex-col ${isReadingMode ? "cursor-default" : "cursor-text"} ${
-            isImageFile(note) || isBinaryFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
+            isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
               ? "flex-1 min-h-0 min-w-0 overflow-hidden"
               : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
           } w-full`}
@@ -13493,7 +15373,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClose={() => setComparingVersion(null)}
             />
           ) : isImageFile(note) ? (
-            <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 overflow-auto flex">
+            <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 md:p-6 overflow-auto flex items-center justify-center">
               {imageBlobUrl || (note.content?.startsWith("data:") || note.content?.startsWith("blob:") || note.content?.startsWith("http") ? note.content : null) ? (
                 <img
                   ref={(img) => {
@@ -13526,7 +15406,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   onClick={handleToggleZoomFit}
-                  className={`m-auto select-none transition-[width,height] duration-150 ${
+                  className={`m-auto select-none transition-[width,height] duration-150 border border-border/60 shadow-xs rounded-xl ${
                     imageZoomMode === "fit"
                       ? "cursor-zoom-in"
                       : "cursor-zoom-out"
@@ -13534,6 +15414,41 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 />
               ) : (
                 <p className="m-auto text-sm text-muted-foreground">{note.fileName}</p>
+              )}
+            </div>
+          ) : (isAudioFile(note) && !videoBlobUrl) || (audioBlobUrl && !videoBlobUrl) ? (
+            <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 md:p-6 overflow-auto flex flex-col items-center justify-center">
+              {audioBlobUrl ? (
+                <div className="w-full max-w-2xl px-4">
+                  <AudioPlayer src={audioBlobUrl} title={note.fileName} />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2.5 text-muted-foreground text-sm">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <span>{t("common.loading") || "Loading audio..."}</span>
+                </div>
+              )}
+            </div>
+          ) : isVideoFile(note) || videoBlobUrl ? (
+            <div className="flex-1 min-h-0 min-w-0 w-full h-full p-4 md:p-6 overflow-auto flex flex-col items-center justify-center">
+              {videoBlobUrl ? (
+                <div className="relative flex flex-col items-center justify-center max-w-full max-h-full">
+                  <VideoPlayer
+                    src={videoBlobUrl}
+                    title={note.fileName}
+                    onLoadedMetadata={({ width, height, duration }) => {
+                      setVideoDimensions({ width, height });
+                      setVideoDuration(duration);
+                    }}
+                    onError={() => setVideoError(true)}
+                    onOpenInSystemApp={() => void handleOpenInSystemApp()}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2.5 text-muted-foreground text-sm">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <span>{t("common.loading") || "Loading video..."}</span>
+                </div>
               )}
             </div>
           ) : isBinaryFile(note) ? (
@@ -13576,24 +15491,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   )}
                 </div>
               </div>
-
-              {isAudioFile(note) && (
-                audioBlobUrl ? (
-                  <div className="w-full max-w-[430px] mt-2">
-                    <AudioPlayer src={audioBlobUrl} title={note.fileName} />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2 py-1">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span>{t("common.loading") || "Loading audio..."}</span>
-                  </div>
-                )
-              )}
             </div>
           ) : note.contentFormat === "css" || isCssFile(note) ? (
             <HtmlCodeEditor
               key={note.id}
-              value={note.content}
+              value={codeEditorContentMap.get(note.id) ?? note.content}
               onChange={handleCodeEditorChange}
               fontSize={editorFontSize}
               onCursorChange={(line, col) => setHtmlCursor({ line, col })}
@@ -13604,8 +15506,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               isVisible={isVisible}
             />
           ) : note.contentFormat === "html" || isHtmlFile(note) ? (
-            htmlPreviewOpen ? (
-              <div className="flex-1 w-full h-full overflow-hidden flex flex-col bg-muted/20">
+            <div className="relative flex-1 w-full h-full min-h-0 overflow-hidden flex flex-col">
+              {/* Preview View */}
+              <div className={`flex-1 w-full h-full overflow-hidden flex flex-col bg-muted/20 ${htmlPreviewOpen ? "flex" : "hidden"}`}>
                 <div className="flex items-center justify-between border-b border-border px-3.5 py-1.5 text-xs font-medium text-muted-foreground bg-muted/40 shrink-0 select-none">
                   <div className="flex items-center gap-2">
                     <Play className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
@@ -13640,26 +15543,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   >
                     <iframe
                       className="w-full h-full bg-white border-0"
-                      srcDoc={previewHtml || note.content}
+                      srcDoc={previewHtml || codeEditorContentMap.get(note.id) || note.content}
                       sandbox="allow-scripts allow-same-origin"
                       title="HTML Preview"
                     />
                   </div>
                 </div>
               </div>
-            ) : (
-              <HtmlCodeEditor
-                key={note.id}
-                value={note.content}
-                onChange={handleCodeEditorChange}
-                fontSize={editorFontSize}
-                onCursorChange={(line, col) => setHtmlCursor({ line, col })}
-                onBlur={() => flushDebouncedContentSave(note)}
-                spellCheck={spellCheckEnabled}
-                noteId={note.id}
-                isVisible={isVisible}
-              />
-            )
+
+              {/* Code Editor View */}
+              <div className={`flex-1 w-full h-full min-h-0 overflow-hidden ${htmlPreviewOpen ? "hidden" : "flex flex-col"}`}>
+                <HtmlCodeEditor
+                  key={note.id}
+                  value={codeEditorContentMap.get(note.id) ?? note.content}
+                  onChange={handleCodeEditorChange}
+                  fontSize={editorFontSize}
+                  onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+                  onBlur={() => flushDebouncedContentSave(note)}
+                  spellCheck={spellCheckEnabled}
+                  noteId={note.id}
+                  isVisible={isVisible && !htmlPreviewOpen}
+                />
+              </div>
+            </div>
           ) : (
             <ContextMenu>
               <ContextMenuTrigger asChild onContextMenuCapture={handleEditorContextMenu}>
@@ -14100,6 +16006,89 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
                   <div className="h-3 w-[1px] bg-border/60" />
 
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenInSystemApp()}
+                        className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </>
+            ) : isVideoFile(note) ? (
+              <>
+                {/* Left side: Dimensions | Duration | File Size | Format */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  {videoDimensions && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                            {`${videoDimensions.width} × ${videoDimensions.height} px`}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.videoDimensions") || "Dimensions"}: {`${videoDimensions.width} × ${videoDimensions.height} px`}
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  {videoDuration != null && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {formatVideoDuration(videoDuration)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.videoDuration") || "Duration"}: {formatVideoDuration(videoDuration)}
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  {activeFileSize != null && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {formatFileSize(activeFileSize)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {getFileFormatLabel(note)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.videoFormat") || "Format"}: {getFileFormatLabel(note)}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Right side: Open in App */}
+                <div className="flex items-center gap-2 shrink-0">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -14597,18 +16586,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <X className="h-3 w-3" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={handleConfirmFootnote}
-              title={settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}
-              className={`p-1 rounded-md transition-colors cursor-pointer text-[10px] font-medium ${
-                footnoteInputText.trim()
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <CornerDownLeft className="h-3 w-3" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleConfirmFootnote}
+                  className={`p-1 rounded-md transition-colors cursor-pointer text-[10px] font-medium ${
+                    footnoteInputText.trim()
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CornerDownLeft className="h-3 w-3" />
+                  <span className="sr-only">{settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -14695,7 +16691,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         }`}
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
-                          {(() => {
+                          {settings?.showFileIcons !== false && (() => {
                             const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
                             const customIcon = n.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
                             const customColor = n.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
@@ -14848,25 +16844,79 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         onSelectImage={handleInsertWorkspaceImage}
       />
 
+      <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("editor.insertVideoByUrl")}</DialogTitle>
+            <DialogDescription>{t("editor.videoDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label htmlFor="video-url" className="block text-xs font-medium text-muted-foreground">
+                {t("editor.videoUrl")}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="video-url"
+                  type="url"
+                  value={videoUrl}
+                  onChange={(event) => setVideoUrl(event.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyVideoUrl();
+                    }
+                  }}
+                  placeholder={t("editor.videoUrlPlaceholder")}
+                  className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
+                />
+                <Button type="button" onClick={handleApplyVideoUrl} disabled={!videoUrl.trim()}>
+                  {t("editor.insertVideo")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <WorkspaceVideoPickerDialog
+        isOpen={workspaceVideoDialogOpen}
+        onClose={() => setWorkspaceVideoDialogOpen(false)}
+        notes={notes}
+        currentNote={note}
+        rootDirHandle={rootDirHandle}
+        assetBlobUrlMap={assetBlobUrlMap}
+        onSelectVideo={handleInsertWorkspaceVideo}
+      />
+
       <FloatingAudioRecorder
         isOpen={audioRecorderOpen}
         onClose={() => setAudioRecorderOpen(false)}
         zIndex={audioRecorderZIndex}
         onFocusWindow={bringAudioRecorderToFront}
         rootDirHandle={rootDirHandle}
-        onInsertAudio={({ src, title }) => {
+        onInsertAudio={({ src, title, relativeSrc }) => {
           if (!editor) return;
-          userEditedRef.current = true;
-          hasPendingDiskSaveRef.current = true;
-          editorSelectionRef.current = null;
-          editor.chain().focus().setAudio({ src, title }).run();
-          setLastEditedTime(Date.now());
-          if (settings.autoSave) {
-            setSaveStatus("auto_saving");
-            scheduleAutoSaveDiskRef.current?.();
-          } else {
-            setSaveStatus("unsaved");
+          const targetTitle = title || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+          const targetRel = relativeSrc || `attachments/${targetTitle.endsWith(".webm") || targetTitle.endsWith(".mp3") ? targetTitle : `${targetTitle}.webm`}`;
+          let decodedRel = targetRel;
+          try {
+            decodedRel = decodeURIComponent(targetRel);
+          } catch {}
+
+          if (src) {
+            assetBlobUrlMap.current.set(targetRel, src);
+            assetBlobUrlMap.current.set(decodedRel, src);
+            assetBlobUrlMap.current.set(src, targetRel);
+            audioLocalCache.set(targetRel, src);
+            audioLocalCache.set(decodedRel, src);
           }
+
+          insertAudioToEditor({
+            src,
+            title: targetTitle,
+            "data-relative-src": targetRel,
+          });
         }}
       />
 
@@ -14875,7 +16925,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("sidebar.deleteFilesDescription")}
+              {settings.language === "th"
+                ? `แน่ใจไหมที่จะย้ายไฟล์ "${note?.fileName || note?.title || t("editor.untitled")}" ไปที่ถังขยะ?`
+                : `Are you sure you want to move "${note?.fileName || note?.title || "Untitled"}" to trash?`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -14886,7 +16938,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 void handleDeleteNote();
               }}
             >
-              {t("common.delete")}
+              {t("sidebar.deleteFileAction")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -15192,14 +17244,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <QrCodeDialog
         open={qrCodeDialogOpen}
         onOpenChange={setQrCodeDialogOpen}
-        onInsertQrCode={(dataUrl, qrData) => {
+        onInsertQrCode={async (dataUrl, qrData) => {
           if (editor) {
+            const { relPath, blobUrl } = await saveQrCodeAttachment(dataUrl, qrData?.text);
             editor
               .chain()
               .focus()
               .setImage({
-                src: dataUrl,
+                src: blobUrl || dataUrl,
                 alt: "QR Code",
+                width: 220,
+                "data-relative-src": relPath,
                 "data-qr-code": "true",
                 "data-qr-text": qrData?.text || "",
                 "data-qr-color": qrData?.color || "#000000",

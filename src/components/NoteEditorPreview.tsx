@@ -36,6 +36,7 @@ import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
 import ImageNodeView from "@/components/editor/ImageNodeView";
 import AudioExtension from "@/components/editor/AudioExtension";
+import VideoExtension from "@/components/editor/VideoExtension";
 import { getTagColorClass } from "@/lib/tagColors";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
 import { useAppSettings, FONT_FAMILY_CSS } from "@/hooks/useAppSettings";
@@ -272,6 +273,7 @@ export default function NoteEditorPreview({
       TaskList,
       TaskItem,
       AudioExtension,
+      VideoExtension,
       Table.configure({
         resizable: false,
       }),

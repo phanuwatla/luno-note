@@ -1,9 +1,11 @@
-const { contextBridge, ipcRenderer, webFrame, clipboard, nativeImage } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, clipboard, nativeImage, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   isElectron: true,
   minimize: () => ipcRenderer.send("window-minimize"),
   maximize: () => ipcRenderer.send("window-maximize"),
+  setFullScreen: (flag) => ipcRenderer.send("window-set-fullscreen", flag),
+  isFullScreen: () => ipcRenderer.invoke("window-is-fullscreen"),
   snapWindow: (boundsRatio) => ipcRenderer.send("window-snap", boundsRatio),
   close: () => ipcRenderer.send("window-close"),
   isMaximized: () => ipcRenderer.invoke("window-is-maximized"),
@@ -45,12 +47,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
   readFileContent: (fullPath) => ipcRenderer.invoke("read-file-content", fullPath),
   readFileBase64: (fullPath) => ipcRenderer.invoke("read-file-base64", fullPath),
   readImageDataUrl: (fullPath) => ipcRenderer.invoke("read-image-data-url", fullPath),
+  readFileBuffer: (fullPath) => ipcRenderer.invoke("read-file-buffer", fullPath),
+  getPathForFile: (file) => {
+    try {
+      if (webUtils && typeof webUtils.getPathForFile === "function") {
+        return webUtils.getPathForFile(file);
+      }
+    } catch {}
+    return file?.path || "";
+  },
   writeFileContent: (data) => ipcRenderer.invoke("write-file-content", data),
   writeFileBase64: (data) => ipcRenderer.invoke("write-file-base64", data),
+  writeFileBuffer: (data) => ipcRenderer.invoke("write-file-buffer", data),
   deleteFileOrFolder: (fullPath) => ipcRenderer.invoke("delete-file-or-folder", fullPath),
   createWorkspaceFolder: (data) => ipcRenderer.invoke("create-workspace-folder", data),
   renameFileOrFolder: (data) => ipcRenderer.invoke("rename-file-or-folder", data),
   copyFileOrFolder: (data) => ipcRenderer.invoke("copy-file-or-folder", data),
+  savePreviewFile: (data) => ipcRenderer.invoke("save-preview-file", data),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   openPath: (fullPath) => ipcRenderer.invoke("open-path", fullPath),
   showItemInFolder: (fullPath) => ipcRenderer.invoke("show-item-in-folder", fullPath),

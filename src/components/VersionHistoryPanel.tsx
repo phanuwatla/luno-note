@@ -34,10 +34,11 @@ import {
   getNoteVersionHistory,
   saveVersionSnapshot,
   deleteVersionSnapshot,
+  groupVersionSnapshots,
   type NoteVersionSnapshot,
 } from "@/lib/versionHistoryStorage";
 import { countWords } from "@/lib/wordCount";
-import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
+import { formatRelativeDateTime, formatTime } from "@/lib/dateTimeFormatter";
 
 interface VersionHistoryPanelProps {
   isOpen: boolean;
@@ -102,13 +103,15 @@ function VersionHistoryPanelComponent({
 
     if (snap) {
       setHistory(getNoteVersionHistory(note));
+      const timeLabel = formatSnapshotTime(snap.timestamp);
       toast({
         title: t("versionHistoryPanel.snapshotSaved"),
+        description: `${t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")} • ${timeLabel}`,
       });
     } else {
       toast({
         title: t("versionHistoryPanel.snapshotSaved"),
-        description: t("saveStatus.saved") || "Current state is already recorded.",
+        description: t("saveStatus.saved") || (isTh ? "บันทึกสถานะปัจจุบันเรียบร้อยแล้ว" : "Current state is already recorded."),
       });
     }
   };
@@ -147,14 +150,38 @@ function VersionHistoryPanelComponent({
     try {
       await navigator.clipboard.writeText(ver.content || "");
       setCopiedVersionId(ver.id);
+      const timeLabel = formatSnapshotTime(ver.timestamp);
+      const triggerLabel =
+        ver.label ||
+        (ver.trigger === "manual"
+          ? t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")
+          : ver.trigger === "pre-restore"
+          ? t("versionHistoryPanel.preRestoreBackup") || (isTh ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
+          : t("versionHistoryPanel.autoSnapshot") || (isTh ? "บันทึกอัตโนมัติ" : "Auto-save"));
       toast({
         title: t("versionHistoryPanel.contentCopied"),
+        description: `${triggerLabel} • ${timeLabel}`,
       });
       setTimeout(() => setCopiedVersionId(null), 2000);
     } catch {
       /* ignore */
     }
   };
+
+  const groupedHistory = useMemo(() => {
+    return groupVersionSnapshots(
+      history,
+      settings.dateFormat,
+      settings.language,
+      {
+        today: t("versionHistoryPanel.today") || (isTh ? "วันนี้" : "Today"),
+        yesterday: t("versionHistoryPanel.yesterday") || (isTh ? "เมื่อวาน" : "Yesterday"),
+        lastWeek: t("versionHistoryPanel.lastWeek") || (isTh ? "สัปดาห์ที่แล้ว" : "Last week"),
+        lastMonth: t("versionHistoryPanel.lastMonth") || (isTh ? "เดือนที่แล้ว" : "Last month"),
+        older: t("versionHistoryPanel.older") || (isTh ? "เก่ากว่านี้" : "Older"),
+      }
+    );
+  }, [history, settings.dateFormat, settings.language, isTh, t]);
 
   const formatSnapshotTime = (ts: number) => {
     return formatRelativeDateTime(ts, settings.dateFormat, settings.timeFormat, settings.language);
@@ -209,7 +236,7 @@ function VersionHistoryPanelComponent({
       </div>
 
       {/* Snapshot List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {/* Current State Card */}
         <div className="rounded-xl border-[1.5px] border-primary/40 bg-primary/5 p-2.5 space-y-1">
           <div className="flex items-center justify-between">
@@ -226,127 +253,151 @@ function VersionHistoryPanelComponent({
           </p>
         </div>
 
-        {/* History Items */}
-        {history.length > 0 ? (
-          <div className="space-y-1.5 pt-1">
-            <div className="px-1 text-[11px] font-semibold text-muted-foreground">
-              {isTh ? "เวอร์ชันที่บันทึกไว้" : "Saved Versions"} ({history.length})
+        {/* History Items Grouped by Subheadings */}
+        {groupedHistory.length > 0 ? (
+          <div className="space-y-3 pt-1">
+            <div className="px-1 text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
+              <span>{t("versionHistoryPanel.savedVersions") || (isTh ? "เวอร์ชันที่บันทึกไว้" : "Saved Versions")}</span>
+              <span className="text-[10px] text-muted-foreground/70 font-medium">
+                {history.length} {isTh ? "เวอร์ชัน" : history.length === 1 ? "version" : "versions"}
+              </span>
             </div>
 
-            {history.map((ver) => {
-              const isCopied = copiedVersionId === ver.id;
-              const triggerLabel =
-                ver.trigger === "manual"
-                  ? t("versionHistoryPanel.manualSnapshot")
-                  : ver.trigger === "pre-restore"
-                  ? t("versionHistoryPanel.preRestoreBackup")
-                  : t("versionHistoryPanel.autoSnapshot");
-
-              return (
-                <div
-                  key={ver.id}
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onCompareVersion(ver);
-                    }
-                  }}
-                  onClick={() => onCompareVersion(ver)}
-                  className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 p-2.5 transition-all cursor-pointer hover:shadow-2xs outline-none"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-xs font-semibold text-foreground truncate">
-                        {formatSnapshotTime(ver.timestamp)}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground shrink-0">
-                      {ver.wordCount || 0} {isTh ? "คำ" : "words"}
-                    </span>
-                  </div>
-
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
-                      {triggerLabel}
-                    </span>
-
-                    {/* Action buttons on hover */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onCompareVersion(ver);
-                            }}
-                            className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
-                          >
-                            <Columns2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.compare")}</TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => handleCopy(ver, e)}
-                            className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
-                          >
-                            {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.copyContent")}</TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmRestoreVersion(ver);
-                            }}
-                            className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.restore")}</TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteVersion(ver);
-                            }}
-                            className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.deleteVersion")}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
+            {groupedHistory.map((group) => (
+              <div key={group.id} className="space-y-1.5">
+                <div className="px-1 pt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1.5">
+                  <span>{group.title}</span>
+                  <span className="text-[9px] font-normal text-muted-foreground/60">({group.items.length})</span>
                 </div>
-              );
-            })}
+
+                {group.items.map((ver) => {
+                  const isCopied = copiedVersionId === ver.id;
+                  const triggerLabel =
+                    ver.trigger === "manual"
+                      ? t("versionHistoryPanel.manualSnapshot")
+                      : ver.trigger === "pre-restore"
+                      ? t("versionHistoryPanel.preRestoreBackup")
+                      : t("versionHistoryPanel.autoSnapshot");
+
+                  const isSingleDay = group.id === "today" || group.id === "yesterday" || group.id.startsWith("date_");
+                  const timeLabel = isSingleDay
+                    ? formatTime(ver.timestamp, settings.timeFormat, settings.language)
+                    : formatRelativeDateTime(ver.timestamp, settings.dateFormat, settings.timeFormat, settings.language);
+
+                  return (
+                    <div
+                      key={ver.id}
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onCompareVersion(ver);
+                        }
+                      }}
+                      onClick={() => onCompareVersion(ver)}
+                      className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 p-2.5 transition-all cursor-pointer hover:shadow-2xs outline-none"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-xs font-semibold text-foreground truncate cursor-default">
+                                {timeLabel}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {formatSnapshotTime(ver.timestamp)}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {ver.wordCount || 0} {isTh ? "คำ" : "words"}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
+                          {ver.label || triggerLabel}
+                        </span>
+
+                        {/* Action buttons on hover */}
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onCompareVersion(ver);
+                                }}
+                                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                              >
+                                <Columns2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.compare")}</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => handleCopy(ver, e)}
+                                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                              >
+                                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.copyContent")}</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmRestoreVersion(ver);
+                                }}
+                                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.restore")}</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDeleteVersion(ver);
+                                }}
+                                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.deleteVersion")}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         ) : (
           <div className="py-8 text-center px-4 space-y-2">
