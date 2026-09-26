@@ -148,6 +148,18 @@ const RELEASES: ReleaseVersion[] = [
         icon: Sparkles,
         badge: { en: "Improvement", th: "การปรับปรุง", variant: "outline" },
       },
+      {
+        title: {
+          en: "Intelligent WebM Audio & Video Classification",
+          th: "ระบบจำแนกประเภทไฟล์ WebM (เสียงและวิดีโอ) อัตโนมัติ",
+        },
+        description: {
+          en: "Deep container header inspection automatically determines whether WebM media is audio-only or video, rendering the optimal player interface.",
+          th: "ระบบสแกนส่วนหัวของไฟล์ WebM อัตโนมัติเพื่อแยกแยะระหว่างไฟล์เสียงและไฟล์วิดีโอ พร้อมเลือกแสดงผลเครื่องเล่นที่เหมาะสมที่สุดในทันที",
+        },
+        icon: ShieldCheck,
+        badge: { en: "Media Engine", th: "ระบบสื่อ", variant: "default" },
+      },
     ],
     changes: [
       {
@@ -239,6 +251,14 @@ const RELEASES: ReleaseVersion[] = [
           {
             en: "Added native window fullscreen toggle controls via IPC.",
             th: "เพิ่มคำสั่งควบคุมโหมดเต็มหน้าจอ (Fullscreen) ผ่าน IPC บนระบบเดสก์ท็อป",
+          },
+          {
+            en: "Added webmClassifier for accurate container detection between audio-only and video WebM media.",
+            th: "เพิ่มโมดูล webmClassifier ตรวจสอบประเภทไฟล์ WebM ระหว่างไฟล์เสียงและวิดีโอได้อย่างแม่นยำ",
+          },
+          {
+            en: "Added rich DOCX document export generator supporting formatting, headings, and lists.",
+            th: "เพิ่มระบบส่งออกเอกสาร Word (.docx) รองรับการจัดรูปแบบ หัวข้อ และรายการอย่างครบถ้วน",
           },
         ],
       },
