@@ -31,6 +31,21 @@ Luno Note is a robust, lightweight, and modern note-taking application engineere
 
 ---
 
+## Key Features
+
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text and Markdown Editing**: Full formatting support including headings, lists, tables, checklists, task items, and code blocks with syntax highlighting.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Integrated Luno AI Assistant**: Context-aware artificial intelligence assistant supporting note attachments, voice dictation, automated summarization, language translation, and editing refinements.
+- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Hierarchical Workspaces and Folders**: Multi-level folder structuring with workspace separation and quick workspace switching.
+- <img src="./assets/icons/tags.svg" width="16" height="16" align="center" /> **Tags and Quick Switcher**: Organize content using tags and jump directly to any document with the keyboard-driven Quick Switcher (`Ctrl+P` / `Cmd+P`).
+- <img src="./assets/icons/paperclip.svg" width="16" height="16" align="center" /> **Media and Audio Attachments**: Attach images, documents, and audio recordings with an integrated audio player and client-side image compression.
+- <img src="./assets/icons/history.svg" width="16" height="16" align="center" /> **Version History and Split-Diff Comparison**: Review granular revisions with side-by-side and unified diff viewers, and restore snapshots with one click.
+- <img src="./assets/icons/eye.svg" width="16" height="16" align="center" /> **Live Note Preview**: Seamlessly toggle between direct editor view and fully rendered Markdown presentation.
+- <img src="./assets/icons/template.svg" width="16" height="16" align="center" /> **Built-in Template Library**: Comprehensive collection of structured templates for meeting minutes, daily journals, project planning, sprint retrospectives, Cornell notes, and OKRs.
+- <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Customization and Visual Themes**: Select from Dark, Light, Sepia, Minimal, and Custom themes, with configurable typography, sizing, and icon sets (Lucide, Tabler, Phosphor).
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Automated Desktop Updates**: Background update detection and one-click installation on Windows via GitHub Releases.
+
+---
+
 ## Installation and Downloads
 
 ### Windows Installer (x64)
