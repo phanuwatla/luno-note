@@ -662,6 +662,106 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconHistory,
     phosphor: PhosphorIcons.ClockCounterClockwise,
   },
+  play: {
+    lucide: LucideIcons.Play,
+    tabler: TablerIcons.IconPlayerPlay || TablerIcons.IconPlayCard,
+    phosphor: PhosphorIcons.Play,
+  },
+  pause: {
+    lucide: LucideIcons.Pause,
+    tabler: TablerIcons.IconPlayerPause,
+    phosphor: PhosphorIcons.Pause,
+  },
+  volume: {
+    lucide: LucideIcons.Volume2 || LucideIcons.Volume1,
+    tabler: TablerIcons.IconVolume,
+    phosphor: PhosphorIcons.SpeakerHigh,
+  },
+  volumeX: {
+    lucide: LucideIcons.VolumeX,
+    tabler: TablerIcons.IconVolumeOff,
+    phosphor: PhosphorIcons.SpeakerSlash,
+  },
+  pip: {
+    lucide: LucideIcons.PictureInPicture2 || LucideIcons.PictureInPicture,
+    tabler: TablerIcons.IconPictureInPicture || TablerIcons.IconPictureInPictureOn,
+    phosphor: PhosphorIcons.Browsers || PhosphorIcons.PictureInPicture,
+  },
+  zoomIn: {
+    lucide: LucideIcons.ZoomIn,
+    tabler: TablerIcons.IconZoomIn,
+    phosphor: PhosphorIcons.MagnifyingGlassPlus,
+  },
+  zoomOut: {
+    lucide: LucideIcons.ZoomOut,
+    tabler: TablerIcons.IconZoomOut,
+    phosphor: PhosphorIcons.MagnifyingGlassMinus,
+  },
+  globe: {
+    lucide: LucideIcons.Globe,
+    tabler: TablerIcons.IconWorld || TablerIcons.IconBrowser,
+    phosphor: PhosphorIcons.Globe,
+  },
+  browser: {
+    lucide: LucideIcons.Globe,
+    tabler: TablerIcons.IconWorld || TablerIcons.IconBrowser,
+    phosphor: PhosphorIcons.Globe || PhosphorIcons.Browser,
+  },
+  unlink: {
+    lucide: LucideIcons.Unlink,
+    tabler: TablerIcons.IconUnlink,
+    phosphor: PhosphorIcons.LinkBreak,
+  },
+  cloudOff: {
+    lucide: LucideIcons.CloudOff,
+    tabler: TablerIcons.IconCloudOff,
+    phosphor: PhosphorIcons.CloudSlash,
+  },
+  layoutGrid: {
+    lucide: LucideIcons.LayoutGrid,
+    tabler: TablerIcons.IconLayoutGrid,
+    phosphor: PhosphorIcons.SquaresFour,
+  },
+  repeat: {
+    lucide: LucideIcons.Repeat,
+    tabler: TablerIcons.IconRepeat,
+    phosphor: PhosphorIcons.Repeat,
+  },
+  scissors: {
+    lucide: LucideIcons.Scissors,
+    tabler: TablerIcons.IconScissors,
+    phosphor: PhosphorIcons.Scissors,
+  },
+  columns: {
+    lucide: LucideIcons.Columns2 || LucideIcons.Columns,
+    tabler: TablerIcons.IconColumns || TablerIcons.IconColumns2,
+    phosphor: PhosphorIcons.Columns,
+  },
+  shieldCheck: {
+    lucide: LucideIcons.ShieldCheck,
+    tabler: TablerIcons.IconShieldCheck,
+    phosphor: PhosphorIcons.ShieldCheck,
+  },
+  shieldAlert: {
+    lucide: LucideIcons.ShieldAlert,
+    tabler: TablerIcons.IconShieldExclamation,
+    phosphor: PhosphorIcons.ShieldWarning,
+  },
+  shuffle: {
+    lucide: LucideIcons.Shuffle,
+    tabler: TablerIcons.IconArrowsShuffle,
+    phosphor: PhosphorIcons.Shuffle,
+  },
+  tagX: {
+    lucide: LucideIcons.TagX || LucideIcons.Tag,
+    tabler: TablerIcons.IconTagOff || TablerIcons.IconTag,
+    phosphor: PhosphorIcons.TagSimple || PhosphorIcons.Tag,
+  },
+  imageOff: {
+    lucide: LucideIcons.ImageOff,
+    tabler: TablerIcons.IconPhotoOff,
+    phosphor: PhosphorIcons.ImageSquare,
+  },
 };
 
 export function getToolbarIcon(toolId: string, pack: IconPackId = "lucide") {
@@ -675,7 +775,7 @@ export const EMOJI_CATEGORIES = [
   {
     nameKey: "iconPicker.catFolders",
     nameEn: "Folders & Org",
-    emojis: ["📁", "📂", "🗂️", "📦", "🗃️", "💼", "📌", "📍", "🏷️", "🔖", "📎", "🔗", "🗄️", "📋", "📊", "🗎", "📥", "📤", "📇", "🗃️", "🗁", "🗀"],
+    emojis: ["📁", "📂", "🗂️", "📦", "🗃️", "💼", "📌", "📍", "🏷️", "🔖", "📎", "🔗", "🗄️", "📋", "📊", "📥", "📤", "📇", "🖇️", "🔒", "🔑", "🗑️"],
   },
   {
     nameKey: "iconPicker.catNotes",

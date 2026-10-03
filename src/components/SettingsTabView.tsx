@@ -153,38 +153,17 @@ const TOOLBAR_TOOL_DEFS: Record<
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
-export type SettingsCategory =
-  | "general"
-  | "appearance"
-  | "editor"
-  | "files"
-  | "markdown"
-  | "templates"
-  | "ai"
-  | "shortcuts"
-  | "storage"
-  | "backup"
-  | "privacy"
-  | "about";
+import {
+  type SettingsCategory,
+  SETTINGS_CATEGORIES,
+  isValidSettingsCategory,
+} from "@/types/settingsCategory";
 
-export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-  "general",
-  "appearance",
-  "editor",
-  "files",
-  "markdown",
-  "templates",
-  "ai",
-  "shortcuts",
-  "storage",
-  "backup",
-  "privacy",
-  "about",
-];
-
-export function isValidSettingsCategory(cat: unknown): cat is SettingsCategory {
-  return typeof cat === "string" && (SETTINGS_CATEGORIES as string[]).includes(cat);
-}
+export {
+  type SettingsCategory,
+  SETTINGS_CATEGORIES,
+  isValidSettingsCategory,
+};
 
 interface CategoryMeta {
   id: SettingsCategory;
@@ -427,6 +406,7 @@ export default function SettingsTabView({
         notes,
         workspaceName: openedFolderName || undefined,
         folderPaths,
+        dateFormat: settings.dateFormat,
       });
 
       if (result.success) {
@@ -680,16 +660,27 @@ export default function SettingsTabView({
                         <label className="text-xs font-semibold text-foreground">{t("settings.enableAnimations")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.enableAnimationsDesc")}</p>
                       </div>
-                      <Switch checked={settings.enableAnimations !== false} onCheckedChange={(val) => updateSetting("enableAnimations", val)} className="scale-85 origin-right" />
+                      <Switch checked={settings.enableAnimations !== false} onCheckedChange={(val) => updateSetting("enableAnimations", val)} className="scale-85 origin-right cursor-pointer shrink-0" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.sendUsageData")}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.sendUsageDataDesc")}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.confirmBeforeExit")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.confirmBeforeExitDesc")}</p>
                       </div>
-                      <Switch checked={settings.sendUsageData === true} onCheckedChange={(val) => updateSetting("sendUsageData", val)} className="scale-85 origin-right" />
+                      <Switch checked={settings.confirmBeforeExit === true} onCheckedChange={(val) => updateSetting("confirmBeforeExit", val)} className="scale-85 origin-right cursor-pointer shrink-0" />
                     </div>
+
+                    {/* Send anonymous usage data (Temporarily hidden - preserved for future use) */}
+                    {false && (
+                      <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                        <div>
+                          <label className="text-xs font-semibold text-foreground">{t("settings.sendUsageData")}</label>
+                          <p className="text-xs text-muted-foreground mt-0.5">{t("settings.sendUsageDataDesc")}</p>
+                        </div>
+                        <Switch checked={settings.sendUsageData === true} onCheckedChange={(val) => updateSetting("sendUsageData", val)} className="scale-85 origin-right" />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2466,14 +2457,16 @@ export default function SettingsTabView({
                         type="button"
                         disabled={isExportingBackup || !notes || notes.length === 0}
                         onClick={handleExportBackup}
-                        className="px-3.5 py-1.5 rounded-xl bg-foreground/[0.05] hover:bg-foreground/10 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-48 h-10 px-3 rounded-xl border border-input bg-card hover:bg-muted text-foreground text-xs font-medium transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                       >
                         {isExportingBackup ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                         ) : (
-                          <Download className="h-3.5 w-3.5" />
+                          <Download className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
-                        {isExportingBackup ? (t("settings.exportingBackup") || "Creating ZIP...") : t("settings.exportBackupBtn")}
+                        <span>
+                          {isExportingBackup ? (t("settings.exportingBackup") || "Creating ZIP...") : t("settings.exportBackupBtn")}
+                        </span>
                       </button>
                     </div>
                   </div>

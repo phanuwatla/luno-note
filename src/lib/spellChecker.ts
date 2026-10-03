@@ -524,13 +524,14 @@ function findThaiSuggestions(word: string, maxSuggestions = 5): string[] {
   if (word.includes("เเ")) {
     return [word.replace(/เเ/g, "แ")];
   }
-  if (/[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}/.test(word)) {
+  if (/[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}/.test(word)) {
     const cleaned = word
-      .replace(/([่้๊๋])\1+/g, "$1")
-      .replace(/([ิีึื])\1+/g, "$1")
-      .replace(/([ุู])\1+/g, "$1")
-      .replace(/([ั])\1+/g, "$1")
-      .replace(/([์])\1+/g, "$1");
+      .replace(/[่้๊๋]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ิีึื]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ุู]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ั]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[์]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ำ]{2,}/g, "ำ");
     if (cleaned !== word) {
       return [cleaned];
     }

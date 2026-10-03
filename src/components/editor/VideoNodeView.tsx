@@ -20,6 +20,38 @@ import { isAudioMedia } from "@/lib/webmClassifier";
 import { useActivePipVideo } from "@/lib/videoPipStore";
 
 export const videoLocalCache = new Map<string, string>();
+const MAX_VIDEO_CACHE = 60;
+const origVideoSet = videoLocalCache.set.bind(videoLocalCache);
+const origVideoDelete = videoLocalCache.delete.bind(videoLocalCache);
+
+// Shared in-flight resolution promises to prevent multiple instances from racing and reading the disk simultaneously
+const pendingVideoResolutions = new Map<string, Promise<string | null>>();
+
+videoLocalCache.set = function (key: string, value: string) {
+  const existing = videoLocalCache.get(key);
+  if (existing && existing !== value && existing.startsWith("blob:")) {
+    try { URL.revokeObjectURL(existing); } catch {}
+  }
+  if (videoLocalCache.size >= MAX_VIDEO_CACHE && !videoLocalCache.has(key)) {
+    const oldestKey = videoLocalCache.keys().next().value;
+    if (oldestKey) {
+      const oldVal = videoLocalCache.get(oldestKey);
+      if (oldVal && oldVal.startsWith("blob:")) {
+        try { URL.revokeObjectURL(oldVal); } catch {}
+      }
+      origVideoDelete(oldestKey);
+    }
+  }
+  return origVideoSet(key, value);
+};
+
+videoLocalCache.delete = function (key: string) {
+  const existing = videoLocalCache.get(key);
+  if (existing && existing.startsWith("blob:")) {
+    try { URL.revokeObjectURL(existing); } catch {}
+  }
+  return origVideoDelete(key);
+};
 
 export function getVideoMimeType(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase() || "mp4";
@@ -63,6 +95,12 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
   const displayTitle = title || (fileName && !fileName.startsWith("blob:") && !fileName.startsWith("data:") ? decodeURIComponent(fileName) : undefined);
   const currentTabId = typeof localStorage !== "undefined" ? localStorage.getItem("notes-app-active-tab") || undefined : undefined;
   const activePip = useActivePipVideo();
+
+  const instanceIdRef = useRef<string | null>(null);
+  if (!instanceIdRef.current) {
+    instanceIdRef.current = `vnode_${Math.random().toString(36).slice(2, 9)}_${Date.now()}`;
+  }
+  const instanceId = instanceIdRef.current;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -113,66 +151,81 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
     let isCancelled = false;
     const resolveLocal = async () => {
       try {
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
-        if (electronAPI?.getSavedWorkspace && (electronAPI?.readFileBuffer || electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
-          const saved = await electronAPI.getSavedWorkspace();
-          const workspacePath = saved?.folderPath || saved?.path;
-          if (workspacePath) {
-            const isAbsolute = /^[a-zA-Z]:[\\/]/.test(cleanRel) || cleanRel.startsWith("/");
-            const fullPath = isAbsolute ? cleanRel : `${workspacePath}/${cleanRel}`;
+        const inFlight = pendingVideoResolutions.get(cleanRel);
+        if (inFlight) {
+          const res = await inFlight;
+          if (!isCancelled && res) {
+            setLocalResolvedSrc(res);
+            setHasError(false);
+          }
+          return;
+        }
 
-            const cachedByFull = videoLocalCache.get(fullPath);
-            if (cachedByFull && !cachedByFull.startsWith("luno-asset:")) {
-              if (!isCancelled) {
-                setLocalResolvedSrc(cachedByFull);
-                setHasError(false);
+        const task = (async (): Promise<string | null> => {
+          const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
+          if (electronAPI?.getSavedWorkspace && (electronAPI?.readFileBuffer || electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
+            const saved = await electronAPI.getSavedWorkspace();
+            const workspacePath = saved?.folderPath || saved?.path;
+            if (workspacePath) {
+              const isAbsolute = /^[a-zA-Z]:[\\/]/.test(cleanRel) || cleanRel.startsWith("/");
+              const fullPath = isAbsolute ? cleanRel : `${workspacePath}/${cleanRel}`;
+
+              const cachedByFull = videoLocalCache.get(fullPath);
+              if (cachedByFull && !cachedByFull.startsWith("luno-asset:")) {
+                return cachedByFull;
               }
-              return;
-            }
 
-            // 1. Preferred: High performance binary buffer directly to Blob URL
-            if (electronAPI.readFileBuffer) {
-              try {
-                const buf = await electronAPI.readFileBuffer(fullPath);
-                if (buf && buf.byteLength > 0) {
-                  const mime = getVideoMimeType(cleanRel);
-                  const blob = new Blob([buf], { type: mime });
-                  const blobUrl = URL.createObjectURL(blob);
-                  videoLocalCache.set(cleanRel, blobUrl);
-                  videoLocalCache.set(fullPath, blobUrl);
-                  if (!isCancelled) {
-                    setLocalResolvedSrc(blobUrl);
-                    setHasError(false);
+              // 1. Preferred: High performance binary buffer directly to Blob URL
+              if (electronAPI.readFileBuffer) {
+                try {
+                  const buf = await electronAPI.readFileBuffer(fullPath);
+                  if (buf && buf.byteLength > 0) {
+                    const mime = getVideoMimeType(cleanRel);
+                    const blob = new Blob([buf], { type: mime });
+                    const blobUrl = URL.createObjectURL(blob);
+                    videoLocalCache.set(cleanRel, blobUrl);
+                    videoLocalCache.set(fullPath, blobUrl);
+                    return blobUrl;
                   }
-                  return;
+                } catch (bufErr) {
+                  console.warn("electronAPI.readFileBuffer failed, trying fallback:", bufErr);
                 }
-              } catch (bufErr) {
-                console.warn("electronAPI.readFileBuffer failed, trying fallback:", bufErr);
               }
-            }
 
-            // 2. Fallback: readImageDataUrl
-            let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
-            if (!dataUrl && electronAPI.readFileBase64) {
-              const b64 = await electronAPI.readFileBase64(fullPath);
-              if (b64) {
-                const mime = getVideoMimeType(cleanRel);
-                dataUrl = `data:${mime};base64,${b64}`;
+              // 2. Fallback: readImageDataUrl
+              let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
+              if (!dataUrl && electronAPI.readFileBase64) {
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                if (b64) {
+                  const mime = getVideoMimeType(cleanRel);
+                  dataUrl = `data:${mime};base64,${b64}`;
+                }
               }
-            }
 
-            if (!isCancelled && dataUrl) {
-              const blobUrl = await asyncDataUrlToBlobUrl(dataUrl);
-              videoLocalCache.set(cleanRel, blobUrl);
-              videoLocalCache.set(fullPath, blobUrl);
-              setLocalResolvedSrc(blobUrl);
-              setHasError(false);
-              return;
+              if (dataUrl) {
+                const blobUrl = await asyncDataUrlToBlobUrl(dataUrl);
+                videoLocalCache.set(cleanRel, blobUrl);
+                videoLocalCache.set(fullPath, blobUrl);
+                return blobUrl;
+              }
             }
           }
+          return null;
+        })();
+
+        pendingVideoResolutions.set(cleanRel, task);
+        const resolved = await task;
+        pendingVideoResolutions.delete(cleanRel);
+
+        if (!isCancelled && resolved) {
+          setLocalResolvedSrc(resolved);
+          setHasError(false);
+          return;
         }
       } catch (err) {
         console.warn("Failed to resolve local video in VideoNodeView:", err);
+      } finally {
+        pendingVideoResolutions.delete(cleanRel);
       }
       if (!isCancelled) {
         setHasError(true);
@@ -259,7 +312,10 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
   );
 
   const displaySrc = localResolvedSrc || src;
-  const isThisVideoInPip = Boolean(activePip && activePip.src === (localResolvedSrc || src));
+  const isThisVideoInPip = Boolean(
+    activePip &&
+      (activePip.instanceId ? activePip.instanceId === instanceId : activePip.src === (localResolvedSrc || src))
+  );
 
   const handlePlayerError = useCallback(async () => {
     console.warn("VideoPlayer error loading displaySrc:", displaySrc);
@@ -267,8 +323,13 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
     if (target) {
       const cleanRel = sanitizeVideoRelPath(target);
       if (cleanRel) {
-        videoLocalCache.delete(cleanRel);
-        if (displaySrc) videoLocalCache.delete(displaySrc);
+        // If the cache currently has a valid blobUrl different from displaySrc, try it first
+        const currentCached = videoLocalCache.get(cleanRel);
+        if (currentCached && currentCached !== displaySrc) {
+          setLocalResolvedSrc(currentCached);
+          setHasError(false);
+          return;
+        }
 
         const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
         if (electronAPI?.getSavedWorkspace && (electronAPI?.readFileBuffer || electronAPI?.readImageDataUrl || electronAPI?.readFileBase64)) {
@@ -278,7 +339,6 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
             if (workspacePath) {
               const isAbsolute = /^[a-zA-Z]:[\\/]/.test(cleanRel) || cleanRel.startsWith("/");
               const fullPath = isAbsolute ? cleanRel : `${workspacePath}/${cleanRel}`;
-              videoLocalCache.delete(fullPath);
 
               let recoveredBlobUrl: string | null = null;
               if (electronAPI.readFileBuffer) {
@@ -336,6 +396,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
         as="div"
         className="my-2 inline-flex max-w-full clear-both select-none align-middle"
         contentEditable={false}
+        style={{ textAlign: textAlign || undefined }}
       >
         <ContextMenu>
           <ContextMenuTrigger asChild onContextMenu={handleContextMenu}>
@@ -344,7 +405,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
             }`}>
               <VideoOff className="w-3.5 h-3.5 opacity-60 shrink-0" />
               <span className="truncate max-w-[280px]">
-                {t("editor.videoLoadError") || "Video could not be loaded"}
+                {displayTitle || fileName || t("editor.videoLoadError") || "Video could not be loaded"}
               </span>
             </div>
           </ContextMenuTrigger>
@@ -425,6 +486,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
           src={displaySrc}
           title={displayTitle}
           noteId={currentTabId}
+          instanceId={instanceId}
           width={currentWidth}
           dataRelativeSrc={dataRelativeSrc}
           onDelete={deleteNode}

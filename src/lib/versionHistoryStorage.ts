@@ -445,6 +445,58 @@ export function scheduleSaveWorkspaceHistory(
   debouncedHistoryTimers.set(relPath, timer);
 }
 
+/**
+ * 64-bit fast deterministic string hash (combining two 32-bit hashes).
+ * Returns a 16-character hexadecimal string.
+ */
+export function hashHistoryPath(str: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c64e6d;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hex1 = (h1 >>> 0).toString(16).padStart(8, "0");
+  const hex2 = (h2 >>> 0).toString(16).padStart(8, "0");
+  return `${hex1}${hex2}`;
+}
+
+/**
+ * Computes a filesystem-safe filename for storing history snapshots in `.luno/history/`.
+ * Ensures:
+ * 1. Safe characters across Windows, macOS, and Linux (replaces \ / : * ? " < > | and control chars).
+ * 2. Guaranteed total length <= 90 characters (Windows NTFS / ext4 255 character limit is never exceeded).
+ * 3. Preserves human-readable title/path prefix (including UTF-8/Thai/Unicode without bloated percent encoding).
+ * 4. Deterministic 64-bit hash suffix ensures uniqueness and collision resistance.
+ */
+export function getHistoryDiskFilename(relPath: string): string {
+  if (!relPath) return `note_${hashHistoryPath("")}.json`;
+
+  const sanitized = relPath
+    .replace(/[\\/:*?"<>|\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/_+/g, "_")
+    .trim()
+    .replace(/^_+|_+$/g, "");
+
+  const safePrefix = sanitized.slice(0, 60).trim().replace(/\.+$/, "") || "note";
+  const hash = hashHistoryPath(relPath);
+  return `${safePrefix}_${hash}.json`;
+}
+
+/**
+ * Legacy filename used prior to safe hash-prefixing (for backward compatibility).
+ */
+export function getLegacyHistoryDiskFilename(relPath: string): string {
+  const safeName = encodeURIComponent(relPath).replace(/%/g, "_");
+  return `${safeName}.json`;
+}
+
 export async function saveWorkspaceHistoryToDisk(
   rootDirHandle: FileSystemDirectoryHandle | null,
   relPath: string,
@@ -452,13 +504,13 @@ export async function saveWorkspaceHistoryToDisk(
 ): Promise<void> {
   const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
   const jsonStr = JSON.stringify(history, null, 2);
+  const filename = getHistoryDiskFilename(relPath);
 
   if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
-        const safeName = encodeURIComponent(relPath).replace(/%/g, "_");
-        const fullPath = `${saved.folderPath}/.luno/history/${safeName}.json`;
+        const fullPath = `${saved.folderPath}/.luno/history/${filename}`;
         await electronAPI.writeFileContent({ fullPath, content: jsonStr });
         return;
       }
@@ -472,8 +524,7 @@ export async function saveWorkspaceHistoryToDisk(
   try {
     const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: true });
     const historyDir = await metaDir.getDirectoryHandle("history", { create: true });
-    const safeName = encodeURIComponent(relPath).replace(/%/g, "_");
-    const fileHandle = await historyDir.getFileHandle(`${safeName}.json`, { create: true });
+    const fileHandle = await historyDir.getFileHandle(filename, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(jsonStr);
     await writable.close();
@@ -487,14 +538,23 @@ export async function loadWorkspaceHistoryFromDisk(
   relPath: string
 ): Promise<NoteVersionSnapshot[] | null> {
   const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-  const safeName = encodeURIComponent(relPath).replace(/%/g, "_");
+  const safeFilename = getHistoryDiskFilename(relPath);
+  const legacyFilename = getLegacyHistoryDiskFilename(relPath);
 
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
-        const fullPath = `${saved.folderPath}/.luno/history/${safeName}.json`;
-        const content = await electronAPI.readFileContent(fullPath);
+        // 1. Try reading the safe hashed filename
+        const fullPath = `${saved.folderPath}/.luno/history/${safeFilename}`;
+        let content = await electronAPI.readFileContent(fullPath);
+
+        // 2. If not found, fallback to legacy percent-encoded filename
+        if (!content && legacyFilename !== safeFilename) {
+          const legacyFullPath = `${saved.folderPath}/.luno/history/${legacyFilename}`;
+          content = await electronAPI.readFileContent(legacyFullPath);
+        }
+
         if (content) {
           const list = JSON.parse(content);
           if (Array.isArray(list)) return list;
@@ -508,12 +568,27 @@ export async function loadWorkspaceHistoryFromDisk(
   try {
     const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: false });
     const historyDir = await metaDir.getDirectoryHandle("history", { create: false });
-    const fileHandle = await historyDir.getFileHandle(`${safeName}.json`, { create: false });
-    const file = await fileHandle.getFile();
-    const content = await file.text();
-    if (content) {
-      const list = JSON.parse(content);
-      if (Array.isArray(list)) return list;
+
+    // 1. Try reading safe hashed filename
+    let fileHandle: FileSystemFileHandle | null = null;
+    try {
+      fileHandle = await historyDir.getFileHandle(safeFilename, { create: false });
+    } catch {
+      // 2. Fallback to legacy filename
+      if (legacyFilename !== safeFilename) {
+        try {
+          fileHandle = await historyDir.getFileHandle(legacyFilename, { create: false });
+        } catch {}
+      }
+    }
+
+    if (fileHandle) {
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      if (content) {
+        const list = JSON.parse(content);
+        if (Array.isArray(list)) return list;
+      }
     }
   } catch {}
 

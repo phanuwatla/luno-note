@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { getToolbarIcon } from "@/lib/iconPacks";
 import { useToast } from "@/hooks/use-toast";
 import type { Note } from "@/hooks/useNotes";
 import {
@@ -35,6 +36,10 @@ import {
   saveVersionSnapshot,
   deleteVersionSnapshot,
   groupVersionSnapshots,
+  loadWorkspaceHistoryFromDisk,
+  getNoteRelativePath,
+  getStorageKey,
+  getPathStorageKey,
   type NoteVersionSnapshot,
 } from "@/lib/versionHistoryStorage";
 import { countWords } from "@/lib/wordCount";
@@ -72,11 +77,41 @@ function VersionHistoryPanelComponent({
 
   const isTh = settings.language === "th";
   const locale = isTh ? "th-TH" : "en-US";
+  const pack = settings?.iconPack || "lucide";
+  const HistoryIcon = getToolbarIcon("history", pack);
+  const PlusIcon = getToolbarIcon("plus", pack);
+  const CloseIcon = getToolbarIcon("x", pack);
+  const ClockIcon = getToolbarIcon("clock", pack);
+  const ColumnsIcon = getToolbarIcon("columns", pack);
+  const CopyIcon = getToolbarIcon("copy", pack);
+  const CheckIcon = getToolbarIcon("check", pack);
+  const RotateCcwIcon = getToolbarIcon("rotateCcw", pack);
+  const TrashIcon = getToolbarIcon("trash", pack);
 
   // Reload version history whenever note changes or panel opens
   useEffect(() => {
     if (isOpen && note) {
-      setHistory(getNoteVersionHistory(note));
+      const currentList = getNoteVersionHistory(note);
+      if (currentList.length > 0) {
+        setHistory(currentList);
+      } else {
+        setHistory([]);
+        const relPath = getNoteRelativePath(note);
+        if (relPath) {
+          void loadWorkspaceHistoryFromDisk(null, relPath).then((diskList) => {
+            if (diskList && diskList.length > 0) {
+              try {
+                const storage = typeof localStorage !== "undefined" ? localStorage : null;
+                if (storage) {
+                  if (note.id) storage.setItem(getStorageKey(note.id), JSON.stringify(diskList));
+                  storage.setItem(getPathStorageKey(relPath), JSON.stringify(diskList));
+                }
+              } catch {}
+              setHistory(diskList);
+            }
+          });
+        }
+      }
     }
   }, [isOpen, note?.id, note?.updatedAt, note?.fileName, note?.folderPath]);
 
@@ -191,6 +226,7 @@ function VersionHistoryPanelComponent({
 
   return (
     <motion.aside
+      data-version-history-panel="true"
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
@@ -198,9 +234,12 @@ function VersionHistoryPanelComponent({
       className="h-full w-[280px] shrink-0 border-l border-border bg-background flex flex-col select-none overflow-hidden"
     >
       {/* Header Bar */}
-      <div className="flex h-10 items-center justify-between border-b border-border/40 px-3.5 shrink-0">
+      <div
+        data-version-history-header="true"
+        className="flex h-10 items-center justify-between border-b border-border/40 px-3.5 shrink-0"
+      >
         <div className="flex items-center gap-2 text-xs font-bold text-foreground">
-          <History className="h-3.5 w-3.5 text-primary" />
+          <HistoryIcon className="h-3.5 w-3.5 text-primary" />
           <span>{t("versionHistoryPanel.title")}</span>
         </div>
 
@@ -213,7 +252,7 @@ function VersionHistoryPanelComponent({
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors cursor-pointer outline-none focus:outline-none focus-visible:ring-0 [&_svg]:size-3.5"
                 aria-label={t("versionHistoryPanel.saveSnapshot")}
               >
-                <Plus className="h-3.5 w-3.5" />
+                <PlusIcon className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.saveSnapshot")}</TooltipContent>
@@ -227,7 +266,7 @@ function VersionHistoryPanelComponent({
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors cursor-pointer outline-none focus:outline-none focus-visible:ring-0 [&_svg]:size-3.5"
                 aria-label={t("common.close") || "Close"}
               >
-                <X className="h-3.5 w-3.5" />
+                <CloseIcon className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={4}>{t("common.close") || "Close"}</TooltipContent>
@@ -287,6 +326,7 @@ function VersionHistoryPanelComponent({
                   return (
                     <div
                       key={ver.id}
+                      data-version-card="true"
                       tabIndex={0}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -299,7 +339,7 @@ function VersionHistoryPanelComponent({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <ClockIcon className="h-3 w-3 text-muted-foreground shrink-0" />
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <span className="text-xs font-semibold text-foreground truncate cursor-default">
@@ -335,7 +375,7 @@ function VersionHistoryPanelComponent({
                                 }}
                                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                               >
-                                <Columns2 className="h-3.5 w-3.5" />
+                                <ColumnsIcon className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.compare")}</TooltipContent>
@@ -350,7 +390,7 @@ function VersionHistoryPanelComponent({
                                 onClick={(e) => handleCopy(ver, e)}
                                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                               >
-                                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                {isCopied ? <CheckIcon className="h-3.5 w-3.5 text-emerald-500" /> : <CopyIcon className="h-3.5 w-3.5" />}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.copyContent")}</TooltipContent>
@@ -368,7 +408,7 @@ function VersionHistoryPanelComponent({
                                 }}
                                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                               >
-                                <RotateCcw className="h-3.5 w-3.5" />
+                                <RotateCcwIcon className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.restore")}</TooltipContent>
@@ -386,7 +426,7 @@ function VersionHistoryPanelComponent({
                                 }}
                                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <TrashIcon className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={4}>{t("versionHistoryPanel.deleteVersion")}</TooltipContent>
@@ -401,7 +441,7 @@ function VersionHistoryPanelComponent({
           </div>
         ) : (
           <div className="py-8 text-center px-4 space-y-2">
-            <Clock className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+            <ClockIcon className="h-8 w-8 text-muted-foreground/40 mx-auto" />
             <p className="text-xs font-semibold text-foreground">
               {t("versionHistoryPanel.noVersions")}
             </p>

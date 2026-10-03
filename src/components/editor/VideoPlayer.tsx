@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   Play,
   Pause,
@@ -77,6 +78,7 @@ export interface VideoPlayerProps {
 
   // Global In-App PiP properties
   noteId?: string;
+  instanceId?: string;
   isFloatingPip?: boolean;
   initialTime?: number;
   initialVolume?: number;
@@ -108,6 +110,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
   onError,
   onOpenInSystemApp,
   noteId,
+  instanceId,
   isFloatingPip = false,
   initialTime = 0,
   initialVolume,
@@ -132,8 +135,17 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const hideControlsTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const effectiveInstanceIdRef = useRef<string | null>(null);
+  if (!effectiveInstanceIdRef.current) {
+    effectiveInstanceIdRef.current = instanceId || `vplay_${Math.random().toString(36).slice(2, 9)}_${Date.now()}`;
+  }
+  const effectiveId = instanceId || effectiveInstanceIdRef.current;
+
   const activePip = useActivePipVideo();
-  const isThisVideoInPip = !isFloatingPip && activePip !== null && activePip.src === src;
+  const isThisVideoInPip =
+    !isFloatingPip &&
+    activePip !== null &&
+    (activePip.instanceId ? activePip.instanceId === effectiveId : activePip.src === src);
 
   const [hasStarted, setHasStarted] = useState(autoPlay || initialTime > 0);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
@@ -352,28 +364,49 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
       };
     }).electronAPI;
 
-    if (!isFullscreen && !document.fullscreenElement) {
-      setIsFullscreen(true);
-      if (electronAPI?.setFullScreen) {
-        electronAPI.setFullScreen(true);
-      }
-      try {
-        const req =
-          container.requestFullscreen ||
-          (container as unknown as { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen;
-        if (req) {
+    const isNativeFs = Boolean(
+      document.fullscreenElement ||
+      (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
+    );
+
+    const wasPlaying = isPlayingRef.current || (videoRef.current && !videoRef.current.paused);
+
+    if (!isFullscreen && !isNativeFs) {
+      const req =
+        container.requestFullscreen ||
+        (container as unknown as { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen;
+
+      if (req) {
+        try {
+          if (electronAPI?.setFullScreen) {
+            electronAPI.setFullScreen(true);
+          }
           await req.call(container);
+          setIsFullscreen(true);
+          if (wasPlaying && videoRef.current && videoRef.current.paused) {
+            void videoRef.current.play().catch(() => {});
+          }
+          resetHideTimer();
+          return;
+        } catch (err) {
+          console.warn("Native fullscreen request rejected, using overlay fallback:", err);
         }
-      } catch (err) {
-        console.warn("Native fullscreen request rejected, using overlay fallback:", err);
+      }
+
+      // Overlay fallback if native fullscreen is not supported or failed
+      setIsFullscreen(true);
+      if (wasPlaying && videoRef.current && videoRef.current.paused) {
+        void videoRef.current.play().catch(() => {});
       }
     } else {
-      setIsFullscreen(false);
       if (electronAPI?.setFullScreen) {
         electronAPI.setFullScreen(false);
       }
       try {
-        if (document.fullscreenElement) {
+        if (
+          document.fullscreenElement ||
+          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
+        ) {
           const exit =
             document.exitFullscreen ||
             (document as unknown as { webkitExitFullscreen?: () => Promise<void> }).webkitExitFullscreen;
@@ -383,6 +416,10 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         }
       } catch (err) {
         console.warn("Exit fullscreen error:", err);
+      }
+      setIsFullscreen(false);
+      if (wasPlaying && videoRef.current && videoRef.current.paused) {
+        void videoRef.current.play().catch(() => {});
       }
     }
     resetHideTimer();
@@ -405,6 +442,13 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
           electronAPI.setFullScreen(false);
         }
         setIsFullscreen(false);
+      } else if (isNativeFs && !isFullscreen) {
+        setIsFullscreen(true);
+      }
+
+      // Maintain playback across fullscreen state changes
+      if (isPlayingRef.current && videoRef.current && videoRef.current.paused) {
+        void videoRef.current.play().catch(() => {});
       }
     };
 
@@ -470,7 +514,8 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
     setIsPlaying(false);
 
     videoPipStore.set({
-      id: `${noteId || ""}_${src}`,
+      id: `${noteId || ""}_${effectiveId}`,
+      instanceId: effectiveId,
       src,
       title,
       currentTime: curTime,
@@ -501,6 +546,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
     isMuted,
     isLooping,
     noteId,
+    effectiveId,
     pipPos,
     videoDimensions,
     width,
@@ -607,6 +653,37 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
     }
     resetHideTimer();
   }, [isPlaying, duration, resetHideTimer]);
+
+  // Debounce single click vs double click on video to prevent pausing on double click
+  const videoClickTimerRef = useRef<number | null>(null);
+
+  const handleVideoClick = useCallback(() => {
+    if (videoClickTimerRef.current) {
+      clearTimeout(videoClickTimerRef.current);
+      videoClickTimerRef.current = null;
+      return;
+    }
+    videoClickTimerRef.current = window.setTimeout(() => {
+      videoClickTimerRef.current = null;
+      togglePlay();
+    }, 250);
+  }, [togglePlay]);
+
+  const handleVideoDoubleClick = useCallback(() => {
+    if (videoClickTimerRef.current) {
+      clearTimeout(videoClickTimerRef.current);
+      videoClickTimerRef.current = null;
+    }
+    void toggleFullscreen();
+  }, [toggleFullscreen]);
+
+  useEffect(() => {
+    return () => {
+      if (videoClickTimerRef.current) {
+        clearTimeout(videoClickTimerRef.current);
+      }
+    };
+  }, []);
 
   // Scrubbing & Seeking
   const handleSeek = (clientX: number) => {
@@ -719,28 +796,64 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
   const bufferedPercent = duration > 0 ? (bufferedEnd / duration) * 100 : 0;
 
   if (hasError) {
+    const effVideoWidth = videoDimensions?.width || activePip?.videoWidth;
+    const effVideoHeight = videoDimensions?.height || activePip?.videoHeight;
+    const effRatio = effVideoWidth && effVideoHeight ? effVideoWidth / effVideoHeight : 16 / 9;
+    const fileNameFromSrc = (dataRelativeSrc || src || "").split("/").pop()?.split("\\").pop();
+    const displayFileName = title || (fileNameFromSrc && !fileNameFromSrc.startsWith("blob:") && !fileNameFromSrc.startsWith("data:") ? decodeURIComponent(fileNameFromSrc) : undefined);
+
     return (
-      <div className={`relative flex flex-col items-center justify-center p-8 rounded-2xl border border-border/80 bg-card/60 text-center max-w-lg mx-auto ${className}`}>
-        <div className="h-12 w-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mb-3">
-          <VideoOff className="h-6 w-6" />
+      <div
+        className={`relative inline-block max-w-full align-middle ${className}`}
+        style={{
+          ...style,
+          width: width ? `${width}px` : effVideoWidth ? `${effVideoWidth}px` : "100%",
+          maxWidth: "100%",
+        }}
+      >
+        <div
+          className="flex flex-col items-center justify-center gap-3 p-4 sm:p-6 text-center rounded-xl border border-border/70 bg-muted/20 dark:bg-card/40 max-w-full overflow-hidden select-none"
+          style={{
+            aspectRatio: width ? undefined : `${effRatio}`,
+            minHeight: "220px",
+            maxHeight: "calc(100vh - 220px)",
+            width: "100%",
+          }}
+        >
+          <VideoOff className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 stroke-[1.5] text-muted-foreground/70" />
+          <div className="flex flex-col items-center gap-1 text-center max-w-full px-2 overflow-hidden">
+            {displayFileName ? (
+              <>
+                <p className="text-xs sm:text-sm font-semibold text-foreground truncate max-w-full">
+                  {displayFileName}
+                </p>
+                <div className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground truncate max-w-full">
+                  <span>{t("editor.videoUnsupported") || "This video format cannot be previewed in the browser."}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs sm:text-sm font-semibold text-foreground truncate max-w-full">
+                  {t("editor.videoLoadError") || "Video could not be played"}
+                </p>
+                <div className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground truncate max-w-full">
+                  <span>{t("editor.videoUnsupported") || "This video format cannot be previewed in the browser."}</span>
+                </div>
+              </>
+            )}
+          </div>
+          {onOpenInSystemApp && (
+            <Button
+              type="button"
+              variant="outline"
+              className="text-xs gap-1.5 cursor-pointer mt-1 h-8 px-3 shrink-0"
+              onClick={onOpenInSystemApp}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              {t("editor.openInDefaultApp") || "Open in Default App"}
+            </Button>
+          )}
         </div>
-        <h4 className="text-sm font-semibold text-foreground mb-1">
-          {t("editor.videoLoadError") || "Video could not be played"}
-        </h4>
-        <p className="text-xs text-muted-foreground max-w-xs mb-4">
-          {t("editor.videoUnsupported") || "This video format cannot be previewed in the browser. You can open it in your system's default media player."}
-        </p>
-        {onOpenInSystemApp && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={onOpenInSystemApp}
-            className="text-xs gap-1.5 shadow-xs cursor-pointer"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            {t("editor.openInDefaultApp") || "Open in App"}
-          </Button>
-        )}
       </div>
     );
   }
@@ -773,6 +886,8 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
       <ContextMenuTrigger asChild onContextMenu={(e) => e.stopPropagation()}>
         <div
           ref={playerWrapperRef}
+          data-video-player="true"
+          data-floating-pip={isFloatingPip ? "true" : undefined}
           tabIndex={0}
           onKeyDown={handleKeyDown}
           onMouseEnter={handleMouseMove}
@@ -877,12 +992,16 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
             ? "!w-full h-auto max-h-[260px] !rounded-2xl"
             : "max-w-full max-h-[calc(100vh-220px)] h-auto rounded-xl"
         }`}
-        style={{
-          width: width ? `${width}px` : "auto",
-          maxWidth: "100%",
-        }}
-        onClick={togglePlay}
-        onDoubleClick={() => void toggleFullscreen()}
+        style={
+          isFullscreen
+            ? { width: "100%", height: "100%", maxWidth: "100%", maxHeight: "100%" }
+            : {
+                width: width ? `${width}px` : "auto",
+                maxWidth: "100%",
+              }
+        }
+        onClick={handleVideoClick}
+        onDoubleClick={handleVideoDoubleClick}
       />
 
       {/* Center Splash Icon Animation (Play / Pause feedback) */}
@@ -1413,6 +1532,19 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
             </Button>
           </div>
         </div>
+      ) : isFullscreen && !Boolean(typeof document !== "undefined" && (document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)) ? (
+        <>
+          <div
+            ref={originalParentRef}
+            className={`relative inline-block max-w-full align-middle ${className || ""}`}
+            style={{
+              ...style,
+              width: width ? `${width}px` : "fit-content",
+              maxWidth: "100%",
+            }}
+          />
+          {typeof document !== "undefined" && createPortal(playerContent, document.body)}
+        </>
       ) : (
         playerContent
       )}

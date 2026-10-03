@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import { getToolbarIcon } from "@/lib/iconPacks";
 import { Folder, FolderPlus, FolderOpen, FolderSearch, Loader2, ArrowLeft, RefreshCw, AlertTriangle, ShieldAlert, Cloud, CloudOff, Link2, Unlink2, LayoutGrid, List, ExternalLink } from "lucide-react";
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import lunoLogo from "@/assets/luno-logo.png";
@@ -41,10 +43,10 @@ function formatModifiedDate(timeStr?: string, language: string = "en"): string {
 
 interface WorkspaceLauncherProps {
   onOpenFolder: () => void | Promise<void>;
-  onCreateWorkspace: (parentPath: string, workspaceName: string) => void | Promise<void>;
+  onCreateWorkspace: (parentPath: string, workspaceName: string, includeWelcomeNote?: boolean) => void | Promise<void>;
   onConnectGoogleDrive: () => void | Promise<void>;
   onOpenCloudWorkspace?: (cloudWs: CloudWorkspaceInfo) => void | Promise<void>;
-  onCreateCloudWorkspace?: (workspaceName: string) => void | Promise<void>;
+  onCreateCloudWorkspace?: (workspaceName: string, includeWelcomeNote?: boolean) => void | Promise<void>;
   isCreating?: boolean;
   onOpenWebTab?: (url: string, initialTitle?: string) => void;
 }
@@ -59,12 +61,18 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   onOpenWebTab,
 }) => {
   const { t, language } = useTranslation();
+  const { settings } = useAppSettings();
+  const pack = settings?.iconPack || "lucide";
+  const FolderPlusIcon = getToolbarIcon("folderPlus", pack);
+  const FolderOpenIcon = getToolbarIcon("folderOpen", pack);
 
   // Local Workspace Creation State
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("My Notes");
+  const [workspaceName, setWorkspaceName] = useState("Untitled Workspace");
   const [parentPath, setParentPath] = useState("");
+  const [defaultDocsPath, setDefaultDocsPath] = useState("");
   const [pathError, setPathError] = useState("");
+  const [includeWelcomeNote, setIncludeWelcomeNote] = useState(true);
 
   // Cloud Workspaces View State
   const [showCloudView, setShowCloudView] = useState(false);
@@ -72,9 +80,23 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   const [workspacesFolderId, setWorkspacesFolderId] = useState<string | null>(null);
   const [isLoadingCloudWorkspaces, setIsLoadingCloudWorkspaces] = useState(false);
   const [createCloudDialogOpen, setCreateCloudDialogOpen] = useState(false);
-  const [cloudWorkspaceName, setCloudWorkspaceName] = useState("My Notes");
+  const [cloudWorkspaceName, setCloudWorkspaceName] = useState("Untitled Workspace");
   const [cloudNameError, setCloudNameError] = useState("");
+  const [includeCloudWelcomeNote, setIncludeCloudWelcomeNote] = useState(true);
   const [layoutMode, setLayoutMode] = useState<"list" | "grid">("list");
+
+  // Load default Documents directory path for local workspaces
+  useEffect(() => {
+    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    if (electronAPI?.getDocumentsPath) {
+      void electronAPI.getDocumentsPath().then((docsPath: string) => {
+        if (docsPath) {
+          setDefaultDocsPath(docsPath);
+          setParentPath((prev) => prev || docsPath);
+        }
+      });
+    }
+  }, []);
 
   // Safety Confirmation & Warning Dialogs State
   const [pendingCloudWs, setPendingCloudWs] = useState<CloudWorkspaceInfo | null>(null);
@@ -194,7 +216,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
     }
     setCloudNameError("");
     if (onCreateCloudWorkspace) {
-      await onCreateCloudWorkspace(cloudWorkspaceName.trim());
+      await onCreateCloudWorkspace(cloudWorkspaceName.trim(), includeCloudWelcomeNote);
       setCreateCloudDialogOpen(false);
     }
   };
@@ -205,14 +227,17 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
       if (electronAPI?.selectDirectoryDialog) {
         const selected = await electronAPI.selectDirectoryDialog(
-          t("launcher.selectLocationTitle") || "Select Location for Workspace"
+          t("launcher.selectLocationTitle") || "Select Location for Workspace",
+          parentPath || defaultDocsPath
         );
         if (selected) {
           setParentPath(selected);
           setPathError("");
         }
       } else if ("showDirectoryPicker" in window) {
-        const handle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
+        const handle = await (window as unknown as { showDirectoryPicker: (opts?: unknown) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
+          startIn: "documents",
+        });
         if (handle?.name) {
           setParentPath(handle.name);
           setPathError("");
@@ -234,13 +259,16 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       return;
     }
     setPathError("");
-    await onCreateWorkspace(parentPath.trim(), workspaceName.trim());
+    await onCreateWorkspace(parentPath.trim(), workspaceName.trim(), includeWelcomeNote);
     setCreateDialogOpen(false);
   };
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex min-h-full w-full flex-col items-center justify-center bg-background px-4 py-8 text-foreground select-none">
+      <div
+        data-workspace-launcher="true"
+        className="flex min-h-full w-full flex-col items-center justify-center bg-background px-4 py-8 text-foreground select-none"
+      >
       <div className="w-full max-w-[540px] flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-200">
         {/* App Logo & Title Branding */}
         <div className="flex flex-col items-center text-center gap-2 mb-1">
@@ -255,7 +283,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
 
         {/* Cloud Workspaces View */}
         {showCloudView ? (
-          <div className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60">
+          <div
+            data-launcher-card="true"
+            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60"
+          >
             {/* Header with Back button and Refresh */}
             <div className="flex items-center justify-between gap-2 p-3 sm:p-3.5">
               <div className="flex items-center gap-2 min-w-0">
@@ -483,7 +514,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
             <div className="flex items-center justify-between gap-4 p-3.5 sm:p-4">
               <div className="space-y-1 min-w-0 pr-2">
                 <div className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <FolderPlus className="h-4 w-4 text-primary shrink-0" />
+                  <FolderPlusIcon className="h-4 w-4 text-primary shrink-0" />
                   <span>{t("launcher.createNewCloudWorkspace") || "Create new workspace"}</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
@@ -493,8 +524,9 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setCloudWorkspaceName("My Notes");
+                  setCloudWorkspaceName("Untitled Workspace");
                   setCloudNameError("");
+                  setIncludeCloudWelcomeNote(true);
                   setCreateCloudDialogOpen(true);
                 }}
                 className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
@@ -505,12 +537,15 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
           </div>
         ) : (
           /* Standard Launcher Card with Dividers */
-          <div className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60">
+          <div
+            data-launcher-card="true"
+            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60"
+          >
             {/* Option 1: Create New Workspace */}
             <div className="flex items-center justify-between gap-4 p-3.5 sm:p-4">
               <div className="space-y-1 min-w-0 pr-2">
                 <div className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <FolderPlus className="h-4 w-4 text-primary shrink-0" />
+                  <FolderPlusIcon className="h-4 w-4 text-primary shrink-0" />
                   <span>{t("launcher.createTitle")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
@@ -520,8 +555,12 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setWorkspaceName("My Notes");
+                  setWorkspaceName("Untitled Workspace");
                   setPathError("");
+                  setIncludeWelcomeNote(true);
+                  if (!parentPath && defaultDocsPath) {
+                    setParentPath(defaultDocsPath);
+                  }
                   setCreateDialogOpen(true);
                 }}
                 className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
@@ -534,7 +573,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
             <div className="flex items-center justify-between gap-4 p-3.5 sm:p-4">
               <div className="space-y-1 min-w-0 pr-2">
                 <div className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4 text-primary shrink-0" />
+                  <FolderOpenIcon className="h-4 w-4 text-primary shrink-0" />
                   <span>{t("launcher.openTitle")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
@@ -602,7 +641,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                     }
                   }
                 }}
-                placeholder="My Notes"
+                placeholder="Untitled Workspace"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
                 autoFocus
               />
@@ -642,6 +681,19 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   <span>{t("launcher.browseBtn")}</span>
                 </Button>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-0.5">
+              <input
+                id="include-welcome-note"
+                type="checkbox"
+                checked={includeWelcomeNote}
+                onChange={(e) => setIncludeWelcomeNote(e.target.checked)}
+                className="luno-editor-checkbox cursor-pointer"
+              />
+              <label htmlFor="include-welcome-note" className="text-xs text-muted-foreground select-none cursor-pointer">
+                {t("launcher.includeWelcomeNote") || "Create starter note (Welcome.md)"}
+              </label>
             </div>
 
             {pathError && (
@@ -704,10 +756,23 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                     }
                   }
                 }}
-                placeholder="My Notes"
+                placeholder="Untitled Workspace"
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus-visible:border-primary focus-visible:ring-0 transition-colors"
                 autoFocus
               />
+            </div>
+
+            <div className="flex items-center gap-2 pt-0.5">
+              <input
+                id="include-cloud-welcome-note"
+                type="checkbox"
+                checked={includeCloudWelcomeNote}
+                onChange={(e) => setIncludeCloudWelcomeNote(e.target.checked)}
+                className="luno-editor-checkbox cursor-pointer"
+              />
+              <label htmlFor="include-cloud-welcome-note" className="text-xs text-muted-foreground select-none cursor-pointer">
+                {t("launcher.includeWelcomeNote") || "Create starter note (Welcome.md)"}
+              </label>
             </div>
 
             {cloudNameError && (

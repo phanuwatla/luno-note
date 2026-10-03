@@ -6,7 +6,7 @@ import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHist
 import { AnimatePresence } from "framer-motion";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_SPELL_REGEX, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
   Check,
@@ -181,8 +181,9 @@ import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
 import { EditorState, TextSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { InputRule, inputRules } from "@tiptap/pm/inputrules";
+import { DOMSerializer } from "@tiptap/pm/model";
 import Image from "@tiptap/extension-image";
-import ImageNodeView, { dataUrlToBlobUrl, asyncDataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
+import ImageNodeView, { dataUrlToBlobUrl, asyncDataUrlToBlobUrl, imageLocalCache } from "@/components/editor/ImageNodeView";
 import Link from "@tiptap/extension-link";
 import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
@@ -821,6 +822,21 @@ export function preprocessMarkdownForEditor(markdown: string, isReadingMode: boo
       .join("");
 
     resultLines.push(processedLine);
+
+    // Ensure standalone HTML tags (such as QR Code <img ... />, media tags, or closed HTML block tags like <p style="...">...</p>)
+    // are followed by a blank line if the next line is a Markdown element (heading, list, table, blockquote, hr, code block) or text.
+    // Under CommonMark / GFM HTML Block Type 7, any subsequent lines without a blank line are absorbed into the HTML block,
+    // which prevents headings (##), lists (-), and other markdown elements from being parsed.
+    const isStandaloneHtmlBlock =
+      /^\s*<(?:img|video|audio)\b[^>]*\/?>(?:\s*<\/(?:img|video|audio)>)?\s*$/i.test(processedLine) ||
+      /^\s*<p>\s*<img\b[^>]*\/?>\s*<\/p>\s*$/i.test(processedLine) ||
+      /<\/(?:p|h[1-6]|div|blockquote|table|section|article)>\s*$/i.test(processedLine);
+    if (isStandaloneHtmlBlock && i + 1 < lines.length) {
+      const nextLine = lines[i + 1];
+      if (nextLine.trim() && !/^\s*<\/(?:div|section|article|p)>/i.test(nextLine)) {
+        resultLines.push("");
+      }
+    }
   }
 
   // In Reading Mode: render collected footnotes at the bottom below divider with return arrow
@@ -901,20 +917,31 @@ export function hasReadingModeFootnotesDoc(doc: any): boolean {
 }
 
 export const EDITOR_CLASSES =
-  "w-full max-w-full break-words [overflow-wrap:anywhere] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&>h1:first-child]:mb-6 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+  "w-full max-w-full break-words [word-break:normal] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&>h1:first-child]:mb-6 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
   " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
   " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
   " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
 
 export function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  if (typeof s !== "string") return "";
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-export const toTaskItemHtml = (isChecked: boolean, text: string) =>
-  `<li data-type="taskItem" data-checked="${isChecked}">` +
-  `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
-  `<div><p>${text}</p></div>` +
-  `</li>`;
+export const toTaskItemHtml = (isChecked: boolean, text: string) => {
+  const trimmed = (text || "").trim();
+  const inner = trimmed.startsWith("<p>") && trimmed.endsWith("</p>") ? trimmed : `<p>${trimmed}</p>`;
+  return (
+    `<li data-type="taskItem" data-checked="${isChecked}">` +
+    `<label contenteditable="false"><input type="checkbox"${isChecked ? " checked" : ""}><span></span></label>` +
+    `<div>${inner}</div>` +
+    `</li>`
+  );
+};
 
 export const migrateDomTaskLists = (root: HTMLElement) => {
   root.querySelectorAll("li.task-list-item").forEach((li) => {
@@ -927,7 +954,9 @@ export const migrateDomTaskLists = (root: HTMLElement) => {
       : ((li as HTMLElement).innerHTML || "").trim();
     const tpl = document.createElement("template");
     tpl.innerHTML = toTaskItemHtml(isChecked, inner);
-    li.replaceWith(tpl.content.firstChild!);
+    if (tpl.content.firstChild) {
+      li.replaceWith(tpl.content.firstChild);
+    }
   });
 
   root.querySelectorAll("li").forEach((li) => {
@@ -938,7 +967,9 @@ export const migrateDomTaskLists = (root: HTMLElement) => {
     const inner = ((li as HTMLElement).innerHTML || "").trim();
     const tpl = document.createElement("template");
     tpl.innerHTML = toTaskItemHtml(isChecked, inner || "<p></p>");
-    li.replaceWith(tpl.content.firstChild!);
+    if (tpl.content.firstChild) {
+      li.replaceWith(tpl.content.firstChild);
+    }
   });
 
   root.querySelectorAll("ul").forEach((ul) => {
@@ -1324,13 +1355,14 @@ export function renderMarkdownToEditorHtml(
 
   const format = options?.contentFormat ?? "markdown";
   if (format === "html") {
+    const clean = sanitizeHtml(markdown);
     if (typeof document !== "undefined") {
       const root = document.createElement("div");
-      root.innerHTML = markdown;
+      root.innerHTML = clean;
       prepareDomForEditor(root, options);
-      return root.innerHTML;
+      return sanitizeHtml(root.innerHTML);
     }
-    return markdown;
+    return clean;
   }
   if (format === "plain") {
     const lines = markdown.split("\n");
@@ -1374,7 +1406,7 @@ export function renderMarkdownToEditorHtml(
   // 6. Complete DOM transformations matching Editor 100%
   if (typeof document !== "undefined") {
     const root = document.createElement("div");
-    root.innerHTML = rawHtml;
+    root.innerHTML = sanitizeHtml(rawHtml);
 
     prepareDomForEditor(root, options);
 
@@ -1476,15 +1508,24 @@ export const HashtagDecoration = Extension.create<HashtagDecorationOptions>({
               let set = oldState.map(tr.mapping, tr.doc);
               for (const step of tr.steps) {
                 step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
-                  const safeStart = Math.min(newStart, tr.doc.content.size);
-                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const docSize = tr.doc.content.size;
+                  if (docSize === 0) {
+                    set = DecorationSet.empty;
+                    return;
+                  }
+                  const safeStart = Math.max(1, Math.min(newStart, docSize));
+                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
                   const $from = tr.doc.resolve(safeStart);
                   const $to = tr.doc.resolve(safeEnd);
-                  const start = $from.start();
-                  const end = $to.end();
-                  set = set.remove(set.find(start, end));
-                  const newDecos: Decoration[] = [];
-                  const parentNode = $from.parent;
+                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
+                  const toDepth = Math.max(0, Math.min($to.depth, 1));
+                  const depth = Math.min(fromDepth, toDepth);
+                  if (depth >= 1) {
+                    const start = $from.start(depth);
+                    const end = $to.end(depth);
+                    set = set.remove(set.find(start, end));
+                    const newDecos: Decoration[] = [];
+                    const parentNode = $from.node(depth);
                   const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
                   parentNode.descendants((child: any, childPos: number, parent: any) => {
                     if (child.isText) {
@@ -1500,23 +1541,26 @@ export const HashtagDecoration = Extension.create<HashtagDecorationOptions>({
                         const hashIndex = match[0].indexOf("#");
                         const startPos = absPos + match.index + hashIndex;
                         const endPos = startPos + 1 + rawTag.length;
-                        const colorClass = getTagColorClass(rawTag, options.theme, undefined, options.tagColorStyle);
-                        newDecos.push(
-                          Decoration.inline(startPos, endPos, {
-                            class: `inline-tag-badge border ${colorClass}`,
-                          })
-                        );
+                        if (startPos >= 0 && endPos <= tr.doc.content.size && startPos < endPos) {
+                          const colorClass = getTagColorClass(rawTag, options.theme, undefined, options.tagColorStyle);
+                          newDecos.push(
+                            Decoration.inline(startPos, endPos, {
+                              class: `inline-tag-badge border ${colorClass}`,
+                            })
+                          );
+                        }
                       }
                     }
                   });
                   if (newDecos.length > 0) {
                     set = set.add(tr.doc, newDecos);
                   }
+                }
                 });
               }
               return set;
             } catch {
-              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
+              return oldState.map(tr.mapping, tr.doc);
             }
           },
         },
@@ -1530,9 +1574,46 @@ export const HashtagDecoration = Extension.create<HashtagDecorationOptions>({
   },
 });
 
-const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
+export const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
 const LATIN_SPELL_REGEX = /[A-Za-z']+/g;
 const THAI_CHAR_TEST = /[\u0E00-\u0E7F]/;
+
+const THAI_COMBINING_OR_ATTACHED = /[\u0E30-\u0E3A\u0E47-\u0E4E]/;
+const THAI_BASE_CONSONANT = /[\u0E01-\u0E2E]/;
+
+export function expandThaiAnomalyCluster(
+  text: string,
+  matchStart: number,
+  matchEnd: number
+): { start: number; end: number } | null {
+  // If the anomaly is purely leading vowels like "เเ", it does not attach to a preceding consonant
+  if (!THAI_COMBINING_OR_ATTACHED.test(text[matchStart])) {
+    return { start: matchStart, end: matchEnd };
+  }
+
+  // Scan backwards to find the base consonant
+  let clusterStart = matchStart;
+  while (clusterStart > 0 && THAI_COMBINING_OR_ATTACHED.test(text[clusterStart - 1])) {
+    clusterStart--;
+  }
+
+  if (clusterStart === 0 || !THAI_BASE_CONSONANT.test(text[clusterStart - 1])) {
+    // No preceding base consonant to anchor to.
+    // Creating an isolated inline element around orphan combining marks breaks Blink/HarfBuzz shaping.
+    return null;
+  }
+
+  // Include the base consonant
+  clusterStart--;
+
+  // Scan forwards to include any trailing combining marks belonging to the same cluster
+  let clusterEnd = matchEnd;
+  while (clusterEnd < text.length && THAI_COMBINING_OR_ATTACHED.test(text[clusterEnd])) {
+    clusterEnd++;
+  }
+
+  return { start: clusterStart, end: clusterEnd };
+}
 
 function collectSpellCheckDecorationsForNode(
   node: any,
@@ -1588,12 +1669,14 @@ function collectSpellCheckDecorationsForNode(
     const isInsideExcludedRange = (fromIdx: number, toIdx: number) =>
       excludedRanges.some((r) => fromIdx < r.end && toIdx > r.start);
 
-    const thaiSpellRegex = getThaiSpellRegex();
-    const thaiAnomalyRegex = getThaiAnomalyRegex();
+    const thaiSpellRegex = THAI_SPELL_REGEX;
+    const thaiAnomalyRegex = THAI_STRUCTURAL_ANOMALY_REGEX;
     const latinSpellRegex = /[A-Za-z']+/g;
 
     // 1. Thai Misspellings & Typographical Anomalies check
     if (THAI_CHAR_TEST.test(text)) {
+      const decoratedRanges: Array<{ start: number; end: number }> = [];
+
       thaiSpellRegex.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = thaiSpellRegex.exec(text)) !== null) {
@@ -1601,26 +1684,41 @@ function collectSpellCheckDecorationsForNode(
         const misspelled = match[0];
         const from = pos + match.index;
         const to = from + misspelled.length;
-        decorations.push(
-          Decoration.inline(from, to, {
-            class: "luno-spell-error",
-            "data-spell-word": misspelled,
-          })
-        );
+        if (from >= 0 && to <= pos + text.length && from < to) {
+          decoratedRanges.push({ start: match.index, end: match.index + match[0].length });
+          decorations.push(
+            Decoration.inline(from, to, {
+              class: "luno-spell-error",
+              "data-spell-word": misspelled,
+            })
+          );
+        }
       }
 
       thaiAnomalyRegex.lastIndex = 0;
+      let lastAnomalyEnd = -1;
       while ((match = thaiAnomalyRegex.exec(text)) !== null) {
         if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
-        const anomaly = match[0];
-        const from = pos + match.index;
-        const to = from + anomaly.length;
-        decorations.push(
-          Decoration.inline(from, to, {
-            class: "luno-spell-error",
-            "data-spell-word": anomaly,
-          })
-        );
+        const expanded = expandThaiAnomalyCluster(text, match.index, match.index + match[0].length);
+        if (!expanded) continue;
+        if (decoratedRanges.some((r) => expanded.start < r.end && expanded.end > r.start)) {
+          continue;
+        }
+        if (expanded.start < lastAnomalyEnd) {
+          continue;
+        }
+        lastAnomalyEnd = expanded.end;
+        const word = text.slice(expanded.start, expanded.end);
+        const from = pos + expanded.start;
+        const to = pos + expanded.end;
+        if (from >= 0 && to <= pos + text.length && from < to) {
+          decorations.push(
+            Decoration.inline(from, to, {
+              class: "luno-spell-error",
+              "data-spell-word": word,
+            })
+          );
+        }
       }
     }
 
@@ -1634,12 +1732,14 @@ function collectSpellCheckDecorationsForNode(
         if (isWordMisspelled(word)) {
           const from = pos + match.index;
           const to = from + word.length;
-          decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": word,
-            })
-          );
+          if (from >= 0 && to <= pos + text.length && from < to) {
+            decorations.push(
+              Decoration.inline(from, to, {
+                class: "luno-spell-error",
+                "data-spell-word": word,
+              })
+            );
+          }
         }
       }
     }
@@ -1688,27 +1788,37 @@ export const SpellCheckDecoration = Extension.create({
               let set = oldState.map(tr.mapping, tr.doc);
               for (const step of tr.steps) {
                 step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-                  const safeStart = Math.min(newStart, tr.doc.content.size);
-                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const docSize = tr.doc.content.size;
+                  if (docSize === 0) {
+                    set = DecorationSet.empty;
+                    return;
+                  }
+                  const safeStart = Math.max(1, Math.min(newStart, docSize));
+                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
                   const $from = tr.doc.resolve(safeStart);
                   const $to = tr.doc.resolve(safeEnd);
-                  const start = $from.start();
-                  const end = $to.end();
-                  set = set.remove(set.find(start, end));
-                  const newDecos: Decoration[] = [];
-                  const parentNode = $from.parent;
-                  parentNode.descendants((child: any, childPos: number) => {
-                    const absPos = start + childPos;
-                    collectSpellCheckDecorationsForNode(child, absPos, newDecos);
-                  });
-                  if (newDecos.length > 0) {
-                    set = set.add(tr.doc, newDecos);
+                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
+                  const toDepth = Math.max(0, Math.min($to.depth, 1));
+                  const depth = Math.min(fromDepth, toDepth);
+                  if (depth >= 1) {
+                    const start = $from.start(depth);
+                    const end = $to.end(depth);
+                    set = set.remove(set.find(start, end));
+                    const newDecos: Decoration[] = [];
+                    const parentNode = $from.node(depth);
+                    parentNode.descendants((child: any, childPos: number) => {
+                      const absPos = start + childPos;
+                      collectSpellCheckDecorationsForNode(child, absPos, newDecos);
+                    });
+                    if (newDecos.length > 0) {
+                      set = set.add(tr.doc, newDecos);
+                    }
                   }
                 });
               }
               return set;
             } catch {
-              return createSpellCheckDecorations(tr.doc, true);
+              return oldState.map(tr.mapping, tr.doc);
             }
           },
         },
@@ -1812,37 +1922,48 @@ export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>(
               let set = oldState.map(tr.mapping, tr.doc);
               for (const step of tr.steps) {
                 step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-                  const safeStart = Math.min(newStart, tr.doc.content.size);
-                  const safeEnd = Math.min(newEnd, tr.doc.content.size);
+                  const docSize = tr.doc.content.size;
+                  if (docSize === 0) {
+                    set = DecorationSet.empty;
+                    return;
+                  }
+                  const safeStart = Math.max(1, Math.min(newStart, docSize));
+                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
                   const $from = tr.doc.resolve(safeStart);
                   const $to = tr.doc.resolve(safeEnd);
-                  const start = $from.start();
-                  const end = $to.end();
-                  set = set.remove(set.find(start, end));
-                  const newDecos: Decoration[] = [];
-                  $from.parent.descendants((child: any, childPos: number, parent: any) => {
-                    if (child.isText) {
-                      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
-                      const hasCodeMark = child.marks && child.marks.some((m: any) => m.type.name === "code");
-                      if (!hasCodeMark) return;
-                      const text = child.text || "";
-                      if (!text.trim()) return;
-                      try {
-                        const result = lowlight.highlightAuto(text);
-                        if (result?.children?.length) {
-                          parseLowlightAst(result.children, start + childPos, newDecos, []);
-                        }
-                      } catch {}
+                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
+                  const toDepth = Math.max(0, Math.min($to.depth, 1));
+                  const depth = Math.min(fromDepth, toDepth);
+                  if (depth >= 1) {
+                    const start = $from.start(depth);
+                    const end = $to.end(depth);
+                    set = set.remove(set.find(start, end));
+                    const newDecos: Decoration[] = [];
+                    const parentNode = $from.node(depth);
+                    parentNode.descendants((child: any, childPos: number, parent: any) => {
+                      if (child.isText) {
+                        if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
+                        const hasCodeMark = child.marks && child.marks.some((m: any) => m.type.name === "code");
+                        if (!hasCodeMark) return;
+                        const text = child.text || "";
+                        if (!text.trim()) return;
+                        try {
+                          const result = lowlight.highlightAuto(text);
+                          if (result?.children?.length) {
+                            parseLowlightAst(result.children, start + childPos, newDecos, []);
+                          }
+                        } catch {}
+                      }
+                    });
+                    if (newDecos.length > 0) {
+                      set = set.add(tr.doc, newDecos);
                     }
-                  });
-                  if (newDecos.length > 0) {
-                    set = set.add(tr.doc, newDecos);
                   }
                 });
               }
               return set;
             } catch {
-              return createInlineCodeDecorations(tr.doc);
+              return oldState.map(tr.mapping, tr.doc);
             }
           },
         },
@@ -1857,7 +1978,7 @@ export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>(
 });
 
 export interface SmartTypographyOptions {
-  enabled: boolean;
+  enabled: boolean | (() => boolean);
 }
 
 function makeSmartRule(
@@ -1938,9 +2059,22 @@ export const SmartTypography = Extension.create<SmartTypographyOptions>({
     };
   },
 
+  addStorage() {
+    return {
+      enabled: true,
+    };
+  },
+
   addProseMirrorPlugins() {
     const extension = this;
-    const rules = buildSmartTypographyRules(() => Boolean(extension.options.enabled));
+    const rules = buildSmartTypographyRules(() => {
+      const opt = extension.options.enabled;
+      if (typeof opt === "function") return Boolean(opt());
+      if (typeof extension.editor?.storage?.smartTypography?.enabled === "boolean") {
+        return extension.editor.storage.smartTypography.enabled;
+      }
+      return Boolean(opt);
+    });
     return [inputRules({ rules })];
   },
 });
@@ -2032,36 +2166,40 @@ export const WrongLanguageSuggestion = Extension.create<WrongLanguageSuggestionO
         },
         props: {
           decorations(state) {
-            if (!extension.options.enabled) return DecorationSet.empty;
-            const pluginState = wrongLanguageSuggestionPluginKey.getState(state) as WrongLangPluginState | undefined;
-            if (!pluginState || !pluginState.suggestion) return DecorationSet.empty;
+            try {
+              if (!extension.options.enabled) return DecorationSet.empty;
+              const pluginState = wrongLanguageSuggestionPluginKey.getState(state) as WrongLangPluginState | undefined;
+              if (!pluginState || !pluginState.suggestion) return DecorationSet.empty;
 
-            const { to, replacement } = pluginState.suggestion;
-            const widget = Decoration.widget(
-              to,
-              () => {
-                const span = document.createElement("span");
-                span.className =
-                  "luno-ghost-suggestion select-none pointer-events-none opacity-50 dark:opacity-60 italic text-muted-foreground font-normal inline-flex items-center align-middle gap-1.5 ml-1";
-                span.dataset.ghostReplacement = replacement;
+              const { to, replacement } = pluginState.suggestion;
+              const widget = Decoration.widget(
+                to,
+                () => {
+                  const span = document.createElement("span");
+                  span.className =
+                    "luno-ghost-suggestion select-none pointer-events-none opacity-50 dark:opacity-60 italic text-muted-foreground font-normal inline-flex items-center align-middle gap-1.5 ml-1";
+                  span.dataset.ghostReplacement = replacement;
 
-                const textSpan = document.createElement("span");
-                textSpan.className = "inline-flex items-center leading-none";
-                textSpan.textContent = replacement;
-                span.appendChild(textSpan);
+                  const textSpan = document.createElement("span");
+                  textSpan.className = "inline-flex items-center leading-none";
+                  textSpan.textContent = replacement;
+                  span.appendChild(textSpan);
 
-                const kbd = document.createElement("kbd");
-                kbd.className =
-                  "not-italic text-[0.8em] leading-none px-1.5 py-1 rounded-md bg-muted border border-border/80 text-muted-foreground font-mono font-medium shadow-2xs inline-flex items-center justify-center align-middle";
-                kbd.textContent = "Tab ⇥";
-                span.appendChild(kbd);
+                  const kbd = document.createElement("kbd");
+                  kbd.className =
+                    "not-italic text-[0.8em] leading-none px-1.5 py-1 rounded-md bg-muted border border-border/80 text-muted-foreground font-mono font-medium shadow-2xs inline-flex items-center justify-center align-middle";
+                  kbd.textContent = "Tab ⇥";
+                  span.appendChild(kbd);
 
-                return span;
-              },
-              { side: 1, key: "luno-ghost-suggestion" }
-            );
+                  return span;
+                },
+                { side: 1, key: "luno-ghost-suggestion" }
+              );
 
-            return DecorationSet.create(state.doc, [widget]);
+              return DecorationSet.create(state.doc, [widget]);
+            } catch {
+              return DecorationSet.empty;
+            }
           },
         },
       }),
@@ -2981,6 +3119,7 @@ export interface EditorProps {
   onCloseRightPanel?: () => void;
   onSelectNote?: (id: string) => void;
   onOpenWebTab?: (url: string, initialTitle?: string, customDisplayUrl?: string, filePath?: string) => void;
+  onOpenSettings?: (category?: string) => void;
   onUnlockNote?: (noteId: string, pin: string) => Promise<boolean>;
   onRelockNote?: (noteId: string) => void;
   onGetActivePin?: (noteId: string) => string | undefined;
@@ -3728,13 +3867,19 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       const level = Number(h.nodeName.charAt(1)) || 1;
       const align = h.style?.textAlign || h.getAttribute("align");
       const prev = h.previousElementSibling;
+      const next = h.nextElementSibling;
       const isPrevNonEmptyBlock = prev && (
         /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
         (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
       );
+      const isNextNonEmptyBlock = next && (
+        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
+        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
+      );
       const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
+      const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
       if (align && align !== "left") {
-        return `${leadingNl}<h${level} style="text-align: ${align}">\n${content}\n</h${level}>\n\n`;
+        return `${leadingNl}<h${level} style="text-align: ${align}">\n${content}\n</h${level}>${trailingNl}`;
       }
       const prefix = "#".repeat(level);
       return `${leadingNl}${prefix} ${content}\n`;
@@ -3759,20 +3904,20 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
         /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
         (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
       );
-      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-      const rawTag = el.getAttribute("data-raw-tag");
-      if (rawTag === "div") {
-        return `${leadingNl}<div>\n    ${el.innerHTML}\n</div>\n\n`;
-      }
-      const style = el.getAttribute("style");
-      if (style) {
-        return `${leadingNl}<p style="${style}">\n${content}\n</p>\n\n`;
-      }
       const isNextNonEmptyBlock = next && (
         /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
         (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
       );
+      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
       const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
+      const rawTag = el.getAttribute("data-raw-tag");
+      if (rawTag === "div") {
+        return `${leadingNl}<div>\n    ${el.innerHTML}\n</div>${trailingNl}`;
+      }
+      const style = el.getAttribute("style");
+      if (style) {
+        return `${leadingNl}<p style="${style}">\n${content}\n</p>${trailingNl}`;
+      }
       return `${leadingNl}${content}${trailingNl}`;
     },
   });
@@ -4447,11 +4592,20 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
     },
   });
 
-  // Suppress individual taskItem processing – handled wholesale by taskList rule below
+  // Serialize individual taskItem if standalone (or suppress if handled by taskList parent)
   td.addRule("taskItem", {
     filter: (node: HTMLElement) =>
       node.nodeName === "LI" && node.getAttribute("data-type") === "taskItem",
-    replacement: () => "",
+    replacement: (content: string, node: TurndownService.Node) => {
+      const li = node as HTMLElement;
+      if (li.closest('ul[data-type="taskList"]')) {
+        return "";
+      }
+      const checked = li.getAttribute("data-checked") === "true" ? "x" : " ";
+      const contentDiv = li.querySelector("div");
+      const text = (contentDiv ? contentDiv.textContent?.trim() : "") || content.trim() || li.textContent?.trim() || "";
+      return `- [${checked}] ${text}\n`;
+    },
   });
 
   // Convert Tiptap's <ul data-type="taskList"> to markdown checkboxes
@@ -4460,10 +4614,14 @@ export function createTurndownService(assetBlobUrlMap?: Map<string, string>): Tu
       node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
     replacement: (_content: string, node: TurndownService.Node) => {
       const ul = node as HTMLElement;
-      const items = Array.from(ul.querySelectorAll('li[data-type="taskItem"]')).map((li) => {
-        const checked = (li as HTMLElement).getAttribute("data-checked") === "true" ? "x" : " ";
+      const directItems = Array.from(ul.children).filter(
+        (el) => el.nodeName === "LI" && el.getAttribute("data-type") === "taskItem"
+      ) as HTMLElement[];
+      const itemsToUse = directItems.length > 0 ? directItems : (Array.from(ul.querySelectorAll('li[data-type="taskItem"]')) as HTMLElement[]);
+      const items = itemsToUse.map((li) => {
+        const checked = li.getAttribute("data-checked") === "true" ? "x" : " ";
         const contentDiv = li.querySelector("div");
-        const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : "";
+        const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : li.textContent?.trim() ?? "";
         return `- [${checked}] ${text}`;
       });
       return "\n" + items.join("\n") + "\n";
@@ -4575,7 +4733,7 @@ export function navigateFootnoteOrAnchor(clickedEl: HTMLElement, container: HTML
 }
 
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
-  const { note, isVisible = true, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
+  const { note, isVisible = true, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onOpenSettings, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
 
   const { settings, updateSetting, resetSettings, keyboardLanguage, toggleKeyboardLanguage } = useAppSettings();
 
@@ -5035,6 +5193,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const editorActiveNoteIdRef = useRef<string | null>(isNoteCurrentlyLocked ? null : (note?.id ?? null));
   const activeNoteRef = useRef<Note | null>(isNoteCurrentlyLocked ? null : (note ?? null));
   const fileHandleByNoteIdRef = useRef<Record<string, FileSystemFileHandle>>({});
+  const internalH1RenameRef = useRef<string | null>(null);
   const deletedNoteIdsRef = useRef<Set<string>>(new Set());
   const editorSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
@@ -5208,6 +5367,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const MOBILE_FULL_TOOLBAR_MIN_WIDTH = 340;
   const assetBlobUrlMap = useRef<Map<string, string>>(new Map());
 
+  // Revoke all blob URLs created in this editor session when unmounting
+  useEffect(() => {
+    const map = assetBlobUrlMap.current;
+    return () => {
+      for (const [, val] of map.entries()) {
+        if (typeof val === "string" && val.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(val);
+          } catch {}
+        }
+      }
+      map.clear();
+    };
+  }, []);
+
   const turndown = useMemo(() => {
     return createTurndownService(assetBlobUrlMap.current);
   }, []);
@@ -5368,18 +5542,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (blob.type !== "image/png") {
         const img = new window.Image();
         const url = URL.createObjectURL(blob);
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-          img.src = url;
-        });
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-        pngBlob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b || blob), "image/png"));
+        try {
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = url;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0);
+          pngBlob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b || blob), "image/png"));
+        } finally {
+          URL.revokeObjectURL(url);
+        }
       }
       await navigator.clipboard.write([
         new ClipboardItem({ "image/png": pngBlob })
@@ -5479,6 +5656,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (pendingRenameRef.current) {
       const { note: targetNote, firstH1Text, newFileName } = pendingRenameRef.current;
       pendingRenameRef.current = null;
+      internalH1RenameRef.current = firstH1Text;
       if (firstH1Text === "") {
         onUpdate(targetNote.id, { title: "" });
       } else if (newFileName && onRenameFile) {
@@ -5493,7 +5671,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [onUpdate, onRenameFile]);
 
   const escHtml = (s: string): string => {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    if (typeof s !== "string") return "";
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   };
 
   /** Detect if a string is a Tiptap JSON document */
@@ -5508,7 +5687,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     readingMode: boolean = isReadingMode
   ): string | Record<string, unknown> => {
     if (isHtml) {
-      return typeof text === "string" ? text : "";
+      return typeof text === "string" ? sanitizeHtml(text) : "";
     }
     if (typeof text !== "string") {
       return isTxt ? "<p></p>" : (baseTitle ? `<h1>${escHtml(baseTitle)}</h1><p></p>` : "<h1></h1><p></p>");
@@ -5830,12 +6009,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const [editorTick, setEditorTick] = useState(0);
   const tickRafRef = useRef<number | null>(null);
+  const typingTickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTickTimeRef = useRef<number>(0);
-  const scheduleEditorTick = useCallback((immediate = false) => {
+  const scheduleEditorTick = useCallback((immediate = false, isTyping = false) => {
+    if (isTyping) {
+      if (typingTickTimeoutRef.current) {
+        clearTimeout(typingTickTimeoutRef.current);
+      }
+      typingTickTimeoutRef.current = setTimeout(() => {
+        typingTickTimeoutRef.current = null;
+        lastTickTimeRef.current = Date.now();
+        setEditorTick((v) => (v + 1) % 1000000);
+      }, 250);
+      return;
+    }
+
+    if (typingTickTimeoutRef.current !== null) {
+      return;
+    }
+
     if (tickRafRef.current !== null) return;
     const now = Date.now();
     const elapsed = now - lastTickTimeRef.current;
-    const interval = immediate ? 150 : 600;
+    const interval = immediate ? 100 : 500;
     if (elapsed >= interval) {
       lastTickTimeRef.current = now;
       tickRafRef.current = window.setTimeout(() => {
@@ -6089,15 +6285,51 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }, [onUpdate, serializeEditorContent, isHtmlFile, isCssFile]);
 
+  const ensureCursorVisible = useCallback((ed?: TiptapEditor | null) => {
+    const activeEditor = ed || editorInstanceRef.current;
+    if (!activeEditor || activeEditor.isDestroyed || !editorScrollContainerRef.current) return;
+    const container = editorScrollContainerRef.current;
+    try {
+      const { selection } = activeEditor.state;
+      const coords = activeEditor.view.coordsAtPos(selection.head);
+      if (!coords) return;
+      const containerRect = container.getBoundingClientRect();
+      const PADDING_BOTTOM = 60;
+      const PADDING_TOP = 20;
+
+      if (coords.bottom + PADDING_BOTTOM > containerRect.bottom) {
+        const diff = coords.bottom + PADDING_BOTTOM - containerRect.bottom;
+        container.scrollTop += diff;
+      } else if (coords.top - PADDING_TOP < containerRect.top) {
+        const diff = containerRect.top - (coords.top - PADDING_TOP);
+        container.scrollTop = Math.max(0, container.scrollTop - diff);
+      }
+    } catch {
+      // Ignore coordinate resolution errors during fast structural node replacements
+    }
+  }, []);
+
+  const cursorScrollRafRef = useRef<number | null>(null);
+  const scheduleEnsureCursorVisible = useCallback((instance: TiptapEditor) => {
+    if (cursorScrollRafRef.current !== null) return;
+    cursorScrollRafRef.current = requestAnimationFrame(() => {
+      cursorScrollRafRef.current = null;
+      ensureCursorVisible(instance);
+    });
+  }, [ensureCursorVisible]);
+
   const navigateFootnoteOrAnchorHandler = useCallback((clickedEl: HTMLElement, container: HTMLElement | null): boolean => {
     return navigateFootnoteOrAnchor(clickedEl, container || editorScrollContainerRef.current);
   }, []);
 
   const editor = useEditor({
+    shouldRerenderOnTransaction: false,
     extensions: [
       StarterKit.configure({
         codeBlock: false,
         paragraph: false,
+        link: false,
+        underline: false,
         dropcursor: {
           color: "hsl(var(--border))",
           width: 1,
@@ -6140,7 +6372,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         enabled: settings.highlightInlineCode === true,
       }),
       SmartTypography.configure({
-        enabled: settings.smartTypography !== false,
+        enabled: () => settingsRef.current?.smartTypography !== false,
       }),
       Underline,
       Highlight,
@@ -6198,6 +6430,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
       IndentKeymap,
       Link.extend({
+        addOptions() {
+          return {
+            ...this.parent?.(),
+            openOnClick: false,
+            autolink: true,
+            protocols: ["wikilink"],
+            shouldAutoLink: (url: string) => {
+              if (settingsRef.current?.smartTypography === false) {
+                return false;
+              }
+              if (!url) return false;
+              const hasProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(url);
+              const hasMaybeProtocol = /^[a-z][a-z0-9+.-]*:/i.test(url);
+              if (hasProtocol || (hasMaybeProtocol && !url.includes("@"))) {
+                return true;
+              }
+              const urlWithoutUserinfo = url.includes("@") ? url.split("@").pop()! : url;
+              const hostname = urlWithoutUserinfo.split(/[/?#:]/)[0];
+              if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+                return false;
+              }
+              if (!/\./.test(hostname)) {
+                return false;
+              }
+              return true;
+            },
+          };
+        },
         addAttributes() {
           return {
             ...this.parent?.(),
@@ -6255,11 +6515,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         },
       }).configure({
         openOnClick: false,
-        autolink: settings.smartTypography !== false,
+        autolink: true,
         protocols: ["wikilink"],
-        validate: () => true,
         isAllowedUri: (url, ctx) => {
           if (!url) return false;
+          const trimmed = url.trim().toLowerCase();
+          if (
+            trimmed.startsWith("javascript:") ||
+            trimmed.startsWith("vbscript:") ||
+            trimmed.startsWith("data:") ||
+            trimmed.startsWith("file:")
+          ) {
+            return false;
+          }
           if (url.startsWith("wikilink:") || url.startsWith("#")) return true;
           return ctx.defaultValidate(url);
         },
@@ -6460,8 +6728,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       preserveWhitespace: "full",
     },
     editorProps: {
+      transformPastedHTML: (html: string) => sanitizeHtml(html),
       attributes: {
         spellcheck: "false",
+        lang: settings.language || "en",
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
         class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
           settings.accentHeadings
@@ -6530,6 +6800,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           } else {
             window.open(href, "_blank", "noopener,noreferrer");
           }
+          return true;
+        }
+
+        if (target.tagName === "A" || target.closest("a")) {
+          event.preventDefault();
+          event.stopPropagation();
           return true;
         }
 
@@ -6808,6 +7084,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     },
     onBlur: () => {
+      if (typingTickTimeoutRef.current) {
+        clearTimeout(typingTickTimeoutRef.current);
+        typingTickTimeoutRef.current = null;
+        setEditorTick((v) => (v + 1) % 1000000);
+      }
       const currentActiveId = editorActiveNoteIdRef.current;
       const currentNote = activeNoteRef.current;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
@@ -6819,9 +7100,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         flushDebouncedContentSave(currentNote);
       }
     },
-    onSelectionUpdate: ({ editor: instance }) => {
+    onSelectionUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
-      scheduleEditorTick(true);
+      const isTyping = Boolean(transaction?.docChanged);
+      scheduleEditorTick(!isTyping, isTyping);
       const currentActiveId = editorActiveNoteIdRef.current;
       const currentNote = activeNoteRef.current;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
@@ -6835,7 +7117,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
-      scheduleEditorTick(false);
+      const isTyping = Boolean(transaction?.docChanged && !transaction.getMeta("isSync"));
+      if (isTyping) {
+        scheduleEnsureCursorVisible(instance);
+      }
+      scheduleEditorTick(false, isTyping);
       scheduleCountUpdate();
       const currentActiveId = editorActiveNoteIdRef.current;
       const currentNote = activeNoteRef.current || note;
@@ -6877,7 +7163,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               debounceRenameTimeoutRef.current = setTimeout(() => {
                 debounceRenameTimeoutRef.current = null;
                 flushPendingRename();
-              }, 800);
+              }, 1500);
             }
           } else {
             pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
@@ -6912,7 +7198,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           pendingSaveContentRef.current = null;
           setLastEditedTime(Date.now());
           onUpdate(currentNote.id, { content: savedContent });
-          userEditedRef.current = false;
+          if (!instance.isFocused) {
+            userEditedRef.current = false;
+          }
 
           // Throttled and debounced automatic version snapshot on typing idle (10s)
           if (debouncedVersionSnapshotTimeoutRef.current) {
@@ -6941,7 +7229,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
       }, 1000);
     },
-  });
+  }, ["luno-editor-instance"]);
 
   editorInstanceRef.current = editor;
 
@@ -7090,14 +7378,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     THAI_STRUCTURAL_ANOMALY_REGEX.lastIndex = 0;
     let anomalyMatch: RegExpExecArray | null;
     while ((anomalyMatch = THAI_STRUCTURAL_ANOMALY_REGEX.exec(parentText)) !== null) {
-      const start = anomalyMatch.index;
-      const end = anomalyMatch.index + anomalyMatch[0].length;
+      const expanded = expandThaiAnomalyCluster(parentText, anomalyMatch.index, anomalyMatch.index + anomalyMatch[0].length);
+      const start = expanded ? expanded.start : anomalyMatch.index;
+      const end = expanded ? expanded.end : anomalyMatch.index + anomalyMatch[0].length;
       if (offsetInParent >= start - 1 && offsetInParent <= end + 1) {
-        const anomaly = anomalyMatch[0];
-        const suggestions = getSpellingSuggestions(anomaly);
+        const clusterText = parentText.slice(start, end);
+        const suggestions = getSpellingSuggestions(clusterText);
         if (suggestions.length > 0) {
           setContextSpellData({
-            word: anomaly,
+            word: clusterText,
             suggestions,
             from: parentStartPos + start,
             to: parentStartPos + end,
@@ -7200,12 +7489,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       };
     }
 
-    const { selection, doc } = editor.state;
-    const pos = selection.$from.pos;
-    const textBefore = doc.textBetween(0, pos, "\n", "\n");
-    const lines = textBefore.split("\n");
-    const line = lines.length;
-    const col = (lines[lines.length - 1]?.length ?? 0) + 1;
+    const { selection } = editor.state;
+    const $from = selection.$from;
+    const currentBlockText = $from.parent.textBetween(0, $from.parentOffset, " ", " ");
+    const subLines = currentBlockText.split("\n");
+    const col = (subLines[subLines.length - 1]?.length ?? 0) + 1;
+    const line = $from.index(0) + subLines.length;
 
     return {
       line,
@@ -7331,7 +7620,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         pre.setAttribute("data-line-numbers", lineNumbersStr);
       }
     });
-  }, [editor, editorTick, settings.showCodeLineNumbers, note?.content]);
+  }, [editor, editorTick, settings.showCodeLineNumbers, note?.id]);
 
   // Dynamically update Hashtag badges when theme or tagColorStyle changes in settings
   useEffect(() => {
@@ -7351,13 +7640,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     try {
-      const linkExt = editor.extensionManager.extensions.find((e) => e.name === "link");
-      if (linkExt) {
-        linkExt.options.autolink = settings.smartTypography !== false;
-      }
-      const typoExt = editor.extensionManager.extensions.find((e) => e.name === "smartTypography");
-      if (typoExt) {
-        typoExt.options.enabled = settings.smartTypography !== false;
+      if (editor.storage?.smartTypography) {
+        editor.storage.smartTypography.enabled = settings.smartTypography !== false;
       }
     } catch {}
   }, [editor, settings.smartTypography]);
@@ -7686,16 +7970,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const firstChild = editor.state.doc.firstChild;
         if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
           const currentH1 = (firstChild.textContent || "").trim();
-          if (baseTitle && currentH1 !== baseTitle) {
+          const isInternalRename =
+            internalH1RenameRef.current !== null &&
+            (internalH1RenameRef.current === currentH1 ||
+              internalH1RenameRef.current === baseTitle ||
+              currentH1.startsWith(internalH1RenameRef.current) ||
+              baseTitle.startsWith(internalH1RenameRef.current));
+          if (!editor.isFocused && !userEditedRef.current && !isInternalRename && baseTitle && currentH1 !== baseTitle) {
             syncingFromNote.current = true;
             const tr = editor.state.tr;
             tr.setMeta("addToHistory", false);
             tr.setMeta("isSync", true);
             const from = 1;
-            const to = 1 + firstChild.nodeSize - 2;
-            tr.replaceWith(from, to, editor.schema.text(baseTitle));
-            editor.view.dispatch(tr);
+            const to = Math.max(1, 1 + firstChild.nodeSize - 2);
+            if (from <= to) {
+              tr.replaceWith(from, to, editor.schema.text(baseTitle));
+              editor.view.dispatch(tr);
+            }
             syncingFromNote.current = false;
+          }
+          if (internalH1RenameRef.current !== null && (baseTitle === internalH1RenameRef.current || currentH1 === internalH1RenameRef.current)) {
+            internalH1RenameRef.current = null;
           }
         }
       }
@@ -7879,10 +8174,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = false;
     loadingNoteIdRef.current = null;
     restoreScrollPosition(note.id);
-  }, [editor, note?.id, note?.content, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note, isVisible]);
+  }, [editor, note?.id, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, isVisible]);
 
+  // Save active note state on unmount or switching note, and flush pending saves
   useEffect(() => {
     return () => {
+      if (typingTickTimeoutRef.current) {
+        clearTimeout(typingTickTimeoutRef.current);
+        typingTickTimeoutRef.current = null;
+      }
+      if (cursorScrollRafRef.current !== null) {
+        cancelAnimationFrame(cursorScrollRafRef.current);
+        cursorScrollRafRef.current = null;
+      }
       if (debouncedContentSaveTimeoutRef.current) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
         debouncedContentSaveTimeoutRef.current = null;
@@ -7895,7 +8199,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
         autoSaveDiskTimeoutRef.current = null;
       }
-      const target = activeNoteRef.current || note;
+      const target = activeNoteRef.current || noteRef.current;
+      if (target?.id && !closedNoteIds.has(target.id)) {
+        if (editor && !editor.isDestroyed && !isReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target)) {
+          noteEditorStateMap.set(target.id, editor.state);
+        }
+        if (editorScrollContainerRef.current && !isHtmlFile(target) && !isCssFile(target)) {
+          const container = editorScrollContainerRef.current;
+          if (container.scrollTop > 0) {
+            setNoteScrollPosition(target.id, container.scrollTop);
+          }
+        }
+      }
       if (userEditedRef.current && target) {
         flushDebouncedContentSave(target);
       } else if (pendingSaveContentRef.current) {
@@ -7911,43 +8226,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       hasPendingDiskSaveRef.current = false;
     };
-  }, [note?.id, onUpdate, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
-
-  // Save active note state on unmount & flush pending save
-  useEffect(() => {
-    return () => {
-      const target = activeNoteRef.current || note;
-      if (target?.id && !closedNoteIds.has(target.id)) {
-        if (editor && !editor.isDestroyed && !isReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target)) {
-          noteEditorStateMap.set(target.id, editor.state);
-        }
-        if (editorScrollContainerRef.current && !isHtmlFile(target) && !isCssFile(target)) {
-          const container = editorScrollContainerRef.current;
-          if (container.scrollTop > 0) {
-            setNoteScrollPosition(target.id, container.scrollTop);
-          }
-        }
-      }
-      if (debouncedContentSaveTimeoutRef.current) {
-        clearTimeout(debouncedContentSaveTimeoutRef.current);
-        debouncedContentSaveTimeoutRef.current = null;
-      }
-      if (debouncedVersionSnapshotTimeoutRef.current) {
-        clearTimeout(debouncedVersionSnapshotTimeoutRef.current);
-        debouncedVersionSnapshotTimeoutRef.current = null;
-      }
-      if (autoSaveDiskTimeoutRef.current) {
-        clearTimeout(autoSaveDiskTimeoutRef.current);
-        autoSaveDiskTimeoutRef.current = null;
-      }
-      if (userEditedRef.current && target) {
-        flushDebouncedContentSave(target);
-      }
-      if (hasPendingDiskSaveRef.current && target && settings.autoSave) {
-        void saveLinkedFileToDisk(target);
-      }
-    };
-  }, [editor, onUpdate, note?.id, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, note]);
+  }, [editor, onUpdate, note?.id, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
 
   useEffect(() => {
     if (!editor) return;
@@ -7956,6 +8235,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         preserveWhitespace: "full",
       },
       editorProps: {
+        transformPastedHTML: (html: string) => sanitizeHtml(html),
         attributes: {
           style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
           class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
@@ -7964,26 +8244,32 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
           }`,
           spellcheck: "false",
+          lang: settings.language || "en",
         },
       },
     });
     if (editor?.view?.dom) {
       editor.view.dom.setAttribute("spellcheck", "false");
+      editor.view.dom.setAttribute("lang", settings.language || "en");
     }
-  }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode]);
+  }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode, settings.language]);
 
   const prevReadingModeRef = useRef(isReadingMode);
   useEffect(() => {
     isReadingModeRef.current = isReadingMode;
     if (!editor || editor.isDestroyed) return;
     if (prevReadingModeRef.current === isReadingMode) {
-      editor.setEditable(!isReadingMode);
+      if (editor.isEditable !== !isReadingMode) {
+        editor.setEditable(!isReadingMode);
+      }
       return;
     }
     const enteringReadingMode = isReadingMode;
     prevReadingModeRef.current = isReadingMode;
     if (!note) {
-      editor.setEditable(!isReadingMode);
+      if (editor.isEditable !== !isReadingMode) {
+        editor.setEditable(!isReadingMode);
+      }
       return;
     }
 
@@ -8069,7 +8355,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (typeof prevScroll === "number" && editorScrollContainerRef.current) {
       editorScrollContainerRef.current.scrollTop = prevScroll;
     }
-  }, [editor, isReadingMode, getBaseTitle, isTxtFile, isHtmlFile, note, flushDebouncedContentSave]);
+  }, [editor, isReadingMode, getBaseTitle, isTxtFile, isHtmlFile, note?.id, flushDebouncedContentSave]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -8371,12 +8657,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const normalizeUrl = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return "";
-    if (/^(https?:|mailto:|tel:|data:|\/)/i.test(trimmed)) return trimmed;
+    if (/^(javascript|vbscript):/i.test(trimmed)) return "";
+    if (/^(https?:|mailto:|tel:|\/|#)/i.test(trimmed)) return trimmed;
     return `https://${trimmed}`;
   };
 
   const insertImageToEditor = (attrs: { src: string; alt?: string; "data-relative-src"?: string; width?: number | null }): boolean => {
-    if (!editor) return false;
+    if (!editor || !attrs || !attrs.src || /^(javascript|vbscript):/i.test(attrs.src.trim())) return false;
 
     // 1. Focus editor and check selection
     if (!editor.isFocused) {
@@ -8492,7 +8779,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const insertVideoToEditor = (attrs: { src: string; title?: string; "data-relative-src"?: string; width?: number | null; textAlign?: string }): boolean => {
-    if (!editor) return false;
+    if (!editor || !attrs || !attrs.src || /^(javascript|vbscript):/i.test(attrs.src.trim())) return false;
 
     // 1. Focus editor and check selection
     if (!editor.isFocused) {
@@ -8527,12 +8814,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return true;
     };
 
-    // 2. If inside a node that only accepts inline content (heading or codeBlock)
+    // 2. If a media node (video, image, audio) is selected or selection is at top level, insert after it instead of overwriting it!
+    const selectedNode = (selection as any).node;
+    if (selectedNode && ["video", "image", "audio"].includes(selectedNode.type?.name)) {
+      try {
+        const afterPos = selection.to;
+        const success = editor.chain().focus().insertContentAt(afterPos, [
+          { type: "video", attrs },
+          { type: "paragraph" },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt after selected media node failed:", err);
+      }
+    }
+
+    // 3. If inside a node that only accepts inline content (heading or codeBlock)
     if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
       try {
         const afterPos = $from.after();
         const success = editor.chain().focus().insertContentAt(afterPos, [
           { type: "video", attrs },
+          { type: "paragraph" },
         ]).run();
         if (success) return onInsertedSuccess();
       } catch (err) {
@@ -8540,13 +8843,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    // 3. If inside an empty paragraph, replace it directly
+    // 4. If inside an empty paragraph, replace it directly and provide trailing paragraph
     if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
       try {
         const fromPos = $from.before();
         const toPos = $from.after();
         const success = editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
           { type: "video", attrs },
+          { type: "paragraph" },
         ]).run();
         if (success) return onInsertedSuccess();
       } catch (err) {
@@ -8554,7 +8858,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    // 4. Try normal setVideo first
+    // 5. Try normal setVideo first (which appends a trailing paragraph)
     try {
       const success = (editor.chain().focus() as any).setVideo(attrs).run();
       if (success) return onInsertedSuccess();
@@ -8562,32 +8866,38 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       console.warn("chain.setVideo error:", e);
     }
 
-    // 5. Try insertContent at selection
+    // 6. Try insertContent at selection
     try {
-      const success = editor.commands.insertContent({ type: "video", attrs });
+      const success = editor.commands.insertContent([
+        { type: "video", attrs },
+        { type: "paragraph" },
+      ]);
       if (success) return onInsertedSuccess();
     } catch (e) {
       console.warn("commands.insertContent error:", e);
     }
 
-    // 6. Fallback: insert after current block
+    // 7. Fallback: insert after current block
     try {
       const afterPos = $from.after();
       const success = editor.chain().focus().insertContentAt(afterPos, [
         { type: "video", attrs },
+        { type: "paragraph" },
       ]).run();
       if (success) return onInsertedSuccess();
     } catch (e) {
       console.warn("insert afterPos failed:", e);
     }
 
-    // 7. Direct ProseMirror schema transaction at top-level boundary
+    // 8. Direct ProseMirror schema transaction at top-level boundary
     try {
       const schema = editor.schema;
       const videoType = schema.nodes.video;
+      const pType = schema.nodes.paragraph;
       if (videoType) {
         const videoNode = videoType.create(attrs);
-        const nodesToInsert = [videoNode];
+        const pNode = pType ? pType.create() : null;
+        const nodesToInsert = pNode ? [videoNode, pNode] : [videoNode];
 
         let insertPos = $from.after(1);
         if (typeof insertPos !== "number" || insertPos > editor.state.doc.content.size || insertPos < 0) {
@@ -8601,11 +8911,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       console.warn("Direct ProseMirror transaction failed:", e);
     }
 
-    // 8. Ultimate fallback: insert at end of document
+    // 9. Ultimate fallback: insert at end of document
     try {
       const docEnd = editor.state.doc.content.size;
       const success = editor.commands.insertContentAt(docEnd, [
         { type: "video", attrs },
+        { type: "paragraph" },
       ]);
       return success ? onInsertedSuccess() : false;
     } catch (err) {
@@ -8615,7 +8926,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const insertAudioToEditor = (attrs: { src: string; title?: string; "data-relative-src"?: string }): boolean => {
-    if (!editor) return false;
+    if (!editor || !attrs || !attrs.src || /^(javascript|vbscript):/i.test(attrs.src.trim())) return false;
 
     // 1. Focus editor and check selection
     if (!editor.isFocused) {
@@ -8650,12 +8961,28 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return true;
     };
 
-    // 2. If inside a node that only accepts inline content (heading or codeBlock)
+    // 2. If a media node is selected or selection is at top level, insert after it instead of overwriting it!
+    const selectedNode = (selection as any).node;
+    if (selectedNode && ["video", "image", "audio"].includes(selectedNode.type?.name)) {
+      try {
+        const afterPos = selection.to;
+        const success = editor.chain().focus().insertContentAt(afterPos, [
+          { type: "audio", attrs },
+          { type: "paragraph" },
+        ]).run();
+        if (success) return onInsertedSuccess();
+      } catch (err) {
+        console.warn("insertContentAt after selected media node failed:", err);
+      }
+    }
+
+    // 3. If inside a node that only accepts inline content (heading or codeBlock)
     if (parentNode.type.name === "heading" || parentNode.type.name === "codeBlock") {
       try {
         const afterPos = $from.after();
         const success = editor.chain().focus().insertContentAt(afterPos, [
           { type: "audio", attrs },
+          { type: "paragraph" },
         ]).run();
         if (success) return onInsertedSuccess();
       } catch (err) {
@@ -8663,13 +8990,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    // 3. If inside an empty paragraph, replace it directly
+    // 4. If inside an empty paragraph, replace it directly
     if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
       try {
         const fromPos = $from.before();
         const toPos = $from.after();
         const success = editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
           { type: "audio", attrs },
+          { type: "paragraph" },
         ]).run();
         if (success) return onInsertedSuccess();
       } catch (err) {
@@ -8677,7 +9005,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
 
-    // 4. Try normal setAudio first
+    // 5. Try normal setAudio first
     try {
       const success = (editor.chain().focus() as any).setAudio(attrs).run();
       if (success) return onInsertedSuccess();
@@ -8685,21 +9013,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       console.warn("chain.setAudio error:", e);
     }
 
-    // 5. Try insertContent at selection
+    // 6. Try insertContent at selection
     try {
-      const success = editor.commands.insertContent({ type: "audio", attrs });
+      const success = editor.commands.insertContent([
+        { type: "audio", attrs },
+        { type: "paragraph" },
+      ]);
       if (success) return onInsertedSuccess();
     } catch (e) {
       console.warn("insertContent audio error:", e);
     }
 
-    // 6. Direct ProseMirror schema transaction at top-level boundary
+    // 7. Direct ProseMirror schema transaction at top-level boundary
     try {
       const schema = editor.schema;
       const audioType = schema.nodes.audio;
+      const pType = schema.nodes.paragraph;
       if (audioType) {
         const audioNode = audioType.create(attrs);
-        const nodesToInsert = [audioNode];
+        const pNode = pType ? pType.create() : null;
+        const nodesToInsert = pNode ? [audioNode, pNode] : [audioNode];
 
         let insertPos = $from.after(1);
         if (typeof insertPos !== "number" || insertPos > editor.state.doc.content.size || insertPos < 0) {
@@ -8713,11 +9046,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       console.warn("Direct ProseMirror transaction audio failed:", e);
     }
 
-    // 7. Ultimate fallback: insert at end of document
+    // 8. Ultimate fallback: insert at end of document
     try {
       const docEnd = editor.state.doc.content.size;
       const success = editor.commands.insertContentAt(docEnd, [
         { type: "audio", attrs },
+        { type: "paragraph" },
       ]);
       return success ? onInsertedSuccess() : false;
     } catch (err) {
@@ -8735,13 +9069,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } = editor.state.selection;
 
     if (empty) {
-      showUiAlert(t("editor.selectTextToFix"));
+      toast({
+        title: t("editor.fixLanguage") || "Fix language",
+        description: t("editor.selectTextToFix") || "Select text before fixing language.",
+      });
       return;
     }
 
     const selectedText = editor.state.doc.textBetween(from, to, "\n", "\n");
     if (!selectedText.trim()) {
-      showUiAlert(t("editor.selectTextToFix"));
+      toast({
+        title: t("editor.fixLanguage") || "Fix language",
+        description: t("editor.selectTextToFix") || "Select text before fixing language.",
+      });
       return;
     }
 
@@ -8755,13 +9095,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   // AI Assistant states & handlers
-  const [aiApiKeyModalOpen, setAiApiKeyModalOpen] = useState(false);
-  const [aiResultModalOpen, setAiResultModalOpen] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiOutputText, setAiOutputText] = useState("");
-  const [aiActionPending, setAiActionPending] = useState<AiActionType | null>(null);
-  const [aiErrorMsg, setAiErrorMsg] = useState("");
-  const [aiKeyInputValue, setAiKeyInputValue] = useState("");
   interface AiDiffState {
     from: number;
     to: number;
@@ -8777,12 +9112,119 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setAiDiffState(null);
   }, [note?.id]);
 
+  const handleOpenAiSettings = useCallback(() => {
+    toast({
+      title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
+      description: t("lunoAi.apiKeyRequired") || "Please set up your Gemini API key in Settings.",
+    });
+    if (onOpenSettings) {
+      onOpenSettings("ai");
+    } else {
+      window.dispatchEvent(new CustomEvent("luno:open-settings", { detail: { category: "ai" } }));
+    }
+  }, [onOpenSettings, t]);
+
+  const getSelectionMarkdown = useCallback((from: number, to: number): string => {
+    if (!editor) return "";
+    try {
+      const slice = editor.state.doc.slice(from, to);
+      const fragment = DOMSerializer.fromSchema(editor.schema).serializeFragment(slice.content);
+      const temp = document.createElement("div");
+      temp.appendChild(fragment);
+
+      migrateDomTaskLists(temp);
+      const orphanTaskItems = Array.from(temp.querySelectorAll('li[data-type="taskItem"]')).filter(
+        (li) => !li.closest('ul[data-type="taskList"]')
+      );
+      if (orphanTaskItems.length > 0) {
+        const ul = document.createElement("ul");
+        ul.setAttribute("data-type", "taskList");
+        orphanTaskItems[0].parentNode?.insertBefore(ul, orphanTaskItems[0]);
+        orphanTaskItems.forEach((li) => ul.appendChild(li));
+      }
+
+      const md = turndown.turndown(temp.innerHTML).trim();
+      if (md) return md;
+    } catch (e) {
+      console.warn("Failed to get markdown slice", e);
+    }
+    return editor.state.doc.textBetween(from, to, "\n", "\n");
+  }, [editor, turndown]);
+
+  const getFullEditorMarkdown = useCallback((): string => {
+    if (!editor) return "";
+    if (isTxtFile(note)) {
+      return (editor.getText() || "").trim();
+    }
+    try {
+      const temp = document.createElement("div");
+      temp.innerHTML = editor.getHTML();
+      // Strip reading-mode footnote section, items, and separator if any are present in the DOM
+      temp.querySelectorAll("section.footnotes, [data-footnotes], hr.footnotes-sep").forEach((el) => el.remove());
+      temp.querySelectorAll(".footnote-item, [data-footnote-id], [data-footnote-target]").forEach((el) => {
+        const block = el.closest("li, ol, ul, section, p") || el;
+        block.remove();
+      });
+      temp.querySelectorAll("a[href*='#fnref-'], [data-footnote-backref]").forEach((el) => {
+        const li = el.closest("li");
+        if (li) {
+          const ol = li.closest("ol, ul");
+          li.remove();
+          if (ol && !ol.textContent?.trim()) ol.remove();
+        }
+      });
+      const firstChild = temp.firstElementChild;
+      if (firstChild && firstChild.tagName.toLowerCase() === "h1") {
+        firstChild.remove();
+      }
+      const md = normalizeSerializedMarkdown(turndown.turndown(temp.innerHTML)).trim();
+      if (md) return md;
+    } catch (e) {
+      console.warn("Failed to get full editor markdown", e);
+    }
+    return (editor.getText() || "").trim();
+  }, [editor, isTxtFile, note, turndown]);
+
   const handleAcceptDiff = useCallback(() => {
     if (!editor || !aiDiffState) return;
     const { from, to, proposedText } = aiDiffState;
-    editor.chain().focus().insertContentAt({ from, to }, proposedText).run();
+    const docSize = editor.state.doc.content.size;
+    const safeTo = Math.min(to, docSize);
+    const safeFrom = Math.min(from, safeTo);
+
+    const isWholeDoc = safeFrom === 0 && safeTo === docSize;
+    if (isWholeDoc) {
+      const isTxt = isTxtFile(note);
+      const isHtml = isHtmlFile(note);
+      const baseTitle = getBaseTitle(note);
+      const parsed = parseEditorContent(proposedText, baseTitle, isTxt, isHtml);
+      editor.commands.setContent(parsed, true);
+    } else {
+      const isRich =
+        proposedText.includes("\n") ||
+        /(?:[ \t]*(?:[-*+]|\d+\.)?[ \t]*\[[ xX]\]|[ \t]*[-*+]\s|[ \t]*\d+\.\s|#{1,6}\s|>\s|```|\|)/.test(proposedText) ||
+        /(\*\*|__|\*|_|~~|==|`|<[a-z][\s\S]*>)/i.test(proposedText);
+
+      if (isRich) {
+        let html = toEditorHtml(proposedText, isTxtFile(note), false);
+        const trimmed = html.trim();
+        // If proposedText has no newlines and html is wrapped in a single <p>...</p>,
+        // unwrap <p> so inline HTML/spans can replace inline selections without inserting block breaks
+        if (
+          !proposedText.includes("\n") &&
+          trimmed.startsWith("<p>") &&
+          trimmed.endsWith("</p>") &&
+          !/<(?:p|div|ul|ol|li|h[1-6]|blockquote|pre|table)[\s>]/i.test(trimmed.slice(3, -4))
+        ) {
+          html = trimmed.slice(3, -4);
+        }
+        editor.chain().focus().insertContentAt({ from: safeFrom, to: safeTo }, html).run();
+      } else {
+        editor.chain().focus().insertContentAt({ from: safeFrom, to: safeTo }, proposedText).run();
+      }
+    }
     setAiDiffState(null);
-  }, [editor, aiDiffState]);
+  }, [editor, aiDiffState, note, isTxtFile, isHtmlFile, getBaseTitle, parseEditorContent, toEditorHtml]);
 
   const handleRejectDiff = useCallback(() => {
     setAiDiffState(null);
@@ -8791,18 +9233,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleInsertBelowDiff = useCallback(() => {
     if (!editor || !aiDiffState) return;
     const { to, proposedText } = aiDiffState;
-    editor.chain().focus().insertContentAt(to, `\n\n${proposedText}`).run();
+    const docSize = editor.state.doc.content.size;
+    const safeTo = Math.min(to, docSize);
+    const isRich =
+      proposedText.includes("\n") ||
+      /(?:[ \t]*(?:[-*+]|\d+\.)?[ \t]*\[[ xX]\]|[ \t]*[-*+]\s|[ \t]*\d+\.\s|#{1,6}\s|>\s|```|\|)/.test(proposedText) ||
+      /(\*\*|__|\*|_|~~|==|`|<[a-z][\s\S]*>)/i.test(proposedText);
+
+    if (isRich) {
+      const html = toEditorHtml(proposedText, isTxtFile(note), false);
+      editor.chain().focus().insertContentAt(safeTo, html).run();
+    } else {
+      editor.chain().focus().insertContentAt(safeTo, `\n\n${proposedText}`).run();
+    }
     setAiDiffState(null);
-  }, [editor, aiDiffState]);
+  }, [editor, aiDiffState, note, isTxtFile, toEditorHtml]);
 
   const handleAiAction = async (action: AiActionType) => {
     if (!editor) return;
 
     if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
-      setAiActionPending(action);
-      setAiKeyInputValue("");
-      setAiErrorMsg("");
-      setAiApiKeyModalOpen(true);
+      handleOpenAiSettings();
       return;
     }
 
@@ -8812,19 +9263,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let selectionTo = to;
 
     if (from !== to) {
-      targetText = editor.state.doc.textBetween(from, to, " ");
+      targetText = getSelectionMarkdown(from, to);
     } else {
-      const currentNode = editor.state.selection.$from.parent;
-      const nodeText = currentNode?.textContent || "";
-      if (currentNode && nodeText.trim()) {
-        targetText = nodeText.trim();
-        selectionFrom = editor.state.selection.$from.start();
-        selectionTo = editor.state.selection.$from.end();
-      } else {
-        targetText = (editor.getText() || "").trim();
-        selectionFrom = 0;
-        selectionTo = editor.state.doc.content.size;
-      }
+      targetText = getFullEditorMarkdown();
+      selectionFrom = 0;
+      selectionTo = editor.state.doc.content.size;
     }
 
     const trimmedTargetText = targetText.trim();
@@ -8835,7 +9278,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     setAiGenerating(true);
-    setAiErrorMsg("");
 
     try {
       const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText, lang, settings.aiModel);
@@ -8852,30 +9294,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Gemini API Key") || msg.includes("API key")) {
-        setAiActionPending(action);
-        setAiErrorMsg(msg);
-        setAiKeyInputValue(settings.geminiApiKey);
-        setAiApiKeyModalOpen(true);
+      if (msg.includes("Gemini API Key") || msg.includes("API key") || msg.includes("API_KEY")) {
+        handleOpenAiSettings();
       } else {
         showUiAlert(`เกิดข้อผิดพลาด AI: ${msg}`);
       }
     } finally {
       setAiGenerating(false);
-    }
-  };
-
-  const handleSaveApiKeyFromModal = () => {
-    const trimmed = aiKeyInputValue.trim();
-    if (!trimmed) return;
-    updateSetting("geminiApiKey", trimmed);
-    setAiApiKeyModalOpen(false);
-    if (aiActionPending) {
-      const actionToRun = aiActionPending;
-      setAiActionPending(null);
-      setTimeout(() => {
-        handleAiAction(actionToRun);
-      }, 100);
     }
   };
 
@@ -9204,6 +9629,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     processAndInsertAudioFileRef.current = processAndInsertAudioFile;
   });
 
+  useEffect(() => {
+    const handleTriggerAiEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ action?: AiActionType }>;
+      handleAiActionRef.current?.(customEvent.detail?.action || "improve");
+    };
+    window.addEventListener("luno:trigger-ai-action", handleTriggerAiEvent);
+    return () => {
+      window.removeEventListener("luno:trigger-ai-action", handleTriggerAiEvent);
+    };
+  }, []);
+
   const handleApplyImageUrl = () => {
     const nextUrl = normalizeUrl(imageUrl);
     if (!nextUrl) {
@@ -9212,7 +9648,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     try {
-      new URL(nextUrl, window.location.origin);
+      const parsed = new URL(nextUrl, window.location.origin);
+      if (!["http:", "https:", "data:", "blob:"].includes(parsed.protocol)) {
+        throw new Error("Invalid protocol");
+      }
     } catch {
       showUiAlert(t("editor.invalidImageUrl"));
       return;
@@ -9231,7 +9670,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     try {
-      new URL(nextUrl, window.location.origin);
+      const parsed = new URL(nextUrl, window.location.origin);
+      if (!["http:", "https:", "data:", "blob:"].includes(parsed.protocol)) {
+        throw new Error("Invalid protocol");
+      }
     } catch {
       showUiAlert(t("editor.invalidVideoUrl") || "Please enter a valid video URL.");
       return;
@@ -9421,12 +9863,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     if (!targetFileName) {
-      if (file && file.name && file.name !== "image.png" && file.name !== "image.webp") {
+      const isGenericFileName = !file?.name || /^(image\.(png|jpe?g|webp|gif|bmp)|blob)$/i.test(file.name);
+      if (file && file.name && !isGenericFileName) {
         targetFileName = file.name;
       } else {
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, "0");
-        const timeTag = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        const activeDateFormat = settingsRef.current?.dateFormat || settings.dateFormat || "YYYY-MM-DD";
+        const dateStr = formatDateForFileName(now, activeDateFormat);
+        const timeTag = `${dateStr}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
         let ext = "png";
         if (initialDataUrl) {
           if (initialDataUrl.includes("image/jpeg") || initialDataUrl.includes("image/jpg")) ext = "jpg";
@@ -9982,6 +10427,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!trimmed) return "";
     if (trimmed.startsWith("/")) return trimmed.replace(/^\/+/, "");
 
+    // If path starts with attachments or attachment (or relative ./ ../ to them), it's anchored at workspace root
+    const cleanRel = trimmed.replace(/^(\.\/|\.\.\/)+/, "");
+    if (/^attachments?(?:\/|$)/i.test(cleanRel)) {
+      return cleanRel;
+    }
+
     const segments = `${baseFolderPath}/${trimmed}`.split("/").filter(Boolean);
     const stack: string[] = [];
 
@@ -10011,6 +10462,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       try {
         current = await current.getDirectoryHandle(segment, { create: false });
       } catch {
+        if (segment.toLowerCase() === "attachment") {
+          try {
+            current = await current.getDirectoryHandle("attachments", { create: false });
+            continue;
+          } catch {}
+        } else if (segment.toLowerCase() === "attachments") {
+          try {
+            current = await current.getDirectoryHandle("attachment", { create: false });
+            continue;
+          } catch {}
+        }
         try {
           current = await current.getFileHandle(segment, { create: false });
         } catch {
@@ -10034,10 +10496,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
-          const fullPath = `${saved.folderPath}/${resolvedRelPath}`;
+          const fullPath = `${saved.folderPath}/${resolvedRelPath}`.replace(/\\/g, "/");
           if (electronAPI.readFileBuffer) {
             try {
-              const buf = await electronAPI.readFileBuffer(fullPath);
+              let buf = await electronAPI.readFileBuffer(fullPath);
+              if (!buf) {
+                if (fullPath.includes("/attachment/")) {
+                  buf = await electronAPI.readFileBuffer(fullPath.replace("/attachment/", "/attachments/"));
+                } else if (fullPath.includes("/attachments/")) {
+                  buf = await electronAPI.readFileBuffer(fullPath.replace("/attachments/", "/attachment/"));
+                }
+              }
               if (buf && buf.byteLength > 0) {
                 const ext = resolvedRelPath.split(".").pop()?.toLowerCase() || "";
                 let mime = "application/octet-stream";
@@ -10054,8 +10523,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             } catch {}
           }
           let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
+          if (!dataUrl && electronAPI.readImageDataUrl) {
+            if (fullPath.includes("/attachment/")) {
+              dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachment/", "/attachments/"));
+            } else if (fullPath.includes("/attachments/")) {
+              dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachments/", "/attachment/"));
+            }
+          }
           if (!dataUrl && electronAPI.readFileBase64) {
-            const b64 = await electronAPI.readFileBase64(fullPath);
+            let b64 = await electronAPI.readFileBase64(fullPath);
+            if (!b64) {
+              if (fullPath.includes("/attachment/")) {
+                b64 = await electronAPI.readFileBase64(fullPath.replace("/attachment/", "/attachments/"));
+              } else if (fullPath.includes("/attachments/")) {
+                b64 = await electronAPI.readFileBase64(fullPath.replace("/attachments/", "/attachment/"));
+              }
+            }
             if (b64) {
               const ext = resolvedRelPath.split(".").pop()?.toLowerCase() || "";
               let mime = "application/octet-stream";
@@ -11044,6 +11527,30 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setActiveFileSize((note as any)?.fileSize || null);
 
     const hydrateHandle = async () => {
+      // 0. Check in-memory imageLocalCache and assetBlobUrlMap first for instant preview
+      if (isImageFile(note)) {
+        const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+        if (relPath) {
+          const altRelPath = relPath.startsWith("attachments/")
+            ? relPath.replace(/^attachments\//, "attachment/")
+            : relPath.startsWith("attachment/")
+            ? relPath.replace(/^attachment\//, "attachments/")
+            : undefined;
+
+          const cachedUrl =
+            imageLocalCache.get(relPath) ||
+            (altRelPath ? imageLocalCache.get(altRelPath) : undefined) ||
+            imageLocalCache.get(note.fileName || "") ||
+            assetBlobUrlMap.current.get(relPath) ||
+            (altRelPath ? assetBlobUrlMap.current.get(altRelPath) : undefined) ||
+            assetBlobUrlMap.current.get(note.fileName || "");
+
+          if (cachedUrl && !cancelled) {
+            setImageBlobUrl(cachedUrl);
+          }
+        }
+      }
+
       // 1. Electron Desktop Native Support
       const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
       if (electronAPI && (electronAPI.readImageDataUrl || electronAPI.readFileBase64)) {
@@ -11060,9 +11567,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (fullPath) {
             const isImg = isImageFile(note);
             if (isImg) {
-              let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
+              const normPath = fullPath.replace(/\\/g, "/");
+              let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(normPath) : null;
+              if (!dataUrl && electronAPI.readImageDataUrl) {
+                if (normPath.includes("/attachment/")) {
+                  dataUrl = await electronAPI.readImageDataUrl(normPath.replace("/attachment/", "/attachments/"));
+                } else if (normPath.includes("/attachments/")) {
+                  dataUrl = await electronAPI.readImageDataUrl(normPath.replace("/attachments/", "/attachment/"));
+                }
+              }
               if (!dataUrl && electronAPI.readFileBase64) {
-                const b64 = await electronAPI.readFileBase64(fullPath);
+                let b64 = await electronAPI.readFileBase64(normPath);
+                if (!b64) {
+                  if (normPath.includes("/attachment/")) {
+                    b64 = await electronAPI.readFileBase64(normPath.replace("/attachment/", "/attachments/"));
+                  } else if (normPath.includes("/attachments/")) {
+                    b64 = await electronAPI.readFileBase64(normPath.replace("/attachments/", "/attachment/"));
+                  }
+                }
                 if (b64) {
                   const ext = (note.fileName || "").toLowerCase();
                   const mime = ext.endsWith(".png")
@@ -11216,10 +11738,43 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           try {
             let targetDir = rootDirHandle;
             const segments = (note.folderPath ?? "").split("/").filter(Boolean);
-            for (const segment of segments) {
-              targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+            for (let i = 0; i < segments.length; i++) {
+              const segment = segments[i];
+              try {
+                targetDir = await targetDir.getDirectoryHandle(segment, { create: false });
+              } catch (segErr) {
+                if (segment.toLowerCase() === "attachment") {
+                  try {
+                    targetDir = await targetDir.getDirectoryHandle("attachments", { create: false });
+                  } catch {
+                    throw segErr;
+                  }
+                } else if (segment.toLowerCase() === "attachments") {
+                  try {
+                    targetDir = await targetDir.getDirectoryHandle("attachment", { create: false });
+                  } catch {
+                    throw segErr;
+                  }
+                } else {
+                  throw segErr;
+                }
+              }
             }
-            storedHandle = await targetDir.getFileHandle(note.fileName, { create: false });
+            try {
+              storedHandle = await targetDir.getFileHandle(note.fileName, { create: false });
+            } catch (fileErr) {
+              if (note.folderPath?.toLowerCase().includes("attachment")) {
+                const altFolder = note.folderPath.toLowerCase().startsWith("attachments") ? "attachment" : "attachments";
+                try {
+                  const altDir = await rootDirHandle.getDirectoryHandle(altFolder, { create: false });
+                  storedHandle = await altDir.getFileHandle(note.fileName, { create: false });
+                } catch {
+                  throw fileErr;
+                }
+              } else {
+                throw fileErr;
+              }
+            }
             await setStoredFileHandle(note.id, storedHandle);
           } catch {
             /* ignore handle fallback error */
@@ -11303,16 +11858,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
       }
 
-      // 3. IndexedDB Image Fallback
+      // 3. Data URL / Blob URL / IndexedDB Image Fallback
       if (!cancelled && isImageFile(note) && !objectUrl && !initialUrl) {
-        try {
-          const idbBlob = await getImageFromIndexedDb(note.id);
-          if (idbBlob && !cancelled) {
-            objectUrl = URL.createObjectURL(idbBlob);
-            setActiveFileSize(idbBlob.size);
-            setImageBlobUrl(objectUrl);
-          }
-        } catch {}
+        if (note.content?.startsWith("data:image/") || note.content?.startsWith("blob:")) {
+          setImageBlobUrl(note.content);
+        } else {
+          try {
+            const idbBlob = await getImageFromIndexedDb(note.id);
+            if (idbBlob && !cancelled) {
+              objectUrl = URL.createObjectURL(idbBlob);
+              setActiveFileSize(idbBlob.size);
+              setImageBlobUrl(objectUrl);
+            }
+          } catch {}
+        }
       }
     };
 
@@ -12858,6 +13417,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </Tooltip>
                   );
                 case "aiAssistant":
+                  if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+                    return (
+                      <Tooltip key="aiAssistant">
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
+                            disabled={!editor || aiGenerating}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={handleOpenAiSettings}
+                          >
+                            {renderToolIcon("aiAssistant")}
+                            <span className="sr-only">{t("settings.aiAssistant")}</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("settings.aiAssistant")}</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
                   return (
                     <DropdownMenu key="aiAssistant">
                       <Tooltip>
@@ -12869,7 +13449,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               size="icon"
                               className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full"
                               disabled={!editor || aiGenerating}
-                              onMouseDown={(e) => e.preventDefault()}
                             >
                               {aiGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : renderToolIcon("aiAssistant")}
                               <span className="sr-only">{t("settings.aiAssistant")}</span>
@@ -15116,6 +15695,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </DropdownMenuItem>
                   );
                 case "aiAssistant":
+                  if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+                    return (
+                      <DropdownMenuItem
+                        key="aiAssistant"
+                        disabled={!editor || aiGenerating}
+                        onClick={handleOpenAiSettings}
+                      >
+                        {renderDropdownIcon("aiAssistant")}
+                        <span>{t("settings.aiAssistant")}</span>
+                      </DropdownMenuItem>
+                    );
+                  }
                   return (
                     <DropdownMenuSub key="aiAssistant" open={overflowSubmenu === "aiAssistant"}>
                       <DropdownMenuSubTrigger disabled={!editor || aiGenerating} onClick={() => setOverflowSubmenu((prev) => prev === "aiAssistant" ? null : "aiAssistant")}>
@@ -15237,66 +15828,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setImportDocxDialogOpen(false)}>
                   {t("common.cancel")}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* AI Assistant API Key Dialog */}
-          <Dialog open={aiApiKeyModalOpen} onOpenChange={setAiApiKeyModalOpen}>
-            <DialogContent className="sm:max-w-md rounded-2xl">
-              <DialogHeader>
-                <DialogTitle>{t("settings.aiApiKeyRequiredTitle")}</DialogTitle>
-                <DialogDescription>{t("settings.aiApiKeyRequiredDesc")}</DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-1.5 py-1">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="ai-api-key-modal-input" className="block text-sm font-semibold text-foreground">
-                    Gemini API Key
-                  </label>
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => {
-                      if (onOpenWebTab) {
-                        e.preventDefault();
-                        onOpenWebTab("https://aistudio.google.com/app/apikey");
-                      }
-                    }}
-                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
-                  >
-                    Get Free API Key <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-                <input
-                  id="ai-api-key-modal-input"
-                  type="password"
-                  value={aiKeyInputValue}
-                  onChange={(e) => setAiKeyInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSaveApiKeyFromModal();
-                    }
-                  }}
-                  placeholder="AIzaSy..."
-                  className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none"
-                />
-                {aiErrorMsg && (
-                  <p className="text-xs text-destructive bg-destructive/10 p-2.5 rounded-xl border border-destructive/20 mt-1">
-                    {aiErrorMsg}
-                  </p>
-                )}
-              </div>
-
-              <DialogFooter className="gap-2 sm:justify-between">
-                <Button type="button" variant="outline" onClick={() => setAiApiKeyModalOpen(false)}>
-                  {t("common.cancel") || "Cancel"}
-                </Button>
-                <Button type="button" onClick={handleSaveApiKeyFromModal} disabled={!aiKeyInputValue.trim()}>
-                  Save Key & Continue
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -15544,7 +16075,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <iframe
                       className="w-full h-full bg-white border-0"
                       srcDoc={previewHtml || codeEditorContentMap.get(note.id) || note.content}
-                      sandbox="allow-scripts allow-same-origin"
+                      sandbox="allow-scripts allow-forms allow-modals"
                       title="HTML Preview"
                     />
                   </div>
@@ -15687,6 +16218,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         } else {
                           window.open(href, "_blank", "noopener,noreferrer");
                         }
+                      } else if (target.tagName === "A" || target.closest("a")) {
+                        e.preventDefault();
+                        e.stopPropagation();
                       }
                     }}
                   />

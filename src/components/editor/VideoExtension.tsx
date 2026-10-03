@@ -109,7 +109,26 @@ export const VideoExtension = Node.create<VideoOptions>({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(VideoNodeView);
+    return ReactNodeViewRenderer(VideoNodeView, {
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (newNode.type.name !== oldNode.type.name) {
+          return false;
+        }
+        const oldAttrs = oldNode.attrs;
+        const newAttrs = newNode.attrs;
+        if (
+          oldAttrs.src !== newAttrs.src ||
+          oldAttrs.title !== newAttrs.title ||
+          oldAttrs.width !== newAttrs.width ||
+          oldAttrs.textAlign !== newAttrs.textAlign ||
+          oldAttrs["data-relative-src"] !== newAttrs["data-relative-src"]
+        ) {
+          updateProps();
+        }
+        return true;
+      },
+      ignoreMutation: () => true,
+    });
   },
 
   addCommands() {
@@ -117,10 +136,15 @@ export const VideoExtension = Node.create<VideoOptions>({
       setVideo:
         (options) =>
         ({ commands }) => {
-          return commands.insertContent({
-            type: this.name,
-            attrs: options,
-          });
+          return commands.insertContent([
+            {
+              type: this.name,
+              attrs: options,
+            },
+            {
+              type: "paragraph",
+            },
+          ]);
         },
     };
   },

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -27,7 +27,7 @@ import type { Editor } from "@tiptap/react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
-import IconPickerDialog from "@/components/IconPickerDialog";
+const IconPickerDialog = lazy(() => import("@/components/IconPickerDialog"));
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -894,27 +894,31 @@ function RightPanelComponent({
               </div>
             </div>
 
-      <IconPickerDialog
-        open={iconPickerOpen}
-        onOpenChange={setIconPickerOpen}
-        title={t("sidebar.changeNoteIcon") || "Change Icon"}
-        initialIcon={currentIcon}
-        initialColor={currentColor}
-        onSelectIcon={(icon, color) => {
-          if (currentRelPath) {
-            setFileIcon(currentRelPath, icon, color);
-          }
-          onUpdateNote?.(note.id, { icon, iconColor: color });
-          setIconPickerOpen(false);
-        }}
-        onRemoveIcon={() => {
-          if (currentRelPath) {
-            removeFileIcon(currentRelPath);
-          }
-          onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined });
-          setIconPickerOpen(false);
-        }}
-      />
+      {iconPickerOpen && (
+        <Suspense fallback={null}>
+          <IconPickerDialog
+            open={iconPickerOpen}
+            onOpenChange={setIconPickerOpen}
+            title={t("sidebar.changeNoteIcon") || "Change Icon"}
+            initialIcon={currentIcon}
+            initialColor={currentColor}
+            onSelectIcon={(icon, color) => {
+              if (currentRelPath) {
+                setFileIcon(currentRelPath, icon, color);
+              }
+              onUpdateNote?.(note.id, { icon, iconColor: color });
+              setIconPickerOpen(false);
+            }}
+            onRemoveIcon={() => {
+              if (currentRelPath) {
+                removeFileIcon(currentRelPath);
+              }
+              onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined });
+              setIconPickerOpen(false);
+            }}
+          />
+        </Suspense>
+      )}
     </motion.aside>
   );
 }

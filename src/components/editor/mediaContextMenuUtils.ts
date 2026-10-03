@@ -186,8 +186,8 @@ export async function openMediaFileInSystemApp(src: string, dataRelativeSrc?: st
     }
   }
 
-  if (src && !src.startsWith("data:")) {
-    window.open(src, "_blank");
+  if (src && (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("blob:"))) {
+    window.open(src, "_blank", "noopener,noreferrer");
     return true;
   }
   return false;
@@ -211,6 +211,8 @@ export async function revealMediaFileInFolder(src: string, dataRelativeSrc?: str
 
 export function downloadMediaFile(src: string, suggestedName?: string): void {
   if (!src) return;
+  const trimmed = src.trim().toLowerCase();
+  if (trimmed.startsWith("javascript:") || trimmed.startsWith("vbscript:") || trimmed.startsWith("data:text/html")) return;
   const link = document.createElement("a");
   link.href = src;
   if (suggestedName) {

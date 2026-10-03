@@ -443,4 +443,48 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
   );
 }
 
-export default React.memo(BreadcrumbComponent);
+function areBreadcrumbPropsEqual(prevProps: BreadcrumbProps, nextProps: BreadcrumbProps): boolean {
+  if (prevProps.rootFolderName !== nextProps.rootFolderName) return false;
+  if (prevProps.paneId !== nextProps.paneId) return false;
+  if (prevProps.isCloudWorkspace !== nextProps.isCloudWorkspace) return false;
+  if (prevProps.onSelectNote !== nextProps.onSelectNote) return false;
+  if (prevProps.onOpenRightPanel !== nextProps.onOpenRightPanel) return false;
+
+  const pn = prevProps.note;
+  const nn = nextProps.note;
+  if (pn !== nn) {
+    if (!pn || !nn) return false;
+    if (
+      pn.id !== nn.id ||
+      pn.title !== nn.title ||
+      pn.fileName !== nn.fileName ||
+      pn.folderPath !== nn.folderPath ||
+      pn.fileType !== nn.fileType ||
+      pn.icon !== nn.icon ||
+      pn.iconColor !== nn.iconColor ||
+      pn.isLocked !== nn.isLocked
+    ) {
+      return false;
+    }
+  }
+
+  const pNotes = prevProps.notes;
+  const nNotes = nextProps.notes;
+  if (pNotes !== nNotes) {
+    if (!pNotes || !nNotes || pNotes.length !== nNotes.length) return false;
+    for (let i = 0; i < pNotes.length; i++) {
+      if (
+        pNotes[i].id !== nNotes[i].id ||
+        pNotes[i].fileName !== nNotes[i].fileName ||
+        pNotes[i].folderPath !== nNotes[i].folderPath ||
+        pNotes[i].title !== nNotes[i].title
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+export default React.memo(BreadcrumbComponent, areBreadcrumbPropsEqual);

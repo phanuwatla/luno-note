@@ -85,6 +85,7 @@ function loadNotes(): Note[] {
 }
 
 let saveNotesTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastSavedSignature = "";
 
 function saveNotes(notes: Note[], immediate = false) {
   if (saveNotesTimeout) {
@@ -94,7 +95,11 @@ function saveNotes(notes: Note[], immediate = false) {
 
   const doSave = () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizeNotesForStorage(notes)));
+      const sanitized = sanitizeNotesForStorage(notes);
+      const json = JSON.stringify(sanitized);
+      if (json === lastSavedSignature) return;
+      lastSavedSignature = json;
+      localStorage.setItem(STORAGE_KEY, json);
     } catch (err) {
       console.warn("Failed to save notes to LocalStorage (QuotaExceededError or disabled):", err);
     }
@@ -306,11 +311,62 @@ export function useNotes() {
       saveNotes([], true);
     }
 
-    notesRef.current = resultNotes;
-    setNotes(resultNotes);
-    saveNotes(resultNotes);
+    // Preserve active/open attachment notes or memory image notes so they don't get wiped out by periodic disk scans
+    const preservedAttachmentNotes: Note[] = [];
+    if (!isNewWorkspace) {
+      notesRef.current.forEach((n) => {
+        if (
+          n.fileType === "image" &&
+          (n.id?.startsWith("img:") ||
+            (n.folderPath && /(?:^|\/)(?:attachments?)(?:\/|$)/i.test(n.folderPath)))
+        ) {
+          const alreadyInItems = items.some(
+            (item) => item.id === n.id || (item.fileName === n.fileName && (item.folderPath || "") === (n.folderPath || ""))
+          );
+          if (!alreadyInItems) {
+            preservedAttachmentNotes.push(n);
+          }
+        }
+      });
+    }
 
-    return resultNotes;
+    const finalNotes = [...resultNotes, ...preservedAttachmentNotes];
+
+    if (!isNewWorkspace && finalNotes.length === notesRef.current.length) {
+      let hasChanges = false;
+      const prevNotes = notesRef.current;
+      for (let i = 0; i < finalNotes.length; i++) {
+        const a = finalNotes[i];
+        const b = prevNotes[i];
+        if (
+          a.id !== b.id ||
+          a.content !== b.content ||
+          a.fileName !== b.fileName ||
+          a.folderPath !== b.folderPath ||
+          a.title !== b.title ||
+          a.updatedAt !== b.updatedAt ||
+          a.fileType !== b.fileType ||
+          a.isFavorite !== b.isFavorite ||
+          a.isLocked !== b.isLocked ||
+          a.isDecrypted !== b.isDecrypted ||
+          a.icon !== b.icon ||
+          a.iconColor !== b.iconColor ||
+          (a.tags?.length || 0) !== (b.tags?.length || 0)
+        ) {
+          hasChanges = true;
+          break;
+        }
+      }
+      if (!hasChanges) {
+        return prevNotes;
+      }
+    }
+
+    notesRef.current = finalNotes;
+    setNotes(finalNotes);
+    saveNotes(finalNotes);
+
+    return finalNotes;
   }, []);
 
   const updateNote = useCallback(

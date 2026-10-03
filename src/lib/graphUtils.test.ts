@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractNoteLinks, resolveLinkedNoteId, buildNoteGraph, wrapNodeText, getNodeBaseRadius } from "./graphUtils";
+import { extractNoteLinks, resolveLinkedNoteId, buildNoteGraph, wrapNodeText, getNodeBaseRadius, extractNoteImageLinks } from "./graphUtils";
 import type { Note } from "@/hooks/useNotes";
 
 describe("graphUtils", () => {
@@ -125,9 +125,9 @@ And markdown link [Fifth Note](Fifth%20Note.md).
   });
 
   describe("getNodeBaseRadius", () => {
-    it("returns base radius of 2.6 for 0 or negative degree", () => {
-      expect(getNodeBaseRadius(0)).toBe(2.6);
-      expect(getNodeBaseRadius(-1)).toBe(2.6);
+    it("returns base radius of 3.12 (20% increased from 2.6) for 0 or negative degree", () => {
+      expect(getNodeBaseRadius(0)).toBeCloseTo(3.12, 2);
+      expect(getNodeBaseRadius(-1)).toBeCloseTo(3.12, 2);
     });
 
     it("scales radius proportionally with higher degrees", () => {
@@ -135,13 +135,233 @@ And markdown link [Fifth Note](Fifth%20Note.md).
       const r2 = getNodeBaseRadius(4);
       const r3 = getNodeBaseRadius(9);
 
-      expect(r1).toBeGreaterThan(2.6);
+      expect(r1).toBeGreaterThan(3.12);
       expect(r2).toBeGreaterThan(r1);
       expect(r3).toBeGreaterThan(r2);
     });
 
-    it("caps max radius at 7.5", () => {
-      expect(getNodeBaseRadius(100)).toBe(7.5);
+    it("caps max radius at 9.0 (20% increased from 7.5)", () => {
+      expect(getNodeBaseRadius(100)).toBe(9.0);
+    });
+  });
+
+  describe("image nodes in graph", () => {
+    it("extracts inserted images and connects them as image nodes to the note", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-1",
+          title: "Architecture Review",
+          fileName: "review.md",
+          content: "Here is the diagram: ![System Diagram](attachments/diagram.png) and a logo ![[logo.jpg|200]]. Also <img src=\"photo.webp\" alt=\"Photo\" />.",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          id: "img-workspace-1",
+          title: "diagram.png",
+          fileName: "diagram.png",
+          folderPath: "attachments",
+          fileType: "image",
+          content: "data:image/png;base64,...",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      // Note-1 + 3 images (diagram.png, logo.jpg, photo.webp)
+      const noteNodes = graph.nodes.filter((n) => n.nodeType !== "image");
+      const imageNodes = graph.nodes.filter((n) => n.nodeType === "image");
+
+      expect(noteNodes).toHaveLength(1);
+      expect(imageNodes).toHaveLength(3);
+
+      const diagramNode = imageNodes.find((n) => n.id === "img-workspace-1" || n.label.includes("diagram.png"));
+      expect(diagramNode).toBeDefined();
+      expect(diagramNode?.nodeType).toBe("image");
+      expect(diagramNode?.connectionIds.has("note-1")).toBe(true);
+
+      const noteNode = noteNodes[0];
+      expect(noteNode.degree).toBe(3);
+    });
+
+    it("connects multiple notes to the same shared image node", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-a",
+          title: "Note A",
+          fileName: "Note A.md",
+          content: "Check out this image: ![[shared-asset.png]]",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          id: "note-b",
+          title: "Note B",
+          fileName: "Note B.md",
+          content: "Same image used here: ![Shared](shared-asset.png)",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      const imageNodes = graph.nodes.filter((n) => n.nodeType === "image");
+      expect(imageNodes).toHaveLength(1);
+
+      const sharedImg = imageNodes[0];
+      expect(sharedImg.label).toBe("shared-asset.png");
+      expect(sharedImg.degree).toBe(2);
+      expect(sharedImg.connectionIds.has("note-a")).toBe(true);
+      expect(sharedImg.connectionIds.has("note-b")).toBe(true);
+    });
+
+    it("deduces folderPath as 'attachments' or 'attachment' for images in attachment folders", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-sub",
+          title: "Sub Note",
+          fileName: "Sub Note.md",
+          folderPath: "Chapter 1/Script",
+          content: "![diagram](../../attachments/flow.png) and ![pic](/attachment/hero.jpg) and ![inline](attachments/inline.png)",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      const flowNode = graph.nodes.find((n) => n.label === "flow.png");
+      const heroNode = graph.nodes.find((n) => n.label === "hero.jpg");
+      const inlineNode = graph.nodes.find((n) => n.label === "inline.png");
+
+      expect(flowNode).toBeDefined();
+      expect(flowNode?.folderPath).toBe("attachments");
+
+      expect(heroNode).toBeDefined();
+      expect(heroNode?.folderPath).toBe("attachment");
+
+      expect(inlineNode).toBeDefined();
+      expect(inlineNode?.folderPath).toBe("attachments");
+    });
+
+    it("extracts QR code image links with data-relative-src or data-qr-code and sets proper filename and folderPath", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-qr",
+          title: "Note With QR",
+          fileName: "Note With QR.md",
+          content: '<p>QR Code below:</p><img src="blob:http://localhost/temp-blob" alt="QR Code" width="220" data-relative-src="attachments/qrcode_comsan_choice_123456.png" data-qr-code="true" data-qr-text="comsan-choice.vercel.app" /><p>End</p>',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      const qrNode = graph.nodes.find((n) => n.nodeType === "image");
+      expect(qrNode).toBeDefined();
+      expect(qrNode?.label).toBe("qrcode_comsan_choice_123456.png");
+      expect(qrNode?.title).toBe("qrcode_comsan_choice_123456.png");
+      expect(qrNode?.folderPath).toBe("attachments");
+      expect(qrNode?.imageSrc).toBe("attachments/qrcode_comsan_choice_123456.png");
+    });
+
+    it("prefers data-relative-src when src is a blob or data URL in extractNoteImageLinks", () => {
+      const html = '<img src="blob:http://localhost/abc" alt="QR Code" data-relative-src="attachment/qrcode_test.png" data-qr-code="true" />';
+      const extracted = extractNoteImageLinks(html);
+      expect(extracted).toHaveLength(1);
+      expect(extracted[0].src).toBe("attachment/qrcode_test.png");
+      expect(extracted[0].alt).toBe("QR Code");
+    });
+  });
+
+  describe("video and audio media nodes in graph", () => {
+    it("extracts inserted video and audio files and connects them as video/audio nodes", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-multimedia",
+          title: "Multimedia Study",
+          fileName: "study.md",
+          content: `
+# Multimedia Lecture
+Watch video: ![[attachments/lecture.mp4|640]]
+Listen to clip: ![[attachments/recording.mp3]]
+HTML Video: <video src="media/presentation.webm" data-title="Presentation"></video>
+HTML Audio: <audio src="audio/voice_memo.wav" data-title="Voice Memo"></audio>
+Embedded document: ![[attachments/handout.pdf]]
+          `,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      const noteNodes = graph.nodes.filter((n) => n.nodeType === "note");
+      const videoNodes = graph.nodes.filter((n) => n.nodeType === "video");
+      const audioNodes = graph.nodes.filter((n) => n.nodeType === "audio");
+      const fileNodes = graph.nodes.filter((n) => n.nodeType === "file");
+
+      expect(noteNodes).toHaveLength(1);
+      expect(videoNodes).toHaveLength(2); // lecture.mp4, presentation.webm
+      expect(audioNodes).toHaveLength(2); // recording.mp3, voice_memo.wav
+      expect(fileNodes).toHaveLength(1);  // handout.pdf
+
+      const lectureNode = graph.nodes.find((n) => n.label === "lecture.mp4");
+      expect(lectureNode).toBeDefined();
+      expect(lectureNode?.nodeType).toBe("video");
+      expect(lectureNode?.folderPath).toBe("attachments");
+      expect(lectureNode?.connectionIds.has("note-multimedia")).toBe(true);
+
+      const mp3Node = graph.nodes.find((n) => n.label === "recording.mp3");
+      expect(mp3Node).toBeDefined();
+      expect(mp3Node?.nodeType).toBe("audio");
+      expect(mp3Node?.folderPath).toBe("attachments");
+      expect(mp3Node?.connectionIds.has("note-multimedia")).toBe(true);
+
+      const pdfNode = graph.nodes.find((n) => n.label === "handout.pdf");
+      expect(pdfNode).toBeDefined();
+      expect(pdfNode?.nodeType).toBe("file");
+      expect(pdfNode?.connectionIds.has("note-multimedia")).toBe(true);
+
+      const noteNode = noteNodes[0];
+      // Connected to 2 videos + 2 audios + 1 pdf = 5 connections
+      expect(noteNode.degree).toBe(5);
+    });
+
+    it("connects multiple notes to the same shared video and audio node", () => {
+      const mockNotes: Note[] = [
+        {
+          id: "note-x",
+          title: "Note X",
+          fileName: "Note X.md",
+          content: "Watch clip: ![[attachments/shared-video.mp4]] and listen: ![[shared-audio.mp3]]",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        {
+          id: "note-y",
+          title: "Note Y",
+          fileName: "Note Y.md",
+          content: "Reference video: <video src=\"attachments/shared-video.mp4\"></video> and [listen](shared-audio.mp3)",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ];
+
+      const graph = buildNoteGraph(mockNotes);
+      const sharedVideo = graph.nodes.find((n) => n.label === "shared-video.mp4");
+      const sharedAudio = graph.nodes.find((n) => n.label === "shared-audio.mp3");
+
+      expect(sharedVideo).toBeDefined();
+      expect(sharedVideo?.nodeType).toBe("video");
+      expect(sharedVideo?.degree).toBe(2);
+      expect(sharedVideo?.connectionIds.has("note-x")).toBe(true);
+      expect(sharedVideo?.connectionIds.has("note-y")).toBe(true);
+
+      expect(sharedAudio).toBeDefined();
+      expect(sharedAudio?.nodeType).toBe("audio");
+      expect(sharedAudio?.degree).toBe(2);
+      expect(sharedAudio?.connectionIds.has("note-x")).toBe(true);
+      expect(sharedAudio?.connectionIds.has("note-y")).toBe(true);
     });
   });
 });

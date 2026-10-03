@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, memo } from "react";
+import React, { useCallback, useEffect, useRef, useState, useMemo, memo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
   X,
@@ -22,6 +22,7 @@ import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import type { Note } from "@/hooks/useNotes";
 import { Columns2Icon } from "@/components/icons/Columns2Icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { getFaviconCandidates } from "@/lib/faviconUtils";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -58,28 +59,36 @@ interface TabBarProps {
 }
 
 function WebFaviconIcon({ note, isActive }: { note: Note; isActive: boolean }) {
-  const [imgFailed, setImgFailed] = useState(false);
+  const [candidateIndex, setCandidateIndex] = useState(0);
   const cls = `h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-primary" : "text-muted-foreground/70"}`;
 
   const url = note.url || (note.id.startsWith("web:") ? note.id.replace(/^web:/, "") : "");
-  let faviconUrl = note.faviconUrl;
-  if (!faviconUrl && url) {
-    try {
-      const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
-      if (parsed.hostname) {
-        faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=32`;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  const candidates = useMemo(() => {
+    return getFaviconCandidates(url, note.faviconUrl);
+  }, [url, note.faviconUrl]);
 
-  if (!imgFailed && faviconUrl) {
+  // Reset candidate index when note URL or explicit favicon changes
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [note.id, url, note.faviconUrl]);
+
+  const currentSrc = candidates[candidateIndex];
+
+  if (currentSrc) {
     return (
       <img
-        src={faviconUrl}
+        key={`${note.id}-${currentSrc}`}
+        src={currentSrc}
         alt=""
-        onError={() => setImgFailed(true)}
+        onError={() => setCandidateIndex((prev) => prev + 1)}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          // Google S2 returns a 16x16 default blue globe image when no favicon is found.
+          // Since sz=32 was requested, genuine favicons are 32x32. Reject the fallback 16x16 globe.
+          if (currentSrc.includes("google.com/s2/favicons") && img.naturalWidth === 16 && img.naturalHeight === 16) {
+            setCandidateIndex((prev) => prev + 1);
+          }
+        }}
         className="h-3.5 w-3.5 shrink-0 rounded-xs object-contain"
       />
     );
@@ -299,6 +308,8 @@ const TabItem = React.memo(function TabItem({
               onCloseTab(note.id);
             }
           }}
+          data-tab-item="true"
+          data-active={isActive ? "true" : "false"}
           className={`group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-1.5 rounded-t-xl px-2.5 py-2 text-xs transition-all duration-150 ${
             isDragging ? "opacity-40 scale-[0.98] bg-muted/60" : ""
           } ${
@@ -546,6 +557,7 @@ function TabBarComponent({
   return (
     <TooltipProvider delayDuration={420}>
       <div
+        data-tabbar="true"
         className="flex items-center justify-between bg-sidebar-accent/50 h-10 select-none shrink-0 border-b border-border/30"
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       >
@@ -655,4 +667,35 @@ function TabBarComponent({
   );
 }
 
-export default React.memo(TabBarComponent);
+function areTabBarPropsEqual(prevProps: TabBarProps, nextProps: TabBarProps): boolean {
+  if (prevProps.activeTabId !== nextProps.activeTabId) return false;
+  if (prevProps.onSelectTab !== nextProps.onSelectTab) return false;
+  if (prevProps.onCloseTab !== nextProps.onCloseTab) return false;
+
+  const prevTabs = prevProps.tabs;
+  const nextTabs = nextProps.tabs;
+  if (prevTabs === nextTabs) return true;
+  if (!prevTabs || !nextTabs || prevTabs.length !== nextTabs.length) return false;
+
+  for (let i = 0; i < prevTabs.length; i++) {
+    const p = prevTabs[i];
+    const n = nextTabs[i];
+    if (
+      p.id !== n.id ||
+      p.title !== n.title ||
+      p.fileName !== n.fileName ||
+      p.icon !== n.icon ||
+      p.iconColor !== n.iconColor ||
+      p.url !== n.url ||
+      p.faviconUrl !== n.faviconUrl ||
+      p.fileType !== n.fileType ||
+      p.isLocked !== n.isLocked
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export default React.memo(TabBarComponent, areTabBarPropsEqual);

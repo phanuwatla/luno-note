@@ -27,6 +27,9 @@ import {
   Languages,
   Cloud,
   Download,
+  Globe,
+  Bookmark,
+  CheckSquare,
 } from "lucide-react";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -68,9 +71,186 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.3.2",
+    version: "1.3.3",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "Integrated Web Browser Hub, Relations Graph Media Nodes, Accidental Exit Confirmation, Welcome Guide & Typing Performance",
+      th: "ศูนย์รวมเว็บเบราว์เซอร์แถบข้าง, แสดงโหนดสื่อในกราฟความสัมพันธ์, ยืนยันก่อนปิดโปรแกรม, โน้ตต้อนรับเริ่มต้น และเพิ่มความเร็วในการพิมพ์",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Integrated Web Browser Hub & Right Drawer",
+          th: "แผงควบคุมเว็บเบราว์เซอร์แถบขวาและระบบจัดการประวัติ",
+        },
+        description: {
+          en: "Browse smoothly alongside notes with chronological history groups (Today, Yesterday, Earlier), quick search filter, bookmark manager, zoom controls, and full privacy data clearing.",
+          th: "เปิดดูเว็บไซต์ควบคู่กับโน้ตได้อย่างลื่นไหล พร้อมแผงควบคุมแถบขวาจัดกลุ่มประวัติเข้าชม ค้นหา คั่นหน้า ปรับระดับการซูม และล้างข้อมูลแคช/คุกกี้เพื่อความเป็นส่วนตัว",
+        },
+        icon: Globe,
+        badge: { en: "Web Browser", th: "เว็บเบราว์เซอร์", variant: "default" },
+      },
+      {
+        title: {
+          en: "One-Click Markdown Link & Active Note Insertion",
+          th: "แทรกและคัดลอกลิงก์เว็บลงโน้ตในคลิกเดียว",
+        },
+        description: {
+          en: "Quickly copy URLs as formatted Markdown or insert web links directly into active notes via a dedicated note selector modal with automatic favicon detection.",
+          th: "คัดลอกลิงก์เป็นรูปแบบ Markdown หรือแทรกลิงก์เข้าสู่โน้ตที่กำลังเปิดอยู่ได้ทันทีผ่านหน้าต่างเลือกโน้ต พร้อมตรวจจับ Favicon ของเว็บไซต์อัตโนมัติ",
+        },
+        icon: ExternalLink,
+        badge: { en: "Integration", th: "การเชื่อมโยง", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Visual Media Nodes in Knowledge Graph",
+          th: "แสดงโหนดไฟล์สื่อ (รูปภาพ วิดีโอ เสียง) ในกราฟความสัมพันธ์",
+        },
+        description: {
+          en: "Explore knowledge connections with optional media nodes in the interactive force-directed graph. Toggle media visibility seamlessly to focus on links or attachments.",
+          th: "สำรวจโครงข่ายความรู้ที่เชื่อมโยงถึงกัน พร้อมตัวเลือกเปิด-ปิดแสดงโหนดไฟล์สื่อ (รูปภาพ วิดีโอ เสียง) ในกราฟความสัมพันธ์ เพื่อให้เห็นความเชื่อมโยงของไฟล์แนบได้ชัดเจน",
+        },
+        icon: Layers,
+        badge: { en: "Knowledge Graph", th: "กราฟความรู้", variant: "default" },
+      },
+      {
+        title: {
+          en: "Accidental Exit Confirmation & Safety Shield",
+          th: "ระบบยืนยันก่อนปิดโปรแกรม ป้องกันการปิดโดยไม่ตั้งใจ",
+        },
+        description: {
+          en: "Prevent accidental window closures during active note taking with configurable exit confirmation dialogs in Settings > System/Other.",
+          th: "ป้องกันการปิดหน้าต่างโดยไม่ตั้งใจด้วยกล่องข้อความยืนยันก่อนปิดโปรแกรม สามารถเปิดหรือปิดได้ในการตั้งค่า > ระบบ/อื่น ๆ",
+        },
+        icon: ShieldCheck,
+        badge: { en: "System", th: "ระบบ", variant: "default" },
+      },
+      {
+        title: {
+          en: "Real-Time Auto-Update Download Progress & Restart",
+          th: "แจ้งเตือนและดาวน์โหลดอัปเดตอัตโนมัติแบบเรียลไทม์",
+        },
+        description: {
+          en: "Track download percentage in a sleek toast notification with interface typography and trigger 'Update & Restart' directly when the new release is ready.",
+          th: "แสดงแถบความคืบหน้าและเปอร์เซ็นต์การดาวน์โหลดเวอร์ชันใหม่แบบสด ๆ บนป๊อปอัปแจ้งเตือน พร้อมปุ่ม 'อัปเดตและเริ่มใหม่ทันที' เมื่อดาวน์โหลดเสร็จสิ้น",
+        },
+        icon: RefreshCw,
+        badge: { en: "Updater", th: "การอัปเดต", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Onboarding Welcome Guide for New Workspaces",
+          th: "โน้ตต้อนรับเริ่มต้นสำหรับการสร้างโฟลเดอร์งานใหม่",
+        },
+        description: {
+          en: "Initialize new workspaces with an optional comprehensive Welcome guide showcasing Markdown shortcuts, media features, and task management tips.",
+          th: "ตัวเลือกสร้างโน้ตต้อนรับ (Welcome Note) อัตโนมัติเมื่อสร้างโฟลเดอร์งานใหม่ รวบรวมคำแนะนำการใช้งาน ทางลัด และฟีเจอร์เด่นเพื่อเริ่มต้นใช้งานได้ทันที",
+        },
+        icon: FileText,
+        badge: { en: "Onboarding", th: "เริ่มต้นใช้งาน", variant: "outline" },
+      },
+      {
+        title: {
+          en: "Accessible Editor Checkboxes & Typing Latency Optimization",
+          th: "ช่องติ๊กงานที่เข้าถึงง่ายและพิมพ์ได้รวดเร็วขึ้น",
+        },
+        description: {
+          en: "Dedicated accessible checklist elements with custom styling, streamlined typography shortcuts, and reduced input latency during rapid note editing.",
+          th: "ปรับแต่งช่องกาเครื่องหมาย (Checkbox) ในเอดิเตอร์ให้รองรับการเข้าถึงและคลิกได้ลื่นไหล ลดการกระตุกขณะพิมพ์งานอย่างรวดเร็ว และปรับปรุงทางลัดจัดรูปแบบอัตโนมัติ",
+        },
+        icon: Zap,
+        badge: { en: "Editor", th: "เอดิเตอร์", variant: "default" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Web Browser Hub", th: "ศูนย์รวมเว็บเบราว์เซอร์" },
+        items: [
+          {
+            en: "Added dedicated right-side Web Browser panel with history and bookmarks management tabs.",
+            th: "เพิ่มแผงด้านข้างสำหรับเว็บเบราว์เซอร์ จัดการประวัติการเข้าชมและที่คั่นหน้าเว็บได้อย่างสะดวกรวดเร็ว",
+          },
+          {
+            en: "Grouped browsing history chronologically (Today, Yesterday, Earlier) with quick keyword filtering and item deletion.",
+            th: "จัดหมวดหมู่ประวัติการเข้าชมตามช่วงเวลา (วันนี้, เมื่อวาน, ก่อนหน้านี้) พร้อมแถบค้นหาและลบรายการ",
+          },
+          {
+            en: "Added complete browsing data clearing via Electron IPC (cookies, HTTP cache, localStorage, site data).",
+            th: "เพิ่มฟังก์ชันล้างข้อมูลประวัติและข้อมูลส่วนตัวของเว็บเบราว์เซอร์ทั้งหมดผ่าน Electron IPC",
+          },
+          {
+            en: "Added page zoom controls (zoom in, zoom out, reset to 100%) and URL address bar quick actions.",
+            th: "เพิ่มปุ่มควบคุมการซูมหน้าเว็บ (ขยาย, ย่อ, รีเซ็ต 100%) และการนำทางที่คล่องตัว",
+          },
+          {
+            en: "Added 'Copy as Markdown Link' and 'Insert link to active note' with modal note selection.",
+            th: "เพิ่มตัวเลือกคัดลอกลิงก์เป็น Markdown และปุ่มแทรกลิงก์เข้าสู่โน้ตที่กำลังเปิดอยู่ผ่านหน้าต่างเลือกโน้ต",
+          },
+          {
+            en: "Dynamic favicon resolution utility with fallback caching.",
+            th: "ระบบตรวจจับและแสดง Favicon ของเว็บไซต์อัตโนมัติพร้อมระบบสำรองกรณีโหลดไม่สำเร็จ",
+          },
+        ],
+      },
+      {
+        category: { en: "Relations Graph & Knowledge Management", th: "กราฟความสัมพันธ์และการจัดการองค์ความรู้" },
+        items: [
+          {
+            en: "Added toggle to display or hide media attachments (images, video, audio) in the Knowledge Graph network.",
+            th: "เพิ่มปุ่มสลับการแสดงผลโหนดไฟล์สื่อ (รูปภาพ วิดีโอ เสียง) ในแผนผังกราฟความสัมพันธ์",
+          },
+          {
+            en: "Enhanced node categorization and distinct visual styling for media nodes in force-directed graph.",
+            th: "ปรับแต่งไอคอนและสไตล์โหนดไฟล์มีเดียในกราฟให้แยกแยะออกจากโน้ตเอกสารได้อย่างชัดเจน",
+          },
+        ],
+      },
+      {
+        category: { en: "System, Safety & Auto-Update", th: "ระบบ ความปลอดภัย และการอัปเดต" },
+        items: [
+          {
+            en: "Added 'Confirm before exit' setting in Settings > System/Other with modal prompt on close.",
+            th: "เพิ่มการตั้งค่ายืนยันก่อนปิดโปรแกรมในหน้าตั้งค่า > ระบบ/อื่น ๆ พร้อมกล่องถามยืนยันก่อนปิดหน้าต่าง",
+          },
+          {
+            en: "Live auto-update download progress toast with percentage indicator using interface typography.",
+            th: "แสดงสถานะการดาวน์โหลดอัปเดตแบบสดบนหน้าจอด้วยฟอนต์อินเทอร์เฟซและแถบความคืบหน้า",
+          },
+          {
+            en: "Added optional Welcome Note generation when initializing new workspaces.",
+            th: "เพิ่มตัวเลือกสร้างเอกสารต้อนรับ Welcome.md อัตโนมัติเมื่อสร้างโฟลเดอร์งานใหม่",
+          },
+          {
+            en: "Security hardening restricting executable and script file execution in external shell opener.",
+            th: "ยกระดับความปลอดภัยด้วยการบล็อกไฟล์นามสกุลอันตรายจากการเปิดผ่านโปรแกรมภายนอก",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor & Performance", th: "เอดิเตอร์และประสิทธิภาพ" },
+        items: [
+          {
+            en: "Accessible and responsive EditorCheckbox component for task lists.",
+            th: "ปรับปรุงช่อง Checkbox ในรายการสิ่งที่ต้องทำ (To-Do List) ให้คลิกง่าย ตอบสนองรวดเร็ว และเป็นมิตรกับผู้ใช้",
+          },
+          {
+            en: "Optimized editor state updates to eliminate input latency during rapid typing.",
+            th: "ปรับปรุงการจัดการสถานะภายในเอดิเตอร์เพื่อลดความหน่วงขณะพิมพ์เร็ว",
+          },
+          {
+            en: "Extracted and modularized reusable template definitions and typography helpers.",
+            th: "แยกโครงสร้างแม่แบบเอกสาร (Templates) และตัวช่วยแปลงตัวอักษรให้อยู่ในโมดูลที่สะอาดและเป็นระบบ",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.3.2",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "HTML Browser & URL Navigation, Comprehensive Tooltip System, Slash Command Toggle, Media PiP & High-Fidelity Exports",
       th: "พรีวิวไฟล์ HTML พร้อมแถบ URL นำทาง, ปรับระบบ Tooltip ทั้งโปรแกรม, ตั้งค่าเปิด-ปิด Slash Command, หน้าต่างวิดีโอลอยตัว (PiP) และปรับปรุงระบบส่งออกเอกสาร",
@@ -1092,7 +1272,10 @@ export default function WhatsNewView({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex-1 h-full min-h-0 overflow-y-auto bg-background text-foreground select-none flex flex-col no-scrollbar">
+      <div
+        data-whats-new-view="true"
+        className="flex-1 h-full min-h-0 overflow-y-auto bg-background text-foreground select-none flex flex-col no-scrollbar"
+      >
         <div className="max-w-5xl w-full mx-auto px-6 py-6 sm:py-7 flex-1 flex flex-col gap-8">
           {/* 1. Header Section (matching Tags/Favorites tab views) */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
@@ -1195,6 +1378,7 @@ export default function WhatsNewView({
               return (
                 <div
                   key={idx}
+                  data-whats-new-card="true"
                   className="rounded-2xl border border-border/60 bg-card/60 p-5 space-y-2.5 shadow-2xs"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -1226,7 +1410,11 @@ export default function WhatsNewView({
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {activeRelease.changes.map((group, gIdx) => (
-                  <div key={gIdx} className="rounded-2xl border border-border/50 bg-muted/20 p-4 space-y-2.5">
+                  <div
+                    key={gIdx}
+                    data-whats-new-card="true"
+                    className="rounded-2xl border border-border/50 bg-muted/20 p-4 space-y-2.5"
+                  >
                     <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
                       <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
                       <span>{isTh ? group.category.th : group.category.en}</span>

@@ -380,8 +380,8 @@ export function generatePdfHtml(options: GeneratePdfHtmlOptions): string {
       font-size: var(--editor-font-size);
       line-height: var(--editor-line-height);
       text-rendering: optimizeLegibility;
-      word-wrap: break-word;
-      overflow-wrap: anywhere;
+      word-break: normal;
+      overflow-wrap: break-word;
     }
 
     .pdf-container {

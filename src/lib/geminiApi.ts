@@ -10,7 +10,12 @@ export type AiActionType =
   | "continue_writing"
   | "rewrite";
 
-const SYSTEM_PREFIX = `Respond ONLY with the final converted text. Do NOT echo constraints, steps, quotes, explanations, or analysis.`;
+const SYSTEM_PREFIX = `Respond ONLY with the final converted text. Do NOT echo constraints, steps, quotes, explanations, or analysis.
+IMPORTANT FORMATTING RULES:
+1. Always preserve Markdown formatting and document structure from the original text (such as checklist checkboxes '- [ ]' / '- [x]', bullet points, numbered lists, headings '#', code blocks, bold, and italics).
+2. If the input contains checkboxes or task lists, the output MUST preserve the exact checkbox format ('- [ ]' or '- [x]') on each corresponding line. Do NOT convert checkboxes into plain paragraphs or normal bullet lists.
+3. If the input contains inline HTML styling tags, custom font/color spans (such as <span style="color: ...">, <span style="font-family: ...">, <span style="font-size: ...">, etc.) or HTML tags, you MUST PRESERVE the exact HTML tags and style attributes around the corresponding text in the output. Never strip, discard, or replace inline HTML styling tags.
+4. Do not wrap the entire response in markdown code blocks (\`\`\`markdown ... \`\`\`) unless specifically requested.`;
 
 export const LUNO_AI_SYSTEM_PROMPT = `# Luno AI — Personality & Behavior
 
@@ -216,37 +221,51 @@ A thoughtful AI writing partner — not a generic chatbot.
 
 const ACTION_PROMPTS: Record<AiActionType, (input: string) => string> = {
   improve: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Improve the flow, clarity, and phrasing of the text. Output ONLY the improved text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Improve the flow, clarity, and phrasing of the text while strictly preserving its Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the improved text.\n\nText:\n${text}`,
   fix_grammar: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Fix all spelling and grammar mistakes. Output ONLY the corrected text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Fix all spelling and grammar mistakes while strictly preserving all Markdown syntax, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the corrected text.\n\nText:\n${text}`,
   make_shorter: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Make the text concise and shorter while keeping key meaning. Output ONLY the shortened text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Make the text concise and shorter while keeping key meaning and preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the shortened text.\n\nText:\n${text}`,
   make_longer: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Expand and elaborate on the text with relevant detail. Output ONLY the expanded text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Expand and elaborate on the text with relevant detail while preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the expanded text.\n\nText:\n${text}`,
   simplify: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Simplify the vocabulary and structure so it is very easy to read. Output ONLY the single simplified text. Do not list options or analysis.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Simplify the vocabulary and structure while preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the single simplified text. Do not list options or analysis.\n\nText:\n${text}`,
   formalize: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Rewrite in a polite, formal, and professional tone. Output ONLY the formal text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Rewrite in a polite, formal, and professional tone while preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the formal text.\n\nText:\n${text}`,
   make_casual: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Rewrite in a friendly, natural, and casual tone. Output ONLY the casual text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Rewrite in a friendly, natural, and casual tone while preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the casual text.\n\nText:\n${text}`,
   translate: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Translate the text. If Thai, translate to English. If English, translate to Thai. Output ONLY the translation without language notes.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Translate the text while preserving all Markdown syntax, structure, checklists ('- [ ]' / '- [x]'), and any inline HTML styling spans (<span style="...">). If Thai, translate to English. If English, translate to Thai. Output ONLY the translation without language notes.\n\nText:\n${text}`,
   continue_writing: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Continue writing naturally from the end of the text. Output ONLY the continuation.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Continue writing naturally from the end of the text. Maintain consistent Markdown styling and HTML formatting if applicable. Output ONLY the continuation.\n\nText:\n${text}`,
   rewrite: (text) =>
-    `${SYSTEM_PREFIX}\n\nTask: Rewrite with fresh phrasing and clear structure. Output ONLY the single rewritten text.\n\nText:\n${text}`,
+    `${SYSTEM_PREFIX}\n\nTask: Rewrite with fresh phrasing and clear structure while strictly preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the single rewritten text.\n\nText:\n${text}`,
 };
 
 export function cleanAiOutputText(rawText: string): string {
   if (!rawText) return "";
   let cleaned = rawText.trim();
 
+  // Strip wrapping markdown code blocks if the whole response was enclosed in ```markdown ... ``` or ``` ... ```
+  const codeBlockMatch = cleaned.match(/^```(?:markdown|md|html)?\s*\n([\s\S]*?)\n```$/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    cleaned = codeBlockMatch[1].trim();
+  }
+
+  // Decode escaped HTML styling tags if returned as entities
+  cleaned = cleaned.replace(/&lt;(\/?(?:span|font|mark|b|i|u|strong|em|p|div|code|del|sub|sup)[^&]*)&gt;/gi, "<$1>");
+
+  // Normalize checkbox formats to standard Markdown `- [ ]` or `- [x]`
+  // e.g. `* [ ]`, `+ [ ]`, `[ ]`, `1. [ ]`
+  cleaned = cleaned.replace(/^([ \t]*)(?:[-*+]|\d+\.)?[ \t]*\[([ xX])\][ \t]*/gm, "$1- [$2] ");
+
   // If text contains quoted strings at the end or double quotes, look for final quoted sentence or last line
   const lines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
   
   // If the last non-empty line is enclosed in double quotes or looks like the final output
+  // but only if it's NOT an HTML tag or markdown block
   const lastLine = lines[lines.length - 1];
-  if (lastLine && /^"([^"]+)"$/.test(lastLine)) {
+  if (lines.length === 1 && lastLine && /^"([^"]+)"$/.test(lastLine) && !lastLine.includes("<span") && !lastLine.includes("style=")) {
     const match = lastLine.match(/^"([^"]+)"$/);
     if (match && match[1]) {
       return match[1].trim();
@@ -261,13 +280,19 @@ export function cleanAiOutputText(rawText: string): string {
     }
   }
 
-  // If response lists bullet points with Role / Constraint / Breakdown, extract the final standalone quote
-  const doubleQuoteMatches = Array.from(cleaned.matchAll(/"([^"\n]{5,})"/g));
-  if (doubleQuoteMatches.length > 0) {
-    // Pick the last valid non-source quote
-    const lastQuote = doubleQuoteMatches[doubleQuoteMatches.length - 1][1];
-    if (lastQuote && !lastQuote.includes("ทันใดนั้นแมว")) {
-      return lastQuote.trim();
+  // Only extract standalone quote if it's NOT a multi-line markdown, HTML, or checklist output
+  const hasRichOrMarkdownStructure =
+    /(?:^|\n)(?:[-*+]\s|#+\s|\d+\.\s|>\s|```|\|)/.test(cleaned) ||
+    /<[a-zA-Z][\s\S]*>/.test(cleaned);
+
+  if (!hasRichOrMarkdownStructure) {
+    const doubleQuoteMatches = Array.from(cleaned.matchAll(/"([^"\n]{5,})"/g));
+    if (doubleQuoteMatches.length > 0) {
+      // Pick the last valid non-source quote
+      const lastQuote = doubleQuoteMatches[doubleQuoteMatches.length - 1][1];
+      if (lastQuote && !lastQuote.includes("ทันใดนั้นแมว")) {
+        return lastQuote.trim();
+      }
     }
   }
 

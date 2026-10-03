@@ -78,6 +78,7 @@ export function sanitizeHtml(rawHtml: string): string {
     }
   } catch (err) {
     console.warn("DOMPurify sanitize failed:", err);
+    return "";
   }
 
   return rawHtml;

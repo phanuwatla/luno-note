@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import {
+  WorkspaceImagePickerDialog,
   ImageItemThumbnail,
   IMAGE_EXTENSIONS,
   type ScannedImageItem,
 } from "./WorkspaceImagePickerDialog";
 import {
+  WorkspaceVideoPickerDialog,
   VideoItemThumbnail,
   captureVideoFrame,
   videoThumbnailCache,
@@ -15,6 +17,8 @@ import {
 } from "./WorkspaceVideoPickerDialog";
 import { imageLocalCache } from "./ImageNodeView";
 import { videoLocalCache } from "./VideoNodeView";
+import { AppSettingsProvider } from "@/hooks/useAppSettings";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 describe("WorkspaceMediaPickers - Image & Video Thumbnail Previews", () => {
   beforeEach(() => {
@@ -241,6 +245,100 @@ describe("WorkspaceMediaPickers - Image & Video Thumbnail Previews", () => {
       expect(isVideoNote({ id: "6", title: "screencast_demo.webm", content: "" } as any)).toBe(true);
       expect(isVideoNote({ id: "7", title: "tutorial.mp4", content: "" } as any)).toBe(true);
       expect(isVideoNote({ id: "8", title: "clip.mov", content: "" } as any)).toBe(true);
+    });
+  });
+
+  describe("Root folder display in Media Picker Dialogs", () => {
+    it("displays Root or หน้าหลัก instead of '/' for root-level items in WorkspaceImagePickerDialog", async () => {
+      const mockNotes = [
+        {
+          id: "note-img-1",
+          title: "root_image.png",
+          fileName: "root_image.png",
+          folderPath: "",
+          content: "data:image/png;base64,test",
+          isLocked: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any,
+      ];
+
+      render(
+        <AppSettingsProvider>
+          <TooltipProvider>
+            <WorkspaceImagePickerDialog
+              isOpen={true}
+              onClose={vi.fn()}
+              notes={mockNotes}
+              currentNote={null}
+              onSelectImage={vi.fn()}
+            />
+          </TooltipProvider>
+        </AppSettingsProvider>
+      );
+
+      // Switch to Workspace Images tab (tab index 1)
+      const tabButtons = screen.getAllByRole("button");
+      const workspaceTab = tabButtons.find((btn) => btn.textContent?.includes("Workspace") || btn.textContent?.includes("ทั้งหมด") || btn.textContent?.includes("All"));
+      if (workspaceTab) {
+        fireEvent.click(workspaceTab);
+      }
+
+      await waitFor(() => {
+        expect(screen.getByText("root_image.png")).toBeDefined();
+      });
+
+      // Check that it does not display "/" alone as the folder name
+      expect(screen.queryByText("/"))?.toBeNull();
+      // It should display "Root" or "หน้าหลัก"
+      const rootElements = screen.queryAllByText(/Root|หน้าหลัก/);
+      expect(rootElements.length).toBeGreaterThan(0);
+    });
+
+    it("displays Root or หน้าหลัก instead of '/' for root-level items in WorkspaceVideoPickerDialog", async () => {
+      const mockNotes = [
+        {
+          id: "note-vid-1",
+          title: "root_video.mp4",
+          fileName: "root_video.mp4",
+          folderPath: "/",
+          content: "blob:http://localhost/root_video.mp4",
+          isLocked: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any,
+      ];
+
+      render(
+        <AppSettingsProvider>
+          <TooltipProvider>
+            <WorkspaceVideoPickerDialog
+              isOpen={true}
+              onClose={vi.fn()}
+              notes={mockNotes}
+              currentNote={null}
+              onSelectVideo={vi.fn()}
+            />
+          </TooltipProvider>
+        </AppSettingsProvider>
+      );
+
+      // Switch to Workspace Videos tab (tab index 1)
+      const tabButtons = screen.getAllByRole("button");
+      const workspaceTab = tabButtons.find((btn) => btn.textContent?.includes("Workspace") || btn.textContent?.includes("ทั้งหมด") || btn.textContent?.includes("All"));
+      if (workspaceTab) {
+        fireEvent.click(workspaceTab);
+      }
+
+      await waitFor(() => {
+        expect(screen.getByText("root_video.mp4")).toBeDefined();
+      });
+
+      // Check that it does not display "/" alone as the folder name
+      expect(screen.queryByText("/"))?.toBeNull();
+      // It should display "Root" or "หน้าหลัก"
+      const rootElements = screen.queryAllByText(/Root|หน้าหลัก/);
+      expect(rootElements.length).toBeGreaterThan(0);
     });
   });
 });

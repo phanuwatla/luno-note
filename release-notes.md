@@ -1,3 +1,47 @@
+## Release Notes - Luno Note v1.3.3
+
+### Overview
+Luno Note version 1.3.3 introduces an integrated Web Browser hub with a dedicated right-side drawer, visual media nodes in the Relations Knowledge Graph, accidental exit confirmation, an onboarding Welcome guide for new workspaces, real-time auto-update download progress indicators, accessible task checkboxes, and typing performance optimizations.
+
+### Key Improvements & New Features
+
+#### 1. Integrated Web Browser Hub & Right Drawer
+- **Dedicated Navigation Drawer**: Seamlessly browse documentation, references, and websites alongside your notes without switching applications.
+- **Chronological History & Fast Search**: Group browsing history intuitively into Today, Yesterday, and Earlier sections, complete with instant keyword search and item removal.
+- **Bookmarks Management**: Save and organize favorite web pages with persistent storage and single-click access.
+- **Full Privacy Data Clearing**: Securely wipe web cookies, HTTP cache, localStorage, and site data through Electron IPC.
+- **Page Zoom Controls & Address Bar Actions**: Easily zoom in, zoom out, or reset to 100%, with integrated address bar shortcuts.
+- **One-Click Note Insertion**: Quickly copy any visited URL as formatted Markdown or insert links directly into active notes through an intuitive note selector dialog with automatic favicon detection.
+
+#### 2. Relations Graph Media Nodes Visualization
+- **Visual Media Nodes**: Force-directed Knowledge Graph now displays media attachment nodes (images, video, audio) alongside markdown notes.
+- **Interactive Media Filter**: Seamlessly toggle media node visibility (`showMedia` / `hideMedia`) to focus strictly on note relationships or explore complete multimedia connections.
+- **Distinct Media Styling**: Customized visual badges, colors, and icons distinguish media assets from note nodes at a glance.
+
+#### 3. Accidental Exit Confirmation & Safety Shield
+- **Configurable Exit Confirmation**: Added `confirmBeforeExit` setting in **Settings > System/Other** (default: enabled).
+- **Interactive Close Prompt**: Prompts for confirmation when closing the window to prevent accidental data loss or interruptions while actively editing.
+
+#### 4. Real-Time Auto-Update Download Progress
+- **Interactive Progress Bar**: Live download progress percentage indicator with interface typography directly within the toast notification.
+- **Instant Restart Action**: One-click **Update & Restart** button immediately applies downloaded releases.
+
+#### 5. Onboarding Welcome Guide for New Workspaces
+- **Starter Welcome Note**: Optional generation of a comprehensive `Welcome.md` guide when creating a new workspace.
+- **Practical Walkthrough**: Highlights formatting shortcuts, multimedia features, task management, and knowledge graph capabilities to get started immediately.
+
+#### 6. Accessible Task Checkboxes & High-Speed Typing
+- **Accessible Editor Checkboxes**: Dedicated `EditorCheckbox` component providing accessible, tactile, and responsive task item interactions.
+- **Typing Latency Optimization**: Streamlined editor state updates eliminating input latency during rapid note taking.
+- **Modularized Architecture**: Extracted reusable template definitions and typography helpers into clean, maintainable modules.
+- **Security Hardening**: Enforced dangerous file extension restrictions preventing arbitrary script/binary execution in external shell handlers.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.3.3.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.2
 
 ### Overview

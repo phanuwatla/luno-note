@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import lunoLogo from "@/assets/luno-logo.png";
@@ -8,17 +8,22 @@ import Editor, { clearNoteEditorHistory } from "@/components/Editor";
 import SplitResizer from "@/components/SplitResizer";
 import TabBar from "@/components/TabBar";
 import Breadcrumb from "@/components/Breadcrumb";
-import SettingsTabView, { type SettingsCategory, isValidSettingsCategory } from "@/components/SettingsTabView";
-import HelpTabView, { type HelpCategory, isValidHelpCategory } from "@/components/HelpTabView";
-import WhatsNewView from "@/components/WhatsNewView";
-import LunoAiView from "@/components/LunoAiView";
-import WebViewerView from "@/components/WebViewerView";
+import { type SettingsCategory, isValidSettingsCategory } from "@/types/settingsCategory";
+import { type HelpCategory, isValidHelpCategory } from "@/types/helpCategory";
+import { TEMPLATE_DEFINITIONS } from "@/lib/templateDefinitions";
 import HomeView from "@/components/HomeView";
-import TrashView from "@/components/TrashView";
-import TemplatesView, { TEMPLATE_DEFINITIONS } from "@/components/TemplatesView";
-import { RelationsView } from "@/components/RelationsView";
-import FavoritesTabView from "@/components/FavoritesTabView";
-import TagsTabView from "@/components/TagsTabView";
+import type { GraphNode } from "@/lib/graphUtils";
+
+const SettingsTabView = lazy(() => import("@/components/SettingsTabView"));
+const HelpTabView = lazy(() => import("@/components/HelpTabView"));
+const WhatsNewView = lazy(() => import("@/components/WhatsNewView"));
+const LunoAiView = lazy(() => import("@/components/LunoAiView"));
+const TrashView = lazy(() => import("@/components/TrashView"));
+const TemplatesView = lazy(() => import("@/components/TemplatesView"));
+const RelationsView = lazy(() => import("@/components/RelationsView").then((m) => ({ default: m.RelationsView })));
+const WebViewerView = lazy(() => import("@/components/WebViewerView"));
+const FavoritesTabView = lazy(() => import("@/components/FavoritesTabView"));
+const TagsTabView = lazy(() => import("@/components/TagsTabView"));
 import { WorkspaceLauncher } from "@/components/WorkspaceLauncher";
 import GlobalVideoPip from "@/components/editor/GlobalVideoPip";
 import type { Note } from "@/hooks/useNotes";
@@ -39,6 +44,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useGoogleDriveSync } from "@/hooks/useGoogleDriveSync";
 import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { createCloudWorkspace } from "@/lib/googleDriveApi";
+import { getWelcomeNoteContent, WELCOME_NOTE_FILENAME } from "@/lib/welcomeNote";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
 import { encryptNoteContent, decryptNoteContent, isEncryptedNote, getRemainingLockoutSeconds, clearPinLockout } from "@/lib/noteCrypto";
 import { clearNoteVersionHistory } from "@/lib/versionHistoryStorage";
@@ -50,12 +56,13 @@ import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { setCustomFontWorkspaceHandle, loadCustomFonts } from "@/lib/customFontStore";
 
 export default function Index() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const isTh = language === "th";
   const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon } = useAppSettings();
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true);
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
-  const { notes, createNote, replaceNotes, updateNote, deleteNote, renameTagGlobally, deleteTagGlobally } = useNotes();
+  const { notes, createNote, bulkCreateNotes, replaceNotes, updateNote, deleteNote, renameTagGlobally, deleteTagGlobally } = useNotes();
   const notesRef = useRef(notes);
   useEffect(() => {
     notesRef.current = notes;
@@ -81,20 +88,37 @@ export default function Index() {
   const loadedWorkspaceKeyRef = useRef<string | null>(null);
   const appUpdate = useAppUpdate();
   const checkedUpdatesOnLaunchRef = useRef(false);
+  const checkForUpdatesRef = useRef(appUpdate.checkForUpdates);
+  checkForUpdatesRef.current = appUpdate.checkForUpdates;
 
   // Check for updates automatically on launch if enabled in settings
   useEffect(() => {
-    if (checkedUpdatesOnLaunchRef.current) return;
     if (settings.checkUpdates === false) return;
+    if (checkedUpdatesOnLaunchRef.current) return;
     if (typeof window === "undefined" || !window.electronAPI?.checkForUpdates) return;
 
     checkedUpdatesOnLaunchRef.current = true;
     const timer = setTimeout(() => {
-      appUpdate.checkForUpdates(false).catch(() => {});
-    }, 3000);
+      checkForUpdatesRef.current(false).catch((err) => {
+        console.warn("Auto check for updates failed on launch:", err);
+      });
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, [settings.checkUpdates, appUpdate]);
+  }, [settings.checkUpdates]);
+
+  // Prompt confirmation on browser tab/window close if confirmBeforeExit is enabled
+  useEffect(() => {
+    if (!settings.confirmBeforeExit || window.electronAPI?.isElectron) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [settings.confirmBeforeExit]);
   const HOME_NOTE: Note = useMemo(
     () => ({
       id: "home",
@@ -264,9 +288,6 @@ export default function Index() {
         const u = new URL(url.startsWith("http") ? url : `https://${url}`);
         if (!displayTitle) {
           displayTitle = u.hostname.replace(/^www\./, "");
-        }
-        if (!faviconUrl && u.hostname) {
-          faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(u.hostname)}&sz=32`;
         }
       } catch {
         if (!displayTitle) displayTitle = url.startsWith("data:") ? "HTML Preview" : url;
@@ -488,6 +509,281 @@ export default function Index() {
     openTab("whats-new");
   }, [openTab]);
 
+  const resolveRelationImageNoteData = useCallback(
+    async (id: string, node: GraphNode) => {
+      let targetFolder = node.folderPath;
+      let targetFileName = "";
+
+      // 1. Try to extract filename and folder from node.mediaSrc, node.imageSrc or id
+      const srcToInspect = (node.mediaSrc || node.imageSrc || id || "").replace(/^(img|vid|aud|file):/, "").split(/[?#]/)[0].trim();
+      let cleanSrc = "";
+      try {
+        cleanSrc = decodeURIComponent(srcToInspect);
+      } catch {
+        cleanSrc = srcToInspect;
+      }
+      cleanSrc = cleanSrc.replace(/\\/g, "/");
+
+      if (!/^(https?:|data:|blob:)/i.test(cleanSrc)) {
+        cleanSrc = cleanSrc.replace(/^(\.\/|\.\.\/|\/)+/, "");
+        const attachMatch = cleanSrc.match(/(?:^|\.\.\/|\.\/)*(attachments?(?:\/[^/]+)*)\/([^/]+)$/i);
+        if (attachMatch) {
+          if (!targetFolder) targetFolder = attachMatch[1];
+          targetFileName = attachMatch[2];
+        } else {
+          const parts = cleanSrc.split("/").filter(Boolean);
+          if (parts.length > 1) {
+            const fName = parts.pop()!;
+            if (!targetFolder) targetFolder = parts.join("/");
+            targetFileName = fName;
+          } else if (parts.length === 1) {
+            targetFileName = parts[0];
+          }
+        }
+      }
+
+      // 2. If targetFileName still not found or lacks extension, check node.label or node.title
+      if (!targetFileName || !/\.[a-zA-Z0-9]+$/i.test(targetFileName)) {
+        if (node.label && /\.[a-zA-Z0-9]+$/i.test(node.label)) {
+          targetFileName = node.label;
+        } else if (node.title && /\.[a-zA-Z0-9]+$/i.test(node.title)) {
+          targetFileName = node.title;
+        } else {
+          const fallback =
+            node.nodeType === "audio"
+              ? "voice_note.webm"
+              : node.nodeType === "video"
+              ? "video.mp4"
+              : node.nodeType === "file"
+              ? "attachment.bin"
+              : "qrcode.png";
+          targetFileName = node.label || node.title || fallback;
+        }
+      }
+
+      // 3. Ensure extension if it's missing (e.g. "QR Code" -> "qrcode.png")
+      if (!/\.[a-zA-Z0-9]+$/i.test(targetFileName)) {
+        const slug = targetFileName.toLowerCase().replace(/\s+/g, "_");
+        const ext =
+          node.nodeType === "audio"
+            ? "webm"
+            : node.nodeType === "video"
+            ? "mp4"
+            : node.nodeType === "file"
+            ? "bin"
+            : "png";
+        targetFileName = `${slug}.${ext}`;
+      }
+
+      // 4. Default targetFolder to attachment(s) if referenced or missing
+      if (!targetFolder) {
+        if (cleanSrc.toLowerCase().includes("attachment/") || id.toLowerCase().includes("attachment/")) {
+          targetFolder = "attachment";
+        } else {
+          targetFolder = "attachments";
+        }
+      }
+
+      // 5. Verify on disk if file exists in targetFolder or altFolder (attachment vs attachments)
+      if (openedRootDirHandle) {
+        try {
+          const primaryFolder = targetFolder;
+          const altFolder = primaryFolder.toLowerCase().startsWith("attachments")
+            ? primaryFolder.replace(/^attachments/i, "attachment")
+            : primaryFolder.replace(/^attachment/i, "attachments");
+
+          let foundInPrimary = false;
+          try {
+            let pDir = openedRootDirHandle;
+            for (const seg of primaryFolder.split("/").filter(Boolean)) {
+              pDir = await pDir.getDirectoryHandle(seg, { create: false });
+            }
+            await pDir.getFileHandle(targetFileName, { create: false });
+            foundInPrimary = true;
+          } catch {}
+
+          if (!foundInPrimary) {
+            try {
+              let aDir = openedRootDirHandle;
+              for (const seg of altFolder.split("/").filter(Boolean)) {
+                aDir = await aDir.getDirectoryHandle(seg, { create: false });
+              }
+              await aDir.getFileHandle(targetFileName, { create: false });
+              targetFolder = altFolder;
+            } catch {}
+          }
+        } catch {}
+      } else {
+        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
+          try {
+            const saved = await electronAPI.getSavedWorkspace();
+            const wsPath = saved?.folderPath || saved?.path;
+            if (wsPath) {
+              const primaryFolder = targetFolder;
+              const altFolder = primaryFolder.toLowerCase().startsWith("attachments")
+                ? primaryFolder.replace(/^attachments/i, "attachment")
+                : primaryFolder.replace(/^attachment/i, "attachments");
+
+              const primaryFiles = (await electronAPI.readDirectoryFiles(`${wsPath}/${primaryFolder}`)) || [];
+              const foundInPrimary = primaryFiles.some((f: any) => (typeof f === "string" ? f : f?.name) === targetFileName);
+
+              if (!foundInPrimary) {
+                const altFiles = (await electronAPI.readDirectoryFiles(`${wsPath}/${altFolder}`)) || [];
+                const foundInAlt = altFiles.some((f: any) => (typeof f === "string" ? f : f?.name) === targetFileName);
+                if (foundInAlt) {
+                  targetFolder = altFolder;
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      return { targetFolder, targetFileName };
+    },
+    [openedRootDirHandle]
+  );
+
+  const handleSelectNoteFromRelations = useCallback(
+    async (id: string, node?: GraphNode) => {
+      // 1. Direct match in workspace notes
+      const existing = notes.find((n) => n.id === id);
+      if (existing) {
+        openTab(id);
+        return;
+      }
+
+      // 2. If it is a media or attachment node (image, video, audio, file)
+      if (node?.nodeType && node.nodeType !== "note") {
+        const { targetFolder, targetFileName } = await resolveRelationImageNoteData(id, node);
+
+        // Find existing media note matching targetFileName and targetFolder
+        const matched = notes.find((n) => {
+          if (n.id === id) return true;
+          const fn = (n.fileName || "").toLowerCase();
+          const fp = (n.folderPath || "").toLowerCase();
+          if (fn === targetFileName.toLowerCase()) {
+            if (targetFolder) {
+              return fp === targetFolder.toLowerCase();
+            }
+            return true;
+          }
+          return false;
+        });
+
+        if (matched) {
+          openTab(matched.id);
+          return;
+        }
+
+        // Pre-store file handle in Web FS if possible
+        if (openedRootDirHandle && targetFolder) {
+          try {
+            let dirHandle = openedRootDirHandle;
+            const segments = targetFolder.split("/").filter(Boolean);
+            for (const seg of segments) {
+              dirHandle = await dirHandle.getDirectoryHandle(seg, { create: false });
+            }
+            const fileHandle = await dirHandle.getFileHandle(targetFileName, { create: false });
+            if (fileHandle) {
+              await setStoredFileHandle(id, fileHandle);
+              const relPath = `${targetFolder}/${targetFileName}`;
+              await setStoredFileHandle(relPath, fileHandle);
+            }
+          } catch {}
+        }
+
+        // Create the media note in memory pointing directly to its folder (e.g. /attachment), never root!
+        const fileType = node.nodeType === "image" ? "image" : "binary";
+        const created = await bulkCreateNotes([
+          {
+            id,
+            title: targetFileName,
+            fileName: targetFileName,
+            folderPath: targetFolder,
+            content: node.mediaSrc || node.imageSrc || "",
+            fileType,
+          },
+        ]);
+        if (created && created[0]?.id) {
+          openTab(created[0].id);
+          return;
+        }
+      }
+
+      openTab(id);
+    },
+    [notes, openTab, bulkCreateNotes, resolveRelationImageNoteData, openedRootDirHandle]
+  );
+
+  const handleSelectNoteFromRelationsSplit = useCallback(
+    async (id: string, node?: GraphNode) => {
+      const existing = notes.find((n) => n.id === id);
+      if (existing) {
+        setSplitTabId(id);
+        return;
+      }
+
+      if (node?.nodeType && node.nodeType !== "note") {
+        const { targetFolder, targetFileName } = await resolveRelationImageNoteData(id, node);
+
+        const matched = notes.find((n) => {
+          if (n.id === id) return true;
+          const fn = (n.fileName || "").toLowerCase();
+          const fp = (n.folderPath || "").toLowerCase();
+          if (fn === targetFileName.toLowerCase()) {
+            if (targetFolder) {
+              return fp === targetFolder.toLowerCase();
+            }
+            return true;
+          }
+          return false;
+        });
+
+        if (matched) {
+          setSplitTabId(matched.id);
+          return;
+        }
+
+        if (openedRootDirHandle && targetFolder) {
+          try {
+            let dirHandle = openedRootDirHandle;
+            const segments = targetFolder.split("/").filter(Boolean);
+            for (const seg of segments) {
+              dirHandle = await dirHandle.getDirectoryHandle(seg, { create: false });
+            }
+            const fileHandle = await dirHandle.getFileHandle(targetFileName, { create: false });
+            if (fileHandle) {
+              await setStoredFileHandle(id, fileHandle);
+              const relPath = `${targetFolder}/${targetFileName}`;
+              await setStoredFileHandle(relPath, fileHandle);
+            }
+          } catch {}
+        }
+
+        const fileType = node.nodeType === "image" ? "image" : "binary";
+        const created = await bulkCreateNotes([
+          {
+            id,
+            title: targetFileName,
+            fileName: targetFileName,
+            folderPath: targetFolder,
+            content: node.mediaSrc || node.imageSrc || "",
+            fileType,
+          },
+        ]);
+        if (created && created[0]?.id) {
+          setSplitTabId(created[0].id);
+          return;
+        }
+      }
+
+      setSplitTabId(id);
+    },
+    [notes, setSplitTabId, bulkCreateNotes, resolveRelationImageNoteData, openedRootDirHandle]
+  );
+
   const handleOpenWebTab = useCallback(
     (rawUrl: string, initialTitle?: string, customDisplayUrl?: string, filePath?: string) => {
       const trimmed = (rawUrl || "").trim();
@@ -614,36 +910,31 @@ export default function Index() {
   }, []);
 
   const handleInsertLinkToActiveNote = useCallback(
-    (url: string, title?: string) => {
+    (url: string, title?: string, targetNoteId?: string) => {
       const cleanUrl = (url || "").trim();
       if (!cleanUrl) return;
       const cleanTitle = (title || "").trim();
       const linkMd = cleanTitle && cleanTitle !== cleanUrl ? `[${cleanTitle}](${cleanUrl})` : cleanUrl;
 
       // Smart resolution of target note:
-      // 1. If split pane is currently showing a note, that's the visible companion note!
-      // 2. If main active tab is currently a note (and web viewer is in split pane)
-      // 3. Last active note the user was working on
-      // 4. Any currently open note in tabs
-      // 5. First note in workspace
+      // 1. Explicit targetNoteId if selected from dropdown or passed
+      // 2. If split pane is currently showing a note, that's the visible companion note!
+      // 3. If main active tab is currently a note (and web viewer is in split pane)
+      // 4. Last active note the user was working on
+      // 5. Any currently open note in tabs
       const targetNote =
+        (targetNoteId ? notes.find((n) => n.id === targetNoteId) : null) ??
         (splitTabId && !isSystemOrWebTab(splitTabId) ? notes.find((n) => n.id === splitTabId) : null) ??
         (activeTabId && !isSystemOrWebTab(activeTabId) ? notes.find((n) => n.id === activeTabId) : null) ??
         (lastActiveNoteId && !isSystemOrWebTab(lastActiveNoteId) ? notes.find((n) => n.id === lastActiveNoteId) : null) ??
         notes.find((n) => n.id === openTabIds.find((id) => !isSystemOrWebTab(id))) ??
-        notes[0] ??
         null;
 
       if (!targetNote) {
-        // If no note exists in workspace, create a new note with the web link
-        const newNote = createNote();
-        if (newNote?.id) {
-          const newTitle = cleanTitle || "Web Note";
-          updateNote(newNote.id, { title: newTitle, content: linkMd });
-        }
         toast({
           title: t("webViewer.insertToNote") || "Insert link to active note",
-          description: t("webViewer.linkInserted") || "Created new note with link",
+          description: t("webViewer.noActiveNotes") || (isTh ? "ไม่มีโน้ตที่เปิดอยู่เพื่อแทรกลิงก์" : "No open notes found to insert link into"),
+          variant: "destructive",
         });
         return;
       }
@@ -698,7 +989,7 @@ export default function Index() {
         description: `${t("webViewer.linkInserted") || "Link inserted into note"} (${noteDisplayName})`,
       });
     },
-    [notes, splitTabId, activeTabId, lastActiveNoteId, openTabIds, updateNote, createNote, t]
+    [notes, splitTabId, activeTabId, lastActiveNoteId, openTabIds, updateNote, isTh, t]
   );
 
   const handleUpdateNote = useCallback(
@@ -723,13 +1014,15 @@ export default function Index() {
           }
         }
 
-        // For non-markdown files, save custom icon in settings.fileIcons
-        if (!isMarkdownNote(currentNote) && currentNote.fileName && ("icon" in patch || "iconColor" in patch)) {
+        // Sync custom icon in settings.fileIcons (for non-markdown files, or when icon is removed)
+        if (currentNote.fileName && ("icon" in patch || "iconColor" in patch)) {
           const relPath = currentNote.folderPath ? `${currentNote.folderPath}/${currentNote.fileName}` : currentNote.fileName;
           const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
           const nextColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
           if (nextIcon) {
-            setFileIcon(relPath, nextIcon, nextColor);
+            if (!isMarkdownNote(currentNote)) {
+              setFileIcon(relPath, nextIcon, nextColor);
+            }
           } else {
             removeFileIcon(relPath);
           }
@@ -1380,9 +1673,19 @@ export default function Index() {
     const resolvedIcon = fmIcon || existing?.icon || customFileIcon?.icon;
     const resolvedIconColor = fmIconColor || existing?.iconColor || customFileIcon?.color;
 
+    const isEditingThisNote = Boolean(
+      existing?.id &&
+      activeTabId &&
+      existing.id === activeTabId &&
+      typeof existing.content === "string" &&
+      !isDiskEncrypted
+    );
+
     const content = (isCurrentlyDecrypted && isDiskEncrypted && existing?.content && !isEncryptedNote(existing.content))
       ? existing.content
-      : e.content;
+      : (isEditingThisNote && existing?.content !== undefined)
+        ? existing.content
+        : e.content;
     const encryptedContent = isDiskEncrypted
       ? e.content
       : (hasMemoryCipher ? existing?.encryptedContent : undefined);
@@ -1438,6 +1741,8 @@ export default function Index() {
     const IGNORED_FOLDERS = new Set([
       "attachments",
       "Attachments",
+      "attachment",
+      "Attachment",
       ".luno",
       "node_modules",
       ".git",
@@ -1551,10 +1856,15 @@ export default function Index() {
         updatedAt?: number;
       }> = [];
 
+      const existingByRelPath = new Map<string, Note>();
+      for (const n of currentNotes) {
+        if (n.fileName) {
+          existingByRelPath.set(getRelativePath(n.folderPath || "", n.fileName), n);
+        }
+      }
+
       for (const entry of filteredEntries) {
-        let existing = currentNotes.find(
-          (n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === entry.relativePath
-        );
+        const existing = existingByRelPath.get(entry.relativePath);
 
         let fileModified = 0;
         let diskFileSize = 0;
@@ -1971,7 +2281,6 @@ export default function Index() {
               removeFileIcon(oldRelPath);
             }
 
-            clearNoteEditorState(note.id);
             updateNote(note.id, { fileName: safeName, title: extractBaseTitleFromFileName(safeName) });
 
             const nextItems = entries.map((e: any) => {
@@ -2014,7 +2323,6 @@ export default function Index() {
       }
 
       await setStoredFileHandle(note.id, newHandle);
-      clearNoteEditorState(note.id);
       notesRef.current = notesRef.current.map((n) =>
         n.id === note.id ? { ...n, fileName: finalName, title: extractBaseTitleFromFileName(finalName) } : n
       );
@@ -3339,7 +3647,7 @@ export default function Index() {
           await setStoredDirectoryHandle(null);
           resetTabs(false);
           electronWorkspacePathRef.current = data.folderPath;
-          const folderName = data.folderName || data.folderPath.split(/[\\/]/).pop() || "My Notes";
+          const folderName = data.folderName || data.folderPath.split(/[\\/]/).pop() || "Untitled Workspace";
           try {
             localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
           } catch {}
@@ -3434,12 +3742,15 @@ export default function Index() {
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
   const handleCreateWorkspace = useCallback(
-    async (parentPath: string, workspaceName: string) => {
+    async (parentPath: string, workspaceName: string, includeWelcomeNote: boolean = true) => {
       setIsCreatingWorkspace(true);
       try {
         const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
         if (electronAPI?.createNewWorkspace) {
-          const data = await electronAPI.createNewWorkspace({ parentPath, workspaceName });
+          const welcomeContent = includeWelcomeNote
+            ? getWelcomeNoteContent(language === "th" ? "th" : "en", workspaceName)
+            : null;
+          const data = await electronAPI.createNewWorkspace({ parentPath, workspaceName, welcomeContent });
           if (data?.folderPath) {
             if (data.openedInNewWindow) {
               // New workspace was launched in a new window; keep current window intact!
@@ -3475,6 +3786,16 @@ export default function Index() {
             const nextNotes = replaceNotes(nextItems, true);
             resetTabs(true);
 
+            // Automatically open Welcome note if created
+            if (includeWelcomeNote) {
+              const welcomeNote = nextNotes.find(
+                (n: any) => n.fileName?.toLowerCase() === "welcome.md" || n.title?.toLowerCase() === "welcome"
+              );
+              if (welcomeNote) {
+                openTab(welcomeNote.id);
+              }
+            }
+
             if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
               void triggerSync(nextNotes, (updated) => {
                 replaceNotes(updated);
@@ -3491,7 +3812,7 @@ export default function Index() {
         setIsWorkspaceLoading(false);
       }
     },
-    [replaceNotes, resetTabs, restoreTabsFromSession, settings.reopenTabs, settings.onStartup, settings.storageMode, triggerSync]
+    [replaceNotes, resetTabs, restoreTabsFromSession, settings.reopenTabs, settings.onStartup, settings.storageMode, triggerSync, language, openTab]
   );
 
   const handleCloseWorkspace = useCallback(async () => {
@@ -3546,6 +3867,14 @@ export default function Index() {
         await importDriveNotes([], (imported) => {
           const nextNotes = replaceNotes(imported, true);
           resetTabs();
+          if (nextNotes.length === 1) {
+            const welcomeNote = nextNotes.find(
+              (n: any) => n.fileName?.toLowerCase() === "welcome.md"
+            );
+            if (welcomeNote) {
+              openTab(welcomeNote.id);
+            }
+          }
         });
 
         toast({
@@ -3562,11 +3891,11 @@ export default function Index() {
         setIsWorkspaceLoading(false);
       }
     },
-    [updateSetting, setRootFolderName, resetTabs, importDriveNotes, replaceNotes, t]
+    [updateSetting, setRootFolderName, resetTabs, importDriveNotes, replaceNotes, t, openTab]
   );
 
   const handleCreateCloudWorkspace = useCallback(
-    async (workspaceName: string) => {
+    async (workspaceName: string, includeWelcomeNote: boolean = true) => {
       setIsCreatingWorkspace(true);
       try {
         let accessToken = await getValidAccessToken();
@@ -3578,7 +3907,10 @@ export default function Index() {
           throw new Error("Not authenticated with Google Drive");
         }
 
-        const created = await createCloudWorkspace(accessToken, workspaceName);
+        const welcomeContent = includeWelcomeNote
+          ? getWelcomeNoteContent(language === "th" ? "th" : "en", workspaceName)
+          : null;
+        const created = await createCloudWorkspace(accessToken, workspaceName, welcomeContent);
         await handleOpenCloudWorkspace({
           id: created.folderId,
           name: created.name,
@@ -3595,7 +3927,7 @@ export default function Index() {
         setIsCreatingWorkspace(false);
       }
     },
-    [handleOpenCloudWorkspace, t]
+    [handleOpenCloudWorkspace, t, language]
   );
 
   const handleConnectGoogleDriveDirect = useCallback(async () => {
@@ -3652,7 +3984,7 @@ export default function Index() {
         setPendingReconnectDirHandle(null);
         await scanAndLoadFolderEntries(dirHandle, {
           onSuccess: (notesLoaded) => {
-            const folderName = dirHandle.name || "My Notes";
+            const folderName = dirHandle.name || "Untitled Workspace";
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
             restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup, dirHandle, isFirstTimeOnVersionRef.current);
@@ -3687,7 +4019,7 @@ export default function Index() {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath && active) {
             electronWorkspacePathRef.current = saved.folderPath;
-            const folderName = saved.folderName || saved.folderPath.split(/[\\/]/).pop() || "My Notes";
+            const folderName = saved.folderName || saved.folderPath.split(/[\\/]/).pop() || "Untitled Workspace";
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
             setElectronWorkspacePath(saved.folderPath);
@@ -3751,7 +4083,7 @@ export default function Index() {
             }
           }
 
-          const folderName = storedDir.name || "My Notes";
+          const folderName = storedDir.name || "Untitled Workspace";
           setOpenedFolderName(folderName);
           setOpenedRootDirHandle(storedDir);
           setRootFolderName(folderName);
@@ -3875,11 +4207,15 @@ export default function Index() {
       const existingByPath = new Map(
         currentNotes
           .filter((n) => n.fileName)
-          .map((n) => [n.folderPath ? `${n.folderPath}/${n.fileName}` : (n.fileName as string), n] as const)
+          .map((n) => {
+            const rel = getRelativePath(n.folderPath || "", n.fileName as string).replace(/\\/g, "/");
+            return [rel, n] as const;
+          })
       );
 
       const nextItems = (data.entries || []).map((e: any) => {
-        const existing = existingByPath.get(e.relativePath);
+        const normRelPath = (e.relativePath || "").replace(/\\/g, "/");
+        const existing = existingByPath.get(normRelPath);
         return mapTreeEntryToItem(e, existing);
       });
 
@@ -4006,6 +4342,31 @@ export default function Index() {
       })
       .filter((n): n is Note => Boolean(n));
   }, [openTabIds, notes, HOME_NOTE, TRASH_NOTE, SETTINGS_NOTE, HELP_NOTE, WHATS_NEW_NOTE, LUNO_AI_NOTE, TEMPLATES_NOTE, RELATIONS_NOTE, FAVORITES_NOTE, TAGS_NOTE, getWebTabNote]);
+
+  const openNoteTabs = useMemo(() => {
+    const list: Note[] = [];
+    const seen = new Set<string>();
+
+    // If split pane has a companion note currently visible on screen, place it first in the list
+    const visibleCompanionNote =
+      (splitTabNote && !isSystemOrWebTab(splitTabNote.id) && splitTabNote.fileType !== "web-viewer" ? splitTabNote : null) ||
+      (activeTabNote && !isSystemOrWebTab(activeTabNote.id) && activeTabNote.fileType !== "web-viewer" ? activeTabNote : null);
+
+    if (visibleCompanionNote && !seen.has(visibleCompanionNote.id)) {
+      seen.add(visibleCompanionNote.id);
+      list.push(visibleCompanionNote);
+    }
+
+    for (const note of openTabNotes) {
+      if (!note || isSystemOrWebTab(note.id) || note.fileType === "web-viewer") continue;
+      if (!seen.has(note.id)) {
+        seen.add(note.id);
+        list.push(note);
+      }
+    }
+
+    return list;
+  }, [openTabNotes, splitTabNote, activeTabNote]);
 
   // Cycle open tabs with Ctrl+Tab / Ctrl+Shift+Tab
   const cycleActiveTab = useCallback((direction: 1 | -1) => {
@@ -4251,6 +4612,17 @@ export default function Index() {
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
   }, [createNoteInFolder, handleOpenFolder, activeTabId, closeTab, notes, setSidebarOpen, openTab, isMobile, sidebarOpen, cycleActiveTab, handleOpenHelp]);
+
+  useEffect(() => {
+    const handleOpenSettingsEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ category?: unknown }>;
+      handleOpenSettings(customEvent.detail?.category || "ai");
+    };
+    window.addEventListener("luno:open-settings", handleOpenSettingsEvent);
+    return () => {
+      window.removeEventListener("luno:open-settings", handleOpenSettingsEvent);
+    };
+  }, [handleOpenSettings]);
 
   const handleCloseTab = useCallback(
     (id: string) => {
@@ -5010,148 +5382,166 @@ export default function Index() {
                     </div>
                     <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
-                        <TemplatesView
-                          onCreateWithTemplate={handleCreateFromHomeTemplate}
-                          notes={notes}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <TemplatesView
+                            onCreateWithTemplate={handleCreateFromHomeTemplate}
+                            notes={notes}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "relations" || activeTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "relations" || id.startsWith("relations:")) && (
-                        <RelationsView
-                          notes={notes}
-                          onSelectNote={(id) => openTab(id)}
-                          activeNoteId={activeTabId}
-                          isMobile={isMobile}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <RelationsView
+                            notes={notes}
+                            onSelectNote={handleSelectNoteFromRelations}
+                            activeNoteId={activeTabId}
+                            isMobile={isMobile}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
-                        <FavoritesTabView
-                          notes={notes}
-                          onOpenNote={(id) => openTab(id)}
-                          onToggleFavorite={(id) => {
-                            const found = notes.find((n) => n.id === id);
-                            if (found) {
-                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                            }
-                          }}
-                          onCreateBlankNote={handleCreateBlankFromHome}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <FavoritesTabView
+                            notes={notes}
+                            onOpenNote={(id) => openTab(id)}
+                            onToggleFavorite={(id) => {
+                              const found = notes.find((n) => n.id === id);
+                              if (found) {
+                                handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                              }
+                            }}
+                            onCreateBlankNote={handleCreateBlankFromHome}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
-                        <TagsTabView
-                          notes={notes}
-                          onOpenNote={(id) => openTab(id)}
-                          onToggleFavorite={(id) => {
-                            const found = notes.find((n) => n.id === id);
-                            if (found) {
-                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                            }
-                          }}
-                          onRenameTagGlobally={renameTagGlobally}
-                          onDeleteTagGlobally={deleteTagGlobally}
-                          onCreateBlankNote={handleCreateBlankFromHome}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <TagsTabView
+                            notes={notes}
+                            onOpenNote={(id) => openTab(id)}
+                            onToggleFavorite={(id) => {
+                              const found = notes.find((n) => n.id === id);
+                              if (found) {
+                                handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                              }
+                            }}
+                            onRenameTagGlobally={renameTagGlobally}
+                            onDeleteTagGlobally={deleteTagGlobally}
+                            onCreateBlankNote={handleCreateBlankFromHome}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
-                        <TrashView
-                          trashedNotes={trashedNotes}
-                          onRestore={handleRestoreFromTrash}
-                          onDeletePermanently={handleDeletePermanently}
-                          onEmptyTrash={handleEmptyTrash}
-                          onOpenSettings={() => handleOpenSettings("files")}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <TrashView
+                            trashedNotes={trashedNotes}
+                            onRestore={handleRestoreFromTrash}
+                            onDeletePermanently={handleDeletePermanently}
+                            onEmptyTrash={handleEmptyTrash}
+                            onOpenSettings={() => handleOpenSettings("files")}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
-                        <SettingsTabView
-                          initialCategory={settingsCategory}
-                          onCategoryChange={setSettingsCategory}
-                          onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
-                          notes={notes}
-                          onNotesUpdated={replaceNotes}
-                          openedFolderName={openedFolderName}
-                          folderPaths={openedFolderPaths}
-                          isCloudWorkspace={isCloudWorkspace}
-                          onCloseWorkspace={handleCloseWorkspace}
-                          onOpenWebTab={handleOpenWebTab}
-                          onOpenWhatsNew={handleOpenWhatsNew}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <SettingsTabView
+                            initialCategory={settingsCategory}
+                            onCategoryChange={setSettingsCategory}
+                            onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
+                            notes={notes}
+                            onNotesUpdated={replaceNotes}
+                            openedFolderName={openedFolderName}
+                            folderPaths={openedFolderPaths}
+                            isCloudWorkspace={isCloudWorkspace}
+                            onCloseWorkspace={handleCloseWorkspace}
+                            onOpenWebTab={handleOpenWebTab}
+                            onOpenWhatsNew={handleOpenWhatsNew}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
-                        <HelpTabView
-                          initialCategory={helpCategory}
-                          onCategoryChange={setHelpCategory}
-                          onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
-                          onOpenSettings={handleOpenSettings}
-                          onOpenWhatsNew={handleOpenWhatsNew}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <HelpTabView
+                            initialCategory={helpCategory}
+                            onCategoryChange={setHelpCategory}
+                            onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
+                            onOpenSettings={handleOpenSettings}
+                            onOpenWhatsNew={handleOpenWhatsNew}
+                            onOpenWebTab={handleOpenWebTab}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
-                        <WhatsNewView
-                          onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
-                          onOpenSettings={handleOpenSettings}
-                          onOpenHelp={handleOpenHelp}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <WhatsNewView
+                            onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
+                            onOpenSettings={handleOpenSettings}
+                            onOpenHelp={handleOpenHelp}
+                            onOpenWebTab={handleOpenWebTab}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                       {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
-                        <LunoAiView
-                          notes={notes}
-                          openedFolderName={openedFolderName}
-                          activeNote={splitTabNote ?? (notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null)}
-                          onInsertToActiveNote={(text) => {
-                            const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
-                            if (targetNote) {
-                              const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                              updateNote(targetNote.id, { content: updatedContent });
-                              toast({
-                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <LunoAiView
+                            notes={notes}
+                            openedFolderName={openedFolderName}
+                            activeNote={splitTabNote ?? (notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null)}
+                            onInsertToActiveNote={(text) => {
+                              const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
+                              if (targetNote) {
+                                const existingContent = targetNote.content || "";
+                                const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                                updateNote(targetNote.id, { content: updatedContent });
+                                toast({
+                                  title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                                  description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
+                                });
+                              }
+                            }}
+                            onInsertToSelectedNote={(targetNoteId, text) => {
+                              const targetNote = notes.find((n) => n.id === targetNoteId);
+                              if (targetNote) {
+                                const existingContent = targetNote.content || "";
+                                const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                                updateNote(targetNote.id, { content: updatedContent });
+                                toast({
+                                  title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                                  description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
+                                });
+                              }
+                            }}
+                            onCreateNewNote={(fileName, content, folderPath) => {
+                              const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                              void createNoteInFolder(folderPath || "", {
+                                fileName: targetName,
+                                initialContent: content,
                               });
-                            }
-                          }}
-                          onInsertToSelectedNote={(targetNoteId, text) => {
-                            const targetNote = notes.find((n) => n.id === targetNoteId);
-                            if (targetNote) {
-                              const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                              updateNote(targetNote.id, { content: updatedContent });
                               toast({
-                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
+                                title: t("lunoAi.createSuccessTitle") || "Note Created",
+                                description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
                               });
-                            }
-                          }}
-                          onCreateNewNote={(fileName, content, folderPath) => {
-                            const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                            void createNoteInFolder(folderPath || "", {
-                              fileName: targetName,
-                              initialContent: content,
-                            });
-                            toast({
-                              title: t("lunoAi.createSuccessTitle") || "Note Created",
-                              description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
-                            });
-                          }}
-                          onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
+                            }}
+                            onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
+                            onOpenWebTab={handleOpenWebTab}
+                          />
+                        </Suspense>
                       )}
                     </div>
                     {openTabIds.filter((id) => id.startsWith("web:") || (id === activeTabId && activeTabNote?.fileType === "web-viewer")).map((webId) => (
@@ -5159,20 +5549,23 @@ export default function Index() {
                         key={webId}
                         className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
                       >
-                        <WebViewerView
-                          tabId={webId}
-                          initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
-                          title={webTabs[webId]?.title}
-                          displayUrl={webTabs[webId]?.displayUrl}
-                          filePath={webTabs[webId]?.filePath}
-                          onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
-                          onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
-                          onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
-                          onInsertToActiveNote={handleInsertLinkToActiveNote}
-                          onClose={() => handleCloseTab(webId)}
-                          onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
-                          isSplit={splitTabId === webId}
-                        />
+                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                          <WebViewerView
+                            tabId={webId}
+                            initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
+                            title={webTabs[webId]?.title}
+                            displayUrl={webTabs[webId]?.displayUrl}
+                            filePath={webTabs[webId]?.filePath}
+                            onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
+                            onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
+                            onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
+                            onInsertToActiveNote={handleInsertLinkToActiveNote}
+                            activeNotes={openNoteTabs}
+                            onClose={() => handleCloseTab(webId)}
+                            onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
+                            isSplit={splitTabId === webId}
+                          />
+                        </Suspense>
                       </div>
                     ))}
                     <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
@@ -5203,6 +5596,7 @@ export default function Index() {
                         onCloseRightPanel={() => setRightPanelOpen(false)}
                         onSelectNote={(id) => openTab(id)}
                         onOpenWebTab={handleOpenWebTab}
+                        onOpenSettings={handleOpenSettings}
                         onUnlockNote={handleUnlockNote}
                         onRelockNote={handleRelockNote}
                         onGetActivePin={handleGetActivePin}
@@ -5259,150 +5653,171 @@ export default function Index() {
               <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
                 <div className={(splitTabId === "templates" || splitTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "templates" || splitTabId?.startsWith("templates:")) && (
-                    <TemplatesView
-                      onCreateWithTemplate={handleCreateFromHomeTemplate}
-                      notes={notes}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <TemplatesView
+                        onCreateWithTemplate={handleCreateFromHomeTemplate}
+                        notes={notes}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "relations" || splitTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "relations" || splitTabId?.startsWith("relations:")) && (
-                    <RelationsView
-                      notes={notes}
-                      onSelectNote={(id) => setSplitTabId(id)}
-                      activeNoteId={splitTabId}
-                      isMobile={isMobile}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <RelationsView
+                        notes={notes}
+                        onSelectNote={handleSelectNoteFromRelationsSplit}
+                        activeNoteId={splitTabId}
+                        isMobile={isMobile}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) && (
-                    <FavoritesTabView
-                      notes={notes}
-                      onOpenNote={(id) => setSplitTabId(id)}
-                      onToggleFavorite={(id) => {
-                        const found = notes.find((n) => n.id === id);
-                        if (found) {
-                          handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                        }
-                      }}
-                      onCreateBlankNote={handleCreateBlankFromHome}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <FavoritesTabView
+                        notes={notes}
+                        onOpenNote={(id) => setSplitTabId(id)}
+                        onToggleFavorite={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                          }
+                        }}
+                        onCreateBlankNote={handleCreateBlankFromHome}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "tags" || splitTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "tags" || splitTabId?.startsWith("tags:")) && (
-                    <TagsTabView
-                      notes={notes}
-                      onOpenNote={(id) => setSplitTabId(id)}
-                      onToggleFavorite={(id) => {
-                        const found = notes.find((n) => n.id === id);
-                        if (found) {
-                          handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                        }
-                      }}
-                      onRenameTagGlobally={renameTagGlobally}
-                      onDeleteTagGlobally={deleteTagGlobally}
-                      onCreateBlankNote={handleCreateBlankFromHome}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <TagsTabView
+                        notes={notes}
+                        onOpenNote={(id) => setSplitTabId(id)}
+                        onToggleFavorite={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                          }
+                        }}
+                        onRenameTagGlobally={renameTagGlobally}
+                        onDeleteTagGlobally={deleteTagGlobally}
+                        onCreateBlankNote={handleCreateBlankFromHome}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "trash" || splitTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "trash" || splitTabId?.startsWith("trash:")) && (
-                    <TrashView
-                      trashedNotes={trashedNotes}
-                      onRestore={handleRestoreFromTrash}
-                      onDeletePermanently={handleDeletePermanently}
-                      onEmptyTrash={handleEmptyTrash}
-                      onOpenSettings={() => handleOpenSettings("files")}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <TrashView
+                        trashedNotes={trashedNotes}
+                        onRestore={handleRestoreFromTrash}
+                        onDeletePermanently={handleDeletePermanently}
+                        onEmptyTrash={handleEmptyTrash}
+                        onOpenSettings={() => handleOpenSettings("files")}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "settings" || splitTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "settings" || splitTabId?.startsWith("settings:")) && (
-                    <SettingsTabView
-                      initialCategory={settingsCategory}
-                      onCategoryChange={setSettingsCategory}
-                      onClose={() => setSplitTabId(null)}
-                      notes={notes}
-                      onNotesUpdated={replaceNotes}
-                      openedFolderName={openedFolderName}
-                      folderPaths={openedFolderPaths}
-                      isCloudWorkspace={isCloudWorkspace}
-                      onCloseWorkspace={handleCloseWorkspace}
-                      onOpenWebTab={handleOpenWebTab}
-                      onOpenWhatsNew={handleOpenWhatsNew}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <SettingsTabView
+                        initialCategory={settingsCategory}
+                        onCategoryChange={setSettingsCategory}
+                        onClose={() => setSplitTabId(null)}
+                        notes={notes}
+                        onNotesUpdated={replaceNotes}
+                        openedFolderName={openedFolderName}
+                        folderPaths={openedFolderPaths}
+                        isCloudWorkspace={isCloudWorkspace}
+                        onCloseWorkspace={handleCloseWorkspace}
+                        onOpenWebTab={handleOpenWebTab}
+                        onOpenWhatsNew={handleOpenWhatsNew}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "help" || splitTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "help" || splitTabId?.startsWith("help:")) && (
-                    <HelpTabView
-                      initialCategory={helpCategory}
-                      onCategoryChange={setHelpCategory}
-                      onClose={() => setSplitTabId(null)}
-                      onOpenSettings={handleOpenSettings}
-                      onOpenWhatsNew={handleOpenWhatsNew}
-                      onOpenWebTab={handleOpenWebTab}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <HelpTabView
+                        initialCategory={helpCategory}
+                        onCategoryChange={setHelpCategory}
+                        onClose={() => setSplitTabId(null)}
+                        onOpenSettings={handleOpenSettings}
+                        onOpenWhatsNew={handleOpenWhatsNew}
+                        onOpenWebTab={handleOpenWebTab}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                   {(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) && (
-                    <WhatsNewView
-                      onClose={() => setSplitTabId(null)}
-                      onOpenSettings={handleOpenSettings}
-                      onOpenHelp={handleOpenHelp}
-                      onOpenWebTab={handleOpenWebTab}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <WhatsNewView
+                        onClose={() => setSplitTabId(null)}
+                        onOpenSettings={handleOpenSettings}
+                        onOpenHelp={handleOpenHelp}
+                        onOpenWebTab={handleOpenWebTab}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 <div className={(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                   {(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) && (
-                    <LunoAiView
-                      notes={notes}
-                      openedFolderName={openedFolderName}
-                      activeNote={splitTabNote}
-                      onInsertToActiveNote={(text) => {
-                        if (splitTabNote) {
-                          const existingContent = splitTabNote.content || "";
-                          const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                          updateNote(splitTabNote.id, { content: updatedContent });
-                        }
-                      }}
-                      onInsertToSelectedNote={(targetNoteId, text) => {
-                        const targetNote = notes.find((n) => n.id === targetNoteId);
-                        if (targetNote) {
-                          const existingContent = targetNote.content || "";
-                          const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                          updateNote(targetNote.id, { content: updatedContent });
-                        }
-                      }}
-                      onCreateNewNote={(fileName, content, folderPath) => {
-                        const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                        void createNoteInFolder(folderPath || "", { fileName: targetName, initialContent: content });
-                      }}
-                      onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                      onOpenWebTab={handleOpenWebTab}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <LunoAiView
+                        notes={notes}
+                        openedFolderName={openedFolderName}
+                        activeNote={splitTabNote}
+                        onInsertToActiveNote={(text) => {
+                          if (splitTabNote) {
+                            const existingContent = splitTabNote.content || "";
+                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                            updateNote(splitTabNote.id, { content: updatedContent });
+                          }
+                        }}
+                        onInsertToSelectedNote={(targetNoteId, text) => {
+                          const targetNote = notes.find((n) => n.id === targetNoteId);
+                          if (targetNote) {
+                            const existingContent = targetNote.content || "";
+                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                            updateNote(targetNote.id, { content: updatedContent });
+                          }
+                        }}
+                        onCreateNewNote={(fileName, content, folderPath) => {
+                          const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                          void createNoteInFolder(folderPath || "", { fileName: targetName, initialContent: content });
+                        }}
+                        onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
+                        onOpenWebTab={handleOpenWebTab}
+                      />
+                    </Suspense>
                   )}
                 </div>
                 {splitTabId?.startsWith("web:") && (
                   <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
-                    <WebViewerView
-                      tabId={splitTabId}
-                      initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
-                      title={splitTabId ? webTabs[splitTabId]?.title : undefined}
-                      displayUrl={splitTabId ? webTabs[splitTabId]?.displayUrl : undefined}
-                      filePath={splitTabId ? webTabs[splitTabId]?.filePath : undefined}
-                      onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
-                      onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
-                      onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
-                      onInsertToActiveNote={handleInsertLinkToActiveNote}
-                      onClose={() => setSplitTabId(null)}
-                      onSplit={() => setSplitTabId(null)}
-                      isSplit={true}
-                    />
+                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                      <WebViewerView
+                        tabId={splitTabId}
+                        initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
+                        title={splitTabId ? webTabs[splitTabId]?.title : undefined}
+                        displayUrl={splitTabId ? webTabs[splitTabId]?.displayUrl : undefined}
+                        filePath={splitTabId ? webTabs[splitTabId]?.filePath : undefined}
+                        onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
+                        onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
+                        onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
+                        onInsertToActiveNote={handleInsertLinkToActiveNote}
+                        activeNotes={openNoteTabs}
+                        onClose={() => setSplitTabId(null)}
+                        onSplit={() => setSplitTabId(null)}
+                        isSplit={true}
+                      />
+                    </Suspense>
                   </div>
                 )}
                 <div className={(isSystemOrWebTab(splitTabId || "") || splitTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
@@ -5432,6 +5847,7 @@ export default function Index() {
                     }}
                     onSelectNote={setSplitTabId}
                     onOpenWebTab={handleOpenWebTab}
+                    onOpenSettings={handleOpenSettings}
                     onUnlockNote={handleUnlockNote}
                     onRelockNote={handleRelockNote}
                     onGetActivePin={handleGetActivePin}
@@ -5511,155 +5927,173 @@ export default function Index() {
                   </div>
                   <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
-                      <TemplatesView
-                        onCreateWithTemplate={handleCreateFromHomeTemplate}
-                        notes={notes}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <TemplatesView
+                          onCreateWithTemplate={handleCreateFromHomeTemplate}
+                          notes={notes}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "relations" || activeTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "relations" || id.startsWith("relations:")) && (
-                      <RelationsView
-                        notes={notes}
-                        onSelectNote={(id) => openTab(id)}
-                        activeNoteId={activeTabId}
-                        isMobile={isMobile}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <RelationsView
+                          notes={notes}
+                          onSelectNote={handleSelectNoteFromRelations}
+                          activeNoteId={activeTabId}
+                          isMobile={isMobile}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
-                      <FavoritesTabView
-                        notes={notes}
-                        onOpenNote={(id) => openTab(id)}
-                        onToggleFavorite={(id) => {
-                          const found = notes.find((n) => n.id === id);
-                          if (found) {
-                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                          }
-                        }}
-                        onCreateBlankNote={handleCreateBlankFromHome}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <FavoritesTabView
+                          notes={notes}
+                          onOpenNote={(id) => openTab(id)}
+                          onToggleFavorite={(id) => {
+                            const found = notes.find((n) => n.id === id);
+                            if (found) {
+                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                            }
+                          }}
+                          onCreateBlankNote={handleCreateBlankFromHome}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
-                      <TagsTabView
-                        notes={notes}
-                        onOpenNote={(id) => openTab(id)}
-                        onToggleFavorite={(id) => {
-                          const found = notes.find((n) => n.id === id);
-                          if (found) {
-                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                          }
-                        }}
-                        onRenameTagGlobally={renameTagGlobally}
-                        onDeleteTagGlobally={deleteTagGlobally}
-                        onCreateBlankNote={handleCreateBlankFromHome}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <TagsTabView
+                          notes={notes}
+                          onOpenNote={(id) => openTab(id)}
+                          onToggleFavorite={(id) => {
+                            const found = notes.find((n) => n.id === id);
+                            if (found) {
+                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
+                            }
+                          }}
+                          onRenameTagGlobally={renameTagGlobally}
+                          onDeleteTagGlobally={deleteTagGlobally}
+                          onCreateBlankNote={handleCreateBlankFromHome}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
-                      <TrashView
-                        trashedNotes={trashedNotes}
-                        onRestore={handleRestoreFromTrash}
-                        onDeletePermanently={handleDeletePermanently}
-                        onEmptyTrash={handleEmptyTrash}
-                        onOpenSettings={() => handleOpenSettings("files")}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <TrashView
+                          trashedNotes={trashedNotes}
+                          onRestore={handleRestoreFromTrash}
+                          onDeletePermanently={handleDeletePermanently}
+                          onEmptyTrash={handleEmptyTrash}
+                          onOpenSettings={() => handleOpenSettings("files")}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
-                      <SettingsTabView
-                        initialCategory={settingsCategory}
-                        onCategoryChange={setSettingsCategory}
-                        onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
-                        notes={notes}
-                        onNotesUpdated={replaceNotes}
-                        openedFolderName={openedFolderName}
-                        folderPaths={openedFolderPaths}
-                        isCloudWorkspace={isCloudWorkspace}
-                        onCloseWorkspace={handleCloseWorkspace}
-                        onOpenWebTab={handleOpenWebTab}
-                        onOpenWhatsNew={handleOpenWhatsNew}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <SettingsTabView
+                          initialCategory={settingsCategory}
+                          onCategoryChange={setSettingsCategory}
+                          onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
+                          notes={notes}
+                          onNotesUpdated={replaceNotes}
+                          openedFolderName={openedFolderName}
+                          folderPaths={openedFolderPaths}
+                          isCloudWorkspace={isCloudWorkspace}
+                          onCloseWorkspace={handleCloseWorkspace}
+                          onOpenWebTab={handleOpenWebTab}
+                          onOpenWhatsNew={handleOpenWhatsNew}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
-                      <HelpTabView
-                        initialCategory={helpCategory}
-                        onCategoryChange={setHelpCategory}
-                        onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
-                        onOpenSettings={handleOpenSettings}
-                        onOpenWhatsNew={handleOpenWhatsNew}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <HelpTabView
+                          initialCategory={helpCategory}
+                          onCategoryChange={setHelpCategory}
+                          onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
+                          onOpenSettings={handleOpenSettings}
+                          onOpenWhatsNew={handleOpenWhatsNew}
+                          onOpenWebTab={handleOpenWebTab}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
-                      <WhatsNewView
-                        onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
-                        onOpenSettings={handleOpenSettings}
-                        onOpenHelp={handleOpenHelp}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <WhatsNewView
+                          onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
+                          onOpenSettings={handleOpenSettings}
+                          onOpenHelp={handleOpenHelp}
+                          onOpenWebTab={handleOpenWebTab}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
                     {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
-                      <LunoAiView
-                        notes={notes}
-                        openedFolderName={openedFolderName}
-                        activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null}
-                        onInsertToActiveNote={(text) => {
-                          const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
-                          if (targetNote) {
-                            const existingContent = targetNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            updateNote(targetNote.id, { content: updatedContent });
-                            toast({
-                              title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                              description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
-                            });
-                          }
-                        }}
-                        onInsertToSelectedNote={(targetNoteId, text) => {
-                          const targetNote = notes.find((n) => n.id === targetNoteId);
-                          if (targetNote) {
-                            const existingContent = targetNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            updateNote(targetNote.id, { content: updatedContent });
-                            toast({
-                              title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                              description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
-                            });
-                          }
-                        }}
-                        onCreateNewNote={(fileName, content, folderPath) => {
-                          let targetName = fileName?.trim();
-                          if (!targetName) {
-                            targetName = `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                          }
-                          if (!/\.[a-zA-Z0-9]+$/.test(targetName)) {
-                            targetName += ".md";
-                          }
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <LunoAiView
+                          notes={notes}
+                          openedFolderName={openedFolderName}
+                          activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null}
+                          onInsertToActiveNote={(text) => {
+                            const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
+                            if (targetNote) {
+                              const existingContent = targetNote.content || "";
+                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              updateNote(targetNote.id, { content: updatedContent });
+                              toast({
+                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
+                              });
+                            }
+                          }}
+                          onInsertToSelectedNote={(targetNoteId, text) => {
+                            const targetNote = notes.find((n) => n.id === targetNoteId);
+                            if (targetNote) {
+                              const existingContent = targetNote.content || "";
+                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              updateNote(targetNote.id, { content: updatedContent });
+                              toast({
+                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
+                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
+                              });
+                            }
+                          }}
+                          onCreateNewNote={(fileName, content, folderPath) => {
+                            let targetName = fileName?.trim();
+                            if (!targetName) {
+                              targetName = `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                            }
+                            if (!/\.[a-zA-Z0-9]+$/.test(targetName)) {
+                              targetName += ".md";
+                            }
 
-                          void createNoteInFolder(folderPath || "", {
-                            fileName: targetName,
-                            initialContent: content,
-                          });
-                          toast({
-                            title: t("lunoAi.createSuccessTitle") || "Note Created",
-                            description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
-                          });
-                        }}
-                        onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
+                            void createNoteInFolder(folderPath || "", {
+                              fileName: targetName,
+                              initialContent: content,
+                            });
+                            toast({
+                              title: t("lunoAi.createSuccessTitle") || "Note Created",
+                              description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
+                            });
+                          }}
+                          onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
+                          onOpenWebTab={handleOpenWebTab}
+                        />
+                      </Suspense>
                     )}
                   </div>
                   {openTabIds.filter((id) => id.startsWith("web:") || (id === activeTabId && activeTabNote?.fileType === "web-viewer")).map((webId) => (
@@ -5667,20 +6101,23 @@ export default function Index() {
                       key={webId}
                       className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
                     >
-                      <WebViewerView
-                        tabId={webId}
-                        initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
-                        title={webTabs[webId]?.title}
-                        displayUrl={webTabs[webId]?.displayUrl}
-                        filePath={webTabs[webId]?.filePath}
-                        onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
-                        onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
-                        onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
-                        onInsertToActiveNote={handleInsertLinkToActiveNote}
-                        onClose={() => handleCloseTab(webId)}
-                        onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
-                        isSplit={splitTabId === webId}
-                      />
+                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+                        <WebViewerView
+                          tabId={webId}
+                          initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
+                          title={webTabs[webId]?.title}
+                          displayUrl={webTabs[webId]?.displayUrl}
+                          filePath={webTabs[webId]?.filePath}
+                          onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
+                          onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
+                          onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
+                          onInsertToActiveNote={handleInsertLinkToActiveNote}
+                          activeNotes={openNoteTabs}
+                          onClose={() => handleCloseTab(webId)}
+                          onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
+                          isSplit={splitTabId === webId}
+                        />
+                      </Suspense>
                     </div>
                   ))}
                   <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
@@ -5711,6 +6148,7 @@ export default function Index() {
                       onCloseRightPanel={() => setRightPanelOpen(false)}
                       onSelectNote={(id) => openTab(id)}
                       onOpenWebTab={handleOpenWebTab}
+                      onOpenSettings={handleOpenSettings}
                       onUnlockNote={handleUnlockNote}
                       onRelockNote={handleRelockNote}
                       onGetActivePin={handleGetActivePin}

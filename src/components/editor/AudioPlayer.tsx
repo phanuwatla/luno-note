@@ -91,6 +91,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const audio = audioRef.current;
     if (!audio) return;
 
+    let activeFixTime: (() => void) | null = null;
+
     const handleLoadedMetadata = () => {
       if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
         setDuration(audio.duration);
@@ -98,11 +100,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         audio.currentTime = 1e101;
         const fixTime = () => {
           audio.removeEventListener("timeupdate", fixTime);
+          activeFixTime = null;
           audio.currentTime = 0;
           if (audio.duration && isFinite(audio.duration)) {
             setDuration(audio.duration);
           }
         };
+        activeFixTime = fixTime;
         audio.addEventListener("timeupdate", fixTime);
       }
     };
@@ -153,6 +157,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
 
     return () => {
+      if (activeFixTime) {
+        audio.removeEventListener("timeupdate", activeFixTime);
+        activeFixTime = null;
+      }
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("ended", handleEnded);
@@ -272,6 +280,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       <ContextMenu>
         <ContextMenuTrigger asChild onContextMenu={(e) => e.stopPropagation()}>
           <div
+            data-audio-player="true"
             className={`flex items-center rounded-xl border border-border/80 bg-background dark:bg-card text-foreground dark:text-white transition-colors overflow-hidden px-3 py-1.5 gap-2 sm:gap-2.5 shadow-sm w-full select-none ${
               selected
                 ? "ring-2 ring-primary ring-offset-2 ring-offset-background"

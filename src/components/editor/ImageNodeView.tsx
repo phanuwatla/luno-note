@@ -24,10 +24,39 @@ import {
 } from "./mediaContextMenuUtils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QrCodeDialog, type QrCodeData } from "@/components/QrCodeDialog";
-import { detectQrCodeText } from "@/lib/qrCode";
+import { detectQrCodeText, generateQrCodeDataUrl } from "@/lib/qrCode";
 
 // Global in-memory cache for resolved local image Data URLs to avoid repetitive disk reads and IPC calls
 export const imageLocalCache = new Map<string, string>();
+const MAX_IMAGE_CACHE = 150;
+const origImageSet = imageLocalCache.set.bind(imageLocalCache);
+const origImageDelete = imageLocalCache.delete.bind(imageLocalCache);
+
+imageLocalCache.set = function (key: string, value: string) {
+  const existing = imageLocalCache.get(key);
+  if (existing && existing !== value && existing.startsWith("blob:")) {
+    try { URL.revokeObjectURL(existing); } catch {}
+  }
+  if (imageLocalCache.size >= MAX_IMAGE_CACHE && !imageLocalCache.has(key)) {
+    const oldestKey = imageLocalCache.keys().next().value;
+    if (oldestKey) {
+      const oldVal = imageLocalCache.get(oldestKey);
+      if (oldVal && oldVal.startsWith("blob:")) {
+        try { URL.revokeObjectURL(oldVal); } catch {}
+      }
+      origImageDelete(oldestKey);
+    }
+  }
+  return origImageSet(key, value);
+};
+
+imageLocalCache.delete = function (key: string) {
+  const existing = imageLocalCache.get(key);
+  if (existing && existing.startsWith("blob:")) {
+    try { URL.revokeObjectURL(existing); } catch {}
+  }
+  return origImageDelete(key);
+};
 
 export function dataUrlToBlobUrl(dataUrl: string): string {
   if (!dataUrl || !dataUrl.startsWith("data:")) return dataUrl;
@@ -243,8 +272,14 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       cleanRel = cleanRel.replace(/^(\.\.\/|\.\/)/, "");
     }
 
+    const altCleanRel = cleanRel.startsWith("attachments/")
+      ? cleanRel.replace(/^attachments\//, "attachment/")
+      : cleanRel.startsWith("attachment/")
+      ? cleanRel.replace(/^attachment\//, "attachments/")
+      : undefined;
+
     // Fast check in memory cache
-    const cached = imageLocalCache.get(cleanRel);
+    const cached = imageLocalCache.get(cleanRel) || (altCleanRel ? imageLocalCache.get(altCleanRel) : undefined);
     if (cached) {
       setLocalResolvedSrc(cached);
       setHasError(false);
@@ -257,7 +292,8 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
         if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath) {
-            const fullPath = `${saved.folderPath}/${cleanRel}`;
+            const normClean = cleanRel.replace(/\\/g, "/");
+            const fullPath = `${saved.folderPath}/${normClean}`.replace(/\\/g, "/");
             const cachedByFull = imageLocalCache.get(fullPath);
             if (cachedByFull) {
               if (!isCancelled) {
@@ -267,17 +303,75 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
               return;
             }
 
-
-            const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+            let dataUrl = await electronAPI.readImageDataUrl(fullPath);
+            if (!dataUrl) {
+              if (fullPath.includes("/attachment/")) {
+                dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachment/", "/attachments/"));
+              } else if (fullPath.includes("/attachments/")) {
+                dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachments/", "/attachment/"));
+              }
+            }
             if (!isCancelled && dataUrl) {
               const blobUrl = dataUrlToBlobUrl(dataUrl);
               imageLocalCache.set(cleanRel, blobUrl);
+              if (altCleanRel) imageLocalCache.set(altCleanRel, blobUrl);
               imageLocalCache.set(fullPath, blobUrl);
               setLocalResolvedSrc(blobUrl);
               setHasError(false);
               return;
             }
           }
+        }
+
+        // Web File System Access API
+        const globalRootDir = (window as any).__luno_rootDirHandle;
+        if (globalRootDir && typeof globalRootDir.getDirectoryHandle === "function") {
+          let targetDir = globalRootDir;
+          const segments = cleanRel.split("/").filter(Boolean);
+          const fileName = segments.pop();
+          if (fileName) {
+            for (const seg of segments) {
+              try {
+                targetDir = await targetDir.getDirectoryHandle(seg, { create: false });
+              } catch {
+                if (seg.toLowerCase() === "attachment") {
+                  try {
+                    targetDir = await targetDir.getDirectoryHandle("attachments", { create: false });
+                  } catch {}
+                } else if (seg.toLowerCase() === "attachments") {
+                  try {
+                    targetDir = await targetDir.getDirectoryHandle("attachment", { create: false });
+                  } catch {}
+                }
+              }
+            }
+            try {
+              let fileHandle = await targetDir.getFileHandle(fileName, { create: false });
+              const file = await fileHandle.getFile();
+              const blobUrl = URL.createObjectURL(file);
+              imageLocalCache.set(cleanRel, blobUrl);
+              if (altCleanRel) imageLocalCache.set(altCleanRel, blobUrl);
+              if (!isCancelled) {
+                setLocalResolvedSrc(blobUrl);
+                setHasError(false);
+              }
+              return;
+            } catch {}
+          }
+        }
+
+        // Dynamic QR code fallback if file is not found on disk
+        if (isQrCode && (dataQrText || (title && title !== "QR Code" && !title.startsWith("data:")))) {
+          try {
+            const qrTextToUse = dataQrText || title;
+            const generatedUrl = await generateQrCodeDataUrl(qrTextToUse);
+            if (generatedUrl && !isCancelled) {
+              imageLocalCache.set(cleanRel, generatedUrl);
+              setLocalResolvedSrc(generatedUrl);
+              setHasError(false);
+              return;
+            }
+          } catch {}
         }
       } catch (err) {
         console.warn("Failed to resolve local attachment in ImageNodeView:", err);
@@ -480,10 +574,17 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                             const workspacePath = saved?.folderPath || saved?.path;
                             if (workspacePath) {
                               const isAbsolute = /^[a-zA-Z]:[\\/]/.test(cleanRel) || cleanRel.startsWith("/");
-                              const fullPath = isAbsolute ? cleanRel : `${workspacePath}/${cleanRel}`;
+                              const fullPath = (isAbsolute ? cleanRel : `${workspacePath}/${cleanRel}`).replace(/\\/g, "/");
                               imageLocalCache.delete(fullPath);
 
-                              const dataUrl = await electronAPI.readImageDataUrl(fullPath);
+                              let dataUrl = await electronAPI.readImageDataUrl(fullPath);
+                              if (!dataUrl) {
+                                if (fullPath.includes("/attachment/")) {
+                                  dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachment/", "/attachments/"));
+                                } else if (fullPath.includes("/attachments/")) {
+                                  dataUrl = await electronAPI.readImageDataUrl(fullPath.replace("/attachments/", "/attachment/"));
+                                }
+                              }
                               if (dataUrl) {
                                 const blobUrl = dataUrlToBlobUrl(dataUrl);
                                 imageLocalCache.set(cleanRel, blobUrl);
@@ -492,6 +593,33 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                                 setHasError(false);
                                 return;
                               }
+                            }
+                          } catch {}
+                          if (isQrCode && (dataQrText || (title && title !== "QR Code" && !title.startsWith("data:")))) {
+                            try {
+                              const qrTextToUse = dataQrText || title;
+                              const generatedUrl = await generateQrCodeDataUrl(qrTextToUse);
+                              if (generatedUrl) {
+                                setLocalResolvedSrc(generatedUrl);
+                                setHasError(false);
+                                return;
+                              }
+                            } catch {}
+                          }
+                          setHasError(true);
+                        })();
+                        return;
+                      }
+
+                      if (isQrCode && (dataQrText || (title && title !== "QR Code" && !title.startsWith("data:")))) {
+                        void (async () => {
+                          try {
+                            const qrTextToUse = dataQrText || title;
+                            const generatedUrl = await generateQrCodeDataUrl(qrTextToUse);
+                            if (generatedUrl) {
+                              setLocalResolvedSrc(generatedUrl);
+                              setHasError(false);
+                              return;
                             }
                           } catch {}
                           setHasError(true);

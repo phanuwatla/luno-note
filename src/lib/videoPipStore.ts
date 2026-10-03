@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export interface ActivePipVideo {
   id: string;
+  instanceId?: string;
   src: string;
   title?: string;
   currentTime: number;

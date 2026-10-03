@@ -42,7 +42,11 @@ const COMMON_ENGLISH_WORDS = new Set([
   "signin", "signup", "register", "password", "email", "phone", "home", "search", "filter", "sort",
   "add", "edit", "delete", "remove", "update", "create", "save", "cancel", "submit", "confirm", "close",
   "open", "show", "hide", "toggle", "clear", "reset", "copy", "paste", "cut", "undo", "redo", "select",
-  "all", "find", "replace", "help", "about", "settings", "profile", "account", "dashboard", "overview"
+  "all", "find", "replace", "help", "about", "settings", "profile", "account", "dashboard", "overview",
+  // Common conversational English words
+  "hello", "hi", "world", "okay", "ok", "yes", "no", "good", "morning", "night", "today", "tomorrow",
+  "yesterday", "welcome", "thanks", "thank", "please", "sorry", "great", "nice", "fine", "sure", "maybe",
+  "computer", "internet", "website", "online", "offline", "message", "chat", "meeting", "task", "work"
 ]);
 
 // Massive Thai Common Dictionary & Frequent Prefixes / Words
@@ -182,7 +186,8 @@ export function detectWrongLanguage(token: string): WrongLanguageSuggestion | nu
   }
 
   // Case 2: Pure Thai text typed (potentially English in Kedmanee)
-  if (/^[\u0E01-\u0E5B]+$/.test(trimmed)) {
+  // Skip if token is too long because continuous Thai sentences without spaces are not single English words
+  if (trimmed.length <= 25 && /^[\u0E01-\u0E5B]+$/.test(trimmed)) {
     const swapped = swapKeyboardLayout(trimmed);
     if (swapped !== trimmed && /^[A-Za-z0-9_\-]+$/.test(swapped)) {
       const lower = swapped.toLowerCase();

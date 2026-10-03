@@ -153,5 +153,96 @@ describe("VideoExtension", () => {
     videoPipStore.close();
     expect(videoPipStore.get()).toBeNull();
   });
+
+  it("should handle inserting the same video multiple times into editor", () => {
+    const editor = new Editor({
+      extensions: [StarterKit, VideoExtension],
+      content: "<p>Intro</p>",
+    });
+
+    editor
+      .chain()
+      .focus()
+      .setVideo({ src: "assets/same-video.mp4" })
+      .run();
+
+    editor
+      .chain()
+      .focus()
+      .setVideo({ src: "assets/same-video.mp4" })
+      .run();
+
+    const videoNodes = editor.getJSON().content?.filter((node) => node.type === "video");
+    expect(videoNodes?.length).toBe(2);
+  });
+
+  it("should render multiple identical video embeds in markdown", () => {
+    const md = `![[video.mp4]]\n![[video.mp4]]`;
+    const html = renderMarkdownToEditorHtml(md);
+    const matches = html.match(/<video\b/g);
+    expect(matches?.length).toBe(2);
+
+    const assetMap = new Map<string, string>();
+    assetMap.set("video.mp4", "blob:http://localhost/mock-video");
+    const td = createTurndownService(assetMap);
+    const mdSerialized = td.turndown(html);
+    expect(mdSerialized).toContain("![[video.mp4]]");
+  });
+
+  it("should test insertVideoToEditor behavior on consecutive inserts from empty document", () => {
+    const editor = new Editor({
+      extensions: [StarterKit, VideoExtension],
+      content: "<p></p>",
+    });
+
+    let savedSelection: { from: number; to: number } | null = null;
+    const rememberSelection = () => {
+      const { from, to } = editor.state.selection;
+      savedSelection = { from, to };
+    };
+
+    const simulateInsertVideoToEditor = (attrs: any) => {
+      if (savedSelection) {
+        editor.commands.setTextSelection(savedSelection);
+        savedSelection = null;
+      }
+      const { state } = editor;
+      const { selection } = state;
+      const { $from } = selection;
+      const parentNode = $from.parent;
+
+      if (parentNode.type.name === "paragraph" && parentNode.content.size === 0) {
+        const fromPos = $from.before();
+        const toPos = $from.after();
+        return editor.chain().focus().insertContentAt({ from: fromPos, to: toPos }, [
+          { type: "video", attrs },
+          { type: "paragraph" },
+        ]).run();
+      }
+
+      if ((selection as any).node?.type?.name === "video" || parentNode.type.name === "doc") {
+        const afterPos = selection.to;
+        return editor.chain().focus().insertContentAt(afterPos, [
+          { type: "video", attrs },
+          { type: "paragraph" },
+        ]).run();
+      }
+
+      const success = (editor.chain().focus() as any).setVideo(attrs).run();
+      if (success) return true;
+      return editor.commands.insertContent({ type: "video", attrs });
+    };
+
+    // 1st insert
+    rememberSelection();
+    simulateInsertVideoToEditor({ src: "video1.mp4" });
+
+    // 2nd insert
+    rememberSelection();
+    simulateInsertVideoToEditor({ src: "video1.mp4" });
+
+    const count = editor.getJSON().content?.filter(n => n.type === "video").length;
+    expect(count).toBe(2);
+  });
 });
 

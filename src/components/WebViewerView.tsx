@@ -14,11 +14,49 @@ import {
   Frown,
   OctagonX,
   FileCode,
+  MoreVertical,
 } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
+import BrowserRightPanel from "@/components/BrowserRightPanel";
+import { addBrowserHistory } from "@/lib/browserStorage";
+import { resolveFaviconUrl, getFaviconCandidates } from "@/lib/faviconUtils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { copyToClipboard } from "@/lib/clipboardUtils";
+import type { Note } from "@/hooks/useNotes";
+import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
+import { useAppSettings } from "@/hooks/useAppSettings";
+
+function NoteFileIcon({ note, className = "h-4 w-4" }: { note: Note; className?: string }) {
+  const { settings } = useAppSettings();
+  const pack = (settings?.iconPack as any) || "lucide";
+  const cls = `${className} shrink-0 text-muted-foreground`;
+
+  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+  if (customIcon) {
+    const custom = renderCustomIcon(customIcon, cls, customColor ? { color: customColor } : undefined);
+    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+  }
+
+  if (note.isLocked) {
+    const LockIcon = getToolbarIcon("lock", pack);
+    return <LockIcon className={cls} />;
+  }
+
+  const defaultKey = getNoteDefaultIconKey(note);
+  const IconComp = getToolbarIcon(defaultKey, pack);
+  return <IconComp className={cls} />;
+}
 
 export function getFriendlyDisplayUrl(rawUrl: string, title?: string, customDisplayUrl?: string): string {
   if (!rawUrl) return "";
@@ -85,7 +123,8 @@ interface WebViewerViewProps {
   onUrlChange?: (url: string) => void;
   onTitleChange?: (title: string) => void;
   onFaviconChange?: (faviconUrl: string) => void;
-  onInsertToActiveNote?: (url: string, title?: string) => void;
+  onInsertToActiveNote?: (url: string, title?: string, targetNoteId?: string) => void;
+  activeNotes?: Note[];
   onClose?: () => void;
   onSplit?: () => void;
   isSplit?: boolean;
@@ -101,11 +140,14 @@ export default function WebViewerView({
   onTitleChange,
   onFaviconChange,
   onInsertToActiveNote,
+  activeNotes = [],
   onClose,
   onSplit,
   isSplit = false,
 }: WebViewerViewProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const isTh = language === "th";
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [currentUrl, setCurrentUrl] = useState(initialUrl || "https://www.google.com");
   const [inputUrl, setInputUrl] = useState(() => getFriendlyDisplayUrl(initialUrl || "https://www.google.com", title, displayUrl));
   const [pageTitle, setPageTitle] = useState(title || "");
@@ -117,6 +159,9 @@ export default function WebViewerView({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
+  const [zoomFactor, setZoomFactor] = useState(0.9);
+  const [pageFavicon, setPageFavicon] = useState<string | undefined>(undefined);
 
   const isElectron = Boolean(window.electronAPI?.isElectron);
   const webviewRef = useRef<any>(null);
@@ -124,6 +169,8 @@ export default function WebViewerView({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const initialSrcRef = useRef(initialUrl || "https://www.google.com");
   const currentUrlRef = useRef(initialUrl || "https://www.google.com");
+  const zoomFactorRef = useRef(zoomFactor);
+  zoomFactorRef.current = zoomFactor;
 
   // Run progress once from left to right on page load
   useEffect(() => {
@@ -279,6 +326,33 @@ export default function WebViewerView({
     };
   }, [tabId, isLoading, currentUrl]);
 
+  const handleHardReload = () => {
+    if (isElectron && webviewRef.current) {
+      try {
+        if (typeof webviewRef.current.reloadIgnoringCache === "function") {
+          webviewRef.current.reloadIgnoringCache();
+        } else {
+          webviewRef.current.reload();
+        }
+      } catch (err) {
+        console.warn("Error hard reloading webview:", err);
+      }
+    } else if (iframeRef.current) {
+      iframeRef.current.src = currentUrl;
+    }
+  };
+
+  const handleSetZoom = (factor: number) => {
+    setZoomFactor(factor);
+    if (isElectron && webviewRef.current) {
+      try {
+        webviewRef.current.setZoomFactor(factor);
+      } catch {}
+    } else if (iframeRef.current) {
+      iframeRef.current.style.zoom = String(factor);
+    }
+  };
+
   const handleGoBack = () => {
     if (isElectron && webviewRef.current) {
       try {
@@ -361,30 +435,98 @@ export default function WebViewerView({
     });
   };
 
-  const handleInsertToNote = () => {
+  const hasMultipleNotes = (activeNotes?.length ?? 0) > 1;
+  const hasSingleNote = (activeNotes?.length ?? 0) === 1;
+  const hasNoNotes = (activeNotes?.length ?? 0) === 0;
+
+  const handleInsertToNote = (targetNoteId?: string) => {
+    if (hasNoNotes) {
+      toast({
+        title: t("webViewer.insertToNote") || "Insert link to active note",
+        description: t("webViewer.noActiveNotes") || (isTh ? "ไม่มีโน้ตที่เปิดอยู่เพื่อแทรกลิงก์" : "No open notes found to insert link into"),
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (onInsertToActiveNote) {
       const linkUrl = isLocalPreview
         ? getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl)
         : currentUrl;
-      onInsertToActiveNote(linkUrl, pageTitle || title || undefined);
+      const targetId = targetNoteId || (hasSingleNote ? activeNotes[0]?.id : undefined);
+      onInsertToActiveNote(linkUrl, pageTitle || title || undefined, targetId);
       setHasInserted(true);
       setTimeout(() => setHasInserted(false), 2000);
     }
   };
+
+  const onUrlChangeRef = useRef(onUrlChange);
+  onUrlChangeRef.current = onUrlChange;
+  const onTitleChangeRef = useRef(onTitleChange);
+  onTitleChangeRef.current = onTitleChange;
+  const onFaviconChangeRef = useRef(onFaviconChange);
+  onFaviconChangeRef.current = onFaviconChange;
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const pageTitleRef = useRef(pageTitle);
+  pageTitleRef.current = pageTitle;
+  const displayUrlRef = useRef(displayUrl);
+  displayUrlRef.current = displayUrl;
 
   // Electron <webview> event binding
   useEffect(() => {
     const webview = webviewRef.current;
     if (!isElectron || !webview) return;
 
+    let timer1: NodeJS.Timeout | null = null;
+    let timer2: NodeJS.Timeout | null = null;
+
     const applyZoom = () => {
       try {
         if (typeof webview.setZoomFactor === "function") {
-          webview.setZoomFactor(0.9);
+          webview.setZoomFactor(zoomFactorRef.current);
         }
       } catch {
         /* ignore */
       }
+    };
+
+    const checkDomFavicon = async () => {
+      try {
+        if (typeof webview.executeJavaScript === "function") {
+          const icon = await webview.executeJavaScript(`(() => {
+            const selectors = [
+              'link[rel="icon"][sizes="32x32"]',
+              'link[rel="icon"][sizes="16x16"]',
+              'link[rel="icon"]',
+              'link[rel="shortcut icon"]',
+              'link[rel*="icon"]',
+              'link[rel="apple-touch-icon"]',
+              'link[rel="apple-touch-icon-precomposed"]'
+            ];
+            for (const s of selectors) {
+              const el = document.querySelector(s);
+              if (el && el.href) return el.href;
+            }
+            return '';
+          })()`);
+          if (icon && typeof icon === "string" && icon.trim()) {
+            const resolved = resolveFaviconUrl(icon, currentUrlRef.current) || icon;
+            setPageFavicon(resolved);
+            onFaviconChangeRef.current?.(resolved);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const scheduleDomCheck = () => {
+      void checkDomFavicon();
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      timer1 = setTimeout(() => void checkDomFavicon(), 300);
+      timer2 = setTimeout(() => void checkDomFavicon(), 1000);
     };
 
     const onStartLoading = () => {
@@ -402,15 +544,17 @@ export default function WebViewerView({
         /* ignore */
       }
       applyZoom();
+      scheduleDomCheck();
     };
 
     const onDidNavigate = (e: any) => {
       if (e.url) {
         currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
-        setInputUrl(getFriendlyDisplayUrl(e.url, title || pageTitle, displayUrl));
-        onUrlChange?.(e.url);
+        setInputUrl(getFriendlyDisplayUrl(e.url, titleRef.current || pageTitleRef.current, displayUrlRef.current));
+        onUrlChangeRef.current?.(e.url);
         applyZoom();
+        scheduleDomCheck();
       }
     };
 
@@ -418,15 +562,17 @@ export default function WebViewerView({
       if (e.url) {
         currentUrlRef.current = e.url;
         setCurrentUrl(e.url);
-        setInputUrl(getFriendlyDisplayUrl(e.url, title || pageTitle, displayUrl));
-        onUrlChange?.(e.url);
+        setInputUrl(getFriendlyDisplayUrl(e.url, titleRef.current || pageTitleRef.current, displayUrlRef.current));
+        onUrlChangeRef.current?.(e.url);
+        scheduleDomCheck();
       }
     };
 
     const onPageTitleUpdated = (e: any) => {
       if (e.title) {
         setPageTitle(e.title);
-        onTitleChange?.(e.title);
+        onTitleChangeRef.current?.(e.title);
+        scheduleDomCheck();
       }
     };
 
@@ -446,11 +592,18 @@ export default function WebViewerView({
 
     const onPageFaviconUpdated = (e: any) => {
       if (e.favicons && e.favicons.length > 0) {
-        const icon = e.favicons[0];
-        if (icon) {
-          onFaviconChange?.(icon);
+        const rawIcon = e.favicons[0];
+        if (rawIcon) {
+          const resolved = resolveFaviconUrl(rawIcon, currentUrlRef.current) || rawIcon;
+          setPageFavicon(resolved);
+          onFaviconChangeRef.current?.(resolved);
         }
       }
+    };
+
+    const onDomReady = () => {
+      applyZoom();
+      scheduleDomCheck();
     };
 
     applyZoom();
@@ -464,10 +617,15 @@ export default function WebViewerView({
     webview.addEventListener("did-fail-load", onFailLoad);
     webview.addEventListener("new-window", onNewWindow);
     webview.addEventListener("load-commit", applyZoom);
-    webview.addEventListener("dom-ready", applyZoom);
-    webview.addEventListener("did-finish-load", applyZoom);
+    webview.addEventListener("dom-ready", onDomReady);
+    webview.addEventListener("did-finish-load", onDomReady);
+
+    // Initial check in case webview is already ready
+    scheduleDomCheck();
 
     return () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
       webview.removeEventListener("did-start-loading", onStartLoading);
       webview.removeEventListener("did-stop-loading", onStopLoading);
       webview.removeEventListener("did-navigate", onDidNavigate);
@@ -477,30 +635,60 @@ export default function WebViewerView({
       webview.removeEventListener("did-fail-load", onFailLoad);
       webview.removeEventListener("new-window", onNewWindow);
       webview.removeEventListener("load-commit", applyZoom);
-      webview.removeEventListener("dom-ready", applyZoom);
-      webview.removeEventListener("did-finish-load", applyZoom);
+      webview.removeEventListener("dom-ready", onDomReady);
+      webview.removeEventListener("did-finish-load", onDomReady);
     };
-  }, [isElectron, onUrlChange, onTitleChange, onFaviconChange, title, pageTitle, displayUrl]);
+  }, [isElectron]);
 
   useEffect(() => {
-    if (currentUrl && !currentUrl.startsWith("data:") && !currentUrl.startsWith("blob:")) {
+    if (currentUrl && !currentUrl.startsWith("data:") && !currentUrl.startsWith("blob:") && !currentUrl.startsWith("file:")) {
       try {
-        const u = new URL(currentUrl.startsWith("http") ? currentUrl : `https://${currentUrl}`);
-        if (u.hostname) {
-          const defaultFavicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(u.hostname)}&sz=32`;
-          onFaviconChange?.(defaultFavicon);
-        }
+        const currHost = new URL(currentUrl.startsWith("http") ? currentUrl : `https://${currentUrl}`).hostname;
+        setPageFavicon((prev) => {
+          if (prev) {
+            try {
+              const prevHost = new URL(prev.startsWith("http") ? prev : `https://${prev}`).hostname;
+              if (prevHost !== currHost && !prev.includes(currHost)) {
+                onFaviconChangeRef.current?.("");
+                return undefined;
+              }
+            } catch {}
+          }
+          return prev;
+        });
       } catch {}
     }
-  }, [currentUrl, onFaviconChange]);
+  }, [currentUrl]);
+
+  // Auto-record visited pages into browser history
+  useEffect(() => {
+    if (
+      currentUrl &&
+      currentUrl !== "about:blank" &&
+      !currentUrl.startsWith("javascript:") &&
+      !loadError
+    ) {
+      addBrowserHistory({
+        url: currentUrl,
+        title: pageTitle || title || getHostFromUrl(currentUrl),
+        favicon: pageFavicon,
+      });
+    }
+  }, [currentUrl, pageTitle, title, pageFavicon, loadError]);
 
   const isHttps = currentUrl.startsWith("https://");
 
   return (
     <TooltipProvider delayDuration={350}>
-      <div className="flex flex-col h-full w-full bg-background select-none overflow-hidden">
+      <div
+        data-web-viewer="true"
+        className="flex flex-col h-full w-full bg-background select-none overflow-hidden"
+      >
         {/* Browser Top Navigation Bar */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] bg-sidebar/50 border-b border-border/40 shrink-0">
+        <div
+          data-web-viewer-nav="true"
+          className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] bg-sidebar/50 border-b border-border/40 shrink-0"
+        >
           {/* Navigation controls */}
           <div className="flex items-center gap-0.5 shrink-0">
             <Tooltip>
@@ -566,6 +754,7 @@ export default function WebViewerView({
 
           {/* Omnibox / Address Bar */}
           <form
+            data-web-viewer-omnibox="true"
             onSubmit={handleSubmitUrl}
             className="flex-1 flex items-center bg-background/70 hover:bg-background focus-within:bg-background border border-border/60 focus-within:border-primary rounded-full px-3 py-1 text-xs transition-colors min-w-0 shadow-none focus-within:ring-0"
           >
@@ -625,23 +814,68 @@ export default function WebViewerView({
           {/* Browser Action Toolbar */}
           <div className="flex items-center gap-0.5 shrink-0">
             {onInsertToActiveNote && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleInsertToNote}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                    aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
+              hasMultipleNotes ? (
+                <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                          aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
+                        >
+                          {hasInserted ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
+                          ) : (
+                            <FilePlus2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={6}
+                    className="w-56 max-h-72 overflow-y-auto no-scrollbar"
                   >
-                    {hasInserted ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
-                    ) : (
-                      <FilePlus2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
-              </Tooltip>
+                    {activeNotes.map((note) => {
+                      const displayName = note.fileName || note.title || (isTh ? "ไม่มีชื่อ" : "Untitled");
+                      return (
+                        <DropdownMenuItem
+                          key={note.id}
+                          onClick={() => handleInsertToNote(note.id)}
+                          className="flex items-center gap-2.5 px-3 py-1.5 cursor-pointer rounded-lg text-[13px]"
+                        >
+                          <NoteFileIcon note={note} className="h-4 w-4 shrink-0" />
+                          <span className="truncate flex-1 min-w-0">
+                            {displayName}
+                          </span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => handleInsertToNote()}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                      aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
+                    >
+                      {hasInserted ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
+                      ) : (
+                        <FilePlus2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
+                </Tooltip>
+              )
             )}
 
             <Tooltip>
@@ -675,6 +909,25 @@ export default function WebViewerView({
               </TooltipTrigger>
               <TooltipContent>{t("webViewer.openExternal") || "Open in Default Browser"}</TooltipContent>
             </Tooltip>
+
+            {/* Browser Right Panel Toggle (Three dots button) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setIsRightPanelOpen((prev) => !prev)}
+                  className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                    isRightPanelOpen
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                  aria-label={t("rightPanel.togglePanel") || (isTh ? "เพิ่มเติม" : "More")}
+                >
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("rightPanel.togglePanel") || (isTh ? "เพิ่มเติม" : "More")}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -692,82 +945,106 @@ export default function WebViewerView({
         )}
 
         {/* Web View Main Area */}
-        <div className="flex-1 relative w-full h-full bg-background overflow-hidden flex flex-col">
-          {loadError ? (
-            <div className="flex-1 w-full h-full bg-background overflow-y-auto p-6 sm:p-10 flex flex-col items-center justify-center">
-              <div className="max-w-md w-full flex flex-col items-start text-left space-y-3.5 animate-in fade-in-50 duration-200">
-                {/* Lucide Frown Icon */}
-                <div className="text-muted-foreground/80 select-none pb-0.5">
-                  <Frown className="h-9 w-9 stroke-[1.75]" />
-                </div>
+        <div className="flex-1 w-full h-full bg-background overflow-hidden flex flex-row">
+          <div className="flex-1 relative w-full h-full bg-background overflow-hidden flex flex-col min-w-0">
+            {loadError ? (
+              <div className="flex-1 w-full h-full bg-background overflow-y-auto p-6 sm:p-10 flex flex-col items-center justify-center">
+                <div className="max-w-md w-full flex flex-col items-start text-left space-y-3.5 animate-in fade-in-50 duration-200">
+                  {/* Lucide Frown Icon */}
+                  <div className="text-muted-foreground/80 select-none pb-0.5">
+                    <Frown className="h-9 w-9 stroke-[1.75]" />
+                  </div>
 
-                {/* Title */}
-                <h1 className="text-lg font-semibold tracking-tight text-foreground">
-                  {t("webViewer.siteCantBeReached") || "This site can’t be reached"}
-                </h1>
+                  {/* Title */}
+                  <h1 className="text-lg font-semibold tracking-tight text-foreground">
+                    {t("webViewer.siteCantBeReached") || "This site can’t be reached"}
+                  </h1>
 
-                {/* Suggestions / Typo in URL */}
-                <div className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
-                  <p>
-                    {t("webViewer.checkTypoInUrl", { host: getHostFromUrl(currentUrl) }) || (
-                      <>
-                        Check if there is a typo in <span className="font-semibold text-foreground">{getHostFromUrl(currentUrl)}</span>
-                      </>
-                    )}
-                  </p>
-                  <p>
-                    {t("webViewer.checkConnectionSuggestion") ||
-                      "If spelling is correct, try checking your network connection or opening in default browser."}
-                  </p>
-                </div>
+                  {/* Suggestions / Typo in URL */}
+                  <div className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
+                    <p>
+                      {t("webViewer.checkTypoInUrl", { host: getHostFromUrl(currentUrl) }) || (
+                        <>
+                          Check if there is a typo in <span className="font-semibold text-foreground">{getHostFromUrl(currentUrl)}</span>
+                        </>
+                      )}
+                    </p>
+                    <p>
+                      {t("webViewer.checkConnectionSuggestion") ||
+                        "If spelling is correct, try checking your network connection or opening in default browser."}
+                    </p>
+                  </div>
 
-                {/* Error code badge */}
-                <div className="text-[11px] font-mono text-muted-foreground/60 uppercase tracking-wide pt-0.5">
-                  {loadError}
-                </div>
+                  {/* Error code badge */}
+                  <div className="text-[11px] font-mono text-muted-foreground/60 uppercase tracking-wide pt-0.5">
+                    {loadError}
+                  </div>
 
-                {/* Action Buttons - Slightly more rounded system style */}
-                <div className="flex flex-wrap items-center gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => handleNavigate(currentUrl)}
-                    className="px-4 py-2 text-xs font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-sm active:scale-95 cursor-pointer"
-                  >
-                    {t("webViewer.retry") || "Reload"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenExternal}
-                    className="px-3.5 py-2 text-xs font-medium rounded-xl border border-border/70 hover:bg-muted text-foreground transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span>{t("webViewer.openInExternalBrowserBtn") || "Open in External Browser"}</span>
-                  </button>
+                  {/* Action Buttons - Slightly more rounded system style */}
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate(currentUrl)}
+                      className="px-4 py-2 text-xs font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    >
+                      {t("webViewer.retry") || "Reload"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenExternal}
+                      className="px-3.5 py-2 text-xs font-medium rounded-xl border border-border/70 hover:bg-muted text-foreground transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span>{t("webViewer.openInExternalBrowserBtn") || "Open in External Browser"}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : isElectron ? (
-            // Native Electron Webview with isolated partition
-            <webview
-              ref={webviewRef}
-              src={initialSrcRef.current}
-              partition="persist:luno_webviewer"
-              allowpopups="true"
-              webpreferences="contextIsolation=yes"
-              className="w-full h-full flex-1 border-0 bg-white"
-              style={{ width: "100%", height: "100%" }}
-            />
-          ) : (
-            // Standard Web Fallback Iframe
-            <iframe
-              ref={iframeRef}
-              src={currentUrl}
-              title={pageTitle || "Web Viewer"}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-              className="w-full h-full flex-1 border-0 bg-white"
-              style={{ width: "100%", height: "100%", zoom: 0.9 }}
-            />
-          )}
+            ) : isElectron ? (
+              // Native Electron Webview with isolated partition
+              <webview
+                ref={webviewRef}
+                src={initialSrcRef.current}
+                partition="persist:luno_webviewer"
+                allowpopups="true"
+                webpreferences="contextIsolation=yes"
+                className="w-full h-full flex-1 border-0 bg-white"
+                style={{ width: "100%", height: "100%" }}
+              />
+            ) : (
+              // Standard Web Fallback Iframe
+              <iframe
+                ref={iframeRef}
+                src={currentUrl}
+                title={pageTitle || "Web Viewer"}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                className="w-full h-full flex-1 border-0 bg-white"
+                style={{ width: "100%", height: "100%", zoom: zoomFactor }}
+              />
+            )}
+          </div>
+
+          {/* Docked Browser Right Panel (Clone of editor's RightPanel UI) */}
+          <AnimatePresence>
+            {isRightPanelOpen && (
+              <BrowserRightPanel
+                isOpen={isRightPanelOpen}
+                onClose={() => setIsRightPanelOpen(false)}
+                currentUrl={currentUrl}
+                pageTitle={pageTitle || title}
+                favicon={pageFavicon}
+                onNavigate={handleNavigate}
+                onReload={handleReloadOrStop}
+                onHardReload={handleHardReload}
+                zoomFactor={zoomFactor}
+                onZoomChange={handleSetZoom}
+                webviewRef={webviewRef}
+                onOpenExternal={handleOpenExternal}
+                onInsertToNote={() => handleInsertToNote()}
+                hasActiveNotes={(activeNotes?.length ?? 0) > 0}
+              />
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </TooltipProvider>

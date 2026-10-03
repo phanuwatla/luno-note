@@ -95,7 +95,10 @@ export function isAttachmentPath(folderPath: string, fileName?: string): boolean
   return (
     folder === "attachments" ||
     folder.startsWith("attachments/") ||
-    name.startsWith("attachments/")
+    name.startsWith("attachments/") ||
+    folder === "attachment" ||
+    folder.startsWith("attachment/") ||
+    name.startsWith("attachment/")
   );
 }
 
@@ -277,10 +280,21 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
   assetBlobUrlMap,
   onSelectImage,
 }) => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const isTh = language === "th";
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"attachments" | "all">("attachments");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
+  const getFolderDisplay = useCallback(
+    (folderPath?: string): string => {
+      if (!folderPath || folderPath.trim() === "" || folderPath === "/" || folderPath === "\\") {
+        return isTh ? "หน้าหลัก" : "Root";
+      }
+      return folderPath;
+    },
+    [isTh]
+  );
   const [scannedItems, setScannedItems] = useState<ScannedImageItem[]>([]);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -566,10 +580,11 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
 
     return list.filter((i) => {
       const name = i.fileName.toLowerCase();
-      const folder = i.folderPath.toLowerCase();
-      return name.includes(query) || folder.includes(query);
+      const folder = (i.folderPath || "").toLowerCase();
+      const folderDisplay = getFolderDisplay(i.folderPath).toLowerCase();
+      return name.includes(query) || folder.includes(query) || folderDisplay.includes(query);
     });
-  }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery]);
+  }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery, getFolderDisplay]);
 
   const handleSelectAndInsert = useCallback(
     async (item: ScannedImageItem) => {
@@ -778,7 +793,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                         </p>
                         <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate leading-none min-w-0">
                           <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                          <span className="truncate min-w-0">{item.folderPath || "/"}</span>
+                          <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
                         </div>
                       </div>
                     </div>
@@ -822,7 +837,7 @@ export const WorkspaceImagePickerDialog: React.FC<WorkspaceImagePickerDialogProp
                           <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate min-w-0">
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-muted text-muted-foreground border border-border/60 min-w-0 truncate">
                               <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                              <span className="truncate min-w-0">{item.folderPath || "/"}</span>
+                              <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
                             </span>
                           </div>
                         </div>

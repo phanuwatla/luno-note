@@ -26,24 +26,17 @@ import { getToolbarIcon } from "@/lib/iconPacks";
 import { APP_VERSION, APP_AUTHOR, APP_AUTHOR_URL, APP_ABOUT_CREDIT, openExternalUrl } from "@/lib/appVersion";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 
-export type HelpCategory =
-  | "features"
-  | "markdown"
-  | "shortcuts"
-  | "faq"
-  | "about";
+import {
+  type HelpCategory,
+  HELP_CATEGORIES,
+  isValidHelpCategory,
+} from "@/types/helpCategory";
 
-export const HELP_CATEGORIES: HelpCategory[] = [
-  "features",
-  "markdown",
-  "shortcuts",
-  "faq",
-  "about",
-];
-
-export function isValidHelpCategory(cat: unknown): cat is HelpCategory {
-  return typeof cat === "string" && (HELP_CATEGORIES as string[]).includes(cat);
-}
+export {
+  type HelpCategory,
+  HELP_CATEGORIES,
+  isValidHelpCategory,
+};
 
 interface HelpCategoryMeta {
   id: HelpCategory;

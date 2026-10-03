@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect, memo, lazy, Suspense } from "react";
 import { Note } from "@/hooks/useNotes";
 import { isEncryptedNote, isLockableTextFile } from "@/lib/noteCrypto";
 import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
@@ -65,16 +65,16 @@ import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTrash, type TrashedNote } from "@/hooks/useTrash";
-import { EditorCheckbox } from "@/components/TrashView";
+import { EditorCheckbox } from "@/components/ui/EditorCheckbox";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { isMarkdownNote } from "@/lib/frontmatter";
 import { stripHtmlAndMarkdown } from "@/lib/snippetUtils";
 import type { CreateNoteOptions, OpenFolderPending } from "@/lib/fileHandles";
 import { renderCustomIcon, getToolbarIcon, getAutoFolderIconAndColor } from "@/lib/iconPacks";
-import IconPickerDialog from "@/components/IconPickerDialog";
-import LunoAiView from "@/components/LunoAiView";
-import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES, setPendingTemplatePreview } from "@/components/TemplatesView";
+const IconPickerDialog = lazy(() => import("@/components/IconPickerDialog"));
+const LunoAiView = lazy(() => import("@/components/LunoAiView"));
+import { TEMPLATE_DEFINITIONS, TEMPLATE_CATEGORIES, setPendingTemplatePreview } from "@/lib/templateDefinitions";
 import { copyToClipboard } from "@/lib/clipboardUtils";
 
 interface SidebarProps {
@@ -135,7 +135,7 @@ interface FolderNode {
   notes: Note[];
 }
 
-const HIDDEN_FOLDERS = new Set(["attachments", ".attachments", "assets", ".luno", "node_modules", "dist", "dist-desktop"]);
+const HIDDEN_FOLDERS = new Set(["attachments", ".attachments", "attachment", ".attachment", "assets", ".luno", "node_modules", "dist", "dist-desktop"]);
 const OPEN_FOLDERS_STORAGE_PREFIX = "luno_open_folders_";
 const LAST_WORKSPACE_STORAGE_KEY = "luno_last_workspace_name";
 
@@ -551,6 +551,19 @@ function SidebarComponent({
 }: SidebarProps) {
   const { settings, updateSetting, setFolderIcon, removeFolderIcon, moveFolderIcons, setFileIcon, removeFileIcon } = useAppSettings();
   const [iconPickerTarget, setIconPickerTarget] = useState<{ type: "folder"; path: string } | { type: "note"; note: Note } | null>(null);
+
+  const handleRemoveNoteIcon = useCallback(
+    (targetNote: Note) => {
+      const relPath = targetNote.fileName
+        ? (targetNote.folderPath ? `${targetNote.folderPath}/${targetNote.fileName}` : targetNote.fileName)
+        : "";
+      if (relPath) {
+        removeFileIcon(relPath);
+      }
+      onUpdateNote?.(targetNote.id, { icon: undefined, iconColor: undefined });
+    },
+    [removeFileIcon, onUpdateNote]
+  );
   const [query, setQuery] = useState("");
   const [navFilter, setNavFilter] = useState<"all" | "explore" | "favorites" | "tags" | "trash">("all");
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
@@ -1813,25 +1826,30 @@ function SidebarComponent({
             </button>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-52 rounded-xl">
-            {!isMultiSelected && settings?.showFileIcons !== false && (
-              <>
-                <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
-                  {note.icon ? (
-                    renderCustomIcon(note.icon, "h-4 w-4 shrink-0", { color: note.iconColor })
-                  ) : (
-                    <NoteIcon note={note} active={false} />
-                  )}
-                  <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
-                </ContextMenuItem>
-                {note.icon && (
-                  <ContextMenuItem onClick={() => onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined })} className="gap-2 text-muted-foreground hover:text-foreground">
-                    <Trash2 className="h-4 w-4" />
-                    <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+            {!isMultiSelected && settings?.showFileIcons !== false && (() => {
+              const noteRelPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+              const noteCustomIcon = note.icon || (noteRelPath && settings?.fileIcons?.[noteRelPath]?.icon);
+              const noteCustomColor = note.iconColor || (noteRelPath && settings?.fileIcons?.[noteRelPath]?.color);
+              return (
+                <>
+                  <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
+                    {noteCustomIcon ? (
+                      renderCustomIcon(noteCustomIcon, "h-4 w-4 shrink-0", { color: noteCustomColor })
+                    ) : (
+                      <NoteIcon note={note} active={false} />
+                    )}
+                    <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
                   </ContextMenuItem>
-                )}
-                <ContextMenuSeparator />
-              </>
-            )}
+                  {Boolean(noteCustomIcon) && (
+                    <ContextMenuItem onClick={() => handleRemoveNoteIcon(note)} className="gap-2 text-muted-foreground hover:text-foreground cursor-pointer">
+                      <Trash2 className="h-4 w-4" />
+                      <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuSeparator />
+                </>
+              );
+            })()}
             <ContextMenuItem
               onClick={() => {
                 if (isMultiSelected) {
@@ -2024,25 +2042,30 @@ function SidebarComponent({
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52 rounded-xl">
-          {!isMultiSelected && settings?.showFileIcons !== false && (
-            <>
-              <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
-                {note.icon ? (
-                  renderCustomIcon(note.icon, "h-4 w-4 shrink-0", { color: note.iconColor })
-                ) : (
-                  <NoteIcon note={note} active={false} />
-                )}
-                <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
-              </ContextMenuItem>
-              {note.icon && (
-                <ContextMenuItem onClick={() => onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined })} className="gap-2 text-muted-foreground hover:text-foreground">
-                  <Trash2 className="h-4 w-4" />
-                  <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+          {!isMultiSelected && settings?.showFileIcons !== false && (() => {
+            const noteRelPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+            const noteCustomIcon = note.icon || (noteRelPath && settings?.fileIcons?.[noteRelPath]?.icon);
+            const noteCustomColor = note.iconColor || (noteRelPath && settings?.fileIcons?.[noteRelPath]?.color);
+            return (
+              <>
+                <ContextMenuItem onClick={() => setIconPickerTarget({ type: "note", note })} className="gap-2">
+                  {noteCustomIcon ? (
+                    renderCustomIcon(noteCustomIcon, "h-4 w-4 shrink-0", { color: noteCustomColor })
+                  ) : (
+                    <NoteIcon note={note} active={false} />
+                  )}
+                  <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
                 </ContextMenuItem>
-              )}
-              <ContextMenuSeparator />
-            </>
-          )}
+                {Boolean(noteCustomIcon) && (
+                  <ContextMenuItem onClick={() => handleRemoveNoteIcon(note)} className="gap-2 text-muted-foreground hover:text-foreground cursor-pointer">
+                    <Trash2 className="h-4 w-4" />
+                    <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                  </ContextMenuItem>
+                )}
+                <ContextMenuSeparator />
+              </>
+            );
+          })()}
           <ContextMenuItem
             onClick={() => {
               if (isMultiSelected) {
@@ -2580,7 +2603,10 @@ function SidebarComponent({
              ========================================================================= */
           <>
             {/* 1. Permanent Left Icon Rail (52px) */}
-            <div className="flex flex-col items-center h-full w-[52px] min-w-[52px] py-3 justify-between shrink-0 border-r border-sidebar-border/30 animate-in fade-in duration-150">
+            <div
+              data-activity-bar="true"
+              className="flex flex-col items-center h-full w-[52px] min-w-[52px] py-3 justify-between shrink-0 border-r border-sidebar-border/30 animate-in fade-in duration-150"
+            >
               <div className="flex flex-col items-center gap-2.5 w-full px-1.5">
                 {/* Top Logo */}
                 <Tooltip>
@@ -3331,33 +3357,35 @@ function SidebarComponent({
 
                     {/* Luno AI View Body */}
                     <div className="flex-1 overflow-hidden min-h-0">
-                      <LunoAiView
-                        isSidebar={true}
-                        notes={notes}
-                        openedFolderName={openedFolderName}
-                        activeNote={notes.find((n) => n.id === activeNoteId) ?? null}
-                        onInsertToActiveNote={(text) => {
-                          const targetNote = notes.find((n) => n.id === activeNoteId) ?? notes[0];
-                          if (targetNote && onUpdateNote) {
-                            const existingContent = targetNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            onUpdateNote(targetNote.id, { content: updatedContent });
-                          }
-                        }}
-                        onInsertToSelectedNote={(targetNoteId, text) => {
-                          const targetNote = notes.find((n) => n.id === targetNoteId);
-                          if (targetNote && onUpdateNote) {
-                            const existingContent = targetNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            onUpdateNote(targetNote.id, { content: updatedContent });
-                          }
-                        }}
-                        onCreateNewNote={(fileName, content, folderPath) => {
-                          void onCreate(folderPath, { initialName: fileName, initialContent: content });
-                        }}
-                        onOpenSettings={onOpenSettings}
-                        onOpenWebTab={onOpenWebTab}
-                      />
+                      <Suspense fallback={<div className="flex h-full items-center justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
+                        <LunoAiView
+                          isSidebar={true}
+                          notes={notes}
+                          openedFolderName={openedFolderName}
+                          activeNote={notes.find((n) => n.id === activeNoteId) ?? null}
+                          onInsertToActiveNote={(text) => {
+                            const targetNote = notes.find((n) => n.id === activeNoteId) ?? notes[0];
+                            if (targetNote && onUpdateNote) {
+                              const existingContent = targetNote.content || "";
+                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              onUpdateNote(targetNote.id, { content: updatedContent });
+                            }
+                          }}
+                          onInsertToSelectedNote={(targetNoteId, text) => {
+                            const targetNote = notes.find((n) => n.id === targetNoteId);
+                            if (targetNote && onUpdateNote) {
+                              const existingContent = targetNote.content || "";
+                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              onUpdateNote(targetNote.id, { content: updatedContent });
+                            }
+                          }}
+                          onCreateNewNote={(fileName, content, folderPath) => {
+                            void onCreate(folderPath, { initialName: fileName, initialContent: content });
+                          }}
+                          onOpenSettings={onOpenSettings}
+                          onOpenWebTab={onOpenWebTab}
+                        />
+                      </Suspense>
                     </div>
                   </>
                 ) : activeSection === "favorites" ? (
@@ -4682,62 +4710,113 @@ function SidebarComponent({
     </AlertDialog>
 
     {/* Custom Icon Picker Dialog */}
-    <IconPickerDialog
-      open={Boolean(iconPickerTarget)}
-      onOpenChange={(open) => {
-        if (!open) setIconPickerTarget(null);
-      }}
-      title={
-        iconPickerTarget?.type === "folder"
-          ? (t("sidebar.changeFolderIcon") || "Change Folder Icon")
-          : (t("sidebar.changeNoteIcon") || "Change Note Icon")
-      }
-      initialIcon={
-        iconPickerTarget?.type === "folder"
-          ? settings.folderIcons?.[iconPickerTarget.path]?.icon
-          : iconPickerTarget?.type === "note"
-          ? (iconPickerTarget.note.icon || (iconPickerTarget.note.fileName ? settings.fileIcons?.[iconPickerTarget.note.folderPath ? `${iconPickerTarget.note.folderPath}/${iconPickerTarget.note.fileName}` : iconPickerTarget.note.fileName]?.icon : undefined))
-          : undefined
-      }
-      initialColor={
-        iconPickerTarget?.type === "folder"
-          ? settings.folderIcons?.[iconPickerTarget.path]?.color
-          : iconPickerTarget?.type === "note"
-          ? (iconPickerTarget.note.iconColor || (iconPickerTarget.note.fileName ? settings.fileIcons?.[iconPickerTarget.note.folderPath ? `${iconPickerTarget.note.folderPath}/${iconPickerTarget.note.fileName}` : iconPickerTarget.note.fileName]?.color : undefined))
-          : undefined
-      }
-      onSelectIcon={(icon, color) => {
-        if (!iconPickerTarget) return;
-        if (iconPickerTarget.type === "folder") {
-          setFolderIcon(iconPickerTarget.path, icon, color);
-        } else if (iconPickerTarget.type === "note") {
-          const note = iconPickerTarget.note;
-          const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-          if (relPath) {
-            setFileIcon(relPath, icon, color);
+    {iconPickerTarget && (
+      <Suspense fallback={null}>
+        <IconPickerDialog
+          open={Boolean(iconPickerTarget)}
+          onOpenChange={(open) => {
+            if (!open) setIconPickerTarget(null);
+          }}
+          title={
+            iconPickerTarget?.type === "folder"
+              ? (t("sidebar.changeFolderIcon") || "Change Folder Icon")
+              : (t("sidebar.changeNoteIcon") || "Change Note Icon")
           }
-          onUpdateNote?.(note.id, { icon, iconColor: color });
-        }
-        setIconPickerTarget(null);
-      }}
-      onRemoveIcon={() => {
-        if (!iconPickerTarget) return;
-        if (iconPickerTarget.type === "folder") {
-          removeFolderIcon(iconPickerTarget.path);
-        } else if (iconPickerTarget.type === "note") {
-          const note = iconPickerTarget.note;
-          const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-          if (relPath) {
-            removeFileIcon(relPath);
+          initialIcon={
+            iconPickerTarget?.type === "folder"
+              ? settings.folderIcons?.[iconPickerTarget.path]?.icon
+              : iconPickerTarget?.type === "note"
+              ? (iconPickerTarget.note.icon || (iconPickerTarget.note.fileName ? settings.fileIcons?.[iconPickerTarget.note.folderPath ? `${iconPickerTarget.note.folderPath}/${iconPickerTarget.note.fileName}` : iconPickerTarget.note.fileName]?.icon : undefined))
+              : undefined
           }
-          onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined });
-        }
-        setIconPickerTarget(null);
-      }}
-    />
+          initialColor={
+            iconPickerTarget?.type === "folder"
+              ? settings.folderIcons?.[iconPickerTarget.path]?.color
+              : iconPickerTarget?.type === "note"
+              ? (iconPickerTarget.note.iconColor || (iconPickerTarget.note.fileName ? settings.fileIcons?.[iconPickerTarget.note.folderPath ? `${iconPickerTarget.note.folderPath}/${iconPickerTarget.note.fileName}` : iconPickerTarget.note.fileName]?.color : undefined))
+              : undefined
+          }
+          onSelectIcon={(icon, color) => {
+            if (!iconPickerTarget) return;
+            if (iconPickerTarget.type === "folder") {
+              setFolderIcon(iconPickerTarget.path, icon, color);
+            } else if (iconPickerTarget.type === "note") {
+              const note = iconPickerTarget.note;
+              const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+              if (relPath) {
+                setFileIcon(relPath, icon, color);
+              }
+              onUpdateNote?.(note.id, { icon, iconColor: color });
+            }
+            setIconPickerTarget(null);
+          }}
+          onRemoveIcon={() => {
+            if (!iconPickerTarget) return;
+            if (iconPickerTarget.type === "folder") {
+              removeFolderIcon(iconPickerTarget.path);
+            } else if (iconPickerTarget.type === "note") {
+              const note = iconPickerTarget.note;
+              const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
+              if (relPath) {
+                removeFileIcon(relPath);
+              }
+              onUpdateNote?.(note.id, { icon: undefined, iconColor: undefined });
+            }
+            setIconPickerTarget(null);
+          }}
+        />
+      </Suspense>
+    )}
       </aside>
     </TooltipProvider>
   );
 }
 
-export default React.memo(SidebarComponent);
+function areSidebarPropsEqual(prevProps: SidebarProps, nextProps: SidebarProps): boolean {
+  if (prevProps.sidebarOpen !== nextProps.sidebarOpen) return false;
+  if (prevProps.activeNoteId !== nextProps.activeNoteId) return false;
+  if (prevProps.openedFolderName !== nextProps.openedFolderName) return false;
+  if (prevProps.pendingReconnectFolder !== nextProps.pendingReconnectFolder) return false;
+  if (prevProps.isMobile !== nextProps.isMobile) return false;
+  if (prevProps.isCloudWorkspace !== nextProps.isCloudWorkspace) return false;
+  if (prevProps.onSelect !== nextProps.onSelect) return false;
+
+  const prevFp = prevProps.folderPaths;
+  const nextFp = nextProps.folderPaths;
+  if (prevFp !== nextFp) {
+    if (!prevFp || !nextFp || prevFp.length !== nextFp.length) return false;
+    for (let i = 0; i < prevFp.length; i++) {
+      if (prevFp[i] !== nextFp[i]) return false;
+    }
+  }
+
+  const prevNotes = prevProps.notes;
+  const nextNotes = nextProps.notes;
+  if (prevNotes === nextNotes) return true;
+  if (!prevNotes || !nextNotes || prevNotes.length !== nextNotes.length) return false;
+
+  for (let i = 0; i < prevNotes.length; i++) {
+    const p = prevNotes[i];
+    const n = nextNotes[i];
+    if (
+      p.id !== n.id ||
+      p.fileName !== n.fileName ||
+      p.title !== n.title ||
+      p.folderPath !== n.folderPath ||
+      p.fileType !== n.fileType ||
+      p.isFavorite !== n.isFavorite ||
+      p.isLocked !== n.isLocked ||
+      p.isDecrypted !== n.isDecrypted ||
+      p.icon !== n.icon ||
+      p.iconColor !== n.iconColor ||
+      p.fileSize !== n.fileSize ||
+      (p.tags?.length || 0) !== (n.tags?.length || 0)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export default React.memo(SidebarComponent, areSidebarPropsEqual);

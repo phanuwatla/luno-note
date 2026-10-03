@@ -6,6 +6,9 @@ import {
   clearNoteHistory,
   getVersionSnapshot,
   groupVersionSnapshots,
+  getHistoryDiskFilename,
+  getLegacyHistoryDiskFilename,
+  loadWorkspaceHistoryFromDisk,
 } from "./versionHistoryStorage";
 import type { Note } from "@/hooks/useNotes";
 
@@ -350,5 +353,75 @@ describe("versionHistoryStorage", () => {
       expect(groups[0].title).toBe("วันนี้");
     });
   });
+
+  describe("disk persistence filenames", () => {
+    it("should generate safe filenames under 90 characters even for long Thai paths that previously exceeded NTFS limit", () => {
+      const thaiRelPath = "Testing Files/ห้องเช่าหมายเลข 13 กับความลับของคนข้างห้อง.md";
+
+      // The old legacy filename expanded every Thai char to 9 chars (_E0_B8_...) and exceeded 255 chars
+      const legacyName = getLegacyHistoryDiskFilename(thaiRelPath);
+      expect(legacyName.length).toBeGreaterThan(255);
+
+      // The new safe filename keeps valid characters and hashes the path
+      const safeName = getHistoryDiskFilename(thaiRelPath);
+      expect(safeName.length).toBeLessThan(90);
+      expect(safeName.endsWith(".json")).toBe(true);
+      // Must not contain illegal Windows filesystem characters
+      expect(safeName).not.toMatch(/[\\/:*?"<>|\x00-\x1F]/);
+      // Contains human readable prefix
+      expect(safeName).toContain("Testing Files_ห้องเช่า");
+    });
+
+    it("should generate deterministic filenames for identical paths and distinct for different paths", () => {
+      const path1 = "Documents/Work/Report.md";
+      const path2 = "Documents/Work/Report.md";
+      const path3 = "Documents/Personal/Report.md";
+
+      expect(getHistoryDiskFilename(path1)).toBe(getHistoryDiskFilename(path2));
+      expect(getHistoryDiskFilename(path1)).not.toBe(getHistoryDiskFilename(path3));
+    });
+
+    it("should load history from disk falling back to legacy filename if safe filename is absent", async () => {
+      const relPath = "Notes/MyOldNote.md";
+      const safeFilename = getHistoryDiskFilename(relPath);
+      const legacyFilename = getLegacyHistoryDiskFilename(relPath);
+
+      const fakeSnapshots = [
+        {
+          id: "legacy-snap-1",
+          noteId: "old-note",
+          relPath,
+          timestamp: 123456789,
+          title: "My Old Note",
+          content: "Legacy content",
+          wordCount: 2,
+          charCount: 14,
+          trigger: "manual" as const,
+        },
+      ];
+
+      // Mock Electron API
+      const mockFiles: Record<string, string> = {
+        [`/workspace/.luno/history/${legacyFilename}`]: JSON.stringify(fakeSnapshots),
+      };
+
+      (window as any).electronAPI = {
+        getSavedWorkspace: async () => ({ folderPath: "/workspace" }),
+        readFileContent: async (p: string) => mockFiles[p] || "",
+      };
+
+      // Ensure safe filename does not exist
+      expect(mockFiles[`/workspace/.luno/history/${safeFilename}`]).toBeUndefined();
+
+      const loaded = await loadWorkspaceHistoryFromDisk(null, relPath);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.length).toBe(1);
+      expect(loaded?.[0].id).toBe("legacy-snap-1");
+      expect(loaded?.[0].content).toBe("Legacy content");
+
+      delete (window as any).electronAPI;
+    });
+  });
 });
+
 

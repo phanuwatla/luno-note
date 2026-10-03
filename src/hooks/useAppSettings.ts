@@ -703,6 +703,7 @@ export interface AppSettings {
   timeFormat: string;
   startWeekOn: string;
   enableAnimations: boolean;
+  confirmBeforeExit: boolean;
   sendUsageData: boolean;
 
   // Trash & Deletion Settings
@@ -868,6 +869,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   timeFormat: "24h",
   startWeekOn: "monday",
   enableAnimations: true,
+  confirmBeforeExit: false,
   sendUsageData: false,
 
   trashRetentionDays: 30,
@@ -1088,6 +1090,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     timeFormat: raw?.timeFormat === "12h" ? "12h" : "24h",
     startWeekOn: raw?.startWeekOn === "sunday" ? "sunday" : "monday",
     enableAnimations: raw?.enableAnimations !== false,
+    confirmBeforeExit: raw?.confirmBeforeExit === true,
     sendUsageData: raw?.sendUsageData === true,
 
     trashRetentionDays: typeof raw?.trashRetentionDays === "number" ? raw.trashRetentionDays : DEFAULT_SETTINGS.trashRetentionDays,
@@ -1512,6 +1515,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("data-app-style", settings.appearanceStyle || "default");
     document.documentElement.setAttribute("data-app-font", settings.fontFamily);
     document.documentElement.setAttribute("data-editor-font", settings.editorFontFamily || settings.fontFamily);
+    document.documentElement.setAttribute("lang", settings.language || "en");
 
     const logoFilter = getThemeLogoFilter(settings.theme, settings.customAccentColor);
     document.documentElement.style.setProperty("--logo-filter", logoFilter);
@@ -1566,17 +1570,23 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const img = new Image();
       img.src = "./luno-logo.png";
       img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width || 64;
-        canvas.height = img.naturalHeight || img.height || 64;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        const filter = getThemeLogoFilter(settings.theme, settings.customAccentColor);
-        if (filter && filter !== "none") {
-          ctx.filter = filter;
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || img.width || 64;
+          canvas.height = img.naturalHeight || img.height || 64;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          const filter = getThemeLogoFilter(settings.theme, settings.customAccentColor);
+          if (filter && filter !== "none") {
+            ctx.filter = filter;
+          }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          if (typeof canvas.toDataURL === "function") {
+            link.href = canvas.toDataURL("image/png");
+          }
+        } catch {
+          // ignore canvas environment issues (e.g. headless/jsdom)
         }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        link.href = canvas.toDataURL("image/png");
       };
     } catch {}
   }, [settings.theme, settings.customAccentColor]);
@@ -1689,7 +1699,12 @@ export function useAppSettings() {
   return context;
 }
 
-export { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, formatFontFileSize } from "@/lib/customFontStore";
+export function useAppSettingsSafe() {
+  return useContext(AppSettingsContext);
+}
+
+import { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, formatFontFileSize } from "@/lib/customFontStore";
+export { type CustomFont, loadCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, getFontDisplayFileSize, formatFontFileSize };
 
 export function useCustomFonts() {
   const [customFonts, setCustomFonts] = useState<import("@/lib/customFontStore").CustomFont[]>([]);
@@ -1697,7 +1712,6 @@ export function useCustomFonts() {
 
   const refresh = useCallback(async () => {
     try {
-      const { loadCustomFonts } = await import("@/lib/customFontStore");
       const fonts = await loadCustomFonts();
       setCustomFonts(fonts);
     } catch (e) {

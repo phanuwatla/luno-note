@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import TabBar from "./TabBar";
 import Breadcrumb from "./Breadcrumb";
 import RightPanel from "./RightPanel";
+import Sidebar from "./Sidebar";
 import { AppSettingsProvider } from "@/hooks/useAppSettings";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Note } from "@/hooks/useNotes";
@@ -53,6 +54,20 @@ describe("showFileIcons Setting Integration", () => {
       writable: true,
       configurable: true,
     });
+    if (typeof (globalThis as any).DOMRect === "undefined" || !(globalThis as any).DOMRect.fromRect) {
+      (globalThis as any).DOMRect = class DOMRect {
+        x = 0; y = 0; width = 0; height = 0; top = 0; right = 0; bottom = 0; left = 0;
+        constructor(x = 0, y = 0, width = 0, height = 0) {
+          this.x = x; this.y = y; this.width = width; this.height = height;
+          this.top = y; this.right = x + width; this.bottom = y + height; this.left = x;
+        }
+        static fromRect(other?: any) {
+          return new (globalThis as any).DOMRect(other?.x, other?.y, other?.width, other?.height);
+        }
+        toJSON() { return JSON.stringify(this); }
+      };
+      (window as any).DOMRect = (globalThis as any).DOMRect;
+    }
   });
 
   it("TabBar renders tab with file icon when showFileIcons is true (default)", () => {
@@ -162,5 +177,68 @@ describe("showFileIcons Setting Integration", () => {
 
     unmount();
   });
+
+  it("Sidebar context menu removes icon properly by clearing both note.icon and settings.fileIcons", () => {
+    window.localStorage.setItem(
+      "notes-app-settings",
+      JSON.stringify({
+        showFileIcons: true,
+        fileIcons: {
+          "sample.md": { icon: "lucide:heart", color: "#ef4444" },
+        },
+      })
+    );
+
+    const onUpdateNote = vi.fn();
+    const testNote: Note = {
+      id: "note-custom-icon",
+      title: "sample",
+      fileName: "sample.md",
+      content: "test",
+      createdAt: 100,
+      updatedAt: 200,
+      icon: "lucide:heart",
+      iconColor: "#ef4444",
+    };
+
+    const { unmount } = render(
+      <AppSettingsProvider>
+        <TooltipProvider>
+          <Sidebar
+            notes={[testNote]}
+            activeNoteId={testNote.id}
+            openedFolderName="Workspace"
+            onSelect={vi.fn()}
+            onCreate={vi.fn()}
+            onUpdateNote={onUpdateNote}
+          />
+        </TooltipProvider>
+      </AppSettingsProvider>
+    );
+
+    // Right-click the note item to open ContextMenu
+    const noteBtn = screen.getByText("sample.md").closest("button");
+    expect(noteBtn).not.toBeNull();
+    fireEvent.contextMenu(noteBtn!);
+
+    // "Remove Icon" should be in the context menu
+    const removeIconOption = screen.getByText(/Remove Icon|sidebar\.removeIcon/i);
+    expect(removeIconOption).toBeInTheDocument();
+
+    fireEvent.click(removeIconOption);
+
+    // Verify onUpdateNote was called to clear icon
+    expect(onUpdateNote).toHaveBeenCalledWith("note-custom-icon", {
+      icon: undefined,
+      iconColor: undefined,
+    });
+
+    // Verify settings was updated to remove from fileIcons
+    const saved = JSON.parse(window.localStorage.getItem("notes-app-settings") || "{}");
+    expect(saved.fileIcons?.["sample.md"]).toBeUndefined();
+
+    unmount();
+  });
 });
+
 

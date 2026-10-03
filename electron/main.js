@@ -422,7 +422,7 @@ function startWorkspaceWatcher(folderPath, targetWindow) {
   if (!folderPath || !fs.existsSync(folderPath)) return;
 
   try {
-    let debounceTimer = null;
+    const watcherItem = { watcher: null, debounceTimer: null };
     const watcher = fs.watch(folderPath, { recursive: true }, (eventType, filename) => {
       if (!filename) return;
       const norm = filename.replace(/\\/g, "/").toLowerCase();
@@ -444,8 +444,9 @@ function startWorkspaceWatcher(folderPath, targetWindow) {
         return;
       }
 
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
+      if (watcherItem.debounceTimer) clearTimeout(watcherItem.debounceTimer);
+      watcherItem.debounceTimer = setTimeout(() => {
+        watcherItem.debounceTimer = null;
         if (!targetWindow.isDestroyed()) {
           const tree = scanWorkspaceTree(folderPath);
           targetWindow.webContents.send("workspace-changed", {
@@ -456,7 +457,8 @@ function startWorkspaceWatcher(folderPath, targetWindow) {
       }, 600);
     });
 
-    windowWatchers.set(windowId, { watcher, debounceTimer });
+    watcherItem.watcher = watcher;
+    windowWatchers.set(windowId, watcherItem);
   } catch (err) {
     console.warn("Failed starting workspace watcher:", folderPath, err);
   }
@@ -655,17 +657,27 @@ function createWindow(initialWorkspacePath = null) {
       /* ignore */
     }
 
-    // Grant microphone and audio media permissions for voice recording
+    // Grant microphone and audio media permissions for voice recording, as well as fullscreen permissions
     try {
       session.setPermissionRequestHandler((_webContents, permission, callback) => {
-        if (permission === "media") {
+        if (
+          permission === "media" ||
+          permission === "fullscreen" ||
+          permission === "automatic-fullscreen" ||
+          permission === "pointerLock"
+        ) {
           return callback(true);
         }
         callback(false);
       });
 
       session.setPermissionCheckHandler((_webContents, permission) => {
-        if (permission === "media") {
+        if (
+          permission === "media" ||
+          permission === "fullscreen" ||
+          permission === "automatic-fullscreen" ||
+          permission === "pointerLock"
+        ) {
           return true;
         }
         return false;
@@ -1866,6 +1878,30 @@ function setupIpcHandlers() {
     }
   });
 
+  ipcMain.handle("clear-browser-data", async (_event, options = {}) => {
+    try {
+      const partitionSession = session.fromPartition("persist:luno_webviewer");
+      const storages = [];
+      if (options.cookies) storages.push("cookies");
+      if (options.storage) storages.push("localstorage", "indexdb", "websql", "serviceworkers");
+      if (options.cache) storages.push("cachestorage", "shadercache");
+
+      if (storages.length > 0) {
+        await partitionSession.clearStorageData({ storages });
+      }
+      if (options.cache) {
+        await partitionSession.clearCache();
+      }
+      if (options.auth) {
+        await partitionSession.clearAuthCache();
+      }
+      return { success: true };
+    } catch (err) {
+      console.error("Failed to clear browser data:", err);
+      return { success: false, error: err?.message };
+    }
+  });
+
   ipcMain.handle("open-external", async (event, url) => {
     try {
       if (url && typeof url === "string") {
@@ -1895,6 +1931,11 @@ function setupIpcHandlers() {
             } catch {}
             const normalized = path.normalize(filePath);
             if (fs.existsSync(normalized)) {
+              const ext = path.extname(normalized).toLowerCase();
+              if (DANGEROUS_EXTENSIONS.has(ext)) {
+                shell.showItemInFolder(normalized);
+                return false;
+              }
               await shell.openPath(normalized);
               return true;
             }
@@ -1906,6 +1947,11 @@ function setupIpcHandlers() {
         if (/^[a-zA-Z]:[/\\]/.test(clean)) {
           const normalized = path.normalize(clean);
           if (fs.existsSync(normalized)) {
+            const ext = path.extname(normalized).toLowerCase();
+            if (DANGEROUS_EXTENSIONS.has(ext)) {
+              shell.showItemInFolder(normalized);
+              return false;
+            }
             await shell.openPath(normalized);
             return true;
           }
@@ -1915,7 +1961,7 @@ function setupIpcHandlers() {
           clean = "https://" + clean;
         }
         const parsed = new URL(clean);
-        if (["http:", "https:", "mailto:", "tel:", "file:"].includes(parsed.protocol)) {
+        if (["http:", "https:", "mailto:", "tel:"].includes(parsed.protocol)) {
           await shell.openExternal(clean);
           return true;
         }
@@ -2258,8 +2304,11 @@ function setupIpcHandlers() {
 
   ipcMain.handle("read-file-content", (event, fullPath) => {
     try {
-      if (fs.existsSync(fullPath)) {
-        return fs.readFileSync(fullPath, "utf8");
+      if (fullPath && typeof fullPath === "string") {
+        const normalized = path.normalize(fullPath);
+        if (fs.existsSync(normalized)) {
+          return fs.readFileSync(normalized, "utf8");
+        }
       }
     } catch (err) {
       console.warn("Failed reading file content:", fullPath, err);
@@ -2341,11 +2390,12 @@ function setupIpcHandlers() {
         console.warn("Blocked writing to protected or invalid path:", fullPath);
         return false;
       }
-      const parentDir = path.dirname(fullPath);
+      const normalizedPath = path.normalize(fullPath);
+      const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
-      fs.writeFileSync(fullPath, content || "", "utf8");
+      fs.writeFileSync(normalizedPath, content || "", "utf8");
       return true;
     } catch (err) {
       console.warn("Failed writing file content:", fullPath, err);
@@ -2365,7 +2415,8 @@ function setupIpcHandlers() {
         console.warn("write-file-base64: missing or invalid base64 data for:", fullPath);
         return false;
       }
-      const parentDir = path.dirname(fullPath);
+      const normalizedPath = path.normalize(fullPath);
+      const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
@@ -2375,7 +2426,7 @@ function setupIpcHandlers() {
         console.warn("write-file-base64: decoded buffer is empty for:", fullPath);
         return false;
       }
-      fs.writeFileSync(fullPath, buffer);
+      fs.writeFileSync(normalizedPath, buffer);
       return true;
     } catch (err) {
       console.warn("Failed writing base64 file content:", fullPath, err);
@@ -2388,12 +2439,13 @@ function setupIpcHandlers() {
       const fullPath = data?.fullPath;
       const arrayBuffer = data?.buffer;
       if (!fullPath || !arrayBuffer || isCriticalSystemPath(fullPath)) return false;
-      const parentDir = path.dirname(fullPath);
+      const normalizedPath = path.normalize(fullPath);
+      const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
       const buffer = Buffer.from(arrayBuffer);
-      await fs.promises.writeFile(fullPath, buffer);
+      await fs.promises.writeFile(normalizedPath, buffer);
       return true;
     } catch (err) {
       console.warn("Failed writing buffer to file:", data?.fullPath, err);
@@ -2550,11 +2602,26 @@ function setupIpcHandlers() {
     return null;
   });
 
-  ipcMain.handle("select-directory-dialog", async (event, title) => {
+  ipcMain.handle("get-documents-path", () => {
+    try {
+      return app.getPath("documents");
+    } catch {
+      return "";
+    }
+  });
+
+  ipcMain.handle("select-directory-dialog", async (event, title, defaultPath) => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    let startPath = defaultPath;
+    if (!startPath) {
+      try {
+        startPath = app.getPath("documents");
+      } catch {}
+    }
     const result = await dialog.showOpenDialog(win || undefined, {
       properties: ["openDirectory"],
       title: title || "Select Location",
+      defaultPath: startPath || undefined,
     });
     if (!result.canceled && result.filePaths.length > 0) {
       return result.filePaths[0];
@@ -2724,7 +2791,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle("create-new-workspace", async (event, { parentPath, workspaceName }) => {
+  ipcMain.handle("create-new-workspace", async (event, { parentPath, workspaceName, welcomeContent }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     try {
       if (!parentPath || !workspaceName) return null;
@@ -2733,6 +2800,13 @@ function setupIpcHandlers() {
         fs.mkdirSync(targetPath, { recursive: true });
       }
       ensureDefaultWorkspaceFolders(targetPath);
+
+      if (welcomeContent && typeof welcomeContent === "string") {
+        const welcomeFilePath = path.join(targetPath, "Welcome.md");
+        if (!fs.existsSync(welcomeFilePath)) {
+          fs.writeFileSync(welcomeFilePath, welcomeContent, "utf8");
+        }
+      }
 
       const folderName = workspaceName.trim();
       const currentWs = win ? windowWorkspaceMap.get(win.id) : null;

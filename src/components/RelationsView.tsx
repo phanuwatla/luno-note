@@ -13,11 +13,13 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
+  ImageIcon,
+  ImageOff,
 } from "lucide-react";
 import type { Note } from "@/hooks/useNotes";
 import { buildNoteGraph, wrapNodeText, getNodeBaseRadius, type GraphNode, type GraphEdge } from "@/lib/graphUtils";
 import { useTranslation } from "@/hooks/useTranslation";
-import { useAppSettings } from "@/hooks/useAppSettings";
+import { useAppSettings, APP_THEMES, hexToHsl } from "@/hooks/useAppSettings";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -25,9 +27,35 @@ import { Input } from "@/components/ui/input";
 
 interface RelationsViewProps {
   notes: Note[];
-  onSelectNote?: (id: string) => void;
+  onSelectNote?: (id: string, node?: GraphNode) => void;
   activeNoteId?: string | null;
   isMobile?: boolean;
+}
+
+/**
+ * Resolves an authentic system palette color for media nodes from APP_THEMES.
+ * Gracefully adapts lightness for high contrast against dark or light canvas backgrounds.
+ */
+function getSystemThemeColor(themeId: string, isDark: boolean): string {
+  const theme = APP_THEMES.find((t) => t.id === themeId);
+  if (!theme) return isDark ? "hsl(215 12% 55%)" : "hsl(215 14% 46%)";
+
+  if (theme.color.startsWith("#")) {
+    const { h, s, l } = hexToHsl(theme.color);
+    const targetL = isDark ? Math.min(l + 10, 65) : l;
+    return `hsl(${h} ${s}% ${targetL}%)`;
+  }
+
+  const match = theme.color.match(/hsl\(\s*(\d+)\s+(\d+)%\s+(\d+)%\s*\)/);
+  if (match) {
+    const h = parseInt(match[1], 10);
+    const s = parseInt(match[2], 10);
+    const l = parseInt(match[3], 10);
+    const targetL = isDark ? Math.min(l + 8, 66) : Math.max(l - 3, 38);
+    return `hsl(${h} ${s}% ${targetL}%)`;
+  }
+
+  return theme.color;
 }
 
 /**
@@ -180,6 +208,24 @@ export function RelationsView({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showOrphans, setShowOrphans] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [showImages, setShowImages] = useState(() => {
+    try {
+      const stored = localStorage.getItem("luno:relations_show_images");
+      return stored !== null ? stored === "true" : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleImages = useCallback(() => {
+    setShowImages((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("luno:relations_show_images", String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(activeNoteId || null);
 
@@ -203,16 +249,47 @@ export function RelationsView({
   const hasMovedSignificantlyRef = useRef(false);
   const simulationAlphaRef = useRef(1);
 
+  // Reheat physics slightly when filters change so nodes gracefully rearrange
+  useEffect(() => {
+    simulationAlphaRef.current = Math.max(simulationAlphaRef.current, 0.4);
+  }, [showImages, showOrphans]);
+
   // Animation flag from global app settings
   const enableAnimations = settings?.enableAnimations !== false;
 
   // Build raw graph data from notes
   const rawGraph = useMemo(() => buildNoteGraph(notes), [notes]);
 
-  // Visible nodes filtered by orphan toggle
+  const noteCount = useMemo(
+    () => rawGraph.nodes.filter((n) => n.nodeType === "note" || !n.nodeType).length,
+    [rawGraph.nodes]
+  );
+  const imageCount = useMemo(
+    () => rawGraph.nodes.filter((n) => n.nodeType === "image").length,
+    [rawGraph.nodes]
+  );
+  const videoCount = useMemo(
+    () => rawGraph.nodes.filter((n) => n.nodeType === "video").length,
+    [rawGraph.nodes]
+  );
+  const audioCount = useMemo(
+    () => rawGraph.nodes.filter((n) => n.nodeType === "audio").length,
+    [rawGraph.nodes]
+  );
+  const fileCount = useMemo(
+    () => rawGraph.nodes.filter((n) => n.nodeType === "file").length,
+    [rawGraph.nodes]
+  );
+
+  // Visible nodes filtered by orphan toggle and image/media toggle
   const visibleNodeMap = useMemo(() => {
     const map = new Map<string, boolean>();
-    nodesRef.current.forEach((node) => {
+    const currentNodes = nodesRef.current.length > 0 ? nodesRef.current : rawGraph.nodes;
+    currentNodes.forEach((node) => {
+      if (!showImages && node.nodeType && node.nodeType !== "note") {
+        map.set(node.id, false);
+        return;
+      }
       if (!showOrphans && node.degree === 0) {
         map.set(node.id, false);
         return;
@@ -220,7 +297,7 @@ export function RelationsView({
       map.set(node.id, true);
     });
     return map;
-  }, [showOrphans, rawGraph]);
+  }, [showOrphans, showImages, rawGraph]);
 
   const matchedNodes = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -290,7 +367,7 @@ export function RelationsView({
     const container = containerRef.current;
     if (!container) return;
     const { clientWidth, clientHeight } = container;
-    if (clientWidth <= 10 || clientHeight <= 10) return;
+    if (clientWidth <= 50 || clientHeight <= 50) return;
 
     const currentNodes = nodesRef.current.length > 0 ? nodesRef.current : rawGraph.nodes;
     const visibleNodes = currentNodes.filter((n) => visibleNodeMap.get(n.id) !== false);
@@ -302,6 +379,7 @@ export function RelationsView({
         transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       }
       setZoomLevel(1);
+      hasInitialCenteredRef.current = true;
       return;
     }
 
@@ -331,29 +409,62 @@ export function RelationsView({
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
 
-    const graphW = Math.max(maxX - minX, 100);
-    const graphH = Math.max(maxY - minY, 100);
+    const totalVisible = visibleNodes.length;
 
-    // Padding around graph (e.g. 70px) so nodes on boundaries don't touch viewport edges
-    const padding = 70;
-    const availW = Math.max(clientWidth - padding * 2, 100);
-    const availH = Math.max(clientHeight - padding * 2, 100);
+    // Responsive padding based on note count and viewport size:
+    // Small graphs (1-6 nodes) receive ample breathing room, while larger graphs use compact padding.
+    const horizontalPadding =
+      totalVisible <= 3
+        ? Math.max(120, clientWidth * 0.22)
+        : totalVisible <= 6
+        ? Math.max(90, clientWidth * 0.16)
+        : totalVisible <= 15
+        ? Math.max(75, clientWidth * 0.1)
+        : 65;
+
+    const verticalPadding =
+      totalVisible <= 3
+        ? Math.max(100, clientHeight * 0.22)
+        : totalVisible <= 6
+        ? Math.max(80, clientHeight * 0.16)
+        : totalVisible <= 15
+        ? Math.max(70, clientHeight * 0.1)
+        : 65;
+
+    const availW = Math.max(clientWidth - horizontalPadding * 2, 100);
+    const availH = Math.max(clientHeight - verticalPadding * 2, 100);
+
+    const graphW = Math.max(maxX - minX, 80);
+    const graphH = Math.max(maxY - minY, 80);
 
     const fitScale = Math.min(availW / graphW, availH / graphH);
-    const fitK = Math.max(0.1, Math.min(1.5, fitScale));
+
+    // Dynamic upper bound based on total visible node count:
+    // - 1-2 nodes: comfortable scale around 2.2
+    // - 3-6 nodes (e.g. 5 notes): allow up to 3.2x so the graph nicely fills the viewport (Image 2)
+    // - 7-15 nodes: allow up to 2.4x
+    // - > 15 nodes: allow up to 1.8x
+    const maxFitScale =
+      totalVisible <= 2 ? 2.2 : totalVisible <= 6 ? 3.2 : totalVisible <= 15 ? 2.4 : 1.8;
+    const minFitScale = 0.08;
+
+    const fitK = Math.max(minFitScale, Math.min(maxFitScale, fitScale));
 
     baseFitScaleRef.current = fitK;
 
-    targetTransformRef.current = {
+    const newTarget = {
       x: clientWidth / 2 - cx * fitK,
       y: clientHeight / 2 - cy * fitK,
       k: fitK,
     };
 
-    if (!enableAnimations || transformRef.current.x === 0) {
-      transformRef.current = { ...targetTransformRef.current };
+    targetTransformRef.current = newTarget;
+
+    if (!enableAnimations || !hasInitialCenteredRef.current || transformRef.current.x === 0) {
+      transformRef.current = { ...newTarget };
     }
     setZoomLevel(1);
+    hasInitialCenteredRef.current = true;
   }, [visibleNodeMap, rawGraph.nodes, enableAnimations]);
 
   // Sync / Initialize nodes and positions preserving existing coordinates
@@ -382,30 +493,21 @@ export function RelationsView({
       const vMap = new Map<string, boolean>();
       updatedNodes.forEach((n) => vMap.set(n.id, true));
 
-      if (enableAnimations) {
-        for (let step = 0; step < 5; step++) {
-          stepSimulation(updatedNodes, rawGraph.edges, vMap, 1.0);
-        }
-        simulationAlphaRef.current = 1.0;
-      } else {
-        // When animations disabled, stabilize instantly
-        let warmupAlpha = 1.0;
-        for (let step = 0; step < 100; step++) {
-          stepSimulation(updatedNodes, rawGraph.edges, vMap, warmupAlpha);
-          warmupAlpha *= 0.95;
-        }
-        simulationAlphaRef.current = 0;
+      let warmupAlpha = 1.0;
+      for (let step = 0; step < 25; step++) {
+        stepSimulation(updatedNodes, rawGraph.edges, vMap, warmupAlpha);
+        warmupAlpha *= 0.90;
       }
+      simulationAlphaRef.current = enableAnimations ? 0.35 : 0;
     } else {
       simulationAlphaRef.current = enableAnimations ? 0.6 : 0;
     }
 
     if (!hasInitialCenteredRef.current) {
-      hasInitialCenteredRef.current = true;
       centerGraph();
       const timer = setTimeout(() => {
         centerGraph();
-      }, 30);
+      }, 50);
       return () => clearTimeout(timer);
     }
   }, [rawGraph, centerGraph, enableAnimations]);
@@ -420,7 +522,6 @@ export function RelationsView({
         const { width, height } = entry.contentRect;
         if (width > 50 && height > 50) {
           if (!hasInitialCenteredRef.current) {
-            hasInitialCenteredRef.current = true;
             centerGraph();
           }
         }
@@ -503,11 +604,41 @@ export function RelationsView({
     setZoomLevel(newK / baseK);
   }, [enableAnimations]);
 
-  // Reheat physics simulation & rearrange layout
+  // Re-organize/Rearrange graph: in case user moved nodes around, resets back to pristine initial layout like when opened
   const handleRearrange = useCallback(() => {
-    simulationAlphaRef.current = 1.0;
+    isDraggingNodeRef.current = null;
+    isDraggingCanvasRef.current = false;
+
+    // 1. Generate clean default positions from buildNoteGraph
+    const freshGraph = buildNoteGraph(notes);
+    const freshMap = new Map<string, GraphNode>();
+    freshGraph.nodes.forEach((n) => freshMap.set(n.id, n));
+
+    // Reset current node positions and velocities
+    nodesRef.current.forEach((n) => {
+      const fresh = freshMap.get(n.id);
+      if (fresh) {
+        n.x = fresh.x;
+        n.y = fresh.y;
+        n.vx = 0;
+        n.vy = 0;
+      }
+    });
+    edgesRef.current = freshGraph.edges;
+
+    // 2. Stable physics warmup (smooth and deterministic settling)
+    const vMap = new Map<string, boolean>();
+    nodesRef.current.forEach((n) => vMap.set(n.id, visibleNodeMap.get(n.id) !== false));
+    let warmupAlpha = 1.0;
+    for (let step = 0; step < 25; step++) {
+      stepSimulation(nodesRef.current, edgesRef.current, vMap, warmupAlpha);
+      warmupAlpha *= 0.90;
+    }
+    simulationAlphaRef.current = enableAnimations ? 0.35 : 0;
+
+    // 3. Center graph at 100% zoom and centered
     centerGraph();
-  }, [centerGraph]);
+  }, [notes, visibleNodeMap, centerGraph, enableAnimations]);
 
   // Main Simulation & Render Loop
   useEffect(() => {
@@ -541,8 +672,10 @@ export function RelationsView({
         return;
       }
 
-      // Default transform fallback to screen center if at (0, 0)
-      if (transformRef.current.x === 0 && transformRef.current.y === 0) {
+      // Initial auto-center if camera not yet placed
+      if (!hasInitialCenteredRef.current && width > 50 && height > 50) {
+        centerGraph();
+      } else if (transformRef.current.x === 0 && transformRef.current.y === 0) {
         const baseK = baseFitScaleRef.current > 0 ? baseFitScaleRef.current : 1.0;
         transformRef.current = { x: width / 2, y: height / 2, k: baseK };
         targetTransformRef.current = { x: width / 2, y: height / 2, k: baseK };
@@ -582,14 +715,25 @@ export function RelationsView({
         simulationAlphaRef.current *= enableAnimations ? 0.982 : 0.92;
       }
 
-      // Read Theme Accent Color dynamically from computed CSS variables
       // Read Theme Accent & Background Colors dynamically from computed CSS variables
       const isDark = document.documentElement.classList.contains("dark") || settings?.colorScheme === "dark";
-      const rawPrimary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim() || "174 62% 39%";
+      const computed = getComputedStyle(document.documentElement);
+      const rawPrimary = computed.getPropertyValue("--primary").trim() || "174 62% 39%";
       const accentHsl = `hsl(${rawPrimary})`;
       const accentEdge = `hsla(${rawPrimary} / 0.85)`;
-      const rawBg = getComputedStyle(document.documentElement).getPropertyValue("--background").trim();
+      const rawBg = computed.getPropertyValue("--background").trim();
       const canvasBg = rawBg ? `hsl(${rawBg})` : isDark ? "#090d16" : "#ffffff";
+      const rawMutedFg = computed.getPropertyValue("--muted-foreground").trim() || (isDark ? "215 12% 55%" : "215 14% 46%");
+      const rawFg = computed.getPropertyValue("--foreground").trim() || (isDark ? "220 13% 92%" : "220 26% 14%");
+      const rawBorder = computed.getPropertyValue("--border").trim() || (isDark ? "222 14% 18%" : "220 13% 91%");
+
+      // System palette colors for media node types & note nodes
+      const imageNodeColor = getSystemThemeColor("emerald", isDark);
+      const videoNodeColor = getSystemThemeColor("violet", isDark);
+      const audioNodeColor = getSystemThemeColor("amber", isDark);
+      const fileNodeColor = getSystemThemeColor("sky", isDark);
+      const noteNodeColor = `hsl(${rawMutedFg})`;
+      const dimmedNodeColor = `hsla(${rawMutedFg} / 0.2)`;
 
       // Drawing Graph
       const { x: panX, y: panY, k } = transformRef.current;
@@ -643,11 +787,11 @@ export function RelationsView({
             ctx.strokeStyle = accentEdge;
             ctx.lineWidth = 0.85 / k;
           } else if (isDimmed) {
-            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.02)";
-            ctx.lineWidth = 0.55 / k;
+            ctx.strokeStyle = `hsla(${rawBorder} / 0.18)`;
+            ctx.lineWidth = 0.825 / k;
           } else {
-            ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.09)";
-            ctx.lineWidth = 0.75 / k;
+            ctx.strokeStyle = `hsla(${rawBorder} / ${isDark ? "0.65" : "0.75"})`;
+            ctx.lineWidth = 1.125 / k;
           }
           ctx.stroke();
         }
@@ -697,15 +841,21 @@ export function RelationsView({
         ctx.arc(node.x, node.y, radiusWorld, 0, Math.PI * 2);
 
         if (isDimmed) {
-          ctx.fillStyle = isDark ? "rgba(113, 113, 122, 0.2)" : "rgba(148, 163, 184, 0.2)";
+          ctx.fillStyle = dimmedNodeColor;
         } else if (isHighlighted || isSelected) {
-          ctx.fillStyle = accentHsl; // Dynamic Accent color on hover/selected
+          ctx.fillStyle = accentHsl; // Dynamic Accent color from active system theme
+        } else if (node.nodeType === "image") {
+          ctx.fillStyle = imageNodeColor; // System Emerald theme
+        } else if (node.nodeType === "video") {
+          ctx.fillStyle = videoNodeColor; // System Violet theme
+        } else if (node.nodeType === "audio") {
+          ctx.fillStyle = audioNodeColor; // System Amber theme
+        } else if (node.nodeType === "file") {
+          ctx.fillStyle = fileNodeColor; // System Sky theme
         } else {
-          // Soft refined mineral graphite gray in light mode, clean light slate in dark mode
-          ctx.fillStyle = isDark ? "#94a3b8" : "#5a606d";
+          ctx.fillStyle = noteNodeColor; // System muted foreground theme
         }
         ctx.fill();
-        // Notice: No border/stroke outline on hover or normal, ensuring 100% borderless clean look
 
         // 3. Draw Labels (Clean typography, scales smoothly with zoom like Obsidian)
         const shouldShowLabel =
@@ -731,11 +881,11 @@ export function RelationsView({
           const lineHeightWorld = worldFontSize * 1.24;
 
           if (isDimmed) {
-            ctx.fillStyle = isDark ? "rgba(148, 163, 184, 0.25)" : "rgba(100, 116, 139, 0.25)";
+            ctx.fillStyle = `hsla(${rawMutedFg} / 0.25)`;
           } else if (isHighlighted || isSelected) {
-            ctx.fillStyle = isDark ? "#ffffff" : "#0f172a";
+            ctx.fillStyle = `hsl(${rawFg})`;
           } else {
-            ctx.fillStyle = isDark ? "rgba(241, 245, 249, 0.92)" : "#475569";
+            ctx.fillStyle = isDark ? `hsla(${rawFg} / 0.92)` : `hsl(${rawFg})`;
           }
 
           lines.forEach((line, idx) => {
@@ -802,8 +952,8 @@ export function RelationsView({
         const dist = Math.hypot(px - screenNodeX, py - screenNodeY);
 
         const rScreen = getNodeBaseRadius(node.degree) * zoomGrowthFactor;
-        // Generous screen hit radius: node radius + 6px (minimum 13px for effortless targeting)
-        const hitRadiusScreen = Math.max(rScreen + 6, 13);
+        // Generous screen hit radius: node radius + 6px (minimum 14px for effortless targeting)
+        const hitRadiusScreen = Math.max(rScreen + 6, 14);
 
         if (dist <= hitRadiusScreen && dist < minCircleDist) {
           minCircleDist = dist;
@@ -919,7 +1069,7 @@ export function RelationsView({
       if (!hasMovedSignificantlyRef.current && isDraggingNodeRef.current) {
         const clickedNode = isDraggingNodeRef.current;
         setSelectedNodeId(clickedNode.id);
-        onSelectNote?.(clickedNode.id);
+        onSelectNote?.(clickedNode.id, clickedNode);
       }
 
       isDraggingNodeRef.current = null;
@@ -957,9 +1107,15 @@ export function RelationsView({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="relative flex-1 w-full h-full min-h-0 min-w-0 bg-background overflow-hidden select-none flex flex-col">
+      <div
+        data-relations-view="true"
+        className="relative flex-1 w-full h-full min-h-0 min-w-0 bg-background overflow-hidden select-none flex flex-col"
+      >
         {/* Top Breadcrumb Toolbar (Matching Editor Breadcrumb Style) */}
-        <div className="flex items-center justify-between bg-background px-3.5 h-[34px] text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
+        <div
+          data-relations-header="true"
+          className="flex items-center justify-between bg-background px-3.5 h-[34px] text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0"
+        >
           {/* Left: Breadcrumb Title */}
           <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden py-0.5">
             <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none flex items-center gap-1.5 text-xs">
@@ -992,6 +1148,7 @@ export function RelationsView({
               </Tooltip>
 
               <PopoverContent
+                data-relations-search-popover="true"
                 align="end"
                 sideOffset={6}
                 className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text"
@@ -1145,6 +1302,40 @@ export function RelationsView({
                   : (t("relations.showLabels") || (isTh ? "แสดงชื่อโน้ต" : "Show labels"))}
               </TooltipContent>
             </Tooltip>
+
+            {/* Toggle Media Nodes (Images, Videos, Audio, Files) */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleToggleImages}
+                  aria-label={
+                    showImages
+                      ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
+                      : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))
+                  }
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                >
+                  {showImages ? (
+                    <ImageOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <ImageIcon className="h-3.5 w-3.5" />
+                  )}
+                  <span className="sr-only">
+                    {showImages
+                      ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
+                      : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))}
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {showImages
+                  ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
+                  : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -1180,12 +1371,51 @@ export function RelationsView({
         </div>
 
         {/* Bottom Status Bar (Matching Image Preview & Editor Bottom Bar) */}
-        <div className="flex h-7 w-full min-w-0 shrink-0 items-center justify-between border-t border-border/60 bg-card/60 dark:bg-card/40 px-3 text-[11px] text-muted-foreground select-none overflow-hidden">
+        <div
+          data-relations-statusbar="true"
+          className="flex h-7 w-full min-w-0 shrink-0 items-center justify-between border-t border-border/60 bg-card/60 dark:bg-card/40 px-3 text-[11px] text-muted-foreground select-none overflow-hidden"
+        >
           {/* Left side: Notes count | Links count | Hint */}
           <div className="flex items-center gap-2.5 shrink-0">
             <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-              {rawGraph.nodes.length} {t("relations.notes") || (isTh ? "โน้ต" : "notes")}
+              {noteCount} {t("relations.notes") || (isTh ? "โน้ต" : "notes")}
             </span>
+
+            {imageCount > 0 && showImages && (
+              <>
+                <div className="h-3 w-[1px] bg-border/60" />
+                <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                  {imageCount} {isTh ? "รูปภาพ" : "images"}
+                </span>
+              </>
+            )}
+
+            {videoCount > 0 && showImages && (
+              <>
+                <div className="h-3 w-[1px] bg-border/60" />
+                <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                  {videoCount} {isTh ? "วิดีโอ" : "videos"}
+                </span>
+              </>
+            )}
+
+            {audioCount > 0 && showImages && (
+              <>
+                <div className="h-3 w-[1px] bg-border/60" />
+                <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                  {audioCount} {isTh ? "เสียง" : "audio"}
+                </span>
+              </>
+            )}
+
+            {fileCount > 0 && showImages && (
+              <>
+                <div className="h-3 w-[1px] bg-border/60" />
+                <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                  {fileCount} {isTh ? "ไฟล์แนบ" : "files"}
+                </span>
+              </>
+            )}
 
             <div className="h-3 w-[1px] bg-border/60" />
 

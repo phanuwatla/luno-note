@@ -1,8 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { Minus, Square, Copy, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useAppSettingsSafe } from "@/hooks/useAppSettings";
 
 declare global {
   interface Window {
@@ -17,7 +28,7 @@ declare global {
   }
 }
 
-export default function WindowControls() {
+function WindowControls() {
   const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
   const [isDesktopEnv, setIsDesktopEnv] = useState(false);
@@ -74,7 +85,47 @@ export default function WindowControls() {
     }, 200);
   };
 
-  if (!isDesktopEnv) return null;
+  const appSettings = useAppSettingsSafe();
+  const confirmBeforeExit = Boolean(appSettings?.settings?.confirmBeforeExit);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!confirmBeforeExit) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.altKey && e.key === "F4") || (e.ctrlKey && e.key.toLowerCase() === "q")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowExitConfirm(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [confirmBeforeExit]);
+
+  const executeClose = () => {
+    if (window.electronAPI) {
+      window.electronAPI.close();
+    } else {
+      window.close();
+    }
+  };
+
+  const handleClose = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowSnapLayouts(false);
+    if (confirmBeforeExit) {
+      setShowExitConfirm(true);
+      return;
+    }
+    executeClose();
+  };
+
+  const handleConfirmExit = () => {
+    setShowExitConfirm(false);
+    executeClose();
+  };
 
   const handleMinimize = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -102,11 +153,7 @@ export default function WindowControls() {
     }
   };
 
-  const handleClose = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowSnapLayouts(false);
-    window.electronAPI?.close();
-  };
+  if (!isDesktopEnv) return null;
 
   const getCleanLabel = (key: string, fallback: string) => {
     const val = t(key);
@@ -377,7 +424,30 @@ export default function WindowControls() {
           </TooltipTrigger>
           <TooltipContent side="bottom">{closeLabel}</TooltipContent>
         </Tooltip>
+
+        {/* Exit Confirmation Dialog */}
+        <AlertDialog open={showExitConfirm} onOpenChange={setShowExitConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("settings.confirmExitTitle") || "Exit Luno Note?"}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("settings.confirmExitDesc") || "Are you sure you want to close the application?"}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+                onClick={handleConfirmExit}
+              >
+                {t("settings.confirmExitBtn") || "Exit"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </TooltipProvider>
   );
 }
+
+export default memo(WindowControls);

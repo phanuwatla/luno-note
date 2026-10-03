@@ -1338,6 +1338,13 @@ This is HTML with inline styling.
     expect(EDITOR_CLASSES).toContain("[&>h1:first-child]:mb-6");
   });
 
+  it("Test 20.1 — Line wrapping without breaking words: EDITOR_CLASSES avoids line-break:anywhere and uses word-break:normal", () => {
+    expect(EDITOR_CLASSES).not.toContain("line-break:anywhere");
+    expect(EDITOR_CLASSES).not.toContain("overflow-wrap:anywhere");
+    expect(EDITOR_CLASSES).toContain("break-words");
+    expect(EDITOR_CLASSES).toContain("[word-break:normal]");
+  });
+
   it("Test 21 — Freshly opened note has undo disabled (can().undo() === false) and sync does not leak undo", () => {
     const editor = new CoreEditor({
       extensions: [

@@ -1,5 +1,6 @@
 import { Note } from "@/hooks/useNotes";
 import { getAllKnownLocalManifests } from "./workspaceIdentity";
+import { getWelcomeNoteContent, WELCOME_NOTE_FILENAME } from "./welcomeNote";
 
 export interface DriveFileItem {
   id: string;
@@ -1617,13 +1618,19 @@ export async function createCloudWorkspace(
 
   await uploadDriveNoteFile(token, lunoMetaId, "workspace.json", JSON.stringify(manifest, null, 2));
 
-  // Create welcome.md
-  await uploadDriveNoteFile(
-    token,
-    projectId,
-    "welcome.md",
-    `# Welcome to ${cleanName}\n\nYour cloud workspace is ready.`
-  );
+  // Create Welcome.md if requested
+  const contentToUpload = welcomeContent === undefined
+    ? getWelcomeNoteContent("en", cleanName)
+    : welcomeContent;
+
+  if (contentToUpload) {
+    await uploadDriveNoteFile(
+      token,
+      projectId,
+      WELCOME_NOTE_FILENAME,
+      contentToUpload
+    );
+  }
 
   return {
     folderId: projectId,

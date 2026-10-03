@@ -449,10 +449,21 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
   assetBlobUrlMap,
   onSelectVideo,
 }) => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const isTh = language === "th";
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"attachments" | "all">("attachments");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
+  const getFolderDisplay = useCallback(
+    (folderPath?: string): string => {
+      if (!folderPath || folderPath.trim() === "" || folderPath === "/" || folderPath === "\\") {
+        return isTh ? "หน้าหลัก" : "Root";
+      }
+      return folderPath;
+    },
+    [isTh]
+  );
   const [scannedItems, setScannedItems] = useState<ScannedVideoItem[]>([]);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -790,10 +801,11 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
 
     return list.filter((i) => {
       const name = i.fileName.toLowerCase();
-      const folder = i.folderPath.toLowerCase();
-      return name.includes(query) || folder.includes(query);
+      const folder = (i.folderPath || "").toLowerCase();
+      const folderDisplay = getFolderDisplay(i.folderPath).toLowerCase();
+      return name.includes(query) || folder.includes(query) || folderDisplay.includes(query);
     });
-  }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery]);
+  }, [activeTab, attachmentItems, workspaceOnlyItems, searchQuery, getFolderDisplay]);
 
   const handleSelectAndInsert = useCallback(
     async (item: ScannedVideoItem) => {
@@ -810,6 +822,13 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
           assetBlobUrlMap.current.get(relPath) ||
           assetBlobUrlMap.current.get(item.relativePath) ||
           assetBlobUrlMap.current.get(encodeURI(relPath));
+      }
+
+      if (!blobUrl) {
+        blobUrl =
+          videoLocalCache.get(relPath) ||
+          videoLocalCache.get(item.relativePath) ||
+          (item.fullPath ? videoLocalCache.get(item.fullPath) : undefined);
       }
 
       // If not yet converted to Blob URL, resolve this ONE video on-demand before inserting:
@@ -1030,7 +1049,7 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
                         </p>
                         <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate leading-none min-w-0">
                           <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                          <span className="truncate min-w-0">{item.folderPath || "/"}</span>
+                          <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
                         </div>
                       </div>
                     </div>
@@ -1074,7 +1093,7 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
                           <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate min-w-0">
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-muted text-muted-foreground border border-border/60 min-w-0 truncate">
                               <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                              <span className="truncate min-w-0">{item.folderPath || "/"}</span>
+                              <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
                             </span>
                           </div>
                         </div>

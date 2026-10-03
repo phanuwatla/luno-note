@@ -123,6 +123,21 @@ export const AiDiffExtension = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(AiDiffComponent);
+    return ReactNodeViewRenderer(AiDiffComponent, {
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (newNode.type.name !== oldNode.type.name) {
+          return false;
+        }
+        if (
+          oldNode.attrs.diffId !== newNode.attrs.diffId ||
+          oldNode.attrs.originalText !== newNode.attrs.originalText ||
+          oldNode.attrs.newText !== newNode.attrs.newText
+        ) {
+          updateProps();
+        }
+        return true;
+      },
+      ignoreMutation: () => true,
+    });
   },
 });

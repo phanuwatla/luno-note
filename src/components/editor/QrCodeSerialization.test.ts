@@ -60,4 +60,47 @@ describe("QR Code Serialization & Obsidian Compatibility", () => {
     expect(parsedHtml).toContain('data-qr-color="#8b5cf6"');
     expect(parsedHtml).toContain('width="220"');
   });
+
+  it("renders Heading 2 and lists correctly when placed directly under QR Code HTML tag without blank line", () => {
+    const md =
+      '<img src="attachments/qrcode_test.png" alt="QR Code" width="220" data-qr-code="true" data-qr-text="https://luno.app" />\n## หัวข้อสำคัญ\n- รายการที่ 1\n- รายการที่ 2';
+
+    const parsedHtml = renderMarkdownToEditorHtml(md);
+
+    // QR Code must be preserved
+    expect(parsedHtml).toContain('data-qr-code="true"');
+    expect(parsedHtml).toContain('data-qr-text="https://luno.app"');
+
+    // Heading 2 must be parsed as <h2>, not swallowed as raw text
+    expect(parsedHtml).toContain('<h2');
+    expect(parsedHtml).toContain("หัวข้อสำคัญ</h2>");
+
+    // List must be parsed as <ul><li>, not swallowed as raw text
+    expect(parsedHtml).toContain("<ul>");
+    expect(parsedHtml).toContain("<li>รายการที่ 1</li>");
+    expect(parsedHtml).toContain("<li>รายการที่ 2</li>");
+  });
+
+  it("Turndown serializes QR Code followed immediately by Heading 2 with single newline (0 blank lines) and preserves formatting without adding unwanted blank lines", () => {
+    const td = createTurndownService();
+    const initialHtml =
+      '<p><img src="attachments/qrcode_test.png" alt="QR Code" width="220" data-qr-code="true" data-qr-text="https://luno.app" /></p><h2>Heading 2</h2><ul><li>Item 1</li><li>Item 2</li></ul>';
+
+    const serializedMd = td.turndown(initialHtml);
+
+    // Must have single newline (\n) between QR code HTML tag and ## Heading 2 when adjacent in editor
+    expect(serializedMd).toMatch(/<img\b[^>]*\/>\n## Heading 2/);
+
+    // Re-parsed HTML must retain Heading 2 and List formatting
+    const reloadedHtml = renderMarkdownToEditorHtml(serializedMd);
+    expect(reloadedHtml).toContain("<h2");
+    expect(reloadedHtml).toContain("Heading 2</h2>");
+    expect(reloadedHtml).toContain("<ul>");
+    expect(reloadedHtml).toContain("<li>Item 1</li>");
+    expect(reloadedHtml).toContain("<li>Item 2</li>");
+    expect(reloadedHtml).toContain('data-qr-code="true"');
+
+    // Crucial: Must NOT recreate an unwanted blank line (<p></p>) between QR code and Heading 2
+    expect(reloadedHtml).not.toContain("<p></p>");
+  });
 });

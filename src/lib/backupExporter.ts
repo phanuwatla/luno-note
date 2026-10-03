@@ -1,11 +1,13 @@
 import JSZip from "jszip";
 import type { Note } from "@/hooks/useNotes";
 import { APP_VERSION } from "@/lib/appVersion";
+import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 
 export interface BackupExportOptions {
   notes: Note[];
   workspaceName?: string | null;
   folderPaths?: string[];
+  dateFormat?: string;
 }
 
 export interface BackupExportResult {
@@ -20,15 +22,13 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
 }
 
-function formatBackupDate(date: Date): string {
+function formatBackupDate(date: Date, dateFormat?: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const y = date.getFullYear();
-  const m = pad(date.getMonth() + 1);
-  const d = pad(date.getDate());
+  const datePart = formatDateForFileName(date, dateFormat);
   const h = pad(date.getHours());
   const min = pad(date.getMinutes());
   const s = pad(date.getSeconds());
-  return `${y}-${m}-${d}_${h}${min}${s}`;
+  return `${datePart}_${h}${min}${s}`;
 }
 
 export async function exportWorkspaceBackupZip(
@@ -113,7 +113,7 @@ export async function exportWorkspaceBackupZip(
   zip.file(".luno/backup-metadata.json", JSON.stringify(metadata, null, 2), { date: new Date() });
 
   // 3. Generate ZIP output
-  const timestamp = formatBackupDate(new Date());
+  const timestamp = formatBackupDate(new Date(), options.dateFormat);
   const cleanWorkspace = workspaceName ? sanitizeFileName(workspaceName) : "Luno";
   const defaultZipFileName = `${cleanWorkspace}-Backup-${timestamp}.zip`;
 

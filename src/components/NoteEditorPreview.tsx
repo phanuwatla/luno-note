@@ -209,6 +209,7 @@ export default function NoteEditorPreview({
     editorProps: {
       attributes: {
         spellcheck: "false",
+        lang: settings.language || "en",
         style: `font-size:${resolvedFontSize}px;line-height:${resolvedLineHeight};font-family:${resolvedFontFamily};`,
         class: `${EDITOR_CLASSES} luno-reading-view ${
           resolvedAccentHeadings
@@ -235,6 +236,12 @@ export default function NoteEditorPreview({
           return true;
         }
 
+        if (target.tagName === "A" || target.closest("a")) {
+          event.preventDefault();
+          event.stopPropagation();
+          return true;
+        }
+
         return false;
       },
     },
@@ -242,6 +249,8 @@ export default function NoteEditorPreview({
       StarterKit.configure({
         codeBlock: false,
         paragraph: false,
+        link: false,
+        underline: false,
         dropcursor: false,
       }),
       CustomParagraph,
@@ -377,6 +386,15 @@ export default function NoteEditorPreview({
         validate: () => true,
         isAllowedUri: (url, ctx) => {
           if (!url) return false;
+          const trimmed = url.trim().toLowerCase();
+          if (
+            trimmed.startsWith("javascript:") ||
+            trimmed.startsWith("vbscript:") ||
+            trimmed.startsWith("data:") ||
+            trimmed.startsWith("file:")
+          ) {
+            return false;
+          }
           if (url.startsWith("wikilink:") || url.startsWith("#")) return true;
           return ctx.defaultValidate(url);
         },
@@ -490,6 +508,7 @@ export default function NoteEditorPreview({
       editorProps: {
         attributes: {
           spellcheck: "false",
+          lang: settings.language || "en",
           style: `font-size:${resolvedFontSize}px;line-height:${resolvedLineHeight};font-family:${resolvedFontFamily};`,
           class: `${EDITOR_CLASSES} luno-reading-view ${
             resolvedAccentHeadings
@@ -499,7 +518,7 @@ export default function NoteEditorPreview({
         },
       },
     });
-  }, [editor, resolvedFontSize, resolvedLineHeight, resolvedFontFamily, resolvedAccentHeadings]);
+  }, [editor, resolvedFontSize, resolvedLineHeight, resolvedFontFamily, resolvedAccentHeadings, settings.language]);
 
   const widthClass =
     resolvedEditorWidth === "compact"
@@ -518,7 +537,7 @@ export default function NoteEditorPreview({
         <iframe
           srcDoc={htmlSrcDoc || content}
           className="w-full h-full border-0 bg-white block"
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-modals"
           title={title || "HTML Preview"}
         />
       </div>

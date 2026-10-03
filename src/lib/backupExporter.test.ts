@@ -97,4 +97,41 @@ describe("backupExporter", () => {
     // Clean up
     delete (window as any).electronAPI;
   });
+
+  it("formats zip file name according to dateFormat option", async () => {
+    const mockNotes: Note[] = [
+      {
+        id: "note-1",
+        title: "Test Note 1",
+        content: "# Heading\nHello world",
+        fileName: "Test Note 1.md",
+        folderPath: "",
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+    ];
+
+    let defaultPathUsed = "";
+    (window as any).electronAPI = {
+      showSaveDialog: vi.fn().mockImplementation((opts) => {
+        defaultPathUsed = opts.defaultPath;
+        return Promise.resolve("C:\\test\\backup.zip");
+      }),
+      writeFileBase64: vi.fn().mockResolvedValue(true),
+    };
+
+    await exportWorkspaceBackupZip({
+      notes: mockNotes,
+      workspaceName: "My Workspace",
+      dateFormat: "DD/MM/YYYY",
+    });
+
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const year = now.getFullYear();
+    expect(defaultPathUsed).toContain(`-${day}-${month}-${year}_`);
+
+    delete (window as any).electronAPI;
+  });
 });
