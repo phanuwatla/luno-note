@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import {
+import LunoAiView, {
   WorkspaceFolderTree,
   WorkspaceNoteIcon,
   WorkspaceFolderIcon,
@@ -295,5 +295,50 @@ describe("LunoAiView Workspace Note and Folder Icons", () => {
     );
 
     expect(screen.getByText("🔥")).toBeInTheDocument();
+  });
+
+  it("does not render attached file names in the top header bar when files are uploaded", async () => {
+    const originalFileReader = window.FileReader;
+    class MockFileReader {
+      onload: ((event: any) => void) | null = null;
+      readAsText(_file: any) {
+        setTimeout(() => {
+          if (this.onload) {
+            this.onload({ target: { result: "dummy content" } });
+          }
+        }, 0);
+      }
+      readAsDataURL(_file: any) {}
+    }
+    (window as any).FileReader = MockFileReader;
+
+    try {
+      const { container } = render(
+        <TooltipProvider>
+          <AppSettingsProvider>
+            <LunoAiView isSidebar={false} />
+          </AppSettingsProvider>
+        </TooltipProvider>
+      );
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(fileInput).not.toBeNull();
+
+      const testFile = new File(["dummy content"], "my-attached-doc.pdf", { type: "text/plain" });
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [testFile] } });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+
+      // The attached file chip should be visible in the prompt input area
+      expect(await screen.findByText("my-attached-doc.pdf")).toBeInTheDocument();
+
+      // Top header bar should NOT contain the attached file name
+      const topHeader = container.querySelector(".h-11.shrink-0.px-4.bg-background");
+      expect(topHeader).not.toBeNull();
+      expect(topHeader?.textContent).not.toContain("my-attached-doc.pdf");
+    } finally {
+      window.FileReader = originalFileReader;
+    }
   });
 });

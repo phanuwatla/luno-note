@@ -16,7 +16,6 @@ import {
   ChevronUp,
   ChevronRight,
   X,
-  FileCode,
   Folder,
   FolderOpen,
   Search,
@@ -1953,12 +1952,6 @@ export default function LunoAiView({
                 {messages.length > 0 && (
                   <span className="text-xs font-bold text-foreground truncate">
                     {messages.find((m) => m.role === "user")?.content.slice(0, 45) || "Luno AI Chat"}
-                  </span>
-                )}
-                {attachedFiles.length > 0 && (
-                  <span className="hidden sm:inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium truncate max-w-[180px]">
-                    <FileCode className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{attachedFiles.map((f) => f.name).join(", ")}</span>
                   </span>
                 )}
               </div>
