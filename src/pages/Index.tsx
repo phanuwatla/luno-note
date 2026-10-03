@@ -4146,6 +4146,7 @@ export default function Index() {
           if (isFirstTimeOnVersionRef.current) {
             isFirstTimeOnVersionRef.current = false;
             markVersionAsSeen();
+            resetTabs();
             openTab("whats-new");
           } else {
             resetTabs();

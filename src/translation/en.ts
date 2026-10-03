@@ -782,6 +782,7 @@ const en = {
     devModeTitle: "Development Mode",
     devModeDesc: "You are running in development mode. Updates are active in packaged releases.",
     downloadFailed: "Download Failed",
+    retry: "Retry",
 
     languageGroup: "Language",
     appLanguage: "App language",

@@ -61,6 +61,32 @@ export function setUpdateTranslator(t: (key: string) => string) {
   tTranslator = t;
 }
 
+export function isNewerVersion(
+  remoteVersion: string | undefined | null,
+  currentVersion: string | undefined | null
+): boolean {
+  if (!remoteVersion || !currentVersion) return false;
+
+  const clean = (v: string) => String(v).replace(/^v/i, "").trim();
+  const vRemote = clean(remoteVersion);
+  const vCurrent = clean(currentVersion);
+
+  if (!vRemote || !vCurrent || vRemote === vCurrent) return false;
+
+  const remoteParts = vRemote.split(/[-+]/)[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const currentParts = vCurrent.split(/[-+]/)[0].split(".").map((p) => parseInt(p, 10) || 0);
+
+  const maxLen = Math.max(remoteParts.length, currentParts.length);
+  for (let i = 0; i < maxLen; i++) {
+    const r = remoteParts[i] ?? 0;
+    const c = currentParts[i] ?? 0;
+    if (r > c) return true;
+    if (r < c) return false;
+  }
+
+  return false;
+}
+
 function formatUpdateError(rawMsg: string | undefined | null, t?: ((key: string) => string) | null): string {
   const tr = t || tTranslator || ((k: string) => k);
   if (!rawMsg) return tr("settings.updateError") || "Update Check Failed";
@@ -119,11 +145,21 @@ function ensureIpcInitialized() {
 
   if (window.electronAPI.onUpdateAvailable) {
     window.electronAPI.onUpdateAvailable((info) => {
+      const curVer = storeState.currentAppVersion || APP_VERSION;
+      if (!isNewerVersion(info?.version, curVer)) {
+        updateStore({
+          status: "not-available",
+          updateInfo: null,
+          showToast: false,
+          errorMessage: null,
+        });
+        return;
+      }
       updateStore({
         status: "available",
         updateInfo: info,
         errorMessage: null,
-        showToast: true,
+        showToast: !storeState.manualCheck,
       });
     });
   }
@@ -131,7 +167,7 @@ function ensureIpcInitialized() {
   if (window.electronAPI.onUpdateNotAvailable) {
     window.electronAPI.onUpdateNotAvailable(() => {
       const wasManual = storeState.manualCheck;
-      updateStore({ status: "not-available", errorMessage: null });
+      updateStore({ status: "not-available", updateInfo: null, showToast: false, errorMessage: null });
       if (wasManual) {
         const tr = tTranslator || ((k: string) => k);
         toast({
@@ -147,7 +183,7 @@ function ensureIpcInitialized() {
       updateStore({
         status: "downloading",
         progress: prog,
-        showToast: true,
+        showToast: !storeState.manualCheck,
       });
     });
   }
@@ -156,7 +192,7 @@ function ensureIpcInitialized() {
     window.electronAPI.onUpdateDownloaded(() => {
       updateStore({
         status: "downloaded",
-        showToast: true,
+        showToast: !storeState.manualCheck,
       });
     });
   }
@@ -168,6 +204,7 @@ function ensureIpcInitialized() {
       updateStore({
         status: "error",
         errorMessage: friendlyMsg,
+        showToast: !wasManual && storeState.showToast,
       });
       if (wasManual) {
         const tr = tTranslator || ((k: string) => k);
@@ -201,15 +238,21 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
     errorMessage: null,
     progress: null,
     manualCheck: isManual,
+    showToast: isManual ? false : storeState.showToast,
   });
 
   try {
     const res = await window.electronAPI.checkForUpdates();
+    const curVer = res?.currentVersion || storeState.currentAppVersion || APP_VERSION;
+    const remoteVer = res?.updateInfo?.version;
+    const isNewer = (res?.isUpdateAvailable ?? true) && isNewerVersion(remoteVer, curVer);
+
     if (!res.success) {
       const friendlyMsg = formatUpdateError(res.error, tr);
       updateStore({
         status: "error",
         errorMessage: friendlyMsg,
+        showToast: false,
       });
       if (isManual) {
         toast({
@@ -219,14 +262,14 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
         });
       }
     } else if (res.isDev) {
-      if (res.updateInfo && res.updateInfo.version) {
+      if (isNewer && res.updateInfo) {
         updateStore({
           status: "available",
           updateInfo: res.updateInfo,
-          showToast: true,
+          showToast: !isManual,
         });
       } else {
-        updateStore({ status: "not-available" });
+        updateStore({ status: "not-available", updateInfo: null, showToast: false });
         if (isManual) {
           toast({
             title: tr("settings.devModeTitle") || "Development Mode",
@@ -234,18 +277,31 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
           });
         }
       }
-    } else if (res.updateInfo && res.updateInfo.version) {
+    } else if (isNewer && res.updateInfo) {
       updateStore({
         status: "available",
         updateInfo: res.updateInfo,
-        showToast: true,
+        showToast: !isManual,
       });
+    } else {
+      updateStore({
+        status: "not-available",
+        updateInfo: null,
+        showToast: false,
+      });
+      if (isManual) {
+        toast({
+          title: tr("settings.updateNotAvailable") || "Up to Date",
+          description: tr("settings.latestVersionInstalled") || "You are using the latest version of Luno Note.",
+        });
+      }
     }
   } catch (err: any) {
     const friendlyMsg = formatUpdateError(err?.message, tr);
     updateStore({
       status: "error",
       errorMessage: friendlyMsg,
+      showToast: false,
     });
     if (isManual) {
       toast({
@@ -257,35 +313,49 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
   }
 }
 
-async function performDownloadUpdate(t?: (key: string) => string) {
+async function performDownloadUpdate(fromToast = false, t?: (key: string) => string) {
   ensureIpcInitialized();
   if (t) setUpdateTranslator(t);
   const tr = t || tTranslator || ((k: string) => k);
 
   if (!window.electronAPI?.downloadUpdate) return;
-  updateStore({ status: "downloading", showToast: true, errorMessage: null });
+  updateStore({
+    status: "downloading",
+    manualCheck: !fromToast,
+    showToast: fromToast,
+    errorMessage: null,
+  });
   try {
     const res = await window.electronAPI.downloadUpdate();
     if (!res.success) {
       const err = res.error || "Failed to download update";
-      updateStore({ status: "error", errorMessage: err });
-      toast({
-        variant: "destructive",
-        title: tr("settings.downloadFailed") || "Download Failed",
-        description: err,
+      updateStore({
+        status: "error",
+        errorMessage: err,
+        showToast: fromToast,
       });
+      if (!fromToast) {
+        toast({
+          variant: "destructive",
+          title: tr("settings.downloadFailed") || "Download Failed",
+          description: err,
+        });
+      }
     }
   } catch (err: any) {
     const errMsg = err?.message || "Download error";
     updateStore({
       status: "error",
       errorMessage: errMsg,
+      showToast: fromToast,
     });
-    toast({
-      variant: "destructive",
-      title: tr("settings.downloadFailed") || "Download Failed",
-      description: errMsg,
-    });
+    if (!fromToast) {
+      toast({
+        variant: "destructive",
+        title: tr("settings.downloadFailed") || "Download Failed",
+        description: errMsg,
+      });
+    }
   }
 }
 
@@ -313,12 +383,18 @@ export function useAppUpdate() {
   }, [t]);
 
   const checkForUpdates = useCallback(
-    (isManual = true) => performCheckForUpdates(isManual, t),
+    (isManual: boolean | unknown = true) => {
+      const manual = isManual === false ? false : true;
+      return performCheckForUpdates(manual, t);
+    },
     [t]
   );
 
   const downloadUpdate = useCallback(
-    () => performDownloadUpdate(t),
+    (fromToast: boolean | unknown = false) => {
+      const isFromToast = fromToast === true;
+      return performDownloadUpdate(isFromToast, t);
+    },
     [t]
   );
 
@@ -337,18 +413,22 @@ export function useAppUpdate() {
     []
   );
 
+  const curVer = current.currentAppVersion || APP_VERSION;
+  const isActuallyAvailable = current.status === "available" && isNewerVersion(current.updateInfo?.version, curVer);
+  const shouldShowToast = current.showToast && (isActuallyAvailable || current.status === "downloading" || current.status === "downloaded" || (current.status === "error" && current.errorMessage !== null));
+
   return {
     status: current.status,
     updateInfo: current.updateInfo,
     progress: current.progress,
     errorMessage: current.errorMessage,
     currentAppVersion: current.currentAppVersion,
-    showToast: current.showToast,
+    showToast: shouldShowToast,
     isChecking: current.status === "checking",
     isDownloading: current.status === "downloading",
     isDownloaded: current.status === "downloaded",
-    isAvailable: current.status === "available",
-    isNotAvailable: current.status === "not-available",
+    isAvailable: isActuallyAvailable,
+    isNotAvailable: current.status === "not-available" || (!isActuallyAvailable && current.status !== "downloading" && current.status !== "downloaded" && current.status !== "checking"),
     checkForUpdates,
     downloadUpdate,
     quitAndInstall,

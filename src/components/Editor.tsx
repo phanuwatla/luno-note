@@ -917,7 +917,7 @@ export function hasReadingModeFootnotesDoc(doc: any): boolean {
 }
 
 export const EDITOR_CLASSES =
-  "w-full max-w-full break-words [word-break:normal] outline-none text-foreground [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&>h1:first-child]:mb-6 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
+  "w-full max-w-full break-words [word-break:normal] outline-none text-foreground cursor-text [&_.is-empty::before]:pointer-events-none [&_.is-empty::before]:float-left [&_.is-empty::before]:h-0 [&_.is-empty::before]:text-muted-foreground/40 [&_.is-empty::before]:content-[attr(data-placeholder)] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:first-child]:text-2xl [&>h1:first-child]:font-semibold [&>h1:first-child]:leading-tight [&>h1:first-child]:md:text-3xl [&>h1:first-child]:mb-6 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_a]:cursor-pointer [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:md:text-3xl [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:text-base [&_h4]:font-semibold [&_h5]:text-sm [&_h5]:font-semibold [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-muted-foreground [&_img]:my-0 [&_img]:h-auto [&_img]:max-w-full [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-6 [&_details]:my-0 [&_details]:py-0 [&_details_summary]:my-0 [&_details_summary]:py-0" +
   " [&_ul[data-type='taskList']]:list-none [&_ul[data-type='taskList']]:pl-0 [&_ul[data-type='taskList']_li]:flex [&_ul[data-type='taskList']_li]:items-start [&_ul[data-type='taskList']_li]:gap-0 [&_ul[data-type='taskList']_li_label]:w-6 [&_ul[data-type='taskList']_li_label]:h-7 [&_ul[data-type='taskList']_li_label]:shrink-0 [&_ul[data-type='taskList']_li_label]:flex [&_ul[data-type='taskList']_li_label]:items-center [&_ul[data-type='taskList']_li_label]:justify-center [&_ul[data-type='taskList']_li_label_input]:h-[14px] [&_ul[data-type='taskList']_li_label_input]:w-[14px] [&_ul[data-type='taskList']_li_label_input]:bg-transparent [&_ul[data-type='taskList']_li_label_input]:rounded-[3px] [&_ul[data-type='taskList']_li_label_input]:border [&_ul[data-type='taskList']_li_label_input]:border-muted-foreground/50 [&_ul[data-type='taskList']_li_label_input]:cursor-pointer [&_ul[data-type='taskList']_li_label_input]:accent-primary [&_ul[data-type='taskList']_li_>_div]:flex-1 [&_ul[data-type='taskList']_li_>_div_p]:my-0 [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:line-through [&_ul[data-type='taskList']_li[data-checked='true']_>_div_p]:text-muted-foreground/90" +
   " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
   " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
@@ -6733,7 +6733,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         spellcheck: "false",
         lang: settings.language || "en",
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
-        class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
+        class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view !cursor-default" : "cursor-text"} ${
           settings.accentHeadings
             ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
             : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
@@ -8238,7 +8238,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         transformPastedHTML: (html: string) => sanitizeHtml(html),
         attributes: {
           style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
-          class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view" : ""} ${
+          class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view !cursor-default" : "cursor-text"} ${
             settings.accentHeadings
               ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
               : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
@@ -15863,18 +15863,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               e.stopPropagation();
               return;
             }
-
-            if (
-              editor &&
-              !isReadingMode &&
-              !target.closest("button, a, input, textarea, select, [role='button'], [role='menuitem'], summary, .code-block-wrapper, table")
-            ) {
-              if (target === e.currentTarget || target.closest("[data-editor-bottom-area]")) {
-                editor.commands.focus("end");
-              }
-            }
           }}
-          className={`flex flex-col ${isReadingMode ? "cursor-default" : "cursor-text"} ${
+          className={`flex flex-col cursor-default ${
             isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
               ? "flex-1 min-h-0 min-w-0 overflow-hidden"
               : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
@@ -16157,7 +16147,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   {editor && !isReadingMode && <TableInteractiveOverlay editor={editor} />}
                   <EditorContent
                     editor={editor}
-                    className="w-full min-w-0 max-w-full"
+                    className={`w-full min-w-0 max-w-full ${isReadingMode ? "cursor-default" : "cursor-text"}`}
                     onClickCapture={(e) => {
                       const target = (e.target as HTMLElement).closest("a");
                       if (!target) return;

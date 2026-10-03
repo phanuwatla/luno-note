@@ -71,9 +71,113 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.3.3",
+    version: "1.3.4",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "Semver Auto-Updater Precision, Clean What's New Tab Launch & Editor Margin Cursor Precision",
+      th: "ระบบตรวจสอบอัปเดตอัตโนมัติแม่นยำตาม Semver, เปิดแท็บ What's New สะอาดตาเมื่ออัปเดต และปรับแต่ง Cursor กับขอบเอดิเตอร์",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Semver Auto-Updater Precision & Smart Notifications",
+          th: "ระบบตรวจสอบเวอร์ชันอัปเดตแม่นยำและแจ้งเตือนอย่างชาญฉลาด",
+        },
+        description: {
+          en: "Deep semantic version comparison prevents false-positive update toasts when running the latest version, suppresses redundant toasts on manual checks, and adds a one-click Retry button for network hiccups.",
+          th: "ตรวจเปรียบเทียบเวอร์ชันตามมาตรฐาน Semver ป้องกันการแจ้งเตือนอัปเดตซ้ำซ้อนเมื่อใช้งานเวอร์ชันล่าสุดอยู่แล้ว ปิดป๊อปอัปซ้ำซ้อนเมื่อตรวจสอบด้วยตนเอง พร้อมปุ่ม 'ลองใหม่' ในคลิกเดียวเมื่อการเชื่อมต่อขัดข้อง",
+        },
+        icon: RefreshCw,
+        badge: { en: "Updater", th: "การอัปเดต", variant: "default" },
+      },
+      {
+        title: {
+          en: "Clean Single-Tab What's New on Version Upgrade",
+          th: "เปิดเฉพาะแท็บ What's New หน้าเดียวสะอาดตาหลังอัปเดต",
+        },
+        description: {
+          en: "On first launch after an update, Luno Note cleans stale session tabs and displays exclusively the What's New hub so you can explore newly added features immediately without distractions.",
+          th: "เมื่อเปิดโปรแกรมครั้งแรกหลังอัปเดตเวอร์ชันใหม่ Luno Note จะรีเซ็ตแท็บค้างจากเซสชันเดิมและเปิดเฉพาะหน้า What's New เพียงหน้าเดียว เพื่อให้ศึกษาฟีเจอร์ใหม่ได้อย่างสบายตา",
+        },
+        icon: Sparkles,
+        badge: { en: "Onboarding", th: "เริ่มต้นใช้งาน", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Context-Aware Cursor & Margin Click Precision",
+          th: "เคอร์เซอร์แม่นยำตรงตามบริบทและป้องกันคลิกขอบกระโดด",
+        },
+        description: {
+          en: "The editor workspace outer margin now shows a clean default cursor without accidental cursor jump to the end of note when clicking side margins. Explicit text cursor styling applies to editing areas, and reading view defaults to default cursor while preserving pointer links and buttons.",
+          th: "ขอบพื้นที่รอบกระดาษเอดิเตอร์แสดงเคอร์เซอร์ลูกศรปกติ ไม่ทำให้เคอร์เซอร์กระโดดไปท้ายเอกสารเมื่อคลิกขอบด้านข้าง ตัวหนังสือแสดง Text Cursor ชัดเจน และโหมดอ่านหนังสือแสดงลูกศรปกติพร้อมรักษา Pointer บนลิงก์และปุ่ม",
+        },
+        icon: CheckCircle2,
+        badge: { en: "Editor UX", th: "ประสบการณ์เอดิเตอร์", variant: "default" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Auto-Update System", th: "ระบบอัปเดตอัตโนมัติ" },
+        items: [
+          {
+            en: "Implemented robust semver comparison utility (isNewerVersion) in Electron main process and renderer store.",
+            th: "เพิ่มระบบเปรียบเทียบ Semantic Versioning (isNewerVersion) ทั้งใน Electron Main และ Frontend Store",
+          },
+          {
+            en: "Automatically suppress update-available events when remote release matches or is older than the installed desktop version.",
+            th: "ยกเลิกการแสดงสถานะอัปเดตโดยอัตโนมัติเมื่อเวอร์ชันบนเซิร์ฟเวอร์ตรงกับหรือเก่ากว่าเวอร์ชันที่กำลังใช้งาน",
+          },
+          {
+            en: "Added localized 'Retry' action in update toast for quick re-checks or re-downloads.",
+            th: "เพิ่มปุ่ม 'ลองใหม่' (Retry) ที่รองรับสองภาษาบนป๊อปอัปแจ้งเตือนอัปเดตเมื่อดาวน์โหลดขัดข้อง",
+          },
+          {
+            en: "Polished error toast title styling and prevented duplicate toast notifications on manual update checks.",
+            th: "ปรับแต่งสไตล์ข้อความแจ้งเตือนข้อผิดพลาดให้กลมกลืนและป้องกันป๊อปอัปซ้อนเมื่อกดตรวจหาอัปเดตด้วยตนเอง",
+          },
+        ],
+      },
+      {
+        category: { en: "Workspace & Tab Management", th: "การจัดการแท็บและโฟลเดอร์งาน" },
+        items: [
+          {
+            en: "Ensured only the What's New tab opens on first launch of a new version, clearing cluttered session tabs.",
+            th: "เปิดเฉพาะแท็บ What's New เพียงแท็บเดียวเมื่อเปิดใช้งานเวอร์ชันใหม่ครั้งแรก ลดความรกของแท็บเดิม",
+          },
+          {
+            en: "Gracefully marks version as seen in storage to maintain regular startup tab preferences on subsequent launches.",
+            th: "บันทึกสถานะการเปิดดูเวอร์ชันใหม่ลงใน Storage อย่างปลอดภัย พร้อมกลับสู่การเปิดแท็บตามการตั้งค่าปกติในครั้งถัดไป",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor & Typography Polish", th: "เอดิเตอร์และการแสดงผลเคอร์เซอร์" },
+        items: [
+          {
+            en: "Changed editor scroll container cursor from cursor-text to cursor-default to distinguish document content from margins.",
+            th: "เปลี่ยนเคอร์เซอร์ของพื้นที่ขอบรอบเอดิเตอร์จาก Text Cursor เป็น Default Cursor เพื่อแยกแยะขอบกระดาษกับเนื้อหา",
+          },
+          {
+            en: "Eliminated focus('end') trigger when clicking outside text margins in editor container.",
+            th: "ยกเลิกคำสั่งเลื่อนเคอร์เซอร์ไปท้ายเอกสารเมื่อคลิกโดนพื้นที่ขอบกระดาษโดยไม่ได้ตั้งใจ",
+          },
+          {
+            en: "Applied explicit cursor: text to headings, paragraphs, lists, blockquotes, and tables in editable mode.",
+            th: "กำหนด cursor: text ที่ชัดเจนให้แก่หัวข้อ, ย่อหน้า, รายการ, ข้อความอ้างอิง และตารางขณะกำลังพิมพ์",
+          },
+          {
+            en: "Enhanced reading view to default to cursor: default with cursor: pointer on links, buttons, and task checkboxes.",
+            th: "ปรับแต่งโหมดการอ่านให้อยู่ในสถานะลูกศรปกติ พร้อมคง cursor: pointer บนลิงก์, ปุ่ม และช่องกาเครื่องหมาย",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.3.3",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "Integrated Web Browser Hub, Relations Graph Media Nodes, Accidental Exit Confirmation, Welcome Guide & Typing Performance",
       th: "ศูนย์รวมเว็บเบราว์เซอร์แถบข้าง, แสดงโหนดสื่อในกราฟความสัมพันธ์, ยืนยันก่อนปิดโปรแกรม, โน้ตต้อนรับเริ่มต้น และเพิ่มความเร็วในการพิมพ์",

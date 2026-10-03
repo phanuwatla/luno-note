@@ -6,29 +6,25 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.3.3-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.3)
+[![Version](https://img.shields.io/badge/version-1.3.4-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.4)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.3.3-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.3.4-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.3.3](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.3](#what-is-new-in-version-133) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.3.4](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.4](#what-is-new-in-version-134) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.3.3
+## What Is New in Version 1.3.4
 
-- <img src="./assets/icons/sidebar.svg" width="16" height="16" align="center" /> **Integrated Web Browser Hub & Right Drawer**: Dedicated right-side drawer alongside notes with chronological browsing history (Today, Yesterday, Earlier), keyword search filter, bookmark manager, zoom controls, and complete privacy data clearing via Electron IPC.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **One-Click Markdown Link & Active Note Insertion**: Quickly copy any visited URL as formatted Markdown or insert links directly into active notes through an intuitive note selector modal with automatic favicon detection.
-- <img src="./assets/icons/git-fork.svg" width="16" height="16" align="center" /> **Visual Media Nodes in Relations Graph**: Expanded force-directed Knowledge Graph with optional media attachment nodes (images, video, audio). Seamlessly toggle media visibility to focus on note connections or media assets.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Accidental Exit Confirmation & Safety Shield**: Configurable safety setting in **Settings > System/Other** preventing accidental window closures during active note taking with interactive confirmation dialogs.
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Interactive Real-Time Auto-Update Toast**: Live download progress percentage indicator with interface typography and one-click 'Update & Restart' action directly from the toast notification.
-- <img src="./assets/icons/template.svg" width="16" height="16" align="center" /> **Onboarding Welcome Guide for New Workspaces**: Option to automatically generate a rich `Welcome.md` note upon creating a new workspace, highlighting Markdown shortcuts, media features, and productivity workflows.
-- <img src="./assets/icons/check.svg" width="16" height="16" align="center" /> **Accessible Editor Checkboxes & Typing Latency Optimization**: Streamlined interactive task list checkboxes, reduced input latency during rapid note editing, and modularized typography shortcuts.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Semver Auto-Updater Precision & Retry Support**: Robust semantic version checking (`isNewerVersion`) in Electron and renderer processes guarantees that installed releases are not falsely flagged for updates. Manual update checks suppress duplicate toasts, and network interruptions offer a one-click **Retry** action.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Clean Single-Tab What's New Launch**: When launching Luno Note for the first time after an update, stale workspace session tabs are gracefully cleared to open exclusively the What's New tab, ensuring an uncluttered onboarding experience.
+- <img src="./assets/icons/typography.svg" width="16" height="16" align="center" /> **Context-Aware Cursor & Margin Click Precision**: The editor scroll container now displays a default cursor outside document margins, preventing inadvertent cursor jumps to the end of note when clicking the blank side areas. ProseMirror editing elements explicitly show text cursor, while Reading View maintains default arrow cursors with pointer cues on links, buttons, and checkboxes.
 
 ---
 
@@ -55,7 +51,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.3.3.exe`** | Automated Windows installer with differential update support | [![Download v1.3.3](https://img.shields.io/badge/Download-v1.3.3-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.3/luno-note-setup-1.3.3.exe) |
+| **`luno-note-setup-1.3.4.exe`** | Automated Windows installer with differential update support | [![Download v1.3.4](https://img.shields.io/badge/Download-v1.3.4-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.4/luno-note-setup-1.3.4.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

@@ -42,6 +42,45 @@ describe("AppUpdateToastItem Component", () => {
     expect(container.querySelector('[data-state]')).toBeNull();
   });
 
+  it("does not render toast when remote version is equal to current app version (1.3.3 vs 1.3.3)", async () => {
+    mockElectronAPI.getAppVersion.mockResolvedValue("1.3.3");
+    let onAvailableCallback: any;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+      onAvailableCallback = cb;
+      return () => {};
+    });
+
+    function TestComponent() {
+      useAppUpdate();
+      return (
+        <ToastProvider>
+          <AppUpdateToastItem />
+          <ToastViewport />
+        </ToastProvider>
+      );
+    }
+
+    const { container } = render(
+      <AppSettingsProvider>
+        <TestComponent />
+      </AppSettingsProvider>
+    );
+
+    // Simulate update-available event with same version as app
+    await act(async () => {
+      if (onAvailableCallback) {
+        onAvailableCallback({
+          version: "1.3.3",
+          releaseDate: "2026-10-03",
+        });
+      }
+    });
+
+    // Toast should NOT render
+    expect(container.querySelector('[data-state]')).toBeNull();
+    expect(screen.queryByText(/Update Available|มีเวอร์ชันใหม่อัปเดต/i)).toBeNull();
+  });
+
   it("renders update available toast with update button when update is available", async () => {
     let onAvailableCallback: any;
     mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
@@ -177,5 +216,58 @@ describe("AppUpdateToastItem Component", () => {
     });
 
     expect(mockElectronAPI.quitAndInstallUpdate).toHaveBeenCalled();
+  });
+
+  it("renders error state with black text title and red icon", async () => {
+    let onErrorCallback: any;
+    mockElectronAPI.onUpdateError.mockImplementation((cb: any) => {
+      onErrorCallback = cb;
+      return () => {};
+    });
+
+    function TestComponent() {
+      const { setShowToast } = useAppUpdate();
+      return (
+        <ToastProvider>
+          <button type="button" onClick={() => setShowToast(true)}>Show Toast</button>
+          <AppUpdateToastItem />
+          <ToastViewport />
+        </ToastProvider>
+      );
+    }
+
+    render(
+      <AppSettingsProvider>
+        <TestComponent />
+      </AppSettingsProvider>
+    );
+
+    // Make toast visible
+    act(() => {
+      screen.getByText("Show Toast").click();
+    });
+
+    // Simulate error event
+    await act(async () => {
+      if (onErrorCallback) {
+        onErrorCallback(new Error("Network connection error"));
+      }
+    });
+
+    // Check title element
+    const titleElement = screen.getByText(/Update Check Failed|การตรวจสอบอัปเดตล้มเหลว/i).closest('[class*="font-bold"]');
+    expect(titleElement).not.toBeNull();
+    // Title text class must have text-foreground (black/standard), NOT text-destructive
+    expect(titleElement?.className).toContain("text-foreground");
+    expect(titleElement?.className).not.toContain("text-destructive");
+
+    // Icon inside title must have text-destructive (red)
+    const icon = titleElement?.querySelector("svg");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("class")).toContain("text-destructive");
+
+    // Retry button is present
+    const retryButton = screen.getByRole("button", { name: /Retry|ลองใหม่/i });
+    expect(retryButton).toBeInTheDocument();
   });
 });

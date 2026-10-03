@@ -2902,26 +2902,63 @@ function setupIpcHandlers() {
     return app.getVersion();
   });
 
+function isNewerVersion(remoteVersion, currentVersion) {
+  if (!remoteVersion || !currentVersion) return false;
+  const clean = (v) => String(v).replace(/^v/i, "").trim();
+  const vRemote = clean(remoteVersion);
+  const vCurrent = clean(currentVersion);
+  if (!vRemote || !vCurrent || vRemote === vCurrent) return false;
+
+  const remoteParts = vRemote.split(/[-+]/)[0].split(".").map((p) => parseInt(p, 10) || 0);
+  const currentParts = vCurrent.split(/[-+]/)[0].split(".").map((p) => parseInt(p, 10) || 0);
+
+  const maxLen = Math.max(remoteParts.length, currentParts.length);
+  for (let i = 0; i < maxLen; i++) {
+    const r = remoteParts[i] ?? 0;
+    const c = currentParts[i] ?? 0;
+    if (r > c) return true;
+    if (r < c) return false;
+  }
+  return false;
+}
+
   ipcMain.handle("check-for-updates", async () => {
     if (!autoUpdater) {
       return { success: false, error: "Auto-updater module not available", currentVersion: app.getVersion() };
     }
     try {
+      const curVersion = app.getVersion();
       if (!app.isPackaged && process.env.NODE_ENV === "development") {
         try {
           const result = await autoUpdater.checkForUpdates();
-          return { success: true, isDev: true, updateInfo: result?.updateInfo };
+          const remoteVersion = result?.updateInfo?.version;
+          const isNewer = isNewerVersion(remoteVersion, curVersion);
+          return {
+            success: true,
+            isDev: true,
+            isUpdateAvailable: isNewer,
+            updateInfo: isNewer ? result?.updateInfo : null,
+            currentVersion: curVersion,
+          };
         } catch (devErr) {
           return {
             success: true,
             isDev: true,
+            isUpdateAvailable: false,
             message: "Running in development mode",
-            currentVersion: app.getVersion(),
+            currentVersion: curVersion,
           };
         }
       }
       const result = await autoUpdater.checkForUpdates();
-      return { success: true, updateInfo: result?.updateInfo, currentVersion: app.getVersion() };
+      const remoteVersion = result?.updateInfo?.version;
+      const isNewer = isNewerVersion(remoteVersion, curVersion);
+      return {
+        success: true,
+        isUpdateAvailable: isNewer,
+        updateInfo: isNewer ? result?.updateInfo : null,
+        currentVersion: curVersion,
+      };
     } catch (err) {
       console.warn("checkForUpdates error:", err);
       return { success: false, error: err?.message || String(err), currentVersion: app.getVersion() };
@@ -2972,6 +3009,14 @@ if (autoUpdater) {
     });
 
     autoUpdater.on("update-available", (info) => {
+      const curVersion = app.getVersion();
+      if (!isNewerVersion(info?.version, curVersion)) {
+        sendUpdateStatusToWindows("update-not-available", {
+          version: info?.version,
+          currentVersion: curVersion,
+        });
+        return;
+      }
       sendUpdateStatusToWindows("update-available", {
         version: info?.version,
         releaseDate: info?.releaseDate,

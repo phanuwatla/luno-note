@@ -782,6 +782,7 @@ const th = {
     devModeTitle: "โหมดนักพัฒนา",
     devModeDesc: "คุณกำลังเปิดใช้งานในโหมด Development ระบบอัปเดตจะทำงานบน Release ที่ติดตั้งแล้ว",
     downloadFailed: "ดาวน์โหลดล้มเหลว",
+    retry: "ลองใหม่",
 
     languageGroup: "ภาษาการใช้งาน",
     appLanguage: "ภาษาของแอป",

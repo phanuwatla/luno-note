@@ -24,6 +24,7 @@ export function AppUpdateToastItem() {
     errorMessage,
     showToast,
     dismissToast,
+    checkForUpdates,
     downloadUpdate,
     quitAndInstall,
     isDownloading,
@@ -31,11 +32,17 @@ export function AppUpdateToastItem() {
     isAvailable,
   } = useAppUpdate();
 
-  if (!showToast || status === "idle" || status === "checking" || status === "not-available") {
+  const isError = status === "error";
+
+  if (
+    !showToast ||
+    status === "idle" ||
+    status === "checking" ||
+    status === "not-available" ||
+    (!isAvailable && !isDownloading && !isDownloaded && !isError)
+  ) {
     return null;
   }
-
-  const isError = status === "error";
 
   return (
     <Toast
@@ -86,9 +93,9 @@ export function AppUpdateToastItem() {
 
           {isError && (
             <>
-              <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-destructive leading-tight">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>{t("settings.updateError") || "Update Failed"}</span>
+              <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                <span>{t("settings.updateError") || "Update Check Failed"}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
                 {errorMessage || t("settings.downloadFailed") || "Download failed. Please try again."}
@@ -102,7 +109,7 @@ export function AppUpdateToastItem() {
           <ToastAction
             altText={t("settings.downloadUpdate") || "Update"}
             onClick={() => {
-              downloadUpdate();
+              downloadUpdate(true);
             }}
             className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground border-transparent gap-1.5 shadow-2xs font-medium cursor-pointer"
           >
@@ -132,14 +139,18 @@ export function AppUpdateToastItem() {
 
         {isError && (
           <ToastAction
-            altText="Retry"
+            altText={t("settings.retry") || "Retry"}
             onClick={() => {
-              downloadUpdate();
+              if (updateInfo) {
+                downloadUpdate(true);
+              } else {
+                checkForUpdates(false);
+              }
             }}
             className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground border-transparent gap-1.5 shadow-2xs font-medium cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>Retry</span>
+            <span>{t("settings.retry") || "Retry"}</span>
           </ToastAction>
         )}
       </div>

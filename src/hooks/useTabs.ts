@@ -381,9 +381,15 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
   ) => {
     if (forceWhatsNew) {
       markVersionAsSeen();
+      openTabIdsRef.current = ["whats-new"];
+      activeTabIdRef.current = "whats-new";
+      setOpenTabIds(["whats-new"]);
+      setActiveTabId("whats-new");
+      saveTabs(["whats-new"], "whats-new", notes);
+      return;
     }
 
-    if (!forceWhatsNew && onStartup === "blank") {
+    if (onStartup === "blank") {
       resetTabs(true);
       return;
     }
@@ -439,18 +445,6 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
         }
 
         if (resolvedTabIds.length > 0) {
-          if (forceWhatsNew) {
-            if (!resolvedTabIds.includes("whats-new")) {
-              resolvedTabIds.unshift("whats-new");
-            }
-            openTabIdsRef.current = resolvedTabIds;
-            activeTabIdRef.current = "whats-new";
-            setOpenTabIds(resolvedTabIds);
-            setActiveTabId("whats-new");
-            saveTabs(resolvedTabIds, "whats-new", notes);
-            return;
-          }
-
           if (onStartup === "home" && !isCompact) {
             if (!resolvedTabIds.includes("home")) {
               resolvedTabIds.unshift("home");
@@ -496,15 +490,6 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
 
     const rawSettings = typeof window !== "undefined" ? localStorage.getItem("notes-app-settings") : null;
     const isCompact = rawSettings ? JSON.parse(rawSettings)?.appLayout === "compact" : false;
-
-    if (forceWhatsNew) {
-      openTabIdsRef.current = ["whats-new"];
-      activeTabIdRef.current = "whats-new";
-      setOpenTabIds(["whats-new"]);
-      setActiveTabId("whats-new");
-      saveTabs(["whats-new"], "whats-new", notes);
-      return;
-    }
 
     if (onStartup === "home" && !isCompact) {
       openTabIdsRef.current = ["home"];

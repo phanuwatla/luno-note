@@ -1,3 +1,31 @@
+## Release Notes - Luno Note v1.3.4
+
+### Overview
+Luno Note version 1.3.4 delivers precision improvements to the in-app auto-update distribution system with semantic version validation, introduces a clean single-tab What's New launch experience on upgrades, and enhances editor ergonomics with context-aware cursor behavior and margin click protection.
+
+### Key Improvements & New Features
+
+#### 1. Semver Auto-Updater Precision & Retry Support
+- **Semantic Version Verification**: Integrated a strict semver comparator (`isNewerVersion`) across both Electron main process and renderer store. Prevents false-positive update notifications when running the current or newer release.
+- **Background Event Suppression**: Silences `update-available` events when remote versions do not exceed the installed version.
+- **Intelligent Toast Behavior**: Prevents duplicate toasts during manual update checks in Settings, ensuring a clean and unobtrusive notification experience.
+- **One-Click Retry**: Added localized **Retry** / **ลองใหม่** button to update notifications when download or checking errors occur due to network interruptions.
+
+#### 2. Clean Single-Tab What's New on Version Upgrade
+- **Distraction-Free Launch**: On first startup following a software update, cluttered session tabs are cleanly reset to present exclusively the What's New view as a single tab.
+- **Safe Persistence**: Records seen version markers reliably so regular startup tab preferences resume naturally on subsequent launches.
+
+#### 3. Context-Aware Cursor & Margin Click Precision
+- **Margin Click Protection**: Outer scroll container around the note canvas now displays `cursor: default` and prevents accidental document-end jumps (`focus('end')`) when clicking outside note content.
+- **Explicit Text Cursors**: Guaranteed `cursor: text` across editing elements including paragraphs, headings, lists, tables, and blockquotes.
+- **Reading View Refinement**: Defaults to arrow pointer in reading view while preserving interactive pointer cursors for links, buttons, and task checkboxes.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.3.4.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.3
 
 ### Overview

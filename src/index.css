@@ -3086,7 +3086,6 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   background-size: 11px 11px !important;
 }
 
-/* Notion-Style Table Styling */
 .ProseMirror {
   width: 100%;
   max-width: 100%;
@@ -3094,6 +3093,41 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
   word-break: normal;
   overflow-wrap: break-word;
   min-height: 120px;
+}
+
+.ProseMirror:not(.luno-reading-view),
+.ProseMirror:not(.luno-reading-view) p,
+.ProseMirror:not(.luno-reading-view) h1,
+.ProseMirror:not(.luno-reading-view) h2,
+.ProseMirror:not(.luno-reading-view) h3,
+.ProseMirror:not(.luno-reading-view) h4,
+.ProseMirror:not(.luno-reading-view) h5,
+.ProseMirror:not(.luno-reading-view) h6,
+.ProseMirror:not(.luno-reading-view) span,
+.ProseMirror:not(.luno-reading-view) strong,
+.ProseMirror:not(.luno-reading-view) em,
+.ProseMirror:not(.luno-reading-view) s,
+.ProseMirror:not(.luno-reading-view) u,
+.ProseMirror:not(.luno-reading-view) code,
+.ProseMirror:not(.luno-reading-view) blockquote,
+.ProseMirror:not(.luno-reading-view) li,
+.ProseMirror:not(.luno-reading-view) td,
+.ProseMirror:not(.luno-reading-view) th {
+  cursor: text;
+}
+
+.ProseMirror:not(.luno-reading-view) a,
+.ProseMirror:not(.luno-reading-view) a *,
+.ProseMirror:not(.luno-reading-view) button,
+.ProseMirror:not(.luno-reading-view) [role="button"],
+.ProseMirror:not(.luno-reading-view) input[type="checkbox"],
+.ProseMirror:not(.luno-reading-view) summary {
+  cursor: pointer;
+}
+
+.ProseMirror [data-node-view-wrapper] img,
+.ProseMirror img {
+  cursor: default;
 }
 
 .ProseMirror > * {
@@ -3729,8 +3763,18 @@ mark,
   background: transparent !important;
   outline: none !important;
 }
-.luno-reading-view table * {
+.luno-reading-view,
+.luno-reading-view * {
   cursor: default !important;
+}
+
+.luno-reading-view a,
+.luno-reading-view a *,
+.luno-reading-view button,
+.luno-reading-view [role="button"],
+.luno-reading-view input[type="checkbox"],
+.luno-reading-view summary {
+  cursor: pointer !important;
 }
 
 /* ==========================================================================
