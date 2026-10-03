@@ -766,7 +766,7 @@ const en = {
     updateAvailable: "Update Available",
     updateNotAvailable: "You are up to date",
     latestVersionInstalled: "You are using the latest version of Luno Note.",
-    newVersion: "Version",
+    newVersion: "New Version",
     isReadyToDownload: "is ready to download.",
     downloadUpdate: "Download Update",
     updateNow: "Update",

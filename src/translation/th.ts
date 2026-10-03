@@ -766,7 +766,7 @@ const th = {
     updateAvailable: "มีเวอร์ชันใหม่อัปเดต",
     updateNotAvailable: "คุณใช้เวอร์ชันล่าสุดแล้ว",
     latestVersionInstalled: "Luno Note ของคุณเป็นเวอร์ชันล่าสุดแล้ว",
-    newVersion: "เวอร์ชัน",
+    newVersion: "เวอร์ชันใหม่",
     isReadyToDownload: "พร้อมให้ดาวน์โหลดแล้ว",
     downloadUpdate: "ดาวน์โหลดอัปเดต",
     updateNow: "อัปเดต",

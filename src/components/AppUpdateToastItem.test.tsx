@@ -132,7 +132,12 @@ describe("AppUpdateToastItem Component", () => {
   });
 
   it("renders progress bar and percent during downloading state", async () => {
+    let onAvailableCallback: any;
     let onProgressCallback: any;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+      onAvailableCallback = cb;
+      return () => {};
+    });
     mockElectronAPI.onUpdateDownloadProgress.mockImplementation((cb: any) => {
       onProgressCallback = cb;
       return () => {};
@@ -156,6 +161,9 @@ describe("AppUpdateToastItem Component", () => {
 
     // Simulate download progress
     await act(async () => {
+      if (onAvailableCallback) {
+        onAvailableCallback({ version: "1.4.0" });
+      }
       if (onProgressCallback) {
         onProgressCallback({
           percent: 54,
@@ -169,6 +177,7 @@ describe("AppUpdateToastItem Component", () => {
     // Verify progress text and percentage
     expect(screen.getAllByText(/Downloading update|กำลังดาวน์โหลดอัปเดต/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/54%/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/1\.4\.0/)).toBeInTheDocument();
   });
 
   it("renders restart button when update is downloaded", async () => {
@@ -203,8 +212,15 @@ describe("AppUpdateToastItem Component", () => {
       }
     });
 
-    // Check that toast shows update downloaded
-    expect(screen.getByText(/Update Ready to Install|ดาวน์โหลดเสร็จสมบูรณ์/i)).toBeInTheDocument();
+    // Check that toast shows update downloaded with black title text and green icon
+    const titleElement = screen.getByText(/Update Ready to Install|ดาวน์โหลดเสร็จสมบูรณ์/i).closest('[class*="font-bold"]');
+    expect(titleElement).not.toBeNull();
+    expect(titleElement?.className).toContain("text-foreground");
+    expect(titleElement?.className).not.toContain("text-emerald-600");
+
+    const icon = titleElement?.querySelector("svg");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("class")).toContain("text-emerald-600");
 
     // Check restart button
     const restartButton = screen.getByRole("button", { name: /Restart|รีสตาร์ต/i });
@@ -266,8 +282,11 @@ describe("AppUpdateToastItem Component", () => {
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("class")).toContain("text-destructive");
 
-    // Retry button is present
+    // Retry button is present with secondary style and icon
     const retryButton = screen.getByRole("button", { name: /Retry|ลองใหม่/i });
     expect(retryButton).toBeInTheDocument();
+    expect(retryButton.className).not.toContain("bg-primary");
+    const retryIcon = retryButton.querySelector("svg");
+    expect(retryIcon).not.toBeNull();
   });
 });

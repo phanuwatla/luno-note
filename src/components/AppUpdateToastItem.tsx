@@ -62,27 +62,22 @@ export function AppUpdateToastItem() {
                 <span>{t("settings.updateAvailable") || "Update Available"}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
-                {t("settings.newVersion") || "Version"} {updateInfo?.version || ""} {t("settings.isReadyToDownload") || "is ready to download."}
+                {t("settings.newVersion") || "New Version"} {updateInfo?.version || ""} {t("settings.isReadyToDownload") || "is ready to download."}
               </ToastDescription>
             </>
           )}
 
           {isDownloading && (
-            <>
-              <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-                <span>{t("settings.downloadingUpdate") || "Downloading update..."}</span>
-              </ToastTitle>
-              <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
-                {t("settings.newVersion") || "Version"} {updateInfo?.version || ""}
-              </ToastDescription>
-            </>
+            <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+              <span>{t("settings.downloadingUpdate") || "Downloading update..."}</span>
+            </ToastTitle>
           )}
 
           {isDownloaded && (
             <>
-              <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 leading-tight">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <span>{t("settings.updateDownloaded") || "Update Ready to Install"}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
@@ -118,12 +113,6 @@ export function AppUpdateToastItem() {
           </ToastAction>
         )}
 
-        {isDownloading && (
-          <div className="inline-flex h-8 shrink-0 items-center justify-center rounded-xl border border-border/80 bg-muted/60 px-2.5 text-xs font-semibold text-foreground shadow-2xs">
-            <span>{progress?.percent ?? 0}%</span>
-          </div>
-        )}
-
         {isDownloaded && (
           <ToastAction
             altText={t("settings.installAndRestart") || "Restart & Install"}
@@ -147,7 +136,7 @@ export function AppUpdateToastItem() {
                 checkForUpdates(false);
               }
             }}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground border-transparent gap-1.5 shadow-2xs font-medium cursor-pointer"
+            className="gap-1.5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             <span>{t("settings.retry") || "Retry"}</span>
@@ -155,17 +144,21 @@ export function AppUpdateToastItem() {
         )}
       </div>
 
-      {/* Show download progress if downloading - EXACT SAME AS ABOUT LUNO! */}
-      {isDownloading && progress && (
-        <div className="pt-2 border-t border-border/30 space-y-1.5 w-full">
+      {/* Show download progress if downloading */}
+      {isDownloading && (
+        <div className="space-y-1.5 w-full">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
-            <span className="font-semibold text-foreground">{progress.percent}%</span>
+            <span>
+              {updateInfo?.version ? `${t("settings.newVersion") || "New Version"} ${updateInfo.version}` : ""}
+            </span>
+            <span className="font-semibold tabular-nums text-foreground">
+              {progress ? `${progress.percent}%` : "0%"}
+            </span>
           </div>
           <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
             <div
               className="h-full bg-primary transition-all duration-200"
-              style={{ width: `${progress.percent}%` }}
+              style={{ width: `${progress?.percent ?? 0}%` }}
             />
           </div>
         </div>
