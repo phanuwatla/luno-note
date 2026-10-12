@@ -54,6 +54,7 @@ import { clearNoteEditorState, noteEditorStateMap } from "@/components/Editor";
 import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { setCustomFontWorkspaceHandle, loadCustomFonts } from "@/lib/customFontStore";
+import { isSensitiveWebUrl, openExternalUrl } from "@/lib/urlUtils";
 
 export default function Index() {
   const { t, language } = useTranslation();
@@ -790,6 +791,12 @@ export default function Index() {
       if (!trimmed) return;
       const isSpecialScheme = /^(https?|blob|data|file):/i.test(trimmed);
       const fullUrl = isSpecialScheme ? trimmed : `https://${trimmed}`;
+
+      // Open sensitive URLs (Google AI Studio, Cloud Console, Google Drive, AI API key portals) in default system browser
+      if (isSensitiveWebUrl(fullUrl)) {
+        openExternalUrl(fullUrl);
+        return;
+      }
 
       let fallbackTitle = initialTitle;
       if (!fallbackTitle) {

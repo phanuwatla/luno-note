@@ -11,7 +11,6 @@ import {
   Copy,
   Check,
   Plus,
-  User,
   ChevronDown,
   ChevronUp,
   ChevronRight,
@@ -44,12 +43,13 @@ import {
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon as Wand2 } from "@/components/icons/WandSparklesIcon";
 import { PencilIcon as Pencil } from "@/components/icons/PencilIcon";
-import { marked } from "marked";
+import { renderLunoAiMarkdown } from "@/lib/lunoAiMarkdown";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { copyToClipboard } from "@/lib/clipboardUtils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
-import { runGeminiPrompt, runGeminiAction, runGeminiChatHistory, transcribeAudioWithGemini, cleanVoiceTranscription } from "@/lib/geminiApi";
+import { runGeminiChatHistory, transcribeAudioWithGemini, cleanVoiceTranscription } from "@/lib/geminiApi";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -92,17 +92,6 @@ function extractDefaultFileName(content: string): string {
   return `Luno_Note_${Date.now().toString().slice(-4)}.md`;
 }
 
-const renderMarkdownHtml = (markdownText: string): string => {
-  if (!markdownText) return "";
-  try {
-    const rawHtml = marked.parse(markdownText, { gfm: true, breaks: true });
-    const htmlString = typeof rawHtml === "string" ? rawHtml : markdownText;
-    return sanitizeHtml(htmlString);
-  } catch (_) {
-    return sanitizeHtml(markdownText);
-  }
-};
-
 export interface MessageItem {
   id: string;
   role: "user" | "assistant";
@@ -112,11 +101,27 @@ export interface MessageItem {
   attachedFileNames?: string[];
 }
 
-interface ChatSession {
+export interface ChatSession {
   id: string;
   title: string;
   createdAt: number;
+  updatedAt?: number;
   messages: MessageItem[];
+}
+
+export function getSessionLastModified(session: ChatSession): number {
+  if (!session) return 0;
+  if (session.updatedAt) return session.updatedAt;
+  if (session.messages && session.messages.length > 0) {
+    let latest = 0;
+    for (const m of session.messages) {
+      if (m?.timestamp && m.timestamp > latest) {
+        latest = m.timestamp;
+      }
+    }
+    if (latest > 0) return latest;
+  }
+  return session.createdAt || (Number.isFinite(Number(session.id)) ? Number(session.id) : 0);
 }
 
 interface LunoAiViewProps {
@@ -665,7 +670,13 @@ export default function LunoAiView({
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     try {
       const saved = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as ChatSession[]) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved) as ChatSession[];
+        if (Array.isArray(parsed)) {
+          return parsed.sort((a, b) => getSessionLastModified(b) - getSessionLastModified(a));
+        }
+      }
+      return [];
     } catch {
       return [];
     }
@@ -706,7 +717,13 @@ export default function LunoAiView({
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [attachedFiles, setAttachedFiles] = useState<{ name: string; content: string }[]>([]);
+  const [markdownTooltip, setMarkdownTooltip] = useState<{
+    text: string;
+    x: number;
+    y: number;
+    side: "top" | "bottom";
+  } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; content: string; dataUrl?: string }[]>([]);
   const [editingUserMsgId, setEditingUserMsgId] = useState<string | null>(null);
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
   const [isHistoryRightPanelOpen, setIsHistoryRightPanelOpen] = useState<boolean>(() => {
@@ -1384,16 +1401,51 @@ export default function LunoAiView({
     if (messages.length === 0) return;
 
     setSessions((prevSessions) => {
+      const now = Date.now();
       if (currentSessionId) {
-        return prevSessions.map((s) => (s.id === currentSessionId ? { ...s, messages } : s));
+        const existing = prevSessions.find((s) => s.id === currentSessionId);
+        // Only update if messages actually differ from saved session messages
+        const hasChanged =
+          !existing ||
+          (existing.messages !== messages &&
+            (existing.messages.length !== messages.length ||
+              existing.messages[existing.messages.length - 1]?.content !==
+                messages[messages.length - 1]?.content ||
+              existing.messages[existing.messages.length - 1]?.id !==
+                messages[messages.length - 1]?.id));
+
+        if (!hasChanged) {
+          return prevSessions;
+        }
+
+        let title = existing.title;
+        if (!title || title === "Luno AI Chat") {
+          const firstUserMsg = (messages || []).find((m) => m?.role === "user");
+          if (firstUserMsg && firstUserMsg.content) {
+            title = firstUserMsg.content.slice(0, 45).trim();
+          }
+        }
+
+        const updatedSession: ChatSession = {
+          ...existing,
+          title: title || existing.title || "Luno AI Chat",
+          messages,
+          updatedAt: now,
+        };
+
+        const remaining = prevSessions.filter((s) => s.id !== currentSessionId);
+        return [updatedSession, ...remaining].sort(
+          (a, b) => getSessionLastModified(b) - getSessionLastModified(a)
+        );
       } else {
-        const newId = Date.now().toString();
+        const newId = now.toString();
         const firstUserMsg = (messages || []).find((m) => m?.role === "user");
         const title = firstUserMsg && firstUserMsg.content ? firstUserMsg.content.slice(0, 45).trim() : "Luno AI Chat";
         const newSession: ChatSession = {
           id: newId,
           title,
-          createdAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
           messages,
         };
         setCurrentSessionId(newId);
@@ -1402,7 +1454,9 @@ export default function LunoAiView({
         } catch {
           /* ignore */
         }
-        return [newSession, ...prevSessions];
+        return [newSession, ...prevSessions.filter((s) => s.id !== newId)].sort(
+          (a, b) => getSessionLastModified(b) - getSessionLastModified(a)
+        );
       }
     });
   }, [messages, currentSessionId]);
@@ -1518,7 +1572,7 @@ export default function LunoAiView({
 
   useEffect(() => {
     if (messages.length > 0) {
-      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      chatBottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
     }
   }, [messages, isGenerating]);
 
@@ -1763,14 +1817,105 @@ export default function LunoAiView({
     }, 50);
   };
 
-  const handleCopy = (id: string, text: string) => {
-    void navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    toast({
-      title: t("lunoAi.copyTitle") || "Copied to Clipboard",
-      description: t("lunoAi.copyDesc") || "Response content copied successfully.",
-    });
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (id: string, text: string, isUserMessage = false) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedId(id);
+      toast({
+        title: isUserMessage
+          ? (t("lunoAi.copyPromptTitle") || t("lunoAi.copyTitle") || "Copied to Clipboard")
+          : (t("lunoAi.copyTitle") || "Copied to Clipboard"),
+        description: isUserMessage
+          ? (t("lunoAi.copyPromptDesc") || "Message content copied successfully.")
+          : (t("lunoAi.copyDesc") || "Response content copied successfully."),
+      });
+      setTimeout(() => setCopiedId(null), 2000);
+    } else {
+      toast({
+        title: t("common.error") || "Error",
+        description: t("common.copyFailed") || "Failed to copy to clipboard.",
+      });
+    }
+  };
+
+  const handleContentMouseOver = (e: React.MouseEvent<HTMLElement>) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tooltip]");
+    if (target) {
+      const text = target.getAttribute("data-tooltip");
+      if (text) {
+        const rect = target.getBoundingClientRect();
+        const placeAbove = rect.top > 36;
+        setMarkdownTooltip({
+          text,
+          x: rect.left + rect.width / 2,
+          y: placeAbove ? rect.top - 6 : rect.bottom + 6,
+          side: placeAbove ? "top" : "bottom",
+        });
+        return;
+      }
+    }
+    setMarkdownTooltip(null);
+  };
+
+  const handleContentMouseOut = (e: React.MouseEvent<HTMLElement>) => {
+    const related = e.relatedTarget as HTMLElement | null;
+    if (!related || !related.closest("[data-tooltip]")) {
+      setMarkdownTooltip(null);
+    }
+  };
+
+  const handleContentClick = async (e: React.MouseEvent<HTMLDivElement>) => {
+    // 1. Link click handling
+    const target = (e.target as HTMLElement).closest("a");
+    if (target) {
+      const href = target.getAttribute("href");
+      if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
+        e.preventDefault();
+        if (onOpenWebTab) onOpenWebTab(href);
+        else window.open(href, "_blank", "noopener,noreferrer");
+        return;
+      }
+    }
+
+    // 2. Copy code block button handling
+    const copyBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-copy-code]");
+    if (copyBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const encoded = copyBtn.getAttribute("data-code");
+      if (encoded) {
+        const codeText = decodeURIComponent(encoded);
+        await copyToClipboard(codeText);
+        const originalTooltip = copyBtn.getAttribute("data-tooltip") || "";
+        const originalSvg = copyBtn.querySelector("svg")?.outerHTML || "";
+        const copiedText = t("lunoAi.copied") || "Copied!";
+
+        copyBtn.setAttribute("data-tooltip", copiedText);
+        copyBtn.setAttribute("aria-label", copiedText);
+        setMarkdownTooltip((prev) => (prev ? { ...prev, text: copiedText } : null));
+
+        const svg = copyBtn.querySelector("svg");
+        if (svg) {
+          svg.outerHTML = `<svg class="h-3.5 w-3.5 text-primary shrink-0" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        }
+
+        toast({
+          title: t("common.copiedToClipboard") || "Copied to clipboard",
+          description: t("lunoAi.codeCopied") || "Code block content copied.",
+        });
+
+        setTimeout(() => {
+          copyBtn.setAttribute("data-tooltip", originalTooltip || t("lunoAi.copyCode") || "Copy code");
+          copyBtn.setAttribute("aria-label", originalTooltip || t("lunoAi.copyCode") || "Copy code");
+          setMarkdownTooltip((prev) => (prev ? { ...prev, text: originalTooltip || t("lunoAi.copyCode") || "Copy code" } : null));
+          const currentSvg = copyBtn.querySelector("svg");
+          if (currentSvg && originalSvg) {
+            currentSvg.outerHTML = originalSvg;
+          }
+        }, 2000);
+      }
+      return;
+    }
   };
 
   const handleProcessFiles = (files: FileList | File[]) => {
@@ -1810,13 +1955,17 @@ export default function LunoAiView({
     creative: t("lunoAi.modelCreative") || "Creative",
   };
 
-  const filteredSessions = sessions.filter((s) => {
-    if (!searchHistoryQuery.trim()) return true;
-    const q = searchHistoryQuery.toLowerCase();
-    const title = (s.title || "").toLowerCase();
-    const contentText = s.messages.map((m) => m.content).join(" ").toLowerCase();
-    return title.includes(q) || contentText.includes(q);
-  });
+  const filteredSessions = useMemo(() => {
+    return sessions
+      .filter((s) => {
+        if (!searchHistoryQuery.trim()) return true;
+        const q = searchHistoryQuery.toLowerCase();
+        const title = (s.title || "").toLowerCase();
+        const contentText = (s.messages || []).map((m) => m.content).join(" ").toLowerCase();
+        return title.includes(q) || contentText.includes(q);
+      })
+      .sort((a, b) => getSessionLastModified(b) - getSessionLastModified(a));
+  }, [sessions, searchHistoryQuery]);
 
   return (
     <div data-luno-ai-view="true" className="w-full flex-1 flex h-full overflow-hidden bg-background text-foreground">
@@ -1854,7 +2003,7 @@ export default function LunoAiView({
           </div>
 
           {/* History List */}
-          <div className="no-scrollbar flex-1 overflow-y-auto px-1.5 pb-4 space-y-1.5">
+          <div className="flex-1 overflow-y-auto px-1.5 pb-4 space-y-1.5">
             {filteredSessions.length === 0 ? (
               <div className="py-12 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
                 <Clock className="h-6 w-6 opacity-40 text-muted-foreground" />
@@ -1864,7 +2013,7 @@ export default function LunoAiView({
               filteredSessions.map((session) => {
                 const isActive = session.id === currentSessionId;
                 const timeStr = formatRelativeDateTime(
-                  session.createdAt || (session as any).updatedAt || Date.now(),
+                  getSessionLastModified(session) || Date.now(),
                   settings.dateFormat,
                   settings.timeFormat,
                   settings.language
@@ -1995,7 +2144,7 @@ export default function LunoAiView({
           )}
 
           {/* Upper Container / Messages Stream */}
-          <div className="flex-1 overflow-y-auto w-full no-scrollbar flex flex-col justify-between">
+          <div className="flex-1 overflow-y-auto w-full flex flex-col justify-between">
             {messages.length === 0 ? (
               /* Hero Content in Hero Mode */
               <div className={`w-full max-w-3xl mx-auto ${isSidebar ? "px-2 py-2 h-full flex-1 flex flex-col justify-between" : "px-4 py-8 -mt-8 sm:-mt-12 space-y-6 flex-1 flex flex-col items-center justify-center"}`}>
@@ -2048,7 +2197,7 @@ export default function LunoAiView({
                         <Tooltip key={idx}>
                           <TooltipTrigger asChild>
                             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                              <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
+                              <AttachedFileChipIcon fileName={file.name} dataUrl={file.dataUrl} notes={notes} />
                               <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                               <button
                                 type="button"
@@ -2374,13 +2523,14 @@ export default function LunoAiView({
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                onClick={() => handleCopy(msg.id, msg.content)}
+                                aria-label={t("lunoAi.copyPrompt") || "Copy message"}
+                                onClick={() => void handleCopy(msg.id, msg.content, true)}
                                 className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
                               >
                                 {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied") || "Copied!") : (t("common.copy") || "Copy")}</TooltipContent>
+                            <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied") || "Copied!") : (t("lunoAi.copyPrompt") || t("common.copy") || "Copy")}</TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -2402,18 +2552,17 @@ export default function LunoAiView({
                       <div className="w-full space-y-2 py-1">
                         <div
                           className="editor-markdown-content text-xs sm:text-sm leading-relaxed text-foreground"
-                          onClick={(e) => {
-                            const target = (e.target as HTMLElement).closest("a");
-                            if (target) {
-                              const href = target.getAttribute("href");
-                              if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-                                e.preventDefault();
-                                if (onOpenWebTab) onOpenWebTab(href);
-                                else window.open(href, "_blank", "noopener,noreferrer");
-                              }
-                            }
+                          data-accent-headings={settings?.accentHeadings ? "true" : undefined}
+                          onClick={handleContentClick}
+                          onMouseOver={handleContentMouseOver}
+                          onMouseOut={handleContentMouseOut}
+                          dangerouslySetInnerHTML={{
+                            __html: renderLunoAiMarkdown(msg.content, {
+                              showCodeLineNumbers: settings?.showCodeLineNumbers,
+                              accentHeadings: settings?.accentHeadings,
+                              copyButtonText: t("lunoAi.copyCode") || "Copy code",
+                            }),
                           }}
-                          dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(msg.content) }}
                         />
 
                         {/* Action Toolbar under AI Output (Icon-only with Tooltips) */}
@@ -2440,7 +2589,8 @@ export default function LunoAiView({
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                onClick={() => handleCopy(msg.id, msg.content)}
+                                aria-label={t("lunoAi.copyResponse") || "Copy response"}
+                                onClick={() => void handleCopy(msg.id, msg.content, false)}
                                 className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
                               >
                                 {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
@@ -2556,7 +2706,7 @@ export default function LunoAiView({
                     <Tooltip key={idx}>
                       <TooltipTrigger asChild>
                         <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
-                          <AttachedFileChipIcon fileName={file.name} dataUrl={(file as any).dataUrl} notes={notes} />
+                          <AttachedFileChipIcon fileName={file.name} dataUrl={file.dataUrl} notes={notes} />
                           <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                           <button
                             type="button"
@@ -2888,7 +3038,7 @@ export default function LunoAiView({
           </div>
 
           {/* Notes Folder Tree */}
-          <div className="max-h-64 overflow-y-auto pr-1 no-scrollbar py-1">
+          <div className="max-h-64 overflow-y-auto pr-1 py-1">
             <WorkspaceFolderTree
               notes={notes}
               searchQuery={searchInsertNoteQuery}
@@ -2945,7 +3095,7 @@ export default function LunoAiView({
           </div>
 
           {/* Notes Folder Tree */}
-          <div className="max-h-60 overflow-y-auto pr-1 no-scrollbar py-1">
+          <div className="max-h-60 overflow-y-auto pr-1 py-1">
             <WorkspaceFolderTree
               notes={notes}
               searchQuery={searchWorkspaceQuery}
@@ -3011,7 +3161,7 @@ export default function LunoAiView({
             </div>
 
             {/* Scrollable Content Body (Matches RightPanel.tsx padding & typography) */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-xs no-scrollbar">
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-xs">
               {/* Search History Filter (Matches Search Note UI) */}
               <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 border border-border/50 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
                 <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -3052,7 +3202,7 @@ export default function LunoAiView({
                   filteredSessions.map((session) => {
                     const isActive = session.id === currentSessionId;
                     const timeStr = formatRelativeDateTime(
-                      session.createdAt || session.updatedAt || Date.now(),
+                      getSessionLastModified(session) || Date.now(),
                       settings.dateFormat,
                       settings.timeFormat,
                       settings.language
@@ -3204,6 +3354,21 @@ export default function LunoAiView({
               <ChevronDown className="h-4 w-4" />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Floating Markdown Tooltip matching Radix Tooltip UI 1:1 */}
+      {markdownTooltip && (
+        <div
+          role="tooltip"
+          className="fixed z-[9999] pointer-events-none select-none rounded-md border border-border bg-popover px-2.5 py-1 text-[11px] font-medium text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+          style={{
+            left: `${markdownTooltip.x}px`,
+            top: `${markdownTooltip.y}px`,
+            transform: markdownTooltip.side === "top" ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+          }}
+        >
+          {markdownTooltip.text}
         </div>
       )}
     </div>

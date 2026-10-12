@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "@/hooks/use-toast";
 import { getDatePatternLabel } from "@/lib/dateTimeFormatter";
 import { fetchAvailableModels, type AvailableModelOption } from "@/lib/geminiApi";
+import { openExternalUrl } from "@/lib/urlUtils";
 
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
@@ -1068,7 +1069,11 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               href="https://aistudio.google.com/app/apikey"
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+              onClick={(e) => {
+                e.preventDefault();
+                openExternalUrl("https://aistudio.google.com/app/apikey");
+              }}
+              className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
             >
               Get Gemini API Key <ExternalLink className="h-3 w-3" />
             </a>

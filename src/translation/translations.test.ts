@@ -3,6 +3,7 @@ import en from "./en";
 import th from "./th";
 import fs from "fs";
 import path from "path";
+import ts from "typescript";
 import { APP_THEMES, APPEARANCE_STYLE_OPTIONS, FONT_OPTIONS } from "@/hooks/useAppSettings";
 import {
   ICON_PACK_OPTIONS,
@@ -11,12 +12,12 @@ import {
   PHOSPHOR_ICON_CATEGORIES,
 } from "@/lib/iconPacks";
 
-function flattenKeys(obj: Record<string, any>, prefix = ""): Set<string> {
+function flattenKeys(obj: Record<string, unknown>, prefix = ""): Set<string> {
   const keys = new Set<string>();
   for (const [k, v] of Object.entries(obj)) {
     const fullKey = prefix ? `${prefix}.${k}` : k;
     if (v && typeof v === "object" && !Array.isArray(v)) {
-      const nested = flattenKeys(v, fullKey);
+      const nested = flattenKeys(v as Record<string, unknown>, fullKey);
       for (const nk of nested) keys.add(nk);
     } else {
       keys.add(fullKey);
@@ -38,12 +39,12 @@ describe("Translation Dictionary Integrity", () => {
   });
 
   it("has no empty strings in en or th dictionaries", () => {
-    function findEmpty(obj: Record<string, any>, prefix = ""): string[] {
+    function findEmpty(obj: Record<string, unknown>, prefix = ""): string[] {
       const empties: string[] = [];
       for (const [k, v] of Object.entries(obj)) {
         const fullKey = prefix ? `${prefix}.${k}` : k;
         if (v && typeof v === "object" && !Array.isArray(v)) {
-          empties.push(...findEmpty(v, fullKey));
+          empties.push(...findEmpty(v as Record<string, unknown>, fullKey));
         } else if (v === "" || v === undefined || v === null) {
           empties.push(fullKey);
         }
@@ -53,6 +54,40 @@ describe("Translation Dictionary Integrity", () => {
 
     expect(findEmpty(en)).toEqual([]);
     expect(findEmpty(th)).toEqual([]);
+  });
+
+  it("en and th have no duplicate keys in source files", () => {
+    function findDuplicateKeysInFile(filePath: string): string[] {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const duplicates: string[] = [];
+      const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+
+      function walk(node: ts.Node) {
+        if (ts.isObjectLiteralExpression(node)) {
+          const keys = new Set<string>();
+          for (const prop of node.properties) {
+            if (ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop)) {
+              const name = prop.name.getText(sourceFile);
+              if (keys.has(name)) {
+                duplicates.push(`${path.basename(filePath)}: duplicate key "${name}"`);
+              } else {
+                keys.add(name);
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, walk);
+      }
+
+      walk(sourceFile);
+      return duplicates;
+    }
+
+    const enPath = path.resolve(__dirname, "en.ts");
+    const thPath = path.resolve(__dirname, "th.ts");
+
+    expect(findDuplicateKeysInFile(enPath)).toEqual([]);
+    expect(findDuplicateKeysInFile(thPath)).toEqual([]);
   });
 
   it("contains all theme translation keys for APP_THEMES", () => {

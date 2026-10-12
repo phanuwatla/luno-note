@@ -697,6 +697,7 @@ export interface AppSettings {
   appLayout: AppLayout;
 
   // General Settings
+  userName: string;
   onStartup: string;
   checkUpdates: boolean;
   dateFormat: string;
@@ -863,6 +864,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reopenTabs: true,
   appLayout: "default",
 
+  userName: "",
   onStartup: "home",
   checkUpdates: true,
   dateFormat: "YYYY-MM-DD",
@@ -1079,6 +1081,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     autoSave: typeof raw?.autoSave === "boolean" ? raw.autoSave : DEFAULT_SETTINGS.autoSave,
     reopenTabs: typeof raw?.reopenTabs === "boolean" ? raw.reopenTabs : DEFAULT_SETTINGS.reopenTabs,
 
+    userName: typeof raw?.userName === "string" ? raw.userName : "",
     onStartup:
       appLayout === "compact" && (raw?.onStartup === "home" || !raw?.onStartup)
         ? "lastNote"

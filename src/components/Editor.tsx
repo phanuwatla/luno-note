@@ -187,11 +187,10 @@ import ImageNodeView, { dataUrlToBlobUrl, asyncDataUrlToBlobUrl, imageLocalCache
 import Link from "@tiptap/extension-link";
 import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
-import { createLowlight, common } from "lowlight";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import CodeBlockNodeView from "@/components/CodeBlockNodeView";
-
-export const lowlight = createLowlight(common);
+import { lowlight } from "@/lib/syntaxHighlighter";
+export { lowlight };
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -17105,7 +17104,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <button
                 type="button"
                 onClick={() => setFootnoteInputText("")}
-                className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                className="h-5 w-5 rounded-full flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -17115,13 +17114,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <button
                   type="button"
                   onClick={handleConfirmFootnote}
-                  className={`p-1 rounded-md transition-colors cursor-pointer text-[10px] font-medium ${
+                  className={`h-6 w-6 rounded-full flex items-center justify-center transition-all cursor-pointer text-[10px] font-medium shrink-0 ${
                     footnoteInputText.trim()
                       ? "bg-primary text-primary-foreground hover:bg-primary/90"
                       : "hover:bg-muted text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <CornerDownLeft className="h-3 w-3" />
+                  <CornerDownLeft className="h-3.5 w-3.5" />
                   <span className="sr-only">{settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}</span>
                 </button>
               </TooltipTrigger>

@@ -313,6 +313,35 @@ export default function SettingsTabView({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
+  const [osUsername, setOsUsername] = useState<string>("");
+  const [userNameValue, setUserNameValue] = useState<string>(() => settings.userName || "");
+
+  useEffect(() => {
+    const electronAPI = (window as unknown as { electronAPI?: { getOsUserInfo?: () => Promise<{ username?: string }> } }).electronAPI;
+    if (electronAPI?.getOsUserInfo) {
+      electronAPI
+        .getOsUserInfo()
+        .then((info) => {
+          if (info?.username) {
+            setOsUsername(info.username);
+            if (!settings.userName) {
+              setUserNameValue(info.username);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to get OS user info:", err);
+        });
+    }
+  }, [settings.userName]);
+
+  useEffect(() => {
+    if (settings.userName) {
+      setUserNameValue(settings.userName);
+    } else if (osUsername && !userNameValue) {
+      setUserNameValue(osUsername);
+    }
+  }, [settings.userName, osUsername]);
 
   const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
   const appUpdate = useAppUpdate();
@@ -526,6 +555,53 @@ export default function SettingsTabView({
               {/* 1. GENERAL */}
               {safeActiveCategory === "general" && (
                 <div className="space-y-6">
+                  {/* User Profile Card */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.profileGroup")}</h3>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.displayName")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.displayNameDesc")}</p>
+                      </div>
+                      <div className="relative flex items-center w-56 shrink-0">
+                        <input
+                          type="text"
+                          value={userNameValue}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setUserNameValue(val);
+                            updateSetting("userName", val);
+                          }}
+                          placeholder={osUsername || "User"}
+                          maxLength={50}
+                          className="w-full h-10 rounded-xl border border-border/80 bg-background px-3.5 py-2 text-xs font-medium text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none pr-8"
+                        />
+                        {Boolean(settings.userName && settings.userName !== osUsername) && (
+                          <TooltipProvider delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUserNameValue(osUsername);
+                                    updateSetting("userName", "");
+                                  }}
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0.5 rounded-md hover:bg-muted/80"
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                <span className="text-xs">{t("settings.resetToDefaultUser")}</span>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Startup Card */}
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.startupGroup")}</h3>
@@ -1990,10 +2066,8 @@ export default function SettingsTabView({
                         target="_blank"
                         rel="noreferrer"
                         onClick={(e) => {
-                          if (onOpenWebTab) {
-                            e.preventDefault();
-                            onOpenWebTab("https://aistudio.google.com/app/apikey");
-                          }
+                          e.preventDefault();
+                          openExternalUrl("https://aistudio.google.com/app/apikey");
                         }}
                         className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
                       >
@@ -2282,11 +2356,7 @@ export default function SettingsTabView({
                                     const driveUrl = targetId
                                       ? `https://drive.google.com/drive/folders/${targetId}`
                                       : "https://drive.google.com";
-                                    if (onOpenWebTab) {
-                                      onOpenWebTab(driveUrl, "Google Drive - Workspaces");
-                                    } else {
-                                      window.open(driveUrl, "_blank", "noopener,noreferrer");
-                                    }
+                                    openExternalUrl(driveUrl);
                                   }}
                                   className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-0.5 group cursor-pointer text-left no-underline hover:no-underline"
                                 >
@@ -2351,11 +2421,7 @@ export default function SettingsTabView({
                               const driveUrl = targetId
                                 ? `https://drive.google.com/drive/folders/${targetId}`
                                 : "https://drive.google.com";
-                              if (onOpenWebTab) {
-                                onOpenWebTab(driveUrl, "Google Drive - Workspaces");
-                              } else {
-                                window.open(driveUrl, "_blank", "noopener,noreferrer");
-                              }
+                              openExternalUrl(driveUrl);
                             }}
                             className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                           >

@@ -71,9 +71,146 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.3.4",
+    version: "1.3.5",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "Luno AI High-Fidelity Markdown & Code Highlighting, Webview Security Delegation, Process Optimization & Profile Ergonomics",
+      th: "ระบบเรนเดอร์ Markdown และไฮไลต์โค้ดคุณภาพสูงใน Luno AI, ยกระดับความปลอดภัยลิงก์ภายนอก, ปรับปรุงสถาปัตยกรรมระบบ และเพิ่มความสะดวกในการตั้งค่า",
+    },
+    highlights: [
+      {
+        title: {
+          en: "High-Fidelity Markdown & Code Syntax Highlighting in Luno AI",
+          th: "เรนเดอร์ Markdown และไฮไลต์โค้ดคุณภาพสูงใน Luno AI",
+        },
+        description: {
+          en: "AI messages now render beautifully with syntax highlighting across dozens of languages, custom code headers with language badges, one-click copy code buttons with tooltips, optional code line numbers, math formulas, task lists, and accent headings.",
+          th: "ข้อความตอบกลับของ Luno AI แสดงผลด้วยระบบไฮไลต์โค้ดรองรับหลากหลายภาษา พร้อมแถบหัวข้อระบุภาษา, ปุ่มคัดลอกโค้ดพร้อม Tooltip, ตัวเลือกแสดงเลขบรรทัดโค้ด, ตาราง, รายการงาน และสีหัวข้อตามการตั้งค่า Accent Headings",
+        },
+        icon: Sparkles,
+        badge: { en: "Luno AI", th: "Luno AI", variant: "default" },
+      },
+      {
+        title: {
+          en: "Sensitive URL Redirection & External Browser Delegation",
+          th: "ยกระดับความปลอดภัย ลิงก์สำคัญเปิดในเบราว์เซอร์หลักอัตโนมัติ",
+        },
+        description: {
+          en: "Automatic interception of authentication, cloud consoles, and API key portals (Google AI Studio, Cloud Console, Google Drive, OpenAI, Anthropic, OpenRouter) to open safely in your default system browser, preventing bot blocks and securing credentials.",
+          th: "ระบบดักจับลิงก์บริการยืนยันตัวตน, คลาวด์คอนโซล และหน้าจัดการ API Key (เช่น Google AI Studio, Cloud Console, Google Drive, OpenAI, Anthropic) เพื่อเปิดในเว็บเบราว์เซอร์หลักของเครื่องโดยอัตโนมัติ ป้องกันปัญหา Disallowed Useragent และปกป้องข้อมูลส่วนตัว",
+        },
+        icon: ShieldCheck,
+        badge: { en: "Security", th: "ความปลอดภัย", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Streamlined Architecture & Native Process Cleanup",
+          th: "ลดขนาดตัวโปรแกรมและทำความสะอาดกระบวนการเบื้องหลัง",
+        },
+        description: {
+          en: "Replaced external PowerShell watchers and background binaries with pure JavaScript, removed redundant unpacking, and optimized Windows desktop installer with explicit shortcuts and asInvoker privileges.",
+          th: "ตัดกระบวนการภายนอกของ PowerShell และไฟล์ไบนารีเบื้องหลังที่ไม่จำเป็นออก เปลี่ยนมาใช้ JavaScript ล้วน ลดขนาดไฟล์และเพิ่มประสิทธิภาพ พร้อมปรับแต่งตัวติดตั้ง Windows ให้สร้าง Shortcut และขอสิทธิ์ระบบอย่างถูกต้อง",
+        },
+        icon: Zap,
+        badge: { en: "Performance", th: "ประสิทธิภาพ", variant: "default" },
+      },
+      {
+        title: {
+          en: "Reset Default User & Floating Tooltip Polish",
+          th: "ปุ่มรีเซ็ตชื่อผู้ใช้และปรับแต่ง Tooltip สวยงามรอบด้าน",
+        },
+        description: {
+          en: "Added a one-click button in Settings > System/Other to restore the detected operating system username, paired with distinct copy prompt vs copy response actions and floating tooltips in chat.",
+          th: "เพิ่มปุ่มกดรีเซ็ตชื่อผู้ใช้กลับเป็นชื่อของระบบปฏิบัติการได้ในคลิกเดียวในการตั้งค่า พร้อมแยกปุ่มคัดลอกคำถามและคำตอบ AI พร้อม Tooltip แสดงผลอย่างลื่นไหล",
+        },
+        icon: Settings,
+        badge: { en: "UI / UX", th: "ประสบการณ์ผู้ใช้", variant: "outline" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Luno AI Assistant", th: "ผู้ช่วย AI (Luno AI)" },
+        items: [
+          {
+            en: "Built dedicated renderLunoAiMarkdown engine with lowlight code syntax highlighting and language labels.",
+            th: "พัฒนาระบบ renderLunoAiMarkdown สำหรับไฮไลต์โค้ดและระบุภาษาด้วย lowlight engine",
+          },
+          {
+            en: "Added one-click copy code button on code blocks with animated tooltip confirmation.",
+            th: "เพิ่มปุ่มคัดลอกโค้ดบนบล็อกโค้ดพร้อม Tooltip แสดงสถานะการคัดลอก",
+          },
+          {
+            en: "Supported optional code block line numbers matching editor settings.",
+            th: "รองรับการแสดงเลขบรรทัดในบล็อกโค้ดตามการตั้งค่าของเอดิเตอร์",
+          },
+          {
+            en: "Added support for tables, blockquotes, inline highlights, task lists, and accent headings in AI messages.",
+            th: "รองรับตาราง ข้อความอ้างอิง ไฮไลต์ข้อความ รายการงาน และสีหัวข้อ Accent Headings ในข้อความ AI",
+          },
+          {
+            en: "Separated copy actions into distinct 'Copy Prompt' and 'Copy Response' with dedicated aria-labels.",
+            th: "แยกปุ่มคัดลอกคำถามและคำตอบออกจากกันอย่างชัดเจนพร้อม aria-label สำหรับผู้พิการ",
+          },
+        ],
+      },
+      {
+        category: { en: "Web Viewer & Security", th: "เว็บเบราว์เซอร์และความปลอดภัย" },
+        items: [
+          {
+            en: "Added urlUtils and automatic interception for sensitive services (Google AI Studio, Cloud, Drive, OpenAI, Anthropic, HuggingFace).",
+            th: "เพิ่มโมดูล urlUtils ดักจับและเปิดบริการสำคัญในเว็บเบราว์เซอร์ภายนอกเพื่อความปลอดภัย",
+          },
+          {
+            en: "Added friendly localized notification toasts when navigating to sensitive accounts externally.",
+            th: "แจ้งเตือนข้อความแนะนำเมื่อมีการเปิดลิงก์ภายนอกเพื่อความปลอดภัยทั้งภาษาไทยและอังกฤษ",
+          },
+          {
+            en: "Enabled webview plugins flag for improved cross-platform embedded web rendering.",
+            th: "เปิดใช้งาน flag plugins สำหรับ webview เพื่อการเรนเดอร์หน้าเว็บที่สมบูรณ์ยิ่งขึ้น",
+          },
+        ],
+      },
+      {
+        category: { en: "Platform & Packaging", th: "แพลตฟอร์มและการบรรจุโปรแกรม" },
+        items: [
+          {
+            en: "Eliminated closeTab.exe and keyboardLayoutWatcher.ps1, transitioning completely to native JavaScript.",
+            th: "ยกเลิกการใช้งาน closeTab.exe และ keyboardLayoutWatcher.ps1 หันมาใช้ JavaScript ล้วน",
+          },
+          {
+            en: "Removed asarUnpack configuration in package.json for cleaner and more compact installation bundles.",
+            th: "นำการแตกไฟล์ asarUnpack ออกเพื่อให้ขนาดของตัวติดตั้งมีความกะทัดรัดและปลอดภัย",
+          },
+          {
+            en: "Added desktop and start menu shortcut configurations and asInvoker execution level in Windows NSIS installer.",
+            th: "ปรับแต่งตัวติดตั้ง Windows ให้สร้าง Desktop และ Start Menu Shortcut พร้อมระดับสิทธิ์ asInvoker",
+          },
+        ],
+      },
+      {
+        category: { en: "Settings & Editor Polish", th: "การตั้งค่าและเอดิเตอร์" },
+        items: [
+          {
+            en: "Added 'Reset to Default User' button next to User Name input in Settings > System/Other.",
+            th: "เพิ่มปุ่มรีเซ็ตชื่อผู้ใช้กลับเป็นค่าเริ่มต้นของเครื่องในการตั้งค่าระบบ",
+          },
+          {
+            en: "Unified syntax highlighter instance between TipTap editor and AI Assistant.",
+            th: "รวม instance ของ lowlight syntax highlighter ระหว่างเอดิเตอร์และผู้ช่วย AI ให้ทำงานร่วมกันได้อย่างมีประสิทธิภาพ",
+          },
+          {
+            en: "Refined footnote insert dialog button styling and hover interactions in note editor.",
+            th: "ปรับแต่งสไตล์ปุ่มแทรกและล้างเชิงอรรถ (Footnote) ในเอดิเตอร์ให้กลมกลืนและสวยงาม",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.3.4",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "Semver Auto-Updater Precision, Clean What's New Tab Launch & Editor Margin Cursor Precision",
       th: "ระบบตรวจสอบอัปเดตอัตโนมัติแม่นยำตาม Semver, เปิดแท็บ What's New สะอาดตาเมื่ออัปเดต และปรับแต่ง Cursor กับขอบเอดิเตอร์",

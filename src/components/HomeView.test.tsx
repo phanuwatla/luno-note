@@ -4,6 +4,25 @@ import HomeView from "./HomeView";
 import { AppSettingsProvider } from "@/hooks/useAppSettings";
 import type { Note } from "@/hooks/useNotes";
 
+// Polyfill localStorage for Node/JSDOM
+const storageMap = new Map<string, string>();
+const localStorageMock = {
+  getItem: (key: string) => storageMap.get(key) ?? null,
+  setItem: (key: string, val: string) => { storageMap.set(key, String(val)); },
+  removeItem: (key: string) => { storageMap.delete(key); },
+  clear: () => { storageMap.clear(); },
+  key: (i: number) => Array.from(storageMap.keys())[i] ?? null,
+  get length() { return storageMap.size; },
+};
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  writable: true,
+});
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+  writable: true,
+});
+
 describe("HomeView Component", () => {
   const mockNotes: Note[] = [
     {
@@ -147,6 +166,32 @@ describe("HomeView Component", () => {
     );
 
     expect(await screen.findByText(/LENOVO/)).toBeInTheDocument();
+    delete (window as any).electronAPI;
+  });
+
+  it("prioritizes custom userName from settings over OS username", async () => {
+    localStorage.setItem(
+      "notes-app-settings",
+      JSON.stringify({ userName: "MyCustomName" })
+    );
+
+    (window as any).electronAPI = {
+      getOsUserInfo: vi.fn().mockResolvedValue({ username: "LENOVO" }),
+    };
+
+    render(
+      <AppSettingsProvider>
+        <HomeView
+          notes={mockNotes}
+          onOpenNote={vi.fn()}
+        />
+      </AppSettingsProvider>
+    );
+
+    expect(await screen.findByText(/MyCustomName/)).toBeInTheDocument();
+    expect(screen.queryByText(/LENOVO/)).not.toBeInTheDocument();
+
+    localStorage.removeItem("notes-app-settings");
     delete (window as any).electronAPI;
   });
 });

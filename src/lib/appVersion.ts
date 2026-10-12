@@ -15,11 +15,4 @@ export const APP_ABOUT_CREDIT = `Made by ${APP_AUTHOR} © 2026 ${APP_NAME}`;
 export const APP_REPOSITORY_URL = "https://github.com/phanuwatla/luno-note";
 export const APP_LATEST_RELEASE_URL = "https://github.com/phanuwatla/luno-note/releases/latest";
 
-export function openExternalUrl(url: string) {
-  const electron = (window as unknown as { electronAPI?: { openExternal?: (url: string) => Promise<boolean> } })?.electronAPI;
-  if (electron?.openExternal) {
-    void electron.openExternal(url);
-  } else {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-}
+export { openExternalUrl } from "./urlUtils";

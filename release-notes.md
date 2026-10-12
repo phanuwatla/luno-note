@@ -1,3 +1,38 @@
+## Release Notes - Luno Note v1.3.5
+
+### Overview
+Luno Note version 1.3.5 introduces an upgraded high-fidelity Markdown and code highlighting engine for Luno AI assistant, proactive security delegation for sensitive external services, streamlined process footprint optimization, and profile ergonomics.
+
+### Key Improvements & New Features
+
+#### 1. High-Fidelity Markdown & Code Syntax Highlighting in Luno AI
+- **Multi-Language Code Highlighting**: AI assistant responses now format code blocks using the `lowlight` engine across JavaScript, TypeScript, Python, HTML, CSS, Bash, SQL, JSON, YAML, and more.
+- **Language Headers & One-Click Copy**: Polished header bars display recognized programming language badges with one-click copy buttons and animated tooltip confirmations.
+- **Optional Code Line Numbers**: Integrated setting honoring `showCodeLineNumbers` within AI chat code blocks.
+- **Rich Document Elements**: Complete rendering support for tables, blockquotes, inline highlights (`==highlight==`), task lists, and accent headings (`accentHeadings`).
+- **Independent Copy Actions**: Separated copy prompt vs copy response buttons with dedicated accessibility labels.
+
+#### 2. Sensitive URL Delegation & External Browser Security
+- **Proactive URL Interception**: Embedded webviewer automatically detects authentication portals, cloud consoles, and API key management interfaces (Google AI Studio, Google Cloud Console, Google Drive, OpenAI, Anthropic, Groq, OpenRouter, HuggingFace tokens).
+- **Default Browser Redirection**: Delegates sensitive navigations safely to the host operating system's default browser via `shell.openExternal`, protecting users from bot detection blocks and credential compromise.
+- **Bilingual Toast Notifications**: Displays informative toast messages guiding users when external delegation occurs.
+
+#### 3. Streamlined Architecture & Native Process Cleanup
+- **Zero Binary Bloat**: Replaced external PowerShell watchers and background binaries with pure JavaScript logic.
+- **Cleaner Packaging**: Removed `asarUnpack` from build configuration, producing smaller and more secure distribution packages.
+- **Enhanced Windows Installer**: Configured explicit desktop shortcuts, start menu shortcuts, and `asInvoker` execution level in the NSIS installer.
+
+#### 4. Settings & Ergonomic Polish
+- **Reset to Default User**: Added an inline button next to User Name in Settings > System/Other to quickly restore the host system username.
+- **Unified Highlighter**: Synchronized syntax highlighter instances between TipTap editor and AI Assistant for optimal memory usage.
+- **Editor Footnote Polish**: Refined footnote insert dialog button styling and hover interactions in note editor.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.3.5.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.4
 
 ### Overview

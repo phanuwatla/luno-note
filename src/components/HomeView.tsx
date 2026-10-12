@@ -96,10 +96,11 @@ export default function HomeView({
     }
   }, []);
 
-  // Time-based greeting with solid colored icons and OS user name
+  // Time-based greeting with solid colored icons and customized/OS user name
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
-    const nameSuffix = osUsername ? `, ${osUsername}` : "";
+    const effectiveUsername = settings.userName?.trim() || osUsername;
+    const nameSuffix = effectiveUsername ? `, ${effectiveUsername}` : "";
     if (hour >= 5 && hour < 12) {
       return {
         text: isTh ? `สวัสดีตอนเช้า${nameSuffix}` : `Good morning${nameSuffix}`,
@@ -116,7 +117,7 @@ export default function HomeView({
       text: isTh ? `สวัสดีตอนเย็น${nameSuffix}` : `Good evening${nameSuffix}`,
       icon: renderIcon("moon", "h-3.5 w-3.5 text-amber-400 fill-amber-400 shrink-0"),
     };
-  }, [isTh, pack, osUsername]);
+  }, [isTh, pack, osUsername, settings.userName]);
 
   // Helper to get note tags
   const getNoteTags = (note: Note): string[] => {

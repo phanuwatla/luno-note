@@ -34,6 +34,7 @@ import type { Note } from "@/hooks/useNotes";
 import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { isSensitiveWebUrl, openExternalUrl } from "@/lib/urlUtils";
 
 function NoteFileIcon({ note, className = "h-4 w-4" }: { note: Note; className?: string }) {
   const { settings } = useAppSettings();
@@ -257,6 +258,16 @@ export default function WebViewerView({
 
   const handleNavigate = (targetUrl: string) => {
     const validUrl = normalizeUrl(targetUrl);
+    if (isSensitiveWebUrl(validUrl)) {
+      openExternalUrl(validUrl);
+      toast({
+        title: isTh ? "เปิดในเบราว์เซอร์ภายนอกเพื่อความปลอดภัย" : "Opened in External Browser",
+        description: isTh
+          ? "บริการนี้ต้องการการยืนยันตัวตนระดับสูงของระบบ จึงเปิดด้วยเบราว์เซอร์หลักของเครื่องเพื่อความปลอดภัย"
+          : "This service requires system-level authentication and has been opened in your default browser.",
+      });
+      return;
+    }
     currentUrlRef.current = validUrl;
     setCurrentUrl(validUrl);
     setInputUrl(getFriendlyDisplayUrl(validUrl, title || pageTitle, displayUrl));
@@ -586,7 +597,26 @@ export default function WebViewerView({
 
     const onNewWindow = (e: any) => {
       if (e.url) {
+        if (isSensitiveWebUrl(e.url)) {
+          openExternalUrl(e.url);
+          return;
+        }
         handleNavigate(e.url);
+      }
+    };
+
+    const onWillNavigate = (e: any) => {
+      if (e.url && isSensitiveWebUrl(e.url)) {
+        try {
+          webview.stop();
+        } catch {}
+        openExternalUrl(e.url);
+        toast({
+          title: isTh ? "เปิดในเบราว์เซอร์ภายนอกเพื่อความปลอดภัย" : "Opened in External Browser",
+          description: isTh
+            ? "บริการนี้ต้องการการยืนยันตัวตนระดับสูงของระบบ จึงเปิดด้วยเบราว์เซอร์หลักของเครื่องเพื่อความปลอดภัย"
+            : "This service requires system-level authentication and has been opened in your default browser.",
+        });
       }
     };
 
@@ -612,6 +642,7 @@ export default function WebViewerView({
     webview.addEventListener("did-stop-loading", onStopLoading);
     webview.addEventListener("did-navigate", onDidNavigate);
     webview.addEventListener("did-navigate-in-page", onDidNavigateInPage);
+    webview.addEventListener("will-navigate", onWillNavigate);
     webview.addEventListener("page-title-updated", onPageTitleUpdated);
     webview.addEventListener("page-favicon-updated", onPageFaviconUpdated);
     webview.addEventListener("did-fail-load", onFailLoad);
@@ -630,6 +661,7 @@ export default function WebViewerView({
       webview.removeEventListener("did-stop-loading", onStopLoading);
       webview.removeEventListener("did-navigate", onDidNavigate);
       webview.removeEventListener("did-navigate-in-page", onDidNavigateInPage);
+      webview.removeEventListener("will-navigate", onWillNavigate);
       webview.removeEventListener("page-title-updated", onPageTitleUpdated);
       webview.removeEventListener("page-favicon-updated", onPageFaviconUpdated);
       webview.removeEventListener("did-fail-load", onFailLoad);

@@ -1010,66 +1010,8 @@ function setupIpcHandlers() {
         } catch {}
       };
 
-      const getCloseTabExePath = () => {
-        const directPath = path.join(__dirname, "closeTab.exe");
-        const unpackedPath = directPath.replace("app.asar", "app.asar.unpacked");
-        if (fs.existsSync(unpackedPath)) return unpackedPath;
-        if (!directPath.includes("app.asar") && fs.existsSync(directPath)) return directPath;
-        try {
-          const userDataPath = app.getPath("userData");
-          const extractedPath = path.join(userDataPath, "closeTab.exe");
-          if (fs.existsSync(directPath)) {
-            const content = fs.readFileSync(directPath);
-            let shouldWrite = true;
-            if (fs.existsSync(extractedPath)) {
-              try {
-                if (fs.readFileSync(extractedPath).equals(content)) shouldWrite = false;
-              } catch {}
-            }
-            if (shouldWrite) {
-              fs.writeFileSync(extractedPath, content);
-            }
-            return extractedPath;
-          }
-        } catch {}
-        return directPath;
-      };
-
-      const closeActiveBrowserTabAndFocusApp = () => {
-        if (process.platform === "win32") {
-          try {
-            const exePath = getCloseTabExePath();
-            if (fs.existsSync(exePath)) {
-              const child = require("child_process").spawn(exePath, [], {
-                windowsHide: true,
-                stdio: "ignore",
-                detached: false,
-              });
-              child.on("close", () => {
-                setTimeout(() => {
-                  bringAppToFront();
-                }, 150);
-              });
-              child.on("error", () => {
-                bringAppToFront();
-              });
-            } else {
-              bringAppToFront();
-            }
-          } catch {
-            bringAppToFront();
-          }
-        } else if (process.platform === "darwin") {
-          try {
-            exec('osascript -e \'tell application "System Events" to keystroke "w" using command down\'', () => {
-              setTimeout(() => { bringAppToFront(); }, 200);
-            });
-          } catch {
-            bringAppToFront();
-          }
-        } else {
-          bringAppToFront();
-        }
+      const focusApp = () => {
+        bringAppToFront();
       };
 
       const server = http.createServer(async (req, res) => {
@@ -1126,7 +1068,7 @@ function setupIpcHandlers() {
           if (parsedUrl.pathname === "/focus" || parsedUrl.pathname === "/close-tab") {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ ok: true }));
-            closeActiveBrowserTabAndFocusApp();
+            focusApp();
             return;
           }
 
@@ -1728,11 +1670,14 @@ function setupIpcHandlers() {
       if (btn) btn.style.opacity = "0.85";
       if (btn) btn.style.pointerEvents = "none";
       if (btnText) {
-        btnText.textContent = isThai ? "✓ สลับไปยัง Luno Note แล้ว" : "✓ Switched to Luno Note";
+        btnText.textContent = isThai ? "✓ สลับไปยัง Luno Note แล้ว (ปิดหน้านี้ได้ทันที)" : "✓ Switched to Luno Note (You may close this tab)";
       }
 
-      // Tell Electron main process to send OS-level Ctrl+W to close this browser tab and focus app
-      fetch("/close-tab").catch(function() {});
+      fetch("/focus").catch(function() {});
+      try {
+        window.open("", "_self", "");
+        window.close();
+      } catch (e) {}
     });
   </script>
 </body>
@@ -3060,108 +3005,12 @@ if (autoUpdater) {
 }
 
 let currentNativeKeyboardLang = "en";
-let keyboardWatcherProcess = null;
-let watcherRestartTimeout = null;
+try {
+  if (app.getLocale && app.getLocale().toLowerCase().startsWith("th")) {
+    currentNativeKeyboardLang = "th";
+  }
+} catch {}
 let isAppQuitting = false;
-
-function getKeyboardWatcherScriptPath() {
-  const directPath = path.join(__dirname, "keyboardLayoutWatcher.ps1");
-  const unpackedPath = directPath.replace("app.asar", "app.asar.unpacked");
-
-  // 1. If unpacked by electron-builder (app.asar.unpacked)
-  if (fs.existsSync(unpackedPath)) {
-    return unpackedPath;
-  }
-
-  // 2. If running directly in dev mode outside of asar
-  if (!directPath.includes("app.asar") && fs.existsSync(directPath)) {
-    return directPath;
-  }
-
-  // 3. If inside app.asar, extract to userData so external powershell.exe can execute it
-  try {
-    const userDataPath = app.getPath("userData");
-    const extractedPath = path.join(userDataPath, "keyboardLayoutWatcher.ps1");
-    if (fs.existsSync(directPath)) {
-      const content = fs.readFileSync(directPath, "utf8");
-      let shouldWrite = true;
-      if (fs.existsSync(extractedPath)) {
-        try {
-          const current = fs.readFileSync(extractedPath, "utf8");
-          if (current === content) shouldWrite = false;
-        } catch {}
-      }
-      if (shouldWrite) {
-        fs.writeFileSync(extractedPath, content, "utf8");
-      }
-      return extractedPath;
-    }
-  } catch (err) {
-    console.warn("Failed to extract keyboardLayoutWatcher.ps1 to userData:", err);
-  }
-
-  return directPath;
-}
-
-function startNativeKeyboardWatcher() {
-  if (process.platform !== "win32" || isAppQuitting) return;
-  if (keyboardWatcherProcess) return;
-
-  try {
-    const { spawn } = require("child_process");
-    const scriptPath = getKeyboardWatcherScriptPath();
-    if (!fs.existsSync(scriptPath)) {
-      console.warn("Keyboard watcher script does not exist:", scriptPath);
-      return;
-    }
-
-    keyboardWatcherProcess = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
-      {
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
-
-    keyboardWatcherProcess.stdout.on("data", (chunk) => {
-      const text = chunk.toString().trim();
-      const lines = text.split(/\r?\n/).map((l) => l.trim().toLowerCase()).filter(Boolean);
-      for (const line of lines) {
-        if (line === "th" || line === "en") {
-          currentNativeKeyboardLang = line;
-          BrowserWindow.getAllWindows().forEach((w) => {
-            try {
-              if (!w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
-                w.webContents.send("native-keyboard-language-changed", line);
-              }
-            } catch {}
-          });
-        }
-      }
-    });
-
-    keyboardWatcherProcess.stderr.on("data", (errChunk) => {
-      console.warn("Keyboard watcher stderr:", errChunk.toString().trim());
-    });
-
-    keyboardWatcherProcess.on("error", (e) => {
-      console.warn("Keyboard watcher error", e);
-    });
-
-    keyboardWatcherProcess.on("exit", () => {
-      keyboardWatcherProcess = null;
-      if (!isAppQuitting) {
-        if (watcherRestartTimeout) clearTimeout(watcherRestartTimeout);
-        watcherRestartTimeout = setTimeout(() => {
-          startNativeKeyboardWatcher();
-        }, 3000);
-      }
-    });
-  } catch (err) {
-    console.warn("Failed to start keyboard watcher", err);
-  }
-}
 
 app.whenReady().then(() => {
   try {
@@ -3224,13 +3073,50 @@ app.whenReady().then(() => {
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = true;
       webPreferences.allowRunningInsecureContent = false;
-      webPreferences.plugins = false;
+      webPreferences.plugins = true;
     });
 
     if (contents.getType() === "webview") {
       try {
         contents.setZoomFactor(0.9);
       } catch {}
+
+      const isSensitiveWebUrl = (rawUrl) => {
+        if (!rawUrl || typeof rawUrl !== "string") return false;
+        try {
+          const trimmed = rawUrl.trim();
+          if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
+          const parsed = new URL(trimmed);
+          const host = parsed.hostname.toLowerCase();
+          const pathname = parsed.pathname.toLowerCase();
+          return (
+            host === "aistudio.google.com" ||
+            host === "console.cloud.google.com" ||
+            host === "accounts.google.com" ||
+            host === "myaccount.google.com" ||
+            host === "drive.google.com" ||
+            (host.endsWith(".google.com") && (pathname.includes("/app/apikey") || pathname.includes("/o/oauth2/") || pathname.includes("/gsi/"))) ||
+            host === "platform.openai.com" ||
+            host === "console.anthropic.com" ||
+            host === "console.groq.com" ||
+            host === "openrouter.ai" ||
+            (host === "huggingface.co" && pathname.includes("/settings/tokens"))
+          );
+        } catch {
+          return false;
+        }
+      };
+
+      contents.on("will-navigate", (event, targetUrl) => {
+        try {
+          if (isSensitiveWebUrl(targetUrl)) {
+            event.preventDefault();
+            shell.openExternal(targetUrl);
+          }
+        } catch {
+          /* ignore */
+        }
+      });
 
       contents.on("did-start-navigation", () => {
         try {
@@ -3259,6 +3145,10 @@ app.whenReady().then(() => {
       contents.setWindowOpenHandler(({ url }) => {
         try {
           if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+            if (isSensitiveWebUrl(url)) {
+              shell.openExternal(url);
+              return { action: "deny" };
+            }
             contents.loadURL(url);
           }
         } catch {
@@ -3270,7 +3160,6 @@ app.whenReady().then(() => {
   });
 
   setupIpcHandlers();
-  startNativeKeyboardWatcher();
 
   createWindow();
 
@@ -3283,24 +3172,10 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   isAppQuitting = true;
-  if (watcherRestartTimeout) {
-    clearTimeout(watcherRestartTimeout);
-    watcherRestartTimeout = null;
-  }
 });
 
 app.on("will-quit", () => {
   isAppQuitting = true;
-  if (watcherRestartTimeout) {
-    clearTimeout(watcherRestartTimeout);
-    watcherRestartTimeout = null;
-  }
-  if (keyboardWatcherProcess) {
-    try {
-      keyboardWatcherProcess.kill();
-    } catch {}
-    keyboardWatcherProcess = null;
-  }
 });
 
 app.on("window-all-closed", () => {

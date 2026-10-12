@@ -2308,7 +2308,6 @@ function SidebarComponent({
               <ContextMenuSeparator />
             </>
           )}
-          <ContextMenuSeparator />
           {node.path !== "__opened_root__" && (
             <ContextMenuItem onClick={() => onCopyFolder?.(node.path)} className="gap-2">
               <Copy className="h-4 w-4" />

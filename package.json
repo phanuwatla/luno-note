@@ -1,7 +1,8 @@
 {
   "name": "luno-note",
   "private": true,
-  "version": "1.3.4",
+  "version": "1.3.5",
+  "description": "Luno Note - Modern and intuitive note-taking application",
   "main": "electron/main.js",
   "author": {
     "name": "phanuwatla",
@@ -42,19 +43,26 @@
       "dist/**/*",
       "electron/**/*"
     ],
-    "asarUnpack": [
-      "**/keyboardLayoutWatcher.ps1",
-      "**/closeTab.exe"
-    ],
     "win": {
       "icon": "electron/icon.ico",
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "legalTrademarks": "Luno Note",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Luno Note",
       "multiLanguageInstaller": true,
       "installerLanguages": [
         "th_TH",
