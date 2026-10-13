@@ -2360,12 +2360,12 @@ export default function SettingsTabView({
                                   }}
                                   className="font-semibold text-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-0.5 group cursor-pointer text-left no-underline hover:no-underline"
                                 >
-                                  <span>Google Drive / Luno / Workspaces</span>
+                                  <span>Luno / Workspaces</span>
                                   <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100 shrink-0" />
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="bottom" align="start" className="text-xs">
-                                Google Drive / Luno / Workspaces
+                                Luno / Workspaces
                               </TooltipContent>
                             </Tooltip>
                           </div>
