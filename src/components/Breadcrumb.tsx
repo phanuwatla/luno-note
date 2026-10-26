@@ -59,9 +59,6 @@ function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
     const LockIcon = getToolbarIcon("lock", pack);
     return <LockIcon className={cls} />;
   }
-  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
-    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
-  }
   const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
   const IconComp = getToolbarIcon(defaultKey, pack);
   return <IconComp className={cls} />;

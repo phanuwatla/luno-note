@@ -20,6 +20,9 @@ import {
   ArrowUpAZ,
   Calendar,
   Clock,
+  ArrowRight,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -44,7 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
-import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
 import type { Note } from "@/hooks/useNotes";
 
 interface TagsTabViewProps {
@@ -64,7 +67,10 @@ export type TagsSortBy =
   | "created-desc"
   | "created-asc";
 
+export type TagsViewMode = "list" | "card";
+
 const TAGS_SORT_STORAGE_KEY = "notes-app-tags-sort";
+const TAGS_VIEW_MODE_STORAGE_KEY = "notes-app-tags-view-mode";
 
 export default function TagsTabView({
   notes,
@@ -117,6 +123,31 @@ export default function TagsTabView({
     }
   };
 
+  const [viewMode, setViewMode] = useState<TagsViewMode>(() => {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const saved = window.localStorage.getItem(TAGS_VIEW_MODE_STORAGE_KEY) as TagsViewMode;
+        if (saved === "list" || saved === "card") {
+          return saved;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return "list";
+  });
+
+  const handleViewModeChange = (newMode: TagsViewMode) => {
+    setViewMode(newMode);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(TAGS_VIEW_MODE_STORAGE_KEY, newMode);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Dialog states for global tag rename and delete
@@ -128,6 +159,61 @@ export default function TagsTabView({
   const renderIcon = (key: string, cls = "h-4 w-4") => {
     const IconComp = getToolbarIcon(key, pack);
     return <IconComp className={cls} />;
+  };
+
+  const renderNoteIcon = (note: Note, cls = "h-4 w-4 shrink-0") => {
+    if (settings?.showFileIcons === false) return null;
+    const noteName = note.fileName || note.title || "";
+    const relPath = noteName ? (note.folderPath ? `${note.folderPath}/${noteName}` : noteName) : "";
+    const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
+    const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
+    if (customIcon) {
+      const custom = renderCustomIcon(customIcon, `${cls} shrink-0`, { color: customColor });
+      if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+    }
+    if (note.isLocked) {
+      const LockIcon = getToolbarIcon("lock", pack);
+      return (
+        <LockIcon
+          className={`${cls} shrink-0 ${customColor ? "" : "text-muted-foreground"}`}
+          style={customColor ? { color: customColor } : undefined}
+        />
+      );
+    }
+    const defaultKey = getNoteDefaultIconKey(note);
+    const IconComp = getToolbarIcon(defaultKey, pack);
+    return (
+      <IconComp
+        className={`${cls} shrink-0 ${customColor ? "" : "text-muted-foreground"}`}
+        style={customColor ? { color: customColor } : undefined}
+      />
+    );
+  };
+
+  const renderFolderIcon = (folderPath?: string, cls = "h-3.5 w-3.5 shrink-0") => {
+    if (settings?.showFileIcons === false) return null;
+    const customFolder = folderPath ? settings?.folderIcons?.[folderPath] : undefined;
+    if (customFolder?.icon) {
+      const custom = renderCustomIcon(customFolder.icon, `${cls} shrink-0`, { color: customFolder.color });
+      if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
+    }
+    const FolderIcon = getToolbarIcon("folder", pack);
+    return (
+      <FolderIcon
+        className={`${cls} shrink-0 ${customFolder?.color ? "" : "text-muted-foreground/70"}`}
+        style={customFolder?.color ? { color: customFolder.color } : undefined}
+      />
+    );
+  };
+
+  const getNoteTags = (note: Note): string[] => {
+    let tags = note.tags || [];
+    if (tags.length === 0 && isMarkdownNote(note) && note.content) {
+      try {
+        tags = parseFrontmatterAndTags(note.content).allTags || [];
+      } catch {}
+    }
+    return tags;
   };
 
   // Keyboard shortcut Ctrl+K / Ctrl+F for search focus
@@ -319,8 +405,8 @@ export default function TagsTabView({
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex-1 h-full min-h-0 overflow-y-auto bg-background text-foreground select-none flex flex-col">
-        <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5">
+      <div className="flex-1 h-full overflow-hidden bg-background text-foreground select-none flex flex-col">
+        <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5 h-full min-h-0 overflow-hidden">
           {/* 1. Header Section */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
             <div className="space-y-0.5">
@@ -550,6 +636,35 @@ export default function TagsTabView({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+
+                {/* View Mode Toggle (List / Card) */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleViewModeChange(viewMode === "list" ? "card" : "list")}
+                      className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent bg-transparent focus:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-transparent shrink-0 transition-colors"
+                      aria-label={
+                        viewMode === "list"
+                          ? (isTh ? "เปลี่ยนเป็นมุมมองการ์ด" : "Switch to card view")
+                          : (isTh ? "เปลี่ยนเป็นมุมมองรายการ" : "Switch to list view")
+                      }
+                    >
+                      {viewMode === "list" ? (
+                        <LayoutGrid className="h-3.5 w-3.5" />
+                      ) : (
+                        <List className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {viewMode === "list"
+                      ? (isTh ? "เปลี่ยนเป็นมุมมองการ์ด" : "Switch to card view")
+                      : (isTh ? "เปลี่ยนเป็นมุมมองรายการ" : "Switch to list view")}
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -637,38 +752,216 @@ export default function TagsTabView({
             })}
           </div>
 
-          {/* 3. Tagged Notes Grid / Empty State */}
-          <div className={`space-y-4 ${filteredNotes.length === 0 ? "flex-1 flex flex-col items-center justify-center min-h-[360px]" : ""}`}>
-            {filteredNotes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center space-y-3">
-                {tagStats.length === 0 ? (
-                  <>
-                    <TagIcon className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
-                    <p className="text-base font-semibold text-foreground">
-                      {isTh ? "ยังไม่มีแท็กในโน้ต" : "No tags found"}
-                    </p>
-                    <p className="text-xs text-muted-foreground max-w-sm">
-                      {isTh
-                        ? "พิมพ์ #ชื่อแท็ก ในเนื้อหาโน้ตเพื่อจัดหมวดหมู่และค้นหาได้อย่างรวดเร็ว"
-                        : "Type #tag in any note content to organize and find notes instantly."}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <Search className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
-                    <p className="text-sm font-semibold text-foreground">
-                      {isTh ? "ไม่พบโน้ตที่ตรงกับแท็กนี้" : "No notes matching this tag"}
-                    </p>
-                    <p className="text-xs text-muted-foreground max-w-sm">
-                      {isTh
-                        ? "ลองเลือกแท็กอื่นหรือล้างคำค้นหาเพื่อดูโน้ตทั้งหมด"
-                        : "Try choosing another tag or clear your search query."}
-                    </p>
-                  </>
+          {/* 3. Tagged Notes Grid / List View / Empty State */}
+          <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden w-full">
+            {viewMode === "list" ? (
+              <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-2xs overflow-hidden min-w-0">
+                {/* Table Header with Grayish Background (matching TrashView) */}
+                <div className="flex items-center px-4 py-2.5 bg-muted/60 dark:bg-muted/40 border-b border-border/50 text-xs font-semibold text-foreground shrink-0 select-none min-w-0">
+                  <div className="w-8 flex items-center justify-center shrink-0">
+                    <Star className="h-3.5 w-3.5 text-muted-foreground/60" />
+                  </div>
+                  <div className="flex-1 min-w-[140px] px-2 truncate">{isTh ? "ไฟล์" : "File"}</div>
+                  <div className="w-44 lg:w-56 hidden md:block px-2 shrink-0 truncate">{isTh ? "ตำแหน่ง" : "Location"}</div>
+                  <div className="w-32 hidden sm:block px-2 shrink-0 truncate">{isTh ? "แก้ไขล่าสุด" : "Modified"}</div>
+                  <div className="w-20 hidden lg:block px-2 shrink-0 truncate">{isTh ? "ประเภท" : "Type"}</div>
+                  <div className="w-8 px-1 shrink-0"></div>
+                </div>
+
+                {/* Table Body (Scrollable rows matching TrashView) */}
+                <div className="no-scrollbar flex-1 overflow-y-auto divide-y divide-border/20 min-w-0">
+                  {filteredNotes.length === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
+                      {tagStats.length === 0 ? (
+                        <>
+                          <TagIcon className="h-8 w-8 text-muted-foreground/40 mb-2 stroke-[1.5]" />
+                          <p className="text-xs font-semibold text-foreground">
+                            {isTh ? "ยังไม่มีแท็กในโน้ต" : "No tags found"}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground/75 mt-0.5 max-w-xs">
+                            {isTh
+                              ? "พิมพ์ #ชื่อแท็ก ในเนื้อหาโน้ตเพื่อจัดหมวดหมู่และค้นหาได้อย่างรวดเร็ว"
+                              : "Type #tag in any note content to organize and find notes instantly."}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="h-8 w-8 text-muted-foreground/40 mb-2 stroke-[1.5]" />
+                          <p className="text-sm font-semibold text-foreground">
+                            {isTh ? "ไม่พบโน้ตที่ตรงกับแท็กนี้" : "No notes matching this tag"}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground/75 mt-0.5 max-w-xs">
+                            {isTh
+                              ? "ลองเลือกแท็กอื่นหรือล้างคำค้นหาเพื่อดูโน้ตทั้งหมด"
+                              : "Try choosing another tag or clear your search query."}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    filteredNotes.map((note) => {
+                    const snippet = getCleanSnippet(note);
+                    const formatExt = getFormatBadge(note);
+                    const displayTags = getNoteTags(note);
+                    const dateFormatted = formatRelativeDateTime(
+                      note.updatedAt || note.createdAt || Date.now(),
+                      settings.language,
+                      settings.dateFormat,
+                      settings.timeFormat
+                    );
+                    const location = note.folderPath || (isTh ? "หน้าหลัก" : "Root");
+
+                    return (
+                      <div
+                        key={note.id}
+                        onClick={() => onOpenNote(note.id)}
+                        className="group flex items-center px-4 py-2.5 text-xs transition-colors cursor-pointer min-w-0 hover:bg-muted/30 text-foreground/90"
+                      >
+                        {/* Star Toggle Button */}
+                        <div className="w-8 flex items-center justify-center shrink-0">
+                          {onToggleFavorite && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onToggleFavorite(note.id);
+                                  }}
+                                  className={`p-1 rounded-md transition-colors cursor-pointer ${
+                                    note.isFavorite
+                                      ? "text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"
+                                      : "text-muted-foreground/40 hover:text-amber-500 hover:bg-muted/50"
+                                  }`}
+                                  aria-label={note.isFavorite ? (isTh ? "ยกเลิกการติดดาว" : "Unstar") : (isTh ? "ติดดาว" : "Star")}
+                                >
+                                  <Star className={`h-3.5 w-3.5 ${note.isFavorite ? "fill-amber-500 text-amber-500" : ""}`} />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={4}>
+                                {note.isFavorite ? (isTh ? "ยกเลิกการติดดาว" : "Unstar") : (isTh ? "ติดดาว" : "Star")}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+
+                        {/* Note Info: Icon + Title + Tag Pill + Snippet */}
+                        <div className="flex-1 min-w-[140px] px-2 flex items-center gap-2.5 overflow-hidden">
+                          {renderNoteIcon(note, "h-4 w-4")}
+                          <div className="min-w-0 flex-1 overflow-hidden">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="font-semibold text-foreground text-xs truncate group-hover:text-primary transition-colors">
+                                {note.fileName || note.title || t("editor.untitled")}
+                              </span>
+                              {displayTags && displayTags.length > 0 &&
+                                displayTags.slice(0, 3).map((tag, idx) => (
+                                  <button
+                                    type="button"
+                                    key={tag}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedTag(tag);
+                                    }}
+                                    className={`shrink-0 text-[9.5px] px-1.5 py-0.2 rounded font-medium border cursor-pointer hover:opacity-80 transition-opacity ${getTagColorClass(
+                                      tag,
+                                      settings.theme,
+                                      idx,
+                                      settings.tagColorStyle
+                                    )}`}
+                                  >
+                                    #{tag}
+                                  </button>
+                                ))}
+                              {displayTags && displayTags.length > 3 && (
+                                <span className="text-[9.5px] text-muted-foreground/70 shrink-0">
+                                  +{displayTags.length - 3}
+                                </span>
+                              )}
+                            </div>
+                            {snippet && (
+                              <p className="text-[11px] text-muted-foreground/75 truncate mt-0.5 font-normal leading-tight">
+                                {snippet}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Location */}
+                        <div className="w-44 lg:w-56 hidden md:flex items-center gap-1.5 px-2 text-muted-foreground overflow-hidden shrink-0">
+                          {renderFolderIcon(note.folderPath, "h-3.5 w-3.5")}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="truncate text-xs font-normal cursor-default">
+                                {location}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {location}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+
+                        {/* Modified Date */}
+                        <div className="w-32 hidden sm:block px-2 text-muted-foreground text-xs truncate font-normal shrink-0">
+                          {dateFormatted}
+                        </div>
+
+                        {/* Format Badge */}
+                        <div className="w-20 hidden lg:block px-2 text-muted-foreground text-xs font-normal shrink-0">
+                          <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md border border-border/40 bg-sidebar-accent/60 text-muted-foreground uppercase">
+                            .{formatExt.toLowerCase()}
+                          </span>
+                        </div>
+
+                        {/* Action Arrow */}
+                        <div className="w-8 px-1 flex justify-end shrink-0 text-muted-foreground/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all">
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
+
+                {/* Table Footer */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/50 text-xs text-muted-foreground shrink-0 min-w-0 bg-card">
+                  <span className="text-[11.5px] text-muted-foreground font-medium">
+                    {isTh ? `ทั้งหมด ${filteredNotes.length} รายการ` : `${filteredNotes.length} items`}
+                  </span>
+                </div>
+              </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              <div className="flex-1 min-h-0 overflow-y-auto w-full pr-1">
+                {filteredNotes.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center p-8 text-center space-y-3">
+                    {tagStats.length === 0 ? (
+                      <>
+                        <TagIcon className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
+                        <p className="text-base font-semibold text-foreground">
+                          {isTh ? "ยังไม่มีแท็กในโน้ต" : "No tags found"}
+                        </p>
+                        <p className="text-xs text-muted-foreground max-w-sm">
+                          {isTh
+                            ? "พิมพ์ #ชื่อแท็ก ในเนื้อหาโน้ตเพื่อจัดหมวดหมู่และค้นหาได้อย่างรวดเร็ว"
+                            : "Type #tag in any note content to organize and find notes instantly."}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
+                        <p className="text-sm font-semibold text-foreground">
+                          {isTh ? "ไม่พบโน้ตที่ตรงกับแท็กนี้" : "No notes matching this tag"}
+                        </p>
+                        <p className="text-xs text-muted-foreground max-w-sm">
+                          {isTh
+                            ? "ลองเลือกแท็กอื่นหรือล้างคำค้นหาเพื่อดูโน้ตทั้งหมด"
+                            : "Try choosing another tag or clear your search query."}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-4">
                 <AnimatePresence mode="popLayout">
                   {filteredNotes.map((note) => {
                     const snippet = getCleanSnippet(note);
@@ -696,17 +989,7 @@ export default function TagsTabView({
                         <div>
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                              {settings?.showFileIcons !== false && (
-                                note.icon ? (
-                                  <span className="shrink-0 flex items-center justify-center">
-                                    {renderCustomIcon(note.icon, "h-4 w-4", { color: note.iconColor })}
-                                  </span>
-                                ) : (() => {
-                                  const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType, note.contentFormat);
-                                  const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
-                                  return <IconComp className="h-4 w-4 shrink-0 text-primary" />;
-                                })()
-                              )}
+                              {renderNoteIcon(note, "h-4 w-4")}
                               <span className="font-semibold text-xs text-foreground group-hover:text-primary transition-colors truncate">
                                 {note.fileName || note.title || t("editor.untitled")}
                               </span>
@@ -777,7 +1060,7 @@ export default function TagsTabView({
                               ))
                             ) : note.folderPath ? (
                               <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
-                                <Folder className="h-3 w-3 shrink-0" />
+                                {renderFolderIcon(note.folderPath, "h-3 w-3")}
                                 <span className="truncate">{note.folderPath}</span>
                               </span>
                             ) : null}
@@ -790,7 +1073,9 @@ export default function TagsTabView({
                       </motion.div>
                     );
                   })}
-                </AnimatePresence>
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
             )}
           </div>

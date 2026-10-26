@@ -7,7 +7,7 @@
 
 const thaiEnglishSegmenter =
   typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? new Intl.Segmenter(["th-TH", "en-US"], { granularity: "word" })
+    ? new (Intl as any).Segmenter(["th-TH", "en-US"], { granularity: "word" })
     : null;
 
 /**

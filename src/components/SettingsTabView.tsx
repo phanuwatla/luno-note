@@ -324,24 +324,17 @@ export default function SettingsTabView({
         .then((info) => {
           if (info?.username) {
             setOsUsername(info.username);
-            if (!settings.userName) {
-              setUserNameValue(info.username);
-            }
           }
         })
         .catch((err) => {
           console.warn("Failed to get OS user info:", err);
         });
     }
-  }, [settings.userName]);
+  }, []);
 
   useEffect(() => {
-    if (settings.userName) {
-      setUserNameValue(settings.userName);
-    } else if (osUsername && !userNameValue) {
-      setUserNameValue(osUsername);
-    }
-  }, [settings.userName, osUsername]);
+    setUserNameValue(settings.userName || "");
+  }, [settings.userName]);
 
   const { status: syncStatus, userProfile, lastSyncedAt, folderStructure, triggerSync } = useGoogleDriveSync();
   const appUpdate = useAppUpdate();
@@ -577,14 +570,14 @@ export default function SettingsTabView({
                           maxLength={50}
                           className="w-full h-10 rounded-xl border border-border/80 bg-background px-3.5 py-2 text-xs font-medium text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none pr-8"
                         />
-                        {Boolean(settings.userName && settings.userName !== osUsername) && (
+                        {Boolean(settings.userName?.trim()) && (
                           <TooltipProvider delayDuration={150}>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setUserNameValue(osUsername);
+                                    setUserNameValue("");
                                     updateSetting("userName", "");
                                   }}
                                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0.5 rounded-md hover:bg-muted/80"
@@ -1480,6 +1473,14 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.toggleHeading")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.toggleHeadingDesc")}</p>
+                      </div>
+                      <Switch checked={(settings as any).toggleHeading !== false} onCheckedChange={(v) => updateSetting("toggleHeading" as any, v)} className="scale-85 origin-right cursor-pointer" />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
                         <label className="text-xs font-semibold text-foreground">{t("settings.showWordCount")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showWordCountDesc")}</p>
                       </div>
@@ -1528,6 +1529,14 @@ export default function SettingsTabView({
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showCodeLineNumbersHint")}</p>
                       </div>
                       <Switch checked={settings.showCodeLineNumbers} onCheckedChange={(v) => updateSetting("showCodeLineNumbers", v)} className="scale-85 origin-right" />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.showCodeIndentGuides")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showCodeIndentGuidesHint")}</p>
+                      </div>
+                      <Switch checked={settings.showCodeIndentGuides !== false} onCheckedChange={(v) => updateSetting("showCodeIndentGuides", v)} className="scale-85 origin-right" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">

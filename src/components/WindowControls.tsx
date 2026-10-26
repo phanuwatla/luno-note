@@ -14,19 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAppSettingsSafe } from "@/hooks/useAppSettings";
-
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron?: boolean;
-      minimize: () => void;
-      maximize: () => void;
-      snapWindow?: (boundsRatio: { xRatio: number; yRatio: number; wRatio: number; hRatio: number }) => void;
-      close: () => void;
-      isMaximized: () => Promise<boolean>;
-    };
-  }
-}
+import { finalizeAllOpenPdfSessions, getUnsavedPdfNoteIds } from "@/components/PdfEditorView";
 
 function WindowControls() {
   const { t } = useTranslation();
@@ -41,7 +29,7 @@ function WindowControls() {
     if (typeof window !== "undefined") {
       if (window.electronAPI?.isElectron) {
         setIsDesktopEnv(true);
-        window.electronAPI.isMaximized().then(setIsMaximized).catch(() => {});
+        window.electronAPI.isMaximized?.().then(setIsMaximized).catch(() => {});
       } else if (import.meta.env.DEV) {
         // Also allow testing in dev server
         setIsDesktopEnv(true);
@@ -90,13 +78,22 @@ function WindowControls() {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   useEffect(() => {
-    if (!confirmBeforeExit) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.altKey && e.key === "F4") || (e.ctrlKey && e.key.toLowerCase() === "q")) {
-        e.preventDefault();
-        e.stopPropagation();
-        setShowExitConfirm(true);
+        if (getUnsavedPdfNoteIds().length > 0) {
+          const ev = new CustomEvent("luno:request-app-close", { cancelable: true });
+          window.dispatchEvent(ev);
+          if (ev.defaultPrevented) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
+        if (confirmBeforeExit) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowExitConfirm(true);
+        }
       }
     };
 
@@ -105,8 +102,9 @@ function WindowControls() {
   }, [confirmBeforeExit]);
 
   const executeClose = () => {
+    void finalizeAllOpenPdfSessions();
     if (window.electronAPI) {
-      window.electronAPI.close();
+      window.electronAPI.close?.();
     } else {
       window.close();
     }
@@ -115,6 +113,13 @@ function WindowControls() {
   const handleClose = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowSnapLayouts(false);
+    if (getUnsavedPdfNoteIds().length > 0) {
+      const ev = new CustomEvent("luno:request-app-close", { cancelable: true });
+      window.dispatchEvent(ev);
+      if (ev.defaultPrevented) {
+        return;
+      }
+    }
     if (confirmBeforeExit) {
       setShowExitConfirm(true);
       return;
@@ -137,9 +142,9 @@ function WindowControls() {
     e.stopPropagation();
     setShowSnapLayouts(false);
     if (window.electronAPI) {
-      window.electronAPI.maximize();
-      const maximized = await window.electronAPI.isMaximized();
-      setIsMaximized(maximized);
+      window.electronAPI.maximize?.();
+      const maximized = await window.electronAPI.isMaximized?.();
+      setIsMaximized(!!maximized);
     } else {
       setIsMaximized((prev) => !prev);
     }

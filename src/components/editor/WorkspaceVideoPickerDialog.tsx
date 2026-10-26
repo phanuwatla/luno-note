@@ -76,11 +76,14 @@ export function isVideoNote(note: Note): boolean {
   return /\.(mp4|ogg|ogv|mov|m4v|mkv|avi)$/i.test(name);
 }
 
-interface WorkspaceVideoPickerDialogProps {
+export interface WorkspaceVideoPickerDialogProps {
   isOpen: boolean;
   onClose: () => void;
   notes: Note[];
   currentNote: Note | null;
+  rootDirHandle?: FileSystemDirectoryHandle | null;
+  assetBlobUrlMap?: React.MutableRefObject<Map<string, string>>;
+  onSelectVideo: (targetNote: Note, relativePath: string, blobUrl?: string) => void;
 }
 
 export const videoThumbnailCache = new Map<string, string>();

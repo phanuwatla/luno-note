@@ -1,7 +1,7 @@
 import packageJson from "../../package.json";
 
 export const APP_VERSION: string = packageJson.version;
-export const APP_NAME: string = packageJson.productName || "Luno Note";
+export const APP_NAME: string = (packageJson as any).productName || (packageJson as any).build?.productName || "Luno Note";
 export const APP_AUTHOR: string =
   typeof packageJson.author === "object" && packageJson.author !== null
     ? (packageJson.author as { name?: string }).name || "phanuwatla"

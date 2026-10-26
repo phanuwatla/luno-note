@@ -200,7 +200,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
                 {t("pinLock.currentPin") || "Current 6-Digit PIN"}
               </label>
               <input
-                ref={mode !== "set" ? inputRef : undefined}
+                ref={inputRef}
                 type={showPin ? "text" : "password"}
                 inputMode="numeric"
                 pattern="[0-9]*"

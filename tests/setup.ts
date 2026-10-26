@@ -21,3 +21,31 @@ if (typeof window !== "undefined" && !window.ResizeObserver) {
     disconnect() {}
   };
 }
+
+if (typeof window !== "undefined") {
+  const storageMap = new Map<string, string>();
+  const localStorageMock: Storage = {
+    getItem: (key: string) => storageMap.get(key) ?? null,
+    setItem: (key: string, val: string) => {
+      storageMap.set(key, String(val));
+    },
+    removeItem: (key: string) => {
+      storageMap.delete(key);
+    },
+    clear: () => {
+      storageMap.clear();
+    },
+    key: (i: number) => Array.from(storageMap.keys())[i] ?? null,
+    get length() {
+      return storageMap.size;
+    },
+  };
+  Object.defineProperty(window, "localStorage", {
+    value: localStorageMock,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    value: localStorageMock,
+    writable: true,
+  });
+}

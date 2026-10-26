@@ -6,6 +6,7 @@ export interface LunoAiMarkdownOptions {
   showCodeLineNumbers?: boolean;
   accentHeadings?: boolean;
   copyButtonText?: string;
+  canInsertToNote?: boolean;
 }
 
 const markdownRenderCache = new Map<string, string>();

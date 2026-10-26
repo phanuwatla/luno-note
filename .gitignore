@@ -47,3 +47,5 @@ src-tauri/target
 .luno/session.json
 
 
+
+*.tsbuildinfo

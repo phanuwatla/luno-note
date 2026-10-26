@@ -43,7 +43,7 @@ describe("WindowControls Confirm Before Exit", () => {
       maximize: vi.fn(),
       close: mockClose,
       isMaximized: vi.fn().mockResolvedValue(false),
-    };
+    } as any;
   });
 
   afterEach(() => {

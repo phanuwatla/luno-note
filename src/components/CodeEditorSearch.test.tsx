@@ -1,0 +1,218 @@
+import "@testing-library/jest-dom";
+import { describe, it, expect } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Search, X, ChevronUp, ChevronDown } from "lucide-react";
+
+// Mock popover test component matching Editor.tsx implementation exactly
+function MockCodeSearchToolbar({
+  isTh = false,
+  totalMatches = 3,
+  initialQuery = "",
+}: {
+  isTh?: boolean;
+  totalMatches?: number;
+  initialQuery?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState(initialQuery);
+  const [stats, setStats] = useState({
+    total: initialQuery ? totalMatches : 0,
+    current: initialQuery && totalMatches > 0 ? 0 : -1,
+  });
+
+  const handleQueryChange = (q: string) => {
+    setQuery(q);
+    if (!q.trim()) {
+      setStats({ total: 0, current: -1 });
+    } else {
+      setStats({ total: totalMatches, current: totalMatches > 0 ? 0 : -1 });
+    }
+  };
+
+  const handleNext = () => {
+    if (stats.total > 0) {
+      setStats((prev) => ({
+        ...prev,
+        current: (prev.current + 1) % prev.total,
+      }));
+    }
+  };
+
+  const handlePrev = () => {
+    if (stats.total > 0) {
+      setStats((prev) => ({
+        ...prev,
+        current: prev.current <= 0 ? prev.total - 1 : prev.current - 1,
+      }));
+    }
+  };
+
+  return (
+    <TooltipProvider>
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                data-testid="code-search-button"
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span className="sr-only">{isTh ? "ค้นหา" : "Search"}</span>
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {isTh ? "ค้นหา" : "Find"}
+          </TooltipContent>
+        </Tooltip>
+
+        <PopoverContent
+          data-code-search-popover="true"
+          align="end"
+          sideOffset={6}
+          className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text"
+        >
+          <div className="flex items-center gap-2 rounded-xl bg-muted/60 px-2.5 py-1.5 border border-border/60 focus-within:border-primary/80 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground pointer-events-none" />
+            <input
+              data-testid="code-search-input"
+              type="text"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              placeholder={isTh ? "ค้นหาในโค้ด..." : "Find in code..."}
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
+              autoFocus
+            />
+            {query && (
+              <button
+                type="button"
+                data-testid="code-search-clear"
+                onClick={() => handleQueryChange("")}
+                className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          {query.trim() && (
+            <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
+              <span data-testid="code-search-count">
+                {stats.total > 0
+                  ? isTh
+                    ? `พบ ${stats.total} รายการ${stats.current >= 0 ? ` (${stats.current + 1}/${stats.total})` : ""}`
+                    : `Found ${stats.total} matching ${stats.total === 1 ? "result" : "results"}${stats.current >= 0 ? ` (${stats.current + 1}/${stats.total})` : ""}`
+                  : isTh
+                  ? "ไม่พบข้อความที่ตรงกัน"
+                  : "No matching text"}
+              </span>
+              {stats.total > 0 && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    data-testid="code-search-prev"
+                    onClick={handlePrev}
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="code-search-next"
+                    onClick={handleNext}
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </TooltipProvider>
+  );
+}
+
+describe("Code Editor Search UI (matching Relations tab search style)", () => {
+  it("renders search trigger button with Search icon and tooltip", () => {
+    render(<MockCodeSearchToolbar />);
+    const btn = screen.getByTestId("code-search-button");
+    expect(btn).toBeInTheDocument();
+  });
+
+  it("opens floating popover menu on click with input and placeholder", () => {
+    render(<MockCodeSearchToolbar isTh={true} />);
+    const btn = screen.getByTestId("code-search-button");
+    fireEvent.click(btn);
+
+    const input = screen.getByTestId("code-search-input") as HTMLInputElement;
+    expect(input).toBeInTheDocument();
+    expect(input.placeholder).toBe("ค้นหาในโค้ด...");
+  });
+
+  it("displays match count and navigation chevrons when query is matched", () => {
+    render(<MockCodeSearchToolbar isTh={true} totalMatches={3} />);
+    const btn = screen.getByTestId("code-search-button");
+    fireEvent.click(btn);
+
+    const input = screen.getByTestId("code-search-input");
+    fireEvent.change(input, { target: { value: "test" } });
+
+    const countText = screen.getByTestId("code-search-count");
+    expect(countText.textContent).toBe("พบ 3 รายการ (1/3)");
+
+    const nextBtn = screen.getByTestId("code-search-next");
+    fireEvent.click(nextBtn);
+    expect(countText.textContent).toBe("พบ 3 รายการ (2/3)");
+
+    const prevBtn = screen.getByTestId("code-search-prev");
+    fireEvent.click(prevBtn);
+    expect(countText.textContent).toBe("พบ 3 รายการ (1/3)");
+  });
+
+  it("displays English matching results string properly", () => {
+    render(<MockCodeSearchToolbar isTh={false} totalMatches={2} />);
+    const btn = screen.getByTestId("code-search-button");
+    fireEvent.click(btn);
+
+    const input = screen.getByTestId("code-search-input");
+    fireEvent.change(input, { target: { value: "func" } });
+
+    const countText = screen.getByTestId("code-search-count");
+    expect(countText.textContent).toBe("Found 2 matching results (1/2)");
+  });
+
+  it("shows no matches message when total is 0", () => {
+    render(<MockCodeSearchToolbar isTh={true} totalMatches={0} />);
+    const btn = screen.getByTestId("code-search-button");
+    fireEvent.click(btn);
+
+    const input = screen.getByTestId("code-search-input");
+    fireEvent.change(input, { target: { value: "nothing" } });
+
+    const countText = screen.getByTestId("code-search-count");
+    expect(countText.textContent).toBe("ไม่พบข้อความที่ตรงกัน");
+  });
+
+  it("clears query and results when clear button is clicked", () => {
+    render(<MockCodeSearchToolbar isTh={true} totalMatches={5} initialQuery="hello" />);
+    const btn = screen.getByTestId("code-search-button");
+    fireEvent.click(btn);
+
+    const clearBtn = screen.getByTestId("code-search-clear");
+    fireEvent.click(clearBtn);
+
+    const input = screen.getByTestId("code-search-input") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(screen.queryByTestId("code-search-count")).toBeNull();
+  });
+});

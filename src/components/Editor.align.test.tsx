@@ -3,7 +3,6 @@ import { Editor as CoreEditor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import {
   createTurndownService,
-  preprocessMarkdownForEditor,
   normalizeSerializedMarkdown,
   renderMarkdownToEditorHtml,
   CustomParagraph,
@@ -39,7 +38,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
       content: res.finalHtml,
     });
-    const blocks = editor.getJSON().content || [];
+    const blocks: any[] = editor.getJSON().content || [];
     expect(blocks.length).toBe(2);
     expect(blocks[0].content?.[0]?.text).toBe("Line 1");
     expect(blocks[0].attrs?.textAlign).toBe("center");
@@ -56,7 +55,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
       content: res.finalHtml,
     });
-    const blocks = editor.getJSON().content || [];
+    const blocks: any[] = editor.getJSON().content || [];
     expect(blocks.length).toBe(2);
     expect(blocks[0].content?.[0]?.text).toBe("Line 1");
     expect(blocks[0].attrs?.textAlign).toBe("center");
@@ -73,7 +72,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
       content: res.finalHtml,
     });
-    const blocks = editor.getJSON().content || [];
+    const blocks: any[] = editor.getJSON().content || [];
     expect(blocks.length).toBe(2);
     expect(blocks[0].content?.[0]?.text).toBe("Line 1");
     expect(blocks[0].attrs?.textAlign).toBe("left");
@@ -90,7 +89,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
       content: res.finalHtml,
     });
-    const blocks = editor.getJSON().content || [];
+    const blocks: any[] = editor.getJSON().content || [];
     expect(blocks.length).toBe(2);
     expect(blocks[0].type).toBe("heading");
     expect(blocks[0].content?.[0]?.text).toBe("Title");
@@ -109,7 +108,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       extensions: [StarterKit.configure({ paragraph: false }), CustomParagraph, TextAlign],
       content: res.finalHtml,
     });
-    const blocks = editor.getJSON().content || [];
+    const blocks: any[] = editor.getJSON().content || [];
     expect(blocks.length).toBe(3);
     expect(blocks[0].content?.[0]?.text).toBe("Line 1");
     expect(blocks[0].attrs?.textAlign).toBe("center");
@@ -139,7 +138,7 @@ describe("Text Alignment blank line preservation across save and reload", () => 
       content: reloadedHtml,
     });
 
-    const blocks = editor2.getJSON().content || [];
+    const blocks: any[] = editor2.getJSON().content || [];
     expect(blocks.length).toBe(2); // Exactly 2 lines, no extra blank line
     expect(blocks[0].content?.[0]?.text).toBe("First line");
     expect(blocks[0].attrs?.textAlign).toBe("center");

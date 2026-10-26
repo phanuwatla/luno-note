@@ -1,5 +1,5 @@
 import { Note } from "@/hooks/useNotes";
-import { getAllKnownLocalManifests } from "./workspaceIdentity";
+import { getAllKnownLocalManifests, getLocalWorkspaceManifest } from "./workspaceIdentity";
 import { getWelcomeNoteContent, WELCOME_NOTE_FILENAME } from "./welcomeNote";
 
 export interface DriveFileItem {
@@ -1599,7 +1599,8 @@ export async function listCloudWorkspaces(token: string): Promise<Array<{
  */
 export async function createCloudWorkspace(
   token: string,
-  workspaceName: string
+  workspaceName: string,
+  welcomeContent?: string | null
 ): Promise<{ folderId: string; workspaceId: string; name: string }> {
   const cleanName = workspaceName.trim() || "Workspace";
   const structure = await ensureLunoFolderStructure(token, cleanName);

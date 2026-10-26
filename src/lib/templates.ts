@@ -619,13 +619,19 @@ export function getDefaultTemplateForExtension(
   if (name.endsWith(".html") || name.endsWith(".htm") || name === "html" || name === "htm") {
     return settings.defaultTemplateHtml || "blank";
   }
+  if (name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs") || name === "javascript" || name === "js") {
+    return "blank";
+  }
+  if (name.endsWith(".css") || name === "css") {
+    return "blank";
+  }
   return settings.defaultTemplateMd || settings.defaultNoteTemplate || "blank";
 }
 
 export function getNoteTemplateContent(
   templateType: NoteTemplateType,
   lang: "en" | "th" = "en",
-  format: "markdown" | "html" | "plain" = "markdown",
+  format: "markdown" | "html" | "plain" | "css" | "javascript" = "markdown",
   dateFormat: string = "YYYY-MM-DD",
   timeFormat: string = "24h",
   iconPack: string = "lucide"
@@ -634,6 +640,11 @@ export function getNoteTemplateContent(
   const now = new Date();
   const dateStr = formatDate(now, dateFormat, lang);
   const timeStr = formatTime(now, timeFormat, lang);
+
+  // Handle JavaScript and CSS
+  if (format === "javascript" || format === "css") {
+    return "";
+  }
 
   // Handle Plain Text Format templates (.txt)
   if (format === "plain") {

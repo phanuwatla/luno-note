@@ -503,6 +503,7 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               </SelectContent>
             </Select>
           </div>
+        </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -895,6 +896,24 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
         </div>
         <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
           <div>
+            <label htmlFor={`${idPrefix}-toggleHeading`} className="text-sm font-medium text-foreground">
+              {t("settings.toggleHeading")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.toggleHeadingDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {(settings as any).toggleHeading !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-toggleHeading`}
+              checked={(settings as any).toggleHeading !== false}
+              onCheckedChange={(checked) => updateSetting("toggleHeading" as any, checked)}
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
             <label htmlFor={`${idPrefix}-showFileIcons`} className="text-sm font-medium text-foreground">
               {t("settings.showFileIcons")}
             </label>
@@ -1010,6 +1029,25 @@ export function SettingsBody({ idPrefix = "set" }: SettingsBodyProps) {
               id={`${idPrefix}-showCodeLineNumbers`}
               checked={settings.showCodeLineNumbers}
               onCheckedChange={(checked) => updateSetting("showCodeLineNumbers", checked)}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+          <div>
+            <label htmlFor={`${idPrefix}-showCodeIndentGuides`} className="text-sm font-medium text-foreground">
+              {t("settings.showCodeIndentGuides")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("settings.showCodeIndentGuidesDesc")}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted-foreground">
+              {settings.showCodeIndentGuides !== false ? t("settings.enabled") : t("settings.disabled")}
+            </span>
+            <Switch
+              id={`${idPrefix}-showCodeIndentGuides`}
+              checked={settings.showCodeIndentGuides !== false}
+              onCheckedChange={(checked) => updateSetting("showCodeIndentGuides", checked)}
             />
           </div>
         </div>

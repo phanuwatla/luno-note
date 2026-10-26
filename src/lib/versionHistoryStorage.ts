@@ -4,7 +4,11 @@
  * frontmatter/property preservation, and cross-session persistence across program restarts.
  */
 
-import type { Note } from "@/hooks/useNotes";
+import {
+  isSystemGeneratedUntitledName,
+  extractBaseTitleFromFileName,
+  type Note,
+} from "@/hooks/useNotes";
 import { countWords, countCharacters } from "./wordCount";
 import {
   parseFrontmatterAndTags,
@@ -23,7 +27,7 @@ export interface NoteVersionSnapshot {
   timestamp: number;
   title: string;
   content: string;
-  contentFormat?: "plain" | "markdown" | "html" | "css";
+  contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js";
   wordCount: number;
   charCount: number;
   trigger: "auto" | "manual" | "pre-restore";
@@ -60,14 +64,15 @@ export function getNoteRelativePath(
  */
 export function resolveNoteContentFormat(
   note: { contentFormat?: string; fileName?: string } | null | undefined
-): "plain" | "markdown" | "html" | "css" {
+): "plain" | "markdown" | "html" | "css" | "javascript" {
   if (!note) return "markdown";
-  if (note.contentFormat === "css" || note.contentFormat === "html" || note.contentFormat === "plain" || note.contentFormat === "markdown") {
-    return note.contentFormat;
+  if (note.contentFormat === "css" || note.contentFormat === "html" || note.contentFormat === "plain" || note.contentFormat === "markdown" || note.contentFormat === "javascript" || note.contentFormat === "js") {
+    return note.contentFormat === "js" ? "javascript" : note.contentFormat;
   }
   const fn = (note.fileName || "").toLowerCase();
   if (fn.endsWith(".css")) return "css";
   if (fn.endsWith(".html") || fn.endsWith(".htm")) return "html";
+  if (fn.endsWith(".js") || fn.endsWith(".mjs") || fn.endsWith(".cjs")) return "javascript";
   if (fn.endsWith(".txt")) return "plain";
   return "markdown";
 }
@@ -102,10 +107,11 @@ export function getNoteVersionHistory(
   noteOrId: string | Note,
   explicitRelPath?: string | null
 ): NoteVersionSnapshot[] {
-  if (!noteOrId) return [];
+  if (!noteOrId && !explicitRelPath) return [];
 
   let noteId = "";
   let relPath: string | null = explicitRelPath ?? null;
+  const noteObj: Note | null = typeof noteOrId === "object" ? (noteOrId as Note) : null;
 
   if (typeof noteOrId === "object") {
     noteId = noteOrId.id || "";
@@ -113,7 +119,7 @@ export function getNoteVersionHistory(
       relPath = getNoteRelativePath(noteOrId);
     }
   } else {
-    noteId = noteOrId;
+    noteId = noteOrId || "";
   }
 
   const storage = getStorage();
@@ -150,8 +156,25 @@ export function getNoteVersionHistory(
       if (raw) {
         const list: NoteVersionSnapshot[] = JSON.parse(raw);
         if (Array.isArray(list)) {
+          const rawFileName = relPath.split("/").pop() || "";
+          const baseName = extractBaseTitleFromFileName(rawFileName);
+          const isUntitled = isSystemGeneratedUntitledName(baseName);
+
           for (const s of list) {
             if (s && s.id) {
+              // Stale check for untitled files:
+              // Never adopt snapshots from a different noteId if untitled, or if created before the note was created.
+              if (isUntitled) {
+                if (noteId && s.noteId && s.noteId !== noteId) {
+                  continue;
+                }
+                if (noteObj?.createdAt && s.timestamp < noteObj.createdAt - 2000) {
+                  continue;
+                }
+              } else if (noteObj?.createdAt && s.timestamp < noteObj.createdAt - 5000 && noteId && s.noteId && s.noteId !== noteId) {
+                continue;
+              }
+
               const existing = snapshotsMap.get(s.id);
               if (!existing) {
                 snapshotsMap.set(s.id, s);
@@ -376,14 +399,21 @@ export function deleteVersionSnapshot(
  */
 export function clearNoteHistory(
   noteOrId: string | Note,
-  explicitRelPath?: string | null
+  explicitRelPath?: string | null,
+  rootDirHandle?: FileSystemDirectoryHandle | null
 ): void {
-  if (!noteOrId) return;
-  const history = getNoteVersionHistory(noteOrId, explicitRelPath);
-  const noteId = typeof noteOrId === "object" ? noteOrId.id : noteOrId;
+  if (!noteOrId && !explicitRelPath) return;
+
+  const noteId = typeof noteOrId === "object" ? noteOrId.id : (noteOrId || "");
   let relPath = explicitRelPath || (typeof noteOrId === "object" ? getNoteRelativePath(noteOrId) : null);
-  if (!relPath && history[0]?.relPath) {
-    relPath = history[0].relPath;
+
+  // Cancel any pending debounced timers
+  if (relPath) {
+    const existing = debouncedHistoryTimers.get(relPath);
+    if (existing) {
+      clearTimeout(existing);
+      debouncedHistoryTimers.delete(relPath);
+    }
   }
 
   try {
@@ -395,7 +425,7 @@ export function clearNoteHistory(
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("luno:version-snapshot-saved", {
-          detail: { noteId },
+          detail: { noteId, relPath, cleared: true },
         })
       );
     }
@@ -404,7 +434,7 @@ export function clearNoteHistory(
   }
 
   if (relPath) {
-    scheduleSaveWorkspaceHistory(relPath, []);
+    void deleteWorkspaceHistoryFromDisk(rootDirHandle ?? null, relPath);
   }
 }
 
@@ -502,6 +532,12 @@ export async function saveWorkspaceHistoryToDisk(
   relPath: string,
   history: NoteVersionSnapshot[]
 ): Promise<void> {
+  if (!relPath) return;
+  if (!history || history.length === 0) {
+    await deleteWorkspaceHistoryFromDisk(rootDirHandle, relPath);
+    return;
+  }
+
   const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
   const jsonStr = JSON.stringify(history, null, 2);
   const filename = getHistoryDiskFilename(relPath);
@@ -530,6 +566,115 @@ export async function saveWorkspaceHistoryToDisk(
     await writable.close();
   } catch (err) {
     console.warn("Failed to write .luno/history file", err);
+  }
+}
+
+export async function deleteWorkspaceHistoryFromDisk(
+  rootDirHandle: FileSystemDirectoryHandle | null,
+  relPath: string
+): Promise<void> {
+  if (!relPath) return;
+  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const safeFilename = getHistoryDiskFilename(relPath);
+  const legacyFilename = getLegacyHistoryDiskFilename(relPath);
+
+  if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder) {
+    try {
+      const saved = await electronAPI.getSavedWorkspace();
+      if (saved?.folderPath) {
+        const fullPath = `${saved.folderPath}/.luno/history/${safeFilename}`;
+        await electronAPI.deleteFileOrFolder(fullPath);
+        if (legacyFilename !== safeFilename) {
+          const legacyFullPath = `${saved.folderPath}/.luno/history/${legacyFilename}`;
+          await electronAPI.deleteFileOrFolder(legacyFullPath);
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed to delete .luno/history in Electron", err);
+    }
+  }
+
+  if (!rootDirHandle) return;
+
+  try {
+    const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: false });
+    const historyDir = await metaDir.getDirectoryHandle("history", { create: false });
+    try {
+      await historyDir.removeEntry(safeFilename);
+    } catch {}
+    if (legacyFilename !== safeFilename) {
+      try {
+        await historyDir.removeEntry(legacyFilename);
+      } catch {}
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Migrates version history when a file is renamed or moved to a new relative path.
+ * Updates snapshots' relPath, transfers localStorage entries, and updates/renames disk files.
+ */
+export async function renameNoteVersionHistory(
+  oldRelPath: string,
+  newRelPath: string,
+  noteId?: string,
+  rootDirHandle?: FileSystemDirectoryHandle | null
+): Promise<void> {
+  if (!oldRelPath || !newRelPath || oldRelPath === newRelPath) return;
+
+  // Cancel any pending debounced save for oldRelPath
+  const existingTimer = debouncedHistoryTimers.get(oldRelPath);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    debouncedHistoryTimers.delete(oldRelPath);
+  }
+
+  // Load current history for this file
+  const history = getNoteVersionHistory(noteId || "", oldRelPath);
+
+  // Update relPath in all snapshots
+  const updatedHistory = history.map((s) => ({
+    ...s,
+    relPath: newRelPath,
+  }));
+
+  const storage = getStorage();
+  try {
+    if (storage) {
+      // Remove old path key
+      storage.removeItem(getPathStorageKey(oldRelPath));
+
+      if (updatedHistory.length > 0) {
+        const jsonStr = JSON.stringify(updatedHistory);
+        storage.setItem(getPathStorageKey(newRelPath), jsonStr);
+        if (noteId) {
+          storage.setItem(getStorageKey(noteId), jsonStr);
+        }
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("luno:version-snapshot-saved", {
+          detail: { noteId, oldRelPath, newRelPath },
+        })
+      );
+    }
+  } catch (err) {
+    console.warn("Failed migrating version history in localStorage:", err);
+  }
+
+  // Disk operations: delete old history from disk, write updated history to new path
+  try {
+    await deleteWorkspaceHistoryFromDisk(rootDirHandle ?? null, oldRelPath);
+    if (updatedHistory.length > 0) {
+      await saveWorkspaceHistoryToDisk(rootDirHandle ?? null, newRelPath, updatedHistory);
+    }
+  } catch (err) {
+    console.warn("Failed migrating workspace history on disk:", err);
   }
 }
 

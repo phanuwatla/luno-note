@@ -30,13 +30,18 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { getToolbarIcon } from "@/lib/iconPacks";
 import { useToast } from "@/hooks/use-toast";
-import type { Note } from "@/hooks/useNotes";
+import {
+  type Note,
+  isSystemGeneratedUntitledName,
+  extractBaseTitleFromFileName,
+} from "@/hooks/useNotes";
 import {
   getNoteVersionHistory,
   saveVersionSnapshot,
   deleteVersionSnapshot,
   groupVersionSnapshots,
   loadWorkspaceHistoryFromDisk,
+  deleteWorkspaceHistoryFromDisk,
   getNoteRelativePath,
   getStorageKey,
   getPathStorageKey,
@@ -100,14 +105,31 @@ function VersionHistoryPanelComponent({
         if (relPath) {
           void loadWorkspaceHistoryFromDisk(null, relPath).then((diskList) => {
             if (diskList && diskList.length > 0) {
-              try {
-                const storage = typeof localStorage !== "undefined" ? localStorage : null;
-                if (storage) {
-                  if (note.id) storage.setItem(getStorageKey(note.id), JSON.stringify(diskList));
-                  storage.setItem(getPathStorageKey(relPath), JSON.stringify(diskList));
+              const rawFileName = note.fileName || relPath.split("/").pop() || "";
+              const baseName = extractBaseTitleFromFileName(rawFileName);
+              const isUntitled = isSystemGeneratedUntitledName(baseName);
+              const validList = diskList.filter((s) => {
+                if (isUntitled) {
+                  if (note.id && s.noteId && s.noteId !== note.id) return false;
+                  if (note.createdAt && s.timestamp < note.createdAt - 2000) return false;
+                } else if (note.createdAt && s.timestamp < note.createdAt - 5000 && note.id && s.noteId && s.noteId !== note.id) {
+                  return false;
                 }
-              } catch {}
-              setHistory(diskList);
+                return true;
+              });
+
+              if (validList.length > 0) {
+                try {
+                  const storage = typeof localStorage !== "undefined" ? localStorage : null;
+                  if (storage) {
+                    if (note.id) storage.setItem(getStorageKey(note.id), JSON.stringify(validList));
+                    storage.setItem(getPathStorageKey(relPath), JSON.stringify(validList));
+                  }
+                } catch {}
+                setHistory(validList);
+              } else if (isUntitled && diskList.length > 0) {
+                void deleteWorkspaceHistoryFromDisk(null, relPath);
+              }
             }
           });
         }

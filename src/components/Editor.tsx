@@ -1,4 +1,12 @@
-import HtmlCodeEditor from "@/components/HtmlCodeEditor";
+import HtmlCodeEditor, { HtmlCodeEditorHandle } from "@/components/HtmlCodeEditor";
+import { PdfEditorView, PdfEditorViewHandle, clearPdfEditorDraft, pdfDraftBookmarksMap, pdfSessionCleanBase64Map } from "@/components/PdfEditorView";
+import {
+  getElectronCleanBasePdfPath,
+  type InkoOutlineItem,
+  type InkoTool,
+  type InkoViewerLiveState,
+  type PdfPageBookmark,
+} from "@/lib/inkoPdfBridge";
 import RightPanel from "@/components/RightPanel";
 import VersionHistoryPanel from "@/components/VersionHistoryPanel";
 import VersionHistorySplitDiffView from "@/components/VersionHistorySplitDiffView";
@@ -9,6 +17,7 @@ import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } fro
 import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_SPELL_REGEX, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
 import {
   Bold,
+  Bookmark,
   Check,
   CheckCircle2,
   Circle,
@@ -24,7 +33,9 @@ import {
   FolderArchive,
   Images,
   ImagePlus,
+  LayoutGrid,
   Mic,
+  MousePointer2,
   Italic,
   Wrench,
   Link2,
@@ -40,7 +51,11 @@ import {
   Moon,
   MoreHorizontal,
   ClipboardList,
+  Pen,
   Plus,
+  Square,
+  TextCursor,
+  Type,
   FolderPlus,
   Undo2,
   Redo2,
@@ -70,6 +85,7 @@ import {
   Save,
   Table as TableIcon,
   Copy,
+  ChevronLeft,
   ChevronRight,
   Columns,
   Layers,
@@ -136,6 +152,7 @@ import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -201,6 +218,8 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { marked } from "marked";
 import { countWords, countCharacters } from "@/lib/wordCount";
 import { formatDateForFileName, formatRelativeDateTime } from "@/lib/dateTimeFormatter";
+import HeadingToggle, { headingTogglePluginKey } from "@/lib/headingToggle";
+export { HeadingToggle, headingTogglePluginKey };
 import { Underline, Highlight, Superscript, Subscript, Kbd, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
 
 marked.use({
@@ -278,6 +297,7 @@ export function clearNoteEditorHistory(noteId: string) {
   noteEditorStateMap.delete(noteId);
   codeEditorContentMap.delete(noteId);
   noteScrollPositionMap.delete(noteId);
+  clearPdfEditorDraft(noteId);
   try {
     sessionStorage.removeItem(`luno_scroll_${noteId}`);
     localStorage.removeItem(`luno_backup_${noteId}`);
@@ -2069,8 +2089,8 @@ export const SmartTypography = Extension.create<SmartTypographyOptions>({
     const rules = buildSmartTypographyRules(() => {
       const opt = extension.options.enabled;
       if (typeof opt === "function") return Boolean(opt());
-      if (typeof extension.editor?.storage?.smartTypography?.enabled === "boolean") {
-        return extension.editor.storage.smartTypography.enabled;
+      if (typeof (extension.editor?.storage as any)?.smartTypography?.enabled === "boolean") {
+        return (extension.editor.storage as any).smartTypography.enabled;
       }
       return Boolean(opt);
     });
@@ -3126,7 +3146,7 @@ export interface EditorProps {
 }
 
 interface SaveSnapshot {
-  ext: "md" | "txt" | "html" | "css";
+  ext: "md" | "txt" | "html" | "css" | "js";
   content: string;
 }
 
@@ -4739,9 +4759,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
-  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">("txt");
+  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html" | "css" | "js">("txt");
   const [newFolderName, setNewFolderName] = useState("");
-  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }>(null);
+  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript"; folderName?: string }>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const isReadingModeRef = useRef(isReadingMode);
   isReadingModeRef.current = isReadingMode;
@@ -5076,8 +5096,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const handleCreateFileFromDialog = () => {
-    const baseName = (newFileName || "").trim();
-    const contentFormat = newFileExt === "md" ? "markdown" : newFileExt === "html" ? "html" : "plain";
+    let base = (newFileName || "").trim();
+    let ext = newFileExt || "txt";
+    const dotIdx = base.lastIndexOf(".");
+    if (dotIdx > 0) {
+      const typedExt = base.slice(dotIdx + 1).toLowerCase();
+      if (["js", "mjs", "cjs", "css", "html", "htm", "md", "markdown", "txt"].includes(typedExt)) {
+        ext = (typedExt === "markdown" ? "md" : typedExt === "htm" ? "html" : typedExt) as "txt" | "md" | "html" | "css" | "js";
+        base = base.slice(0, dotIdx);
+      }
+    }
+    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : ext === "css" ? "css" : ext === "js" ? "javascript" : "plain";
     const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
     let defaultBaseName = "Untitled";
     if (settings.newFilePattern === "date") {
@@ -5085,7 +5114,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else if (settings.newFilePattern === "daily") {
       defaultBaseName = `Daily-${dateStr}`;
     }
-    const fileName = baseName ? `${baseName}.${newFileExt}` : `${defaultBaseName}.${newFileExt}`;
+    const fileName = base ? `${base}.${ext}` : `${defaultBaseName}.${ext}`;
 
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "file", fileName, contentFormat });
@@ -5258,8 +5287,174 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [activeFileSize, setActiveFileSize] = useState<number | null>(null);
   const [imageZoomMode, setImageZoomMode] = useState<"fit" | "custom">("fit");
   const [imageCustomZoom, setImageCustomZoom] = useState<number>(100);
+  const [pdfLoadedNoteId, setPdfLoadedNoteId] = useState<string | null>(null);
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfFullPath, setPdfFullPath] = useState<string | undefined>(undefined);
+  const [pdfWorkspaceFolder, setPdfWorkspaceFolder] = useState<string | null>(null);
+  const [isPdfLoadingSource, setIsPdfLoadingSource] = useState(false);
+  const [isPdfViewLoaded, setIsPdfViewLoaded] = useState(false);
+  const [pdfSourceError, setPdfSourceError] = useState<string | null>(null);
+  const [pdfViewerState, setPdfViewerState] = useState<InkoViewerLiveState | null>(null);
+  const [pdfActiveTool, setPdfActiveTool] = useState<InkoTool | null>("select");
+  const [lastPdfShape, setLastPdfShape] = useState<"rectangle" | "circle" | "line" | "arrow">("rectangle");
+  const [pdfActiveBrushColor, setPdfActiveBrushColor] = useState<string>("#000000");
+  const [pdfActiveBrushWidth, setPdfActiveBrushWidth] = useState<number>(3);
+  const [pdfActiveFontSize, setPdfActiveFontSize] = useState<number>(16);
+  const [pdfActiveHighlightColor, setPdfActiveHighlightColor] = useState<string>("#facc15");
+  const [pdfActiveHighlightWidth, setPdfActiveHighlightWidth] = useState<number>(16);
+  const [pdfActiveEraserWidth, setPdfActiveEraserWidth] = useState<number>(20);
+  const [pdfActiveShapeFillColor, setPdfActiveShapeFillColor] = useState<string | null>(null);
+  const [pdfActiveShapeFillOpacity, setPdfActiveShapeFillOpacity] = useState<number>(100);
+  const [pdfActiveShapeNoStroke, setPdfActiveShapeNoStroke] = useState<boolean>(false);
+  const [pdfPageJumpOpen, setPdfPageJumpOpen] = useState(false);
+  const [pdfPageJumpValue, setPdfPageJumpValue] = useState("");
+  const [pdfBookmarks, setPdfBookmarks] = useState<PdfPageBookmark[]>([]);
+  const [pdfBookmarkOpen, setPdfBookmarkOpen] = useState(false);
+  const [pdfBookmarkTitleInput, setPdfBookmarkTitleInput] = useState("");
+  const pdfEditorRef = useRef<PdfEditorViewHandle | null>(null);
+  const pdfViewerStateRef = useRef<InkoViewerLiveState | null>(null);
+  pdfViewerStateRef.current = pdfViewerState;
+  const pdfActiveToolRef = useRef<InkoTool | null>(null);
+  pdfActiveToolRef.current = pdfActiveTool;
+
+  const handleSelectPdfTool = useCallback((tool: InkoTool) => {
+    setPdfActiveTool(tool);
+    setPdfViewerState((prev) => (prev ? {
+      ...prev,
+      currentTool: tool,
+      hasSelection: tool === "select" ? prev.hasSelection : false,
+      selectedMeta: tool === "select" ? prev.selectedMeta : null,
+    } : null));
+    pdfEditorRef.current?.setTool(tool);
+  }, []);
   const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
   const [htmlDeviceMode, setHtmlDeviceMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
+
+  const codeEditorRef = useRef<HtmlCodeEditorHandle>(null);
+  const codeSearchInputRef = useRef<HTMLInputElement>(null);
+  const [isCodeSearchOpen, setIsCodeSearchOpen] = useState(false);
+  const [codeSearchQuery, setCodeSearchQuery] = useState("");
+  const [codeSearchStats, setCodeSearchStats] = useState({ total: 0, current: -1 });
+
+  const handleOpenCodeSearch = useCallback((selectedText?: string) => {
+    setIsCodeSearchOpen(true);
+    const queryToUse = selectedText || codeSearchQuery;
+    if (queryToUse) {
+      setCodeSearchQuery(queryToUse);
+      const res = codeEditorRef.current?.setSearchQuery(queryToUse);
+      if (res) setCodeSearchStats(res);
+    }
+    setTimeout(() => {
+      codeSearchInputRef.current?.focus();
+      if (queryToUse) {
+        codeSearchInputRef.current?.select();
+      }
+    }, 60);
+  }, [codeSearchQuery]);
+
+  const handleCodeSearchOpenChange = useCallback((open: boolean) => {
+    setIsCodeSearchOpen(open);
+    if (!open) {
+      codeEditorRef.current?.clearSearch();
+    } else {
+      const selected = codeEditorRef.current?.getSelectionText();
+      const queryToUse = selected || codeSearchQuery;
+      if (queryToUse) {
+        setCodeSearchQuery(queryToUse);
+        const res = codeEditorRef.current?.setSearchQuery(queryToUse);
+        if (res) setCodeSearchStats(res);
+      }
+      setTimeout(() => {
+        codeSearchInputRef.current?.focus();
+        if (queryToUse) {
+          codeSearchInputRef.current?.select();
+        }
+      }, 60);
+    }
+  }, [codeSearchQuery]);
+
+  const handleCodeSearchQueryChange = useCallback((query: string) => {
+    setCodeSearchQuery(query);
+    const res = codeEditorRef.current?.setSearchQuery(query);
+    if (res) setCodeSearchStats(res);
+  }, []);
+
+  const handleCodeSearchNext = useCallback(() => {
+    const res = codeEditorRef.current?.findNext(codeSearchQuery);
+    if (res) setCodeSearchStats(res);
+  }, [codeSearchQuery]);
+
+  const handleCodeSearchPrev = useCallback(() => {
+    const res = codeEditorRef.current?.findPrev(codeSearchQuery);
+    if (res) setCodeSearchStats(res);
+  }, [codeSearchQuery]);
+
+  useEffect(() => {
+    setIsCodeSearchOpen(false);
+    setCodeSearchQuery("");
+    setCodeSearchStats({ total: 0, current: -1 });
+  }, [note?.id]);
+
+  const pdfSearchInputRef = useRef<HTMLInputElement>(null);
+  const [isPdfSearchOpen, setIsPdfSearchOpen] = useState(false);
+  const [pdfSearchQuery, setPdfSearchQuery] = useState("");
+  const [pdfSearchStats, setPdfSearchStats] = useState({ total: 0, current: -1 });
+
+  const handleOpenPdfSearch = useCallback((selectedText?: string) => {
+    setIsPdfSearchOpen(true);
+    const queryToUse = (selectedText || pdfSearchQuery).trim();
+    if (queryToUse) {
+      setPdfSearchQuery(queryToUse);
+      pdfEditorRef.current?.setSearchQuery(queryToUse);
+    }
+    setTimeout(() => {
+      pdfSearchInputRef.current?.focus();
+      if (queryToUse) {
+        pdfSearchInputRef.current?.select();
+      }
+    }, 60);
+  }, [pdfSearchQuery]);
+
+  const handlePdfSearchOpenChange = useCallback((open: boolean) => {
+    setIsPdfSearchOpen(open);
+    if (open) {
+      const queryToUse = pdfSearchQuery.trim();
+      if (queryToUse) {
+        pdfEditorRef.current?.setSearchQuery(queryToUse);
+      }
+      setTimeout(() => {
+        pdfSearchInputRef.current?.focus();
+        if (pdfSearchQuery) {
+          pdfSearchInputRef.current?.select();
+        }
+      }, 60);
+    }
+  }, [pdfSearchQuery]);
+
+  const handlePdfSearchQueryChange = useCallback((query: string) => {
+    setPdfSearchQuery(query);
+    if (!query.trim()) {
+      setPdfSearchStats({ total: 0, current: -1 });
+      pdfEditorRef.current?.closeSearch();
+    } else {
+      pdfEditorRef.current?.setSearchQuery(query);
+    }
+  }, []);
+
+  const handlePdfSearchNext = useCallback(() => {
+    pdfEditorRef.current?.searchNext();
+  }, []);
+
+  const handlePdfSearchPrev = useCallback(() => {
+    pdfEditorRef.current?.searchPrev();
+  }, []);
+
+  useEffect(() => {
+    setIsPdfSearchOpen(false);
+    setPdfSearchQuery("");
+    setPdfSearchStats({ total: 0, current: -1 });
+  }, [note?.id]);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [clockOpen, setClockOpen] = useState(false);
@@ -5388,7 +5583,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isLikelyHtml = (text: string) => /<\/?[a-z][\s\S]*>/i.test(text);
   
   const getContentFormat = (): "plain" | "markdown" | "html" => {
-    if (note?.contentFormat && note.contentFormat !== "css") return note.contentFormat;
+    if (note?.contentFormat && note.contentFormat !== "css" && note.contentFormat !== "javascript" && note.contentFormat !== "js") return note.contentFormat;
     return "markdown";
   };
 
@@ -5415,6 +5610,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return false;
   }, []);
 
+  const isJsFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    if (targetNote.contentFormat === "javascript" || targetNote.contentFormat === "js") return true;
+    const fileName = targetNote.fileName?.toLowerCase() ?? "";
+    if (fileName.endsWith(".js") || fileName.endsWith(".mjs") || fileName.endsWith(".cjs")) return true;
+    return false;
+  }, []);
+
   const isImageFile = useCallback((targetNote: Note | null) => {
     if (!targetNote) return false;
     if (targetNote.fileType === "image") return true;
@@ -5422,11 +5625,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|tiff?)$/i.test(name);
   }, []);
 
+  const isPdfFile = useCallback((targetNote: Note | null) => {
+    if (!targetNote) return false;
+    const name = (targetNote.fileName || targetNote.title || "").toLowerCase();
+    return /\.pdf$/i.test(name);
+  }, []);
+
   const isBinaryFile = useCallback((targetNote: Note | null) => {
     if (!targetNote) return false;
+    const name = (targetNote.fileName || targetNote.title || "").toLowerCase();
+    if (/\.pdf$/i.test(name)) return false;
     if (targetNote.fileType === "binary") return true;
-    const name = targetNote.fileName?.toLowerCase() ?? "";
-    return /\.(zip|rar|7z|tar|gz|bz2|pdf|docx?|xlsx?|pptx?|mp3|wav|ogg|m4a|flac|aac|mp4|webm|mov|avi|mkv|exe|bin|iso|dmg|apk)$/i.test(name);
+    return /\.(zip|rar|7z|tar|gz|bz2|docx?|xlsx?|pptx?|mp3|wav|ogg|m4a|flac|aac|mp4|webm|mov|avi|mkv|exe|bin|iso|dmg|apk)$/i.test(name);
   }, []);
 
   const isAudioFile = useCallback((targetNote: Note | null) => {
@@ -5442,10 +5652,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isCodeFile = useCallback((targetNote: Note | null) => {
     if (!targetNote) return false;
     if (targetNote.contentFormat === "css" || isCssFile(targetNote)) return true;
+    if (targetNote.contentFormat === "javascript" || targetNote.contentFormat === "js" || isJsFile(targetNote)) return true;
     if (targetNote.contentFormat === "html" || isHtmlFile(targetNote)) return false;
     const name = targetNote.fileName?.toLowerCase() ?? "";
     return /\.(js|jsx|ts|tsx|json|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|swift|kt|scss|less|yaml|yml|toml|xml|sql|sh|bash|zsh|vue|svelte)$/i.test(name);
-  }, [isCssFile, isHtmlFile]);
+  }, [isCssFile, isHtmlFile, isJsFile]);
 
   const formatFileSize = useCallback((bytes: number | null | undefined): string => {
     if (bytes == null || isNaN(bytes) || bytes < 0) return "";
@@ -5501,8 +5712,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (name.endsWith(".mkv")) return "Matroska Video";
     if (name.endsWith(".avi")) return "AVI Video";
     if (name.endsWith(".wmv") || name.endsWith(".flv") || name.endsWith(".ogv") || name.endsWith(".3gp") || name.endsWith(".mpg") || name.endsWith(".mpeg")) return "Video File";
-    if (targetNote.fileType === "video") return isTh ? "วิดีโอ" : "Video";
-    if (targetNote.fileType === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
+    if ((targetNote.fileType as string) === "video") return isTh ? "วิดีโอ" : "Video";
+    if ((targetNote.fileType as string) === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
 
     if (targetNote.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
     if (targetNote.contentFormat === "css" || name.endsWith(".css")) return "CSS";
@@ -5596,11 +5807,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         console.warn("Open in system app failed:", err);
       }
     }
-    const src = videoBlobUrl || imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
+    const src = videoBlobUrl || imageBlobUrl || pdfBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
     if (src) {
       window.open(src, "_blank");
     }
-  }, [note, imageBlobUrl, videoBlobUrl]);
+  }, [note, imageBlobUrl, videoBlobUrl, pdfBlobUrl]);
 
   const handleRevealInFileExplorer = useCallback(async () => {
     if (!note) return;
@@ -6135,23 +6346,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const wasVisible = prevIsVisibleRef.current;
     prevIsVisibleRef.current = isVisible;
 
-    if (!isVisible && wasVisible && note?.id && editorScrollContainerRef.current && !isHtmlFile(note) && !isCssFile(note)) {
+    if (!isVisible && wasVisible && note?.id && editorScrollContainerRef.current && !isHtmlFile(note) && !isCssFile(note) && !isJsFile(note)) {
       const container = editorScrollContainerRef.current;
       if (container.scrollTop > 0) {
         setNoteScrollPosition(note.id, container.scrollTop);
       }
-    } else if (isVisible && !wasVisible && note?.id && !isHtmlFile(note) && !isCssFile(note)) {
+    } else if (isVisible && !wasVisible && note?.id && !isHtmlFile(note) && !isCssFile(note) && !isJsFile(note)) {
       if (editorInstanceRef.current && (editorActiveNoteIdRef.current !== note.id || closedNoteIds.has(note.id))) {
         setEditorTick((v) => (v + 1) % 1000000);
       }
       restoreScrollPosition(note.id);
     }
-  }, [isVisible, note?.id, restoreScrollPosition, isHtmlFile, isCssFile]);
+  }, [isVisible, note?.id, restoreScrollPosition, isHtmlFile, isCssFile, isJsFile]);
 
   const handleEditorScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!note?.id) return;
     if (isRestoringScrollRef.current) return;
-    if (isHtmlFile(note) || isCssFile(note) || isImageFile(note) || isBinaryFile(note)) return;
+    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || isJsFile(note) || isImageFile(note) || isBinaryFile(note)) return;
     const target = e.currentTarget;
     if (
       target.scrollTop === 0 &&
@@ -6161,7 +6372,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     const top = target.scrollTop;
     setNoteScrollPosition(note.id, top);
-  }, [note?.id, isHtmlFile, isCssFile, isImageFile, isBinaryFile]);
+  }, [note?.id, isHtmlFile, isCssFile, isJsFile, isImageFile, isBinaryFile]);
 
   const serializeEditorContent = useCallback((targetNote: Note, instance: TiptapEditor): string => {
     if (isTxtFile(targetNote)) {
@@ -6234,7 +6445,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (userEditedRef.current && currentNote) {
       let contentToSave = pendingSaveContentRef.current?.content;
-      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote))) {
+      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote) || isJsFile(currentNote))) {
         contentToSave = codeEditorContentMap.get(currentNote.id) ?? currentNote.content;
       }
       if ((contentToSave === undefined || contentToSave === null) && editorInstanceRef.current && !editorInstanceRef.current.isDestroyed) {
@@ -6244,12 +6455,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           // fallback
         }
       }
-      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote))) {
+      if ((contentToSave === undefined || contentToSave === null) && (isHtmlFile(currentNote) || isCssFile(currentNote) || isJsFile(currentNote))) {
         contentToSave = currentNote.content;
       }
       pendingSaveContentRef.current = null;
       if (contentToSave !== undefined && contentToSave !== null) {
-        if (isHtmlFile(currentNote) || isCssFile(currentNote)) {
+        if (isHtmlFile(currentNote) || isCssFile(currentNote) || isJsFile(currentNote)) {
           codeEditorContentMap.set(currentNote.id, contentToSave);
         }
         if (!currentNote.isLocked) {
@@ -6282,7 +6493,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else if (!userEditedRef.current) {
       pendingSaveContentRef.current = null;
     }
-  }, [onUpdate, serializeEditorContent, isHtmlFile, isCssFile]);
+  }, [onUpdate, serializeEditorContent, isHtmlFile, isCssFile, isJsFile]);
 
   const ensureCursorVisible = useCallback((ed?: TiptapEditor | null) => {
     const activeEditor = ed || editorInstanceRef.current;
@@ -6372,6 +6583,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
       SmartTypography.configure({
         enabled: () => settingsRef.current?.smartTypography !== false,
+      }),
+      HeadingToggle.configure({
+        enabled: () => (settingsRef.current as any)?.toggleHeading !== false,
       }),
       Underline,
       Highlight,
@@ -7070,6 +7284,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const savedState = note?.id ? noteEditorStateMap.get(note.id) : null;
       if (savedState) {
         instance.view.updateState(savedState);
+        if (note?.id) {
+          instance.view.dispatch(
+            instance.state.tr
+              .setMeta("addToHistory", false)
+              .setMeta(headingTogglePluginKey, {
+                setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+              })
+          );
+        }
       } else {
         // Ensure initial editor state has a clean history (undoDepth: 0)
         const cleanState = EditorState.create({
@@ -7077,6 +7300,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           plugins: instance.state.plugins,
         });
         instance.view.updateState(cleanState);
+        if (note?.id) {
+          instance.view.dispatch(
+            instance.state.tr
+              .setMeta("addToHistory", false)
+              .setMeta(headingTogglePluginKey, {
+                setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+              })
+          );
+        }
         if (note?.id && !hasReadingModeFootnotesDoc(instance.state.doc)) {
           noteEditorStateMap.set(note.id, instance.state);
         }
@@ -7457,6 +7689,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       syntaxLabel = "CSS";
     } else if (fileName.endsWith(".html") || note?.contentFormat === "html") {
       syntaxLabel = "HTML";
+    } else if (fileName.endsWith(".js") || fileName.endsWith(".mjs") || fileName.endsWith(".cjs") || note?.contentFormat === "javascript" || note?.contentFormat === "js" || isJsFile(note)) {
+      syntaxLabel = "JavaScript";
     } else if (fileName.endsWith(".txt")) {
       syntaxLabel = t("editor.formatText") || "Plain Text";
     }
@@ -7464,14 +7698,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const currentFontSize = settings.editorFontSize || editorFontSize || 15;
     const zoom = Math.round((currentFontSize / 15) * 100);
 
-    if (note?.contentFormat === "html" || note?.contentFormat === "css" || isCssFile(note) || isHtmlFile(note)) {
+    if (note?.contentFormat === "html" || note?.contentFormat === "css" || note?.contentFormat === "javascript" || note?.contentFormat === "js" || isCssFile(note) || isHtmlFile(note) || isJsFile(note)) {
       return {
         line: htmlCursor.line,
         col: htmlCursor.col,
         charCount: cachedCounts.charCount,
         wordCount: cachedCounts.wordCount,
         readingTime: cachedCounts.readingTime,
-        syntaxLabel: (note?.contentFormat === "css" || isCssFile(note)) ? "CSS" : "HTML",
+        syntaxLabel: (note?.contentFormat === "css" || isCssFile(note)) ? "CSS" : (note?.contentFormat === "javascript" || note?.contentFormat === "js" || isJsFile(note)) ? "JavaScript" : "HTML",
         zoom,
       };
     }
@@ -7547,7 +7781,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (isReadingModeRef.current) return;
     if (!hasPendingDiskSaveRef.current) return;
     const n = targetNote || activeNoteRef.current || note;
-    if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n)) || !settings.autoSave) return;
+    if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n) && !isJsFile(n)) || !settings.autoSave) return;
     if ((n.isLocked && !n.isDecrypted) || isEncryptedNote(n.content)) return;
     if (!targetNote && editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== n.id) return;
     if (n.fileType === "image" || n.fileType === "binary") return;
@@ -7574,7 +7808,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         setSaveStatus("failed");
       }
     }
-  }, [note, editor, isHtmlFile, isCssFile, settings.autoSave, notes]);
+  }, [note, editor, isHtmlFile, isCssFile, isJsFile, settings.autoSave, notes]);
 
   const scheduleAutoSaveDisk = useCallback(() => {
     if (autoSaveDiskTimeoutRef.current) {
@@ -7639,8 +7873,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     try {
-      if (editor.storage?.smartTypography) {
-        editor.storage.smartTypography.enabled = settings.smartTypography !== false;
+      if ((editor.storage as any)?.smartTypography) {
+        (editor.storage as any).smartTypography.enabled = settings.smartTypography !== false;
       }
     } catch {}
   }, [editor, settings.smartTypography]);
@@ -7679,7 +7913,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     | "auto_saving"
     | "unsaved"
     | "failed"
-    | "unavailable";
+    | "unavailable"
+    | "idle";
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastEditedTime, setLastEditedTime] = useState<number | null>(null);
@@ -7849,7 +8084,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (
         userEditedRef.current ||
         hasPendingDiskSaveRef.current ||
-        ((isHtmlFile(target) || isCssFile(target)) && codeEditorContentMap.has(targetId))
+        ((isHtmlFile(target) || isCssFile(target) || isJsFile(target)) && codeEditorContentMap.has(targetId))
       ) {
         flushDebouncedContentSave(target);
         if (settings.autoSave) {
@@ -8013,10 +8248,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         void saveLinkedFileToDisk(prevNote);
       }
       if (!closedNoteIds.has(prevId)) {
-        if (editor?.state && !isReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote)) {
+        if (editor?.state && !isReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
           noteEditorStateMap.set(prevId, editor.state);
         }
-        if (editorScrollContainerRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote)) {
+        if (editorScrollContainerRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
           const container = editorScrollContainerRef.current;
           if (container.scrollTop > 0) {
             setNoteScrollPosition(prevId, container.scrollTop);
@@ -8044,7 +8279,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    if (isHtmlFile(note) || isCssFile(note)) {
+    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note)) {
       if (debounceRenameTimeoutRef.current) {
         clearTimeout(debounceRenameTimeoutRef.current);
         debounceRenameTimeoutRef.current = null;
@@ -8083,6 +8318,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         editorActiveNoteIdRef.current = note.id;
         activeNoteRef.current = note;
         editor.view.updateState(savedState);
+        if (note?.id) {
+          editor.view.dispatch(
+            editor.state.tr
+              .setMeta("addToHistory", false)
+              .setMeta(headingTogglePluginKey, {
+                setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+              })
+          );
+        }
         if (isReadingMode) {
           editor.setEditable(false);
           const rawContent = noteRef.current?.content ?? note.content ?? "";
@@ -8128,6 +8372,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
     activeNoteRef.current = note;
+    if (note?.id) {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta("addToHistory", false)
+          .setMeta("isSync", true)
+          .setMeta(headingTogglePluginKey, {
+            setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: false },
+          })
+      );
+    }
     (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
     void resolveRelativeImagesInEditor(editor);
 
@@ -8153,6 +8407,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       plugins: editor.state.plugins,
     });
     editor.view.updateState(cleanState);
+    if (note?.id) {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta("addToHistory", false)
+          .setMeta(headingTogglePluginKey, {
+            setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+          })
+      );
+    }
     if (!isReadingMode) {
       noteEditorStateMap.set(note.id, editor.state);
     }
@@ -8329,6 +8592,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       if (isSavedStateValid && !hasFootnotes) {
         editor.view.updateState(savedState);
+        if (note.id) {
+          editor.view.dispatch(
+            editor.state.tr
+              .setMeta("addToHistory", false)
+              .setMeta(headingTogglePluginKey, {
+                setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+              })
+          );
+        }
       } else {
         // If note has footnotes or savedState was tainted, always parse fresh clean Edit-Mode content!
         const isTxt = isTxtFile(note);
@@ -8342,6 +8614,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         });
         editor.view.updateState(cleanState);
         if (note.id) {
+          editor.view.dispatch(
+            editor.state.tr
+              .setMeta("addToHistory", false)
+              .setMeta(headingTogglePluginKey, {
+                setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
+              })
+          );
           noteEditorStateMap.set(note.id, editor.state);
         }
       }
@@ -8371,6 +8650,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       .setMeta(spellCheckPluginKey, { recompute: true });
     editor.view.dispatch(tr);
   }, [editor, spellCheckEnabled, settings.wrongLanguageSuggestion]);
+
+  const toggleHeadingEnabled = (settings as any).toggleHeading !== false;
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.extensionManager.extensions.forEach((ext) => {
+      if (ext.name === "headingToggle") {
+        ext.options.enabled = toggleHeadingEnabled;
+      }
+    });
+    const tr = editor.state.tr
+      .setMeta("addToHistory", false)
+      .setMeta(headingTogglePluginKey, { recompute: true });
+    editor.view.dispatch(tr);
+  }, [editor, toggleHeadingEnabled]);
 
 
   useEffect(() => {
@@ -8433,13 +8726,166 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
-      if (!ctrl) return;
-
       const key = e.key ? e.key.toLowerCase() : "";
       const code = e.code || "";
 
+      // Target element check for editable fields
+      const target = e.target as HTMLElement | null;
+      const isTyping = Boolean(
+        target && (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          target.closest("input, textarea, [contenteditable='true'], [role='textbox'], dialog[open]")
+        )
+      );
+
+      // PDF Editor shortcuts (when viewing a PDF note)
+      if (isPdfFile(note)) {
+        if (ctrl && !e.altKey) {
+          // Ctrl + S (Save Note)
+          if ((key === "s" || code === "KeyS" || key === "ห") && !e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSaveFile();
+            return;
+          }
+          // Ctrl + F (Search PDF)
+          if (!e.shiftKey && (key === "f" || code === "KeyF" || key === "ด")) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleOpenPdfSearch();
+            return;
+          }
+          // Ctrl + P (Print PDF)
+          if (!e.shiftKey && (key === "p" || code === "KeyP" || key === "ย")) {
+            e.preventDefault();
+            e.stopPropagation();
+            void pdfEditorRef.current?.printPdf();
+            return;
+          }
+          // Ctrl + Z (Undo)
+          if (!e.shiftKey && (key === "z" || code === "KeyZ" || key === "ผ")) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (pdfEditorRef.current?.undo) {
+              pdfEditorRef.current.undo();
+            } else {
+              pdfEditorRef.current?.sendCommand("undo");
+            }
+            return;
+          }
+          // Ctrl + Y or Ctrl + Shift + Z (Redo)
+          if ((!e.shiftKey && (key === "y" || code === "KeyY" || key === "ั")) || (e.shiftKey && (key === "z" || code === "KeyZ" || key === "ผ"))) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (pdfEditorRef.current?.redo) {
+              pdfEditorRef.current.redo();
+            } else {
+              pdfEditorRef.current?.sendCommand("redo");
+            }
+            return;
+          }
+          // Ctrl + + / Ctrl + = (Zoom In)
+          if (key === "+" || key === "=" || code === "Equal" || code === "NumpadAdd") {
+            e.preventDefault();
+            e.stopPropagation();
+            pdfEditorRef.current?.sendCommand("zoomIn");
+            return;
+          }
+          // Ctrl + - / Ctrl + _ (Zoom Out)
+          if (key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract") {
+            e.preventDefault();
+            e.stopPropagation();
+            pdfEditorRef.current?.sendCommand("zoomOut");
+            return;
+          }
+          // Ctrl + 0 (Reset Zoom)
+          if (key === "0" || code === "Digit0" || code === "Numpad0") {
+            e.preventDefault();
+            e.stopPropagation();
+            pdfEditorRef.current?.sendCommand("zoomReset");
+            return;
+          }
+        } else if (!ctrl && !e.altKey && !isTyping) {
+          // Delete / Backspace: Delete selected annotation item
+          if (key === "delete" || code === "Delete" || key === "backspace" || code === "Backspace") {
+            if (pdfViewerStateRef.current?.hasSelection) {
+              e.preventDefault();
+              e.stopPropagation();
+              pdfEditorRef.current?.sendCommand("deleteSelected");
+              setPdfViewerState((prev) => (prev ? { ...prev, hasSelection: false, selectedMeta: null } : null));
+              return;
+            }
+          }
+          // Escape: Deselect annotation / revert tool to select
+          if (key === "escape" || code === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            pdfEditorRef.current?.sendCommand("clearSelection");
+            setPdfViewerState((prev) => (prev ? { ...prev, hasSelection: false, selectedMeta: null } : null));
+            const curTool = pdfActiveToolRef.current || pdfViewerStateRef.current?.currentTool;
+            if (curTool && curTool !== "select" && curTool !== "contentSelect") {
+              handleSelectPdfTool("select");
+            }
+            return;
+          }
+          // Single-key Tool Switching (V, I, P, H, E, T, R, O, L, A) - supports both English and Thai keyboard layouts
+          if (!e.shiftKey) {
+            const toolByCodeMap: Record<string, InkoTool> = {
+              KeyV: "select",
+              KeyI: "contentSelect",
+              KeyP: "pen",
+              KeyH: "highlighter",
+              KeyE: "eraser",
+              KeyT: "text",
+              KeyR: "rectangle",
+              KeyO: "circle",
+              KeyL: "line",
+              KeyA: "arrow",
+            };
+            const toolByKeyMap: Record<string, InkoTool> = {
+              v: "select",
+              i: "contentSelect",
+              p: "pen",
+              h: "highlighter",
+              e: "eraser",
+              t: "text",
+              r: "rectangle",
+              o: "circle",
+              l: "line",
+              a: "arrow",
+              // Thai Kedmanee layout mappings
+              "อ": "select",
+              "ร": "contentSelect",
+              "ย": "pen",
+              "้": "highlighter",
+              "ำ": "eraser",
+              "ะ": "text",
+              "พ": "rectangle",
+              "น": "circle",
+              "ส": "line",
+              "ฟ": "arrow",
+            };
+            const targetTool = toolByCodeMap[code] || toolByKeyMap[key];
+            if (targetTool) {
+              e.preventDefault();
+              e.stopPropagation();
+              if (targetTool === "rectangle" || targetTool === "circle" || targetTool === "line" || targetTool === "arrow") {
+                setLastPdfShape(targetTool);
+              }
+              handleSelectPdfTool(targetTool);
+              return;
+            }
+          }
+        }
+      }
+
+      // If not Ctrl, stop here for non-PDF shortcuts
+      if (!ctrl) return;
+
       // Ctrl + S (Save Note)
-      if ((key === "s" || code === "KeyS") && !e.shiftKey && !e.altKey) {
+      if ((key === "s" || code === "KeyS" || key === "ห") && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         handleSaveFile();
@@ -8629,7 +9075,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [note, editor, bringCalculatorToFront, bringClockToFront, handleSaveFile]);
+  }, [note, editor, bringCalculatorToFront, bringClockToFront, handleSaveFile, handleOpenPdfSearch, handleSelectPdfTool]);
   const showUiAlert = (message: string) => setAlertMessage(message);
   const rememberSelection = () => {
     if (!editor) return;
@@ -9197,7 +9643,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const isHtml = isHtmlFile(note);
       const baseTitle = getBaseTitle(note);
       const parsed = parseEditorContent(proposedText, baseTitle, isTxt, isHtml);
-      editor.commands.setContent(parsed, true);
+      editor.commands.setContent(parsed, { emitUpdate: true });
     } else {
       const isRich =
         proposedText.includes("\n") ||
@@ -10372,13 +10818,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const canUseNativeFs = canUseNativeFileSystem;
 
-  const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | "css" | null>(null);
+  const [selectedExtension, setSelectedExtension] = useState<"md" | "txt" | "html" | "css" | "js" | null>(null);
 
   const getPreferredExtension = (targetNote?: Note) => {
     if (selectedExtension) return selectedExtension;
     const n = targetNote || activeNoteRef.current || note;
     const currentFileName = n?.fileName?.toLowerCase() ?? "";
     if (currentFileName.endsWith(".css") || n?.contentFormat === "css") return "css";
+    if (currentFileName.endsWith(".js") || currentFileName.endsWith(".mjs") || currentFileName.endsWith(".cjs") || n?.contentFormat === "javascript" || n?.contentFormat === "js") return "js";
     if (currentFileName.endsWith(".txt")) return "txt";
     if (currentFileName.endsWith(".md") || currentFileName.endsWith(".markdown")) return "md";
     if (currentFileName.endsWith(".html") || currentFileName.endsWith(".htm")) return "html";
@@ -10697,7 +11144,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleRestoreVersionContent = useCallback((ver: NoteVersionSnapshot) => {
     if (!note) return;
-    const currentContent = (isHtmlFile(note) || isCssFile(note) || !editor)
+    const currentContent = (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || !editor)
       ? (note.content || "")
       : serializeEditorContent(note, editor);
     saveVersionSnapshot({ ...note, content: currentContent }, "pre-restore");
@@ -10751,7 +11198,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     onUpdate(note.id, patch);
 
     // 4. Update TipTap Editor DOM (for markdown and txt files)
-    if (!isHtmlFile(note) && !isCssFile(note) && editor && !editor.isDestroyed) {
+    if (!isHtmlFile(note) && !isCssFile(note) && !isJsFile(note) && editor && !editor.isDestroyed) {
       const baseTitle = getBaseTitle(note);
       const parsed = parseEditorContent(ver.content, baseTitle, isTxtFile(note), isHtmlFile(note));
       syncingFromNote.current = true;
@@ -10781,7 +11228,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleManualVersionSnapshot = useCallback((): NoteVersionSnapshot | null => {
     if (!note) return null;
-    const isCode = isHtmlFile(note) || isCssFile(note) || !editor;
+    const isCode = isHtmlFile(note) || isCssFile(note) || isJsFile(note) || !editor;
     const currentContent = isCode ? (note.content || "") : serializeEditorContent(note, editor);
     const words = isCode
       ? (currentContent.trim() ? currentContent.trim().split(/\s+/).filter(Boolean).length : 0)
@@ -10797,7 +11244,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       chars
     );
     return snap;
-  }, [note, editor, isHtmlFile, isCssFile, serializeEditorContent, editorStats]);
+  }, [note, editor, isHtmlFile, isCssFile, isJsFile, serializeEditorContent, editorStats]);
 
   const handleCodeEditorChange = useCallback((val: string) => {
     if (!note) return;
@@ -11044,10 +11491,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return html.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, "");
   };
 
-  const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css", targetNote?: Note): string => {
+  const getContentToSave = (targetExt?: "md" | "txt" | "html" | "css" | "js", targetNote?: Note): string => {
     const n = targetNote || activeNoteRef.current || note;
     if (!n) return "";
-    if (isHtmlFile(n) || isCssFile(n) || targetExt === "css" || targetExt === "html") {
+    if (isHtmlFile(n) || isCssFile(n) || isJsFile(n) || targetExt === "css" || targetExt === "html" || targetExt === "js") {
       if (pendingSaveContentRef.current && pendingSaveContentRef.current.id === n.id) {
         return pendingSaveContentRef.current.content;
       }
@@ -11069,7 +11516,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (isReadingModeRef.current && (!targetExt || targetExt === "md" || isMarkdownNote(n))) {
       return sourceContent;
     }
-    const format = targetExt === "html" ? "html" : targetExt === "txt" ? "plain" : targetExt === "md" ? "markdown" : getContentFormat();
+    const format = targetExt === "txt" ? "plain" : targetExt === "md" ? "markdown" : getContentFormat();
 
     let rawHtml = "";
     if (editor && !editor.isDestroyed) {
@@ -11139,7 +11586,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   };
 
-  const setSavedSnapshot = (noteId: string, ext: "md" | "txt" | "html" | "css", content: string) => {
+  const setSavedSnapshot = (noteId: string, ext: "md" | "txt" | "html" | "css" | "js", content: string) => {
     setSavedSnapshotByNoteId((prev) => ({
       ...prev,
       [noteId]: { ext, content },
@@ -11173,7 +11620,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   };
 
-  const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" | "css" = "txt") => {
+  const downloadMarkdown = (markdown: string, ext: "md" | "txt" | "html" | "css" | "js" = "txt") => {
     if (!note) return;
 
     const normalizedContent = lineEnding === "CRLF"
@@ -11259,7 +11706,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (ok) {
           if (saveOpIdRef.current === currentOpId) {
             hasPendingDiskSaveRef.current = false;
-            if (isHtmlFile(n) || isCssFile(n)) {
+            if (isHtmlFile(n) || isCssFile(n) || isJsFile(n)) {
               codeEditorContentMap.set(n.id, normalizedContent);
             }
             if (n.content !== normalizedContent && !userEditedRef.current) {
@@ -11286,7 +11733,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!existingHandle?.createWritable) {
       if (saveOpIdRef.current === currentOpId) {
         hasPendingDiskSaveRef.current = false;
-        if (isHtmlFile(n) || isCssFile(n)) {
+        if (isHtmlFile(n) || isCssFile(n) || isJsFile(n)) {
           codeEditorContentMap.set(n.id, normalizedContent);
         }
         if (n.content !== normalizedContent && !userEditedRef.current) {
@@ -11322,7 +11769,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       writable = null;
       if (saveOpIdRef.current === currentOpId) {
         hasPendingDiskSaveRef.current = false;
-        if (isHtmlFile(n) || isCssFile(n)) {
+        if (isHtmlFile(n) || isCssFile(n) || isJsFile(n)) {
           codeEditorContentMap.set(n.id, normalizedContent);
         }
         if (n.content !== normalizedContent && !userEditedRef.current) {
@@ -11364,12 +11811,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!note || isNoteDeleted(note.id)) return;
     if (note.fileType === "image" || note.fileType === "binary") return;
 
-    const preferredExt = customExt || (getPreferredExtension() as "md" | "txt" | "html" | "css");
+    const preferredExt = customExt || (getPreferredExtension() as "md" | "txt" | "html" | "css" | "js");
     const rawContent = customContent ?? getContentToSave(preferredExt);
     const content = lineEnding === "CRLF"
       ? rawContent.replace(/\r?\n/g, "\r\n")
       : rawContent.replace(/\r\n/g, "\n");
-    const baseName = getSuggestedFileName().replace(/\.(md|txt|html|css)$/i, "");
+    const baseName = getSuggestedFileName().replace(/\.(md|txt|html|css|js|mjs|cjs)$/i, "");
     const defaultFileName = `${baseName}.${preferredExt}`;
 
     const currentOpId = ++saveOpIdRef.current;
@@ -11387,6 +11834,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             { name: "Plain Text Document (*.txt)", extensions: ["txt"] },
             { name: "HTML Document (*.html)", extensions: ["html", "htm"] },
             { name: "CSS Stylesheet (*.css)", extensions: ["css"] },
+            { name: "JavaScript File (*.js)", extensions: ["js", "mjs", "cjs"] },
             { name: "All Files (*.*)", extensions: ["*"] },
           ],
         });
@@ -11396,8 +11844,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           return;
         }
 
-        const selectedExt = (filePath.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css";
-        const finalContent = getContentToSave(selectedExt === "html" || selectedExt === "txt" || selectedExt === "css" ? selectedExt : "md");
+        const selectedExt = (filePath.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css" | "js";
+        const finalContent = getContentToSave(selectedExt === "html" || selectedExt === "txt" || selectedExt === "css" || selectedExt === "js" ? selectedExt : "md");
         const ok = await electronAPI.writeFileContent({ fullPath: filePath, content: finalContent });
         if (ok) {
           setSavedSnapshot(note.id, selectedExt, finalContent);
@@ -11437,12 +11885,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               description: "CSS Stylesheet (*.css)",
               accept: { "text/css": [".css"] },
             },
+            {
+              description: "JavaScript File (*.js)",
+              accept: { "text/javascript": [".js", ".mjs", ".cjs"] },
+            },
           ],
         });
 
         const file = await handle.getFile();
-        const chosenExt = (file.name.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css";
-        const finalContent = getContentToSave(chosenExt === "html" || chosenExt === "txt" || chosenExt === "css" ? chosenExt : "md");
+        const chosenExt = (file.name.split(".").pop() || "md").toLowerCase() as "md" | "txt" | "html" | "css" | "js";
+        const finalContent = getContentToSave(chosenExt === "html" || chosenExt === "txt" || chosenExt === "css" || chosenExt === "js" ? chosenExt : "md");
 
         const writable = await handle.createWritable();
         await writable.write(finalContent);
@@ -11456,7 +11908,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             targetNoteId = createdNote.id;
             onUpdate(targetNoteId, {
               content: chosenExt === "txt" ? finalContent : note.content,
-              contentFormat: chosenExt === "txt" ? "plain" : chosenExt === "html" ? "html" : "markdown",
+              contentFormat: chosenExt === "txt" ? "plain" : chosenExt === "html" ? "html" : chosenExt === "css" ? "css" : chosenExt === "js" ? "javascript" : "markdown",
               isLinkedFile: false,
               fileName: undefined,
             });
@@ -11497,6 +11949,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let objectUrl: string | null = null;
     let audioObjectUrl: string | null = null;
     let videoObjectUrl: string | null = null;
+    let pdfObjectUrl: string | null = null;
 
     const initialUrl =
       note.content?.startsWith("data:image/") ||
@@ -11515,6 +11968,29 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         ? note.content
         : null
     );
+    const sessionCleanPdfB64 = isPdfFile(note) ? pdfSessionCleanBase64Map.get(note.id) || null : null;
+    const initialPdfB64 = sessionCleanPdfB64
+      ? sessionCleanPdfB64
+      : note.content?.startsWith("data:application/pdf;base64,")
+      ? note.content.slice("data:application/pdf;base64,".length)
+      : null;
+    const initialPdfUrl =
+      isPdfFile(note) && (note.content?.startsWith("blob:") || note.content?.startsWith("http"))
+        ? note.content
+        : null;
+    setPdfLoadedNoteId(initialPdfB64 || initialPdfUrl ? note.id : null);
+    setPdfBase64(initialPdfB64);
+    setPdfBlobUrl(initialPdfUrl);
+    setPdfFullPath((note as any)?.fullPath || undefined);
+    setPdfWorkspaceFolder(null);
+    setPdfSourceError(null);
+    setPdfViewerState(null);
+    setPdfActiveTool("select");
+    setPdfBookmarks(pdfDraftBookmarksMap.get(note.id) || []);
+    setPdfBookmarkOpen(false);
+    setPdfBookmarkTitleInput("");
+    setIsPdfViewLoaded(false);
+    setIsPdfLoadingSource(isPdfFile(note) && !initialPdfB64 && !initialPdfUrl);
     setVideoDimensions(null);
     setVideoDuration(null);
     setVideoError(false);
@@ -11557,9 +12033,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           let fullPath = (note as any).fullPath;
           if (!fullPath && electronAPI.getSavedWorkspace && note?.fileName) {
             const saved = await electronAPI.getSavedWorkspace();
-            if (saved?.folderPath) {
+            const wsFolder = typeof saved === "string" ? saved : saved?.folderPath;
+            if (wsFolder && typeof wsFolder === "string") {
               const relPath = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
-              fullPath = `${saved.folderPath}/${relPath}`;
+              fullPath = `${wsFolder.replace(/[\\/]+$/, "")}/${relPath}`;
             }
           }
 
@@ -11714,8 +12191,70 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }
             }
 
+            // For PDF files in Electron, load base64 directly for Inko PDF Editor
+            // Prefer pristine .base.pdf if annotations were previously flattened onto fullPath,
+            // so reopening in Luno Note never double-renders flattened strokes under editable vector layers.
+            const isPdf = isPdfFile(note);
+            if (isPdf && electronAPI.readFileBase64) {
+              try {
+                let workspaceRoot: string | null = null;
+                if (electronAPI.getSavedWorkspace) {
+                  try {
+                    const saved = await electronAPI.getSavedWorkspace();
+                    workspaceRoot = (typeof saved === "string" ? saved : saved?.folderPath) || null;
+                  } catch {}
+                }
+                const b64 = await electronAPI.readFileBase64(fullPath);
+                let sourceB64 = pdfSessionCleanBase64Map.get(note.id) || b64;
+                if (!pdfSessionCleanBase64Map.get(note.id)) {
+                  const candidateCleanPaths = Array.from(
+                    new Set(
+                      [
+                        getElectronCleanBasePdfPath(fullPath, workspaceRoot),
+                        getElectronCleanBasePdfPath(fullPath, null),
+                      ].filter(Boolean) as string[]
+                    )
+                  );
+                  for (const cleanBasePath of candidateCleanPaths) {
+                    try {
+                      const cleanB64 = await electronAPI.readFileBase64(cleanBasePath);
+                      if (cleanB64 && cleanB64.length > 0) {
+                        sourceB64 = cleanB64;
+                        break;
+                      }
+                    } catch {}
+                  }
+                }
+                if (sourceB64) {
+                  pdfSessionCleanBase64Map.set(note.id, sourceB64);
+                }
+                if (!cancelled) {
+                  setPdfFullPath(fullPath);
+                  setPdfWorkspaceFolder(workspaceRoot);
+                  if (sourceB64) {
+                    const sizeSource = b64 || sourceB64;
+                    const padding = (sizeSource.match(/=/g) || []).length;
+                    setActiveFileSize(Math.max(0, Math.floor((sizeSource.length * 3) / 4 - padding)));
+                    setPdfBase64(sourceB64);
+                    setPdfLoadedNoteId(note.id);
+                    setPdfSourceError(null);
+                  } else {
+                    setPdfSourceError(lang === "th" ? "ไม่สามารถอ่านไฟล์ PDF ได้" : "Failed to read PDF file");
+                  }
+                  setIsPdfLoadingSource(false);
+                }
+                return;
+              } catch (err) {
+                if (!cancelled) {
+                  setPdfSourceError(err instanceof Error ? err.message : String(err));
+                  setIsPdfLoadingSource(false);
+                }
+                return;
+              }
+            }
+
             // For other binary / raw files in Electron, load file size from base64 if not known yet
-            if (!isImg && !isAud && !isVid && electronAPI.readFileBase64) {
+            if (!isImg && !isAud && !isVid && !isPdf && electronAPI.readFileBase64) {
               try {
                 const b64 = await electronAPI.readFileBase64(fullPath);
                 if (b64 && !cancelled) {
@@ -11779,13 +12318,23 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             /* ignore handle fallback error */
           }
         }
-        if (cancelled || !storedHandle) return;
+        if (cancelled || !storedHandle) {
+          if (!cancelled && isPdfFile(note)) {
+            setIsPdfLoadingSource(false);
+          }
+          return;
+        }
 
         fileHandleByNoteIdRef.current[note.id] = storedHandle;
 
         try {
           const permission = await requestPermissionIfAvailable(storedHandle, "read");
-          if (permission !== "granted") return;
+          if (permission !== "granted") {
+            if (!cancelled && isPdfFile(note)) {
+              setIsPdfLoadingSource(false);
+            }
+            return;
+          }
 
           const file = await storedHandle.getFile();
           if (!cancelled) {
@@ -11834,6 +12383,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             return;
           }
 
+          if (isPdfFile(note)) {
+            const pdfBlob = file.type === "application/pdf" ? file : new Blob([file], { type: "application/pdf" });
+            pdfObjectUrl = URL.createObjectURL(pdfBlob);
+            if (!cancelled) {
+              setPdfBlobUrl(pdfObjectUrl);
+              setPdfLoadedNoteId(note.id);
+              setPdfSourceError(null);
+              setIsPdfLoadingSource(false);
+            }
+            // Generate base64 in background for offline persistence if needed, without blocking immediate PDF rendering
+            file.arrayBuffer().then((buf) => {
+              if (cancelled) return;
+              const bytes = new Uint8Array(buf);
+              let binary = "";
+              const chunkSize = 0x8000;
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+              }
+              const b64 = window.btoa(binary);
+              if (!cancelled) {
+                setPdfBase64(b64);
+                setPdfLoadedNoteId(note.id);
+              }
+            }).catch(() => {});
+            return;
+          }
+
           if (note.fileType === "binary") return;
 
           const text = await file.text();
@@ -11872,6 +12448,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           } catch {}
         }
       }
+      if (!cancelled && isPdfFile(note)) {
+        setIsPdfLoadingSource(false);
+      }
     };
 
     void hydrateHandle();
@@ -11881,6 +12460,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
       if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
+      if (pdfObjectUrl) URL.revokeObjectURL(pdfObjectUrl);
     };
   }, [note?.id, note?.fileName, note?.folderPath, note?.fileType, (note as any)?.fullPath, canUseNativeFs, rootDirHandle]);
 
@@ -11960,12 +12540,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 if (img.complete) {
                   return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
                 }
-                return new Promise((resolve) => {
+                return new Promise<void>((resolve) => {
                   img.onload = () => {
                     if (img.decode) img.decode().catch(() => {}).then(resolve);
                     else resolve();
                   };
-                  img.onerror = resolve;
+                  img.onerror = () => resolve();
                 });
               })
             ),
@@ -12439,6 +13019,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   async function handleSaveFile() {
     if (!note) return;
+    if (isPdfFile(note)) {
+      setSaveStatus("saving");
+      const ok = await pdfEditorRef.current?.saveAnnotations();
+      if (ok) {
+        setSaveStatus("manually_saved");
+      } else {
+        setSaveStatus("unsaved");
+      }
+      return;
+    }
     if (note.fileType === "image" || note.fileType === "binary") return;
 
     if (debouncedContentSaveTimeoutRef.current) {
@@ -12449,7 +13039,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const ext = getPreferredExtension() as "md" | "txt" | "html" | "css";
     const content = getContentToSave(ext);
 
-    if (isHtmlFile(note) || isCssFile(note) || ext === "html" || ext === "css") {
+    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || ext === "html" || ext === "css") {
       codeEditorContentMap.set(note.id, content);
       try {
         localStorage.setItem(`luno_backup_${note.id}`, content);
@@ -12479,7 +13069,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           hasPendingDiskSaveRef.current = false;
           userEditedRef.current = false;
           pendingSaveContentRef.current = null;
-          if (isHtmlFile(note) || isCssFile(note) || ext === "html" || ext === "css") {
+          if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || ext === "html" || ext === "css") {
             codeEditorContentMap.set(note.id, content);
           }
           onUpdate(note.id, { content });
@@ -12550,9 +13140,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const isNonEditable =
       !note ||
       note.fileType === "image" ||
-      note.fileType === "binary" ||
-      note.fileName?.toLowerCase()?.endsWith(".zip") ||
-      note.fileName?.toLowerCase()?.endsWith(".pdf");
+      (note.fileType === "binary" && !isPdfFile(note)) ||
+      note.fileName?.toLowerCase()?.endsWith(".zip");
 
     if (isNonEditable) {
       return null;
@@ -12652,6 +13241,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const isBin = isBinaryFile(note);
     const isHtml = note.contentFormat === "html" || isHtmlFile(note);
     const isCss = note.contentFormat === "css" || isCssFile(note);
+    const isJs = note.contentFormat === "javascript" || note.contentFormat === "js" || isJsFile(note);
     const isCode = isCodeFile(note);
 
     // 1. Image Actions: Print, Share (and Relock if locked)
@@ -12698,6 +13288,306 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+          </Tooltip>
+
+          {/* Relock Note */}
+          {note.isLocked && note.isDecrypted && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRelockNote?.(note.id)}
+                  className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                >
+                  {(() => {
+                    const LockIconComp = getToolbarIcon("lock", settings.iconPack);
+                    return <LockIconComp className="h-3.5 w-3.5" />;
+                  })()}
+                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+            </Tooltip>
+          )}
+        </Fragment>
+      );
+    }
+
+    // 1b. PDF Editor Actions: Search, Reading/Editing Mode, Save Dropdown, Print, Share, Relock
+    if (isPdfFile(note)) {
+      const isTh = settings.language === "th";
+      return (
+        <Fragment>
+          {/* Search Button for PDF Editor (matching Relations tab & Code editor search style) */}
+          <Popover open={isPdfSearchOpen} onOpenChange={handlePdfSearchOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    data-testid="pdf-search-button"
+                    className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 outline-none select-none"
+                  >
+                    {(() => {
+                      const SearchIconComp = getToolbarIcon("search", settings.iconPack);
+                      return <SearchIconComp className="h-3.5 w-3.5" />;
+                    })()}
+                    <span className="sr-only">{t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}</span>
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isTh ? "ค้นหา (Ctrl+F)" : "Find (Ctrl+F)"}
+              </TooltipContent>
+            </Tooltip>
+
+            <PopoverContent
+              data-pdf-search-popover="true"
+              align="end"
+              sideOffset={6}
+              className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text"
+            >
+              <div className="flex items-center gap-2 rounded-xl bg-muted/60 px-2.5 py-1.5 border border-border/60 focus-within:border-primary/80 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+                {(() => {
+                  const SearchIconComp = getToolbarIcon("search", settings.iconPack);
+                  return <SearchIconComp className="h-3.5 w-3.5 shrink-0 text-muted-foreground pointer-events-none" />;
+                })()}
+                <input
+                  ref={pdfSearchInputRef}
+                  data-pdf-search="true"
+                  data-testid="pdf-search-input"
+                  type="text"
+                  value={pdfSearchQuery}
+                  onChange={(e) => handlePdfSearchQueryChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (e.shiftKey) {
+                        handlePdfSearchPrev();
+                      } else {
+                        handlePdfSearchNext();
+                      }
+                    } else if (e.key === "Escape") {
+                      if (pdfSearchQuery) {
+                        handlePdfSearchQueryChange("");
+                      } else {
+                        setIsPdfSearchOpen(false);
+                        pdfEditorRef.current?.closeSearch();
+                      }
+                    }
+                  }}
+                  placeholder={isTh ? "ค้นหาใน PDF..." : "Find in PDF..."}
+                  className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
+                  autoFocus
+                />
+                {pdfSearchQuery && (
+                  <button
+                    type="button"
+                    data-testid="pdf-search-clear"
+                    onClick={() => handlePdfSearchQueryChange("")}
+                    className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {pdfSearchQuery.trim() && (
+                <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
+                  <span data-testid="pdf-search-count">
+                    {pdfSearchStats.total > 0
+                      ? isTh
+                        ? `พบ ${pdfSearchStats.total} รายการ${pdfSearchStats.current >= 0 ? ` (${pdfSearchStats.current + 1}/${pdfSearchStats.total})` : ""}`
+                        : `Found ${pdfSearchStats.total} matching ${pdfSearchStats.total === 1 ? "result" : "results"}${pdfSearchStats.current >= 0 ? ` (${pdfSearchStats.current + 1}/${pdfSearchStats.total})` : ""}`
+                      : isTh
+                      ? "ไม่พบข้อความที่ตรงกัน"
+                      : "No matching text"}
+                  </span>
+                  {pdfSearchStats.total > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            data-testid="pdf-search-prev"
+                            onClick={handlePdfSearchPrev}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                            <span className="sr-only">Previous match</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {isTh ? "ข้อความก่อนหน้า (Shift+Enter)" : "Previous match (Shift+Enter)"}
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            data-testid="pdf-search-next"
+                            onClick={handlePdfSearchNext}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                            <span className="sr-only">Next match</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {isTh ? "ข้อความถัดไป (Enter)" : "Next match (Enter)"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+
+          {/* Reading / Editing Mode Toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsReadingMode((prev) => !prev)}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus-visible:ring-0 focus-visible:outline-none focus:outline-none"
+              >
+                {(() => {
+                  const IconComp = getToolbarIcon(isReadingMode ? "edit" : "bookOpen", settings.iconPack);
+                  return <IconComp className="h-3.5 w-3.5" />;
+                })()}
+                <span className="sr-only">
+                  {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Save Dropdown for PDF */}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={!note || isNoteCurrentlyLocked}
+                    className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                  >
+                    {(() => {
+                      const SaveIconComp = getToolbarIcon("save", settings.iconPack);
+                      return <SaveIconComp className="h-3.5 w-3.5" />;
+                    })()}
+                    <span className="sr-only">{t("editor.saveFile")}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("editor.saveFile")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
+              <DropdownMenuItem
+                disabled={!note || isNoteCurrentlyLocked}
+                onClick={() => void handleSaveFile()}
+                className="gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center"
+              >
+                {(() => {
+                  const SaveIconComp = getToolbarIcon("save", settings.iconPack);
+                  return <SaveIconComp className="h-4 w-4 shrink-0" />;
+                })()}
+                <span>{t("editor.save")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!note || isNoteCurrentlyLocked}
+                onClick={() => void pdfEditorRef.current?.exportFlattenedPdfAs()}
+                className="gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center"
+              >
+                {(() => {
+                  const FileIconComp = getToolbarIcon("file", settings.iconPack);
+                  return <FileIconComp className="h-4 w-4 shrink-0" />;
+                })()}
+                <span>{t("editor.saveAs")}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Print PDF Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => void pdfEditorRef.current?.printPdf()}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              >
+                {(() => {
+                  const PrintIconComp = getToolbarIcon("printer", settings.iconPack);
+                  return <PrintIconComp className="h-3.5 w-3.5" />;
+                })()}
+                <span className="sr-only">{t("editor.print") || "Print"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{isTh ? "พิมพ์" : "Print"}</TooltipContent>
+          </Tooltip>
+
+          {/* Share Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={!note || isSharingLoading || isNoteCurrentlyLocked}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+                onClick={handleShareClick}
+              >
+                {isSharingLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  (() => {
+                    const ShareIconComp = getToolbarIcon("share", settings.iconPack);
+                    return <ShareIconComp className="h-3.5 w-3.5" />;
+                  })()
+                )}
+                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+          </Tooltip>
+
+          {/* Version History Button — Standard Luno Version History */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  if (note && !isNoteCurrentlyLocked) {
+                    setVersionHistoryOpen((prev) => !prev);
+                  }
+                }}
+                className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 outline-none select-none"
+              >
+                {(() => {
+                  const HistoryIconComp = getToolbarIcon("history", settings.iconPack);
+                  return <HistoryIconComp className="h-3.5 w-3.5" />;
+                })()}
+                <span className="sr-only">{t("breadcrumb.versionHistory") || "Version History"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("breadcrumb.versionHistory") || "Version History"}</TooltipContent>
           </Tooltip>
 
           {/* Relock Note */}
@@ -12780,6 +13670,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     // 3. Text / Code / HTML / Markdown Notes
+    const isTh = settings.language === "th";
     return (
       <Fragment>
         {isHtml && (
@@ -12876,6 +13767,126 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Search Button for Code Editor (matching Relations tab search style) */}
+        {(isHtml || isCss || isCode) && !htmlPreviewOpen && (
+          <Popover open={isCodeSearchOpen} onOpenChange={handleCodeSearchOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 outline-none select-none"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    <span className="sr-only">{t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}</span>
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isTh ? "ค้นหา" : "Find"}
+              </TooltipContent>
+            </Tooltip>
+
+            <PopoverContent
+              data-code-search-popover="true"
+              align="end"
+              sideOffset={6}
+              className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text"
+            >
+              <div className="flex items-center gap-2 rounded-xl bg-muted/60 px-2.5 py-1.5 border border-border/60 focus-within:border-primary/80 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
+                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground pointer-events-none" />
+                <input
+                  ref={codeSearchInputRef}
+                  data-code-search="true"
+                  type="text"
+                  value={codeSearchQuery}
+                  onChange={(e) => handleCodeSearchQueryChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (e.shiftKey) {
+                        handleCodeSearchPrev();
+                      } else {
+                        handleCodeSearchNext();
+                      }
+                    } else if (e.key === "Escape") {
+                      if (codeSearchQuery) {
+                        handleCodeSearchQueryChange("");
+                      } else {
+                        setIsCodeSearchOpen(false);
+                        codeEditorRef.current?.clearSearch();
+                      }
+                    }
+                  }}
+                  placeholder={isTh ? "ค้นหาในโค้ด..." : "Find in code..."}
+                  className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
+                  autoFocus
+                />
+                {codeSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => handleCodeSearchQueryChange("")}
+                    className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {codeSearchQuery.trim() && (
+                <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
+                  <span>
+                    {codeSearchStats.total > 0
+                      ? isTh
+                        ? `พบ ${codeSearchStats.total} รายการ${codeSearchStats.current >= 0 ? ` (${codeSearchStats.current + 1}/${codeSearchStats.total})` : ""}`
+                        : `Found ${codeSearchStats.total} matching ${codeSearchStats.total === 1 ? "result" : "results"}${codeSearchStats.current >= 0 ? ` (${codeSearchStats.current + 1}/${codeSearchStats.total})` : ""}`
+                      : isTh
+                      ? "ไม่พบข้อความที่ตรงกัน"
+                      : "No matching text"}
+                  </span>
+                  {codeSearchStats.total > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={handleCodeSearchPrev}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                            <span className="sr-only">Previous match</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {isTh ? "ข้อความก่อนหน้า (Shift+Enter)" : "Previous match (Shift+Enter)"}
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={handleCodeSearchNext}
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                            <span className="sr-only">Next match</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {isTh ? "ข้อความถัดไป (Enter)" : "Next match (Enter)"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
         )}
 
         {/* Reading Mode button for Markdown / Text files */}
@@ -13013,7 +14024,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               variant="ghost"
               size="icon"
               disabled={!note || isNoteCurrentlyLocked}
-              className="inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
+              className="inline-flex h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 outline-none select-none"
               onClick={() => {
                 if (note && !isNoteCurrentlyLocked) {
                   setVersionHistoryOpen((prev) => !prev);
@@ -13098,7 +14109,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <label htmlFor="new-file-ext-editor" className="mb-2 block text-sm font-medium text-foreground">
                   {t("sidebar.fileExtensionLabel")}
                 </label>
-                <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v === "md" ? "md" : v === "html" ? "html" : "txt")}>
+                <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v as "txt" | "md" | "html" | "css" | "js")}>
                   <SelectTrigger id="new-file-ext-editor" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -13106,6 +14117,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
                     <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
                     <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
+                    <SelectItem value="css">{t("sidebar.fileTypeCss") || "CSS (.css)"}</SelectItem>
+                    <SelectItem value="js">{t("sidebar.fileTypeJs") || "JavaScript (.js)"}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -13239,6 +14252,1491 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const isSaved = saveStatus === "saved" || saveStatus === "auto_saved" || saveStatus === "manually_saved";
   const saveStatusLabel = isSaved ? t("editor.saveStatusSaved") : t("editor.saveStatusUnsaved");
 
+  const renderPdfToolbar = () => {
+    const currentTool: InkoTool = pdfActiveTool || pdfViewerState?.currentTool || "select";
+    const selectedMeta = pdfViewerState?.selectedMeta || null;
+    const canUndo = Boolean(pdfViewerState?.canUndo);
+    const canRedo = Boolean(pdfViewerState?.canRedo);
+    const hasSelection = Boolean(pdfViewerState?.hasSelection) || Boolean(selectedMeta);
+    const showThumbnails = Boolean(pdfViewerState?.showThumbnails);
+    const currentPageNum = pdfViewerState?.currentPage || 1;
+    const currentPageBookmark =
+      pdfBookmarks.find((b) => b.page === currentPageNum) || null;
+    const isCurrentPageBookmarked = Boolean(currentPageBookmark);
+
+    const flatOutlineItems: Array<{ title: string; page: number | null; depth: number }> = [];
+    if (Array.isArray(pdfViewerState?.outline) && pdfViewerState.outline.length > 0) {
+      const walkOutline = (items: InkoOutlineItem[], depth: number) => {
+        if (depth > 4) return;
+        for (const it of items) {
+          flatOutlineItems.push({ title: it.title, page: it.page, depth });
+          if (Array.isArray(it.children) && it.children.length > 0) {
+            walkOutline(it.children, depth + 1);
+          }
+        }
+      };
+      walkOutline(pdfViewerState.outline, 0);
+    }
+
+    const currentColor =
+      currentTool === "select" && selectedMeta?.color
+        ? selectedMeta.color
+        : pdfActiveBrushColor;
+    const currentWidth =
+      currentTool === "select" && selectedMeta?.width
+        ? Math.max(1, Math.round(selectedMeta.width))
+        : pdfActiveBrushWidth;
+    const currentFontSize =
+      currentTool === "select" && selectedMeta?.fontSize
+        ? Math.max(8, Math.round(selectedMeta.fontSize))
+        : pdfActiveFontSize;
+    const currentHighlightColor =
+      currentTool === "select" && selectedMeta?.kind === "highlighter" && selectedMeta.color
+        ? selectedMeta.color
+        : pdfActiveHighlightColor;
+    const currentHighlightWidth =
+      currentTool === "select" && selectedMeta?.kind === "highlighter" && selectedMeta.width
+        ? Math.max(6, Math.round(selectedMeta.width))
+        : pdfActiveHighlightWidth;
+    const currentEraserWidth = pdfActiveEraserWidth;
+    const currentShapeFillColor =
+      currentTool === "select" && selectedMeta?.canFill
+        ? selectedMeta.fillColor || null
+        : pdfActiveShapeFillColor;
+    const currentShapeFillOpacity =
+      currentTool === "select" && selectedMeta?.canFill && selectedMeta.fillOpacity != null
+        ? selectedMeta.fillOpacity
+        : pdfActiveShapeFillOpacity;
+
+    const handleSetBrushWidth = (w: number) => {
+      setPdfActiveBrushWidth(w);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        brushWidth: w,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, width: w } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setBrushWidth(w);
+    };
+
+    const handleSetHighlightWidth = (w: number) => {
+      setPdfActiveHighlightWidth(w);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        highlightWidth: w,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, width: w } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setHighlightWidth(w);
+      if (currentTool === "select") {
+        pdfEditorRef.current?.setBrushWidth(w);
+      }
+    };
+
+    const handleSetEraserWidth = (w: number) => {
+      setPdfActiveEraserWidth(w);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        eraserWidth: w,
+      } : null));
+      pdfEditorRef.current?.setEraserWidth(w);
+    };
+
+    const handleSetShapeFillOpacity = (op: number) => {
+      setPdfActiveShapeFillOpacity(op);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        shapeFillOpacity: op,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, fillOpacity: op } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setShapeFillOpacity(op);
+    };
+
+    const handleSetFontSize = (sz: number) => {
+      setPdfActiveFontSize(sz);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        fontSize: sz,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, fontSize: sz } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setFontSize(sz);
+    };
+
+    const handleSetBrushColor = (c: string) => {
+      setPdfActiveBrushColor(c);
+      setPdfActiveShapeNoStroke(false);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        brushColor: c,
+        shapeNoStroke: false,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, color: c, noStroke: false } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setBrushColor(c);
+      if (isFillableShapeContext) {
+        pdfEditorRef.current?.setShapeStrokeColor(c);
+      }
+    };
+
+    const handleSetHighlightColor = (c: string) => {
+      setPdfActiveHighlightColor(c);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        highlightColor: c,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, color: c } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setHighlightColor(c);
+      if (currentTool === "select") {
+        pdfEditorRef.current?.setBrushColor(c);
+      }
+    };
+
+    const handleSetShapeFillColor = (c: string | null) => {
+      setPdfActiveShapeFillColor(c);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        shapeFillColor: c,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, fillColor: c } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setShapeFillColor(c);
+    };
+
+    const handleSetShapeNoStroke = () => {
+      setPdfActiveShapeNoStroke(true);
+      setPdfViewerState((prev) => (prev ? {
+        ...prev,
+        shapeNoStroke: true,
+        selectedMeta: prev.selectedMeta ? { ...prev.selectedMeta, noStroke: true } : prev.selectedMeta,
+      } : null));
+      pdfEditorRef.current?.setShapeStrokeColor(null);
+    };
+
+    const isShapeActive =
+      currentTool === "rectangle" ||
+      currentTool === "circle" ||
+      currentTool === "line" ||
+      currentTool === "arrow";
+    const selectedShapeType =
+      currentTool === "select" &&
+      (selectedMeta?.shapeType === "rectangle" ||
+        selectedMeta?.shapeType === "circle" ||
+        selectedMeta?.shapeType === "line" ||
+        selectedMeta?.shapeType === "arrow")
+        ? selectedMeta.shapeType
+        : null;
+    const activeShape: "rectangle" | "circle" | "line" | "arrow" = isShapeActive
+      ? currentTool
+      : selectedShapeType || lastPdfShape;
+
+    const isTextContext =
+      currentTool === "text" || (currentTool === "select" && selectedMeta?.kind === "text");
+    const isHighlighterContext =
+      currentTool === "highlighter" ||
+      (currentTool === "select" && selectedMeta?.kind === "highlighter");
+    const isEraserContext = currentTool === "eraser";
+    const isFillableShapeContext =
+      currentTool === "rectangle" ||
+      currentTool === "circle" ||
+      (currentTool === "select" && Boolean(selectedMeta?.canFill));
+    const hasContextualStyleControls =
+      (currentTool !== "select" && currentTool !== "contentSelect") || Boolean(selectedMeta);
+
+    const pdfSliderCls =
+      "py-1 cursor-pointer [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&_[role=slider]]:h-4 [&_[role=slider]]:w-4 [&_[role=slider]]:bg-primary [&_[role=slider]]:border-primary [&_[role=slider]]:shadow-xs";
+
+    const appFontCss =
+      FONT_FAMILY_CSS[settings?.fontFamily || "inter"] || "var(--app-font-family)";
+
+    const PRESET_STROKE_COLORS = [
+      "#000000",
+      "#26A295",
+      "#0ea5e9",
+      "#3b82f6",
+      "#6366f1",
+      "#8b5cf6",
+      "#d946ef",
+      "#ec4899",
+      "#f43f5e",
+      "#f97316",
+      "#eab308",
+      "#84cc16",
+      "#10b981",
+      "#14b8a6",
+      "#64748b",
+      "#ffffff",
+    ];
+
+    const PRESET_HIGHLIGHT_COLORS = [
+      "#facc15",
+      "#4ade80",
+      "#38bdf8",
+      "#f472b6",
+      "#fb923c",
+      "#c084fc",
+      "#2dd4bf",
+      "#f87171",
+    ];
+
+    const PDF_FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+
+    const renderToolIconLocal = (toolId: string, extraClass = "h-4 w-4") => {
+      const IconComp = getToolbarIcon(toolId, settings.iconPack);
+      return <IconComp className={extraClass} />;
+    };
+
+    const getShapeIconKey = (shape: "rectangle" | "circle" | "line" | "arrow") => {
+      if (shape === "circle") return "shapeCircle";
+      if (shape === "line") return "shapeLine";
+      if (shape === "arrow") return "shapeArrow";
+      return "shapeSquare";
+    };
+
+    const toolBtnCls = (active: boolean) =>
+      `h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full transition-colors ${
+        active ? "bg-primary/12 text-primary font-medium" : "text-foreground"
+      }`;
+
+    return (
+      <div
+        data-editor-toolbar="true"
+        className="flex w-fit max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-border bg-secondary p-1"
+      >
+        {/* Undo */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
+              disabled={!canUndo}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (pdfEditorRef.current?.undo) {
+                  pdfEditorRef.current.undo();
+                } else {
+                  pdfEditorRef.current?.sendCommand("undo");
+                }
+              }}
+            >
+              {renderToolIconLocal("undo")}
+              <span className="sr-only">{t("editor.undo")}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{`${t("editor.undo") || "Undo"} (Ctrl+Z)`}</TooltipContent>
+        </Tooltip>
+
+        {/* Redo */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
+              disabled={!canRedo}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (pdfEditorRef.current?.redo) {
+                  pdfEditorRef.current.redo();
+                } else {
+                  pdfEditorRef.current?.sendCommand("redo");
+                }
+              }}
+            >
+              {renderToolIconLocal("redo")}
+              <span className="sr-only">{t("editor.redo")}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{`${t("editor.redo") || "Redo"} (Ctrl+Y)`}</TooltipContent>
+        </Tooltip>
+
+        <div className="h-4 w-px shrink-0 bg-border" />
+
+        {/* Select & Move (V) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "select")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("select")}
+            >
+              {renderToolIconLocal("select")}
+              <span className="sr-only">{lang === "th" ? "เลือกและย้ายวัตถุ" : "Select & Move"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "เลือกและย้ายวัตถุ (V)" : "Select & Move (V)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Text Select in PDF (I) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "contentSelect")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("contentSelect")}
+            >
+              {renderToolIconLocal("textSelect")}
+              <span className="sr-only">{lang === "th" ? "เลือกข้อความใน PDF" : "Select PDF Text"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "เลือกข้อความใน PDF (I)" : "Select PDF Text (I)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Pen (P) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "pen")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("pen")}
+            >
+              {renderToolIconLocal("pen")}
+              <span className="sr-only">{lang === "th" ? "ปากกา" : "Pen"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "ปากกาวาดเขียน (P)" : "Pen Tool (P)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Highlighter (H) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "highlighter")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("highlighter")}
+            >
+              {renderToolIconLocal("highlight")}
+              <span className="sr-only">{lang === "th" ? "ปากกาเน้นข้อความ" : "Highlighter"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th"
+              ? "ปากกาเน้นข้อความ (H)"
+              : "Highlighter (H)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Eraser (E) */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "eraser")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("eraser")}
+            >
+              {renderToolIconLocal("eraser")}
+              <span className="sr-only">{lang === "th" ? "ยางลบ" : "Eraser"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "ยางลบ (E)" : "Eraser Tool (E)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Text Tool (T) — Direct Activation */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(currentTool === "text")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelectPdfTool("text")}
+            >
+              {renderToolIconLocal("textBox")}
+              <span className="sr-only">{lang === "th" ? "ข้อความ" : "Text"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "เพิ่มข้อความ (T)" : "Add Text (T)"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Shapes Dropdown (Rectangle, Circle/Ellipse, Line, Arrow) */}
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm transition-colors ${
+                    isShapeActive ? "bg-primary/12 text-primary font-medium" : "font-normal text-foreground"
+                  }`}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  {renderToolIconLocal(getShapeIconKey(activeShape))}
+                  <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                  <span className="sr-only">{lang === "th" ? "รูปร่าง" : "Shapes"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>
+              {lang === "th"
+                ? "รูปร่าง"
+                : "Shapes"}
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
+            {(
+              [
+                {
+                  id: "rectangle" as const,
+                  icon: "shapeSquare",
+                  label: lang === "th" ? "สี่เหลี่ยม" : "Rectangle",
+                  shortcut: "R",
+                },
+                {
+                  id: "circle" as const,
+                  icon: "shapeCircle",
+                  label: lang === "th" ? "วงกลม / วงรี" : "Circle / Ellipse",
+                  shortcut: "O",
+                },
+                {
+                  id: "line" as const,
+                  icon: "shapeLine",
+                  label: lang === "th" ? "เส้นตรง" : "Line",
+                  shortcut: "L",
+                },
+                {
+                  id: "arrow" as const,
+                  icon: "shapeArrow",
+                  label: lang === "th" ? "ลูกศร" : "Arrow",
+                  shortcut: "A",
+                },
+              ]
+            ).map((item) => {
+              const isItemActive = currentTool === item.id;
+              return (
+                <DropdownMenuItem
+                  key={item.id}
+                  onClick={() => {
+                    setLastPdfShape(item.id);
+                    handleSelectPdfTool(item.id);
+                  }}
+                  className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                    isItemActive
+                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    {renderToolIconLocal(
+                      item.icon,
+                      item.id === "line" ? "h-4 w-4 -rotate-45" : "h-4 w-4"
+                    )}
+                    <span>{item.label}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground font-normal">
+                      {item.shortcut}
+                    </span>
+                    {isItemActive && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                  </div>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <div className="h-4 w-px shrink-0 bg-border" />
+
+        {/* Contextual Properties: Text / Highlighter / Eraser / Stroke */}
+        {!hasContextualStyleControls ? null : isTextContext ? (
+          <>
+            {/* Font Size Dropdown — Exact Luno Editor Style */}
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-8 w-[44px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm font-normal text-foreground"
+                      style={{ fontFamily: appFontCss }}
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <span className="text-xs md:text-sm font-normal tabular-nums" style={{ fontFamily: appFontCss }}>
+                        {currentFontSize}
+                      </span>
+                      <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                      <span className="sr-only">{t("editor.fontSize") || "Font Size"}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("editor.fontSize") || "Font Size"}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent
+                align="start"
+                className="w-40 max-h-72 overflow-y-auto rounded-xl p-1.5 shadow-md"
+                style={{ fontFamily: appFontCss }}
+              >
+                {PDF_FONT_SIZES.map((sz) => {
+                  const isCurrent = sz === currentFontSize;
+                  return (
+                    <DropdownMenuItem
+                      key={sz}
+                      onClick={() => handleSetFontSize(sz)}
+                      style={{ fontFamily: appFontCss }}
+                      className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
+                        isCurrent
+                          ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                          : ""
+                      }`}
+                    >
+                      <span style={{ fontFamily: appFontCss }}>{`${sz}px`}</span>
+                      {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Text Color Popover — Exact Luno Editor Style */}
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <TextColorIcon color={currentColor} className="h-4 w-4" />
+                      <span className="sr-only">{t("editor.textColor") || "Text Color"}</span>
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("editor.textColor") || "Text Color"}</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                align="start"
+                className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Palette className="w-3.5 h-3.5 text-primary" />
+                      {t("editor.textColor") || (lang === "th" ? "สีข้อความ" : "Text Color")}
+                    </span>
+                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                      {currentColor}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                      <input
+                        type="color"
+                        value={/^#[0-9A-Fa-f]{6}$/.test(currentColor) ? currentColor : "#000000"}
+                        onChange={(e) => handleSetBrushColor(e.target.value)}
+                        className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                      />
+                    </div>
+                    <Input
+                      value={currentColor}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          handleSetBrushColor(val);
+                        }
+                      }}
+                      placeholder="#000000"
+                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                      maxLength={7}
+                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleSetBrushColor("#000000")}
+                          className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                    </Tooltip>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
+                      {t("settings.quickPresets") || "Presets"}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESET_STROKE_COLORS.map((color) => {
+                        const isSelected = currentColor.toLowerCase() === color.toLowerCase();
+                        return (
+                          <button
+                            key={color}
+                            type="button"
+                            style={{
+                              backgroundColor: color,
+                              borderColor: color === "#ffffff" ? "var(--border)" : "transparent",
+                            }}
+                            onClick={() => handleSetBrushColor(color)}
+                            className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                              isSelected
+                                ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                : "hover:scale-115 opacity-85 hover:opacity-100"
+                            }`}
+                            aria-label={color}
+                          >
+                            {isSelected && (
+                              <Check
+                                className={`w-3 h-3 ${
+                                  color === "#ffffff" ? "text-foreground" : "text-white"
+                                }`}
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </>
+        ) : isHighlighterContext ? (
+          /* Highlighter Color & Thickness Popover */
+          <Popover>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full relative"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <div
+                      className="h-4 w-4 rounded-full border border-border shadow-2xs"
+                      style={{ backgroundColor: currentHighlightColor, opacity: 0.85 }}
+                    />
+                    <span className="sr-only">
+                      {lang === "th" ? "สีและความหนาไฮไลต์" : "Highlight Color & Size"}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                {lang === "th" ? "สีและความหนาไฮไลต์" : "Highlight Color & Width"}
+              </TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              align="center"
+              className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-primary" />
+                  {lang === "th" ? "สีเน้นข้อความ" : "Highlight Color"}
+                </span>
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  {currentHighlightColor}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                  <input
+                    type="color"
+                    value={
+                      /^#[0-9A-Fa-f]{6}$/.test(currentHighlightColor)
+                        ? currentHighlightColor
+                        : "#facc15"
+                    }
+                    onChange={(e) => handleSetHighlightColor(e.target.value)}
+                    className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                  />
+                </div>
+                <Input
+                  value={currentHighlightColor}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                      handleSetHighlightColor(val);
+                    }
+                  }}
+                  placeholder="#FACC15"
+                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                  maxLength={7}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleSetHighlightColor("#facc15")}
+                      className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                </Tooltip>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {PRESET_HIGHLIGHT_COLORS.map((color) => {
+                  const isSelected = currentHighlightColor.toLowerCase() === color.toLowerCase();
+                  return (
+                    <button
+                      key={color}
+                      type="button"
+                      style={{ backgroundColor: color, borderColor: "transparent" }}
+                      onClick={() => handleSetHighlightColor(color)}
+                      className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                        isSelected
+                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                      }`}
+                      aria-label={color}
+                    >
+                      {isSelected && <Check className="w-3 h-3 text-slate-900" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2.5 pt-2 border-t border-border/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {lang === "th" ? "ขนาดหัวไฮไลต์อิสระ" : "Freehand Width"}
+                  </span>
+                  <span className="text-[11px] font-medium text-foreground tabular-nums">
+                    {currentHighlightWidth}px
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-2xs shrink-0"
+                    style={{ backgroundColor: currentHighlightColor, opacity: 0.85 }}
+                  />
+                  <Slider
+                    min={8}
+                    max={48}
+                    step={1}
+                    value={[currentHighlightWidth]}
+                    onValueChange={([w]) => handleSetHighlightWidth(w)}
+                    className={pdfSliderCls}
+                  />
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : isEraserContext ? (
+          /* Eraser Size Popover */
+          <Popover>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-8 px-2 rounded-full md:rounded-full text-xs text-foreground flex items-center gap-1.5"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    <span
+                      className="rounded-full border border-foreground/70 bg-background shrink-0"
+                      style={{
+                        width: `${Math.max(6, Math.min(16, Math.round(currentEraserWidth / 3)))}px`,
+                        height: `${Math.max(6, Math.min(16, Math.round(currentEraserWidth / 3)))}px`,
+                      }}
+                    />
+                    <span className="tabular-nums text-xs">{currentEraserWidth}</span>
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                {lang === "th" ? "ขนาดยางลบ" : "Eraser Size"}
+              </TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              align="center"
+              className="w-56 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md space-y-2.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground">
+                  {lang === "th" ? "ขนาดยางลบ" : "Eraser Size"}
+                </span>
+                <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
+                  {currentEraserWidth}px
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="h-3.5 w-3.5 rounded-full border border-foreground/60 bg-muted shrink-0" />
+                <Slider
+                  min={8}
+                  max={64}
+                  step={1}
+                  value={[currentEraserWidth]}
+                  onValueChange={([w]) => handleSetEraserWidth(w)}
+                  className={pdfSliderCls}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          /* Stroke Color & Width + Optional Shape Interior Fill */
+          <>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full relative"
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      {isFillableShapeContext ? (
+                        <div
+                          className="h-4 w-4 rounded-full bg-transparent shadow-2xs relative flex items-center justify-center overflow-hidden"
+                          style={{
+                            borderWidth: "2.5px",
+                            borderStyle:
+                              (currentTool === "select" && selectedMeta?.canFill
+                                ? Boolean(selectedMeta?.noStroke)
+                                : pdfActiveShapeNoStroke)
+                                ? "none"
+                                : "solid",
+                            borderColor:
+                              currentColor === "#ffffff" ? "hsl(var(--border))" : currentColor,
+                          }}
+                        >
+                          {(currentTool === "select" && selectedMeta?.canFill
+                            ? Boolean(selectedMeta?.noStroke)
+                            : pdfActiveShapeNoStroke) && (
+                            <span className="block w-5 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
+                          )}
+                        </div>
+                      ) : (
+                        <div
+                          className="h-4 w-4 rounded-full border border-border shadow-2xs"
+                          style={{ backgroundColor: currentColor }}
+                        />
+                      )}
+                      <span className="sr-only">
+                        {lang === "th" ? "สีและความหนาเส้น" : "Color & Stroke"}
+                      </span>
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isFillableShapeContext
+                    ? lang === "th"
+                      ? "สีเส้นขอบและความหนา"
+                      : "Border Color & Width"
+                    : lang === "th"
+                    ? "สีและความหนาเส้น"
+                    : "Stroke Color & Width"}
+                </TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                align="center"
+                className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-primary" />
+                    {isFillableShapeContext
+                      ? lang === "th"
+                        ? "สีเส้นขอบรูปร่าง"
+                        : "Border Color"
+                      : lang === "th"
+                      ? "สีปากกา / รูปทรง"
+                      : "Stroke Color"}
+                  </span>
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                    {currentColor}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                    <input
+                      type="color"
+                      value={/^#[0-9A-Fa-f]{6}$/.test(currentColor) ? currentColor : "#000000"}
+                      onChange={(e) => handleSetBrushColor(e.target.value)}
+                      className="absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0"
+                    />
+                  </div>
+                  <Input
+                    value={currentColor}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        handleSetBrushColor(val);
+                      }
+                    }}
+                    placeholder="#000000"
+                    className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                    maxLength={7}
+                  />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleSetBrushColor("#000000")}
+                        className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                  </Tooltip>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {/* No Stroke Swatch */}
+                  {isFillableShapeContext && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetShapeNoStroke()}
+                      className={`h-5 w-5 rounded-full border border-border bg-background transition-transform cursor-pointer flex items-center justify-center relative overflow-hidden ${
+                        (currentTool === "select" && selectedMeta?.canFill
+                          ? Boolean(selectedMeta?.noStroke)
+                          : pdfActiveShapeNoStroke)
+                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                      }`}
+                      aria-label={lang === "th" ? "ไม่มีเส้นขอบ" : "No Stroke"}
+                      title={lang === "th" ? "ไม่มีเส้นขอบ" : "No Stroke"}
+                    >
+                      <span className="block w-6 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
+                    </button>
+                  )}
+
+                  {PRESET_STROKE_COLORS.map((color) => {
+                    const isSelected =
+                      !(
+                        currentTool === "select" && selectedMeta?.canFill
+                          ? Boolean(selectedMeta?.noStroke)
+                          : pdfActiveShapeNoStroke
+                      ) && currentColor.toLowerCase() === color.toLowerCase();
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        style={{
+                          backgroundColor: color,
+                          borderColor: color === "#ffffff" ? "var(--border)" : "transparent",
+                        }}
+                        onClick={() => handleSetBrushColor(color)}
+                        className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                          isSelected
+                            ? "ring-2 ring-primary ring-offset-1 scale-110"
+                            : "hover:scale-115 opacity-85 hover:opacity-100"
+                        }`}
+                        aria-label={color}
+                      >
+                        {isSelected && (
+                          <Check
+                            className={`w-3 h-3 ${
+                              color === "#ffffff" ? "text-foreground" : "text-white"
+                            }`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="space-y-2.5 pt-2 border-t border-border/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {lang === "th" ? "ความหนาเส้น" : "Stroke Width"}
+                    </span>
+                    <span className="text-[11px] font-medium text-foreground tabular-nums">
+                      {currentWidth}px
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-2xs shrink-0"
+                      style={{ backgroundColor: currentColor }}
+                    />
+                    <Slider
+                      min={1}
+                      max={24}
+                      step={1}
+                      value={[currentWidth]}
+                      onValueChange={([w]) => handleSetBrushWidth(w)}
+                      className={pdfSliderCls}
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {isFillableShapeContext && (
+              <Popover>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full relative"
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        <div
+                          className="h-4 w-4 rounded-[4px] border border-border shadow-2xs relative overflow-hidden flex items-center justify-center bg-background"
+                          style={
+                            currentShapeFillColor
+                              ? {
+                                  backgroundColor: currentShapeFillColor,
+                                  opacity: Math.max(0.2, currentShapeFillOpacity / 100),
+                                }
+                              : undefined
+                          }
+                        >
+                          {!currentShapeFillColor && (
+                            <span className="block w-5 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
+                          )}
+                        </div>
+                        <span className="sr-only">
+                          {lang === "th" ? "สีภายในรูปร่าง" : "Shape Fill Color"}
+                        </span>
+                      </Button>
+                    </PopoverTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {lang === "th" ? "สีภายในรูปร่าง" : "Shape Fill Color"}
+                  </TooltipContent>
+                </Tooltip>
+                <PopoverContent
+                  align="center"
+                  className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Palette className="w-3.5 h-3.5 text-primary" />
+                      {lang === "th" ? "สีภายในรูปร่าง" : "Fill Color"}
+                    </span>
+                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                      {currentShapeFillColor || (lang === "th" ? "ไม่มีสี" : "No Fill")}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50 bg-background flex items-center justify-center">
+                      {!currentShapeFillColor && (
+                        <span className="block w-12 h-[1.5px] bg-destructive/75 -rotate-45 pointer-events-none" />
+                      )}
+                      <input
+                        type="color"
+                        value={
+                          currentShapeFillColor && /^#[0-9A-Fa-f]{6}$/.test(currentShapeFillColor)
+                            ? currentShapeFillColor
+                            : "#000000"
+                        }
+                        onChange={(e) => handleSetShapeFillColor(e.target.value)}
+                        className={`absolute -top-3 -left-3 w-16 h-16 cursor-pointer border-0 p-0 ${
+                          currentShapeFillColor ? "opacity-100" : "opacity-0"
+                        }`}
+                      />
+                    </div>
+                    <Input
+                      value={currentShapeFillColor || ""}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        if (!val) {
+                          handleSetShapeFillColor(null);
+                        } else if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                          handleSetShapeFillColor(val);
+                        }
+                      }}
+                      placeholder={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                      maxLength={7}
+                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleSetShapeFillColor(null)}
+                          className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          <span className="sr-only">
+                            {lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                          </span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {lang === "th" ? "ไม่มีสีพื้น (โปร่งใส)" : "No Fill (Transparent)"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {/* No Fill Swatch */}
+                    <button
+                      type="button"
+                      onClick={() => handleSetShapeFillColor(null)}
+                      className={`h-5 w-5 rounded-full border border-border bg-background transition-transform cursor-pointer flex items-center justify-center relative overflow-hidden ${
+                        !currentShapeFillColor
+                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                      }`}
+                      aria-label={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                      title={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                    >
+                      <span className="block w-6 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
+                    </button>
+
+                    {PRESET_STROKE_COLORS.map((color) => {
+                      const isSelected =
+                        currentShapeFillColor?.toLowerCase() === color.toLowerCase();
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          style={{
+                            backgroundColor: color,
+                            borderColor: color === "#ffffff" ? "var(--border)" : "transparent",
+                          }}
+                          onClick={() => handleSetShapeFillColor(color)}
+                          className={`h-5 w-5 rounded-full border transition-transform cursor-pointer flex items-center justify-center relative ${
+                            isSelected
+                              ? "ring-2 ring-primary ring-offset-1 scale-110"
+                              : "hover:scale-115 opacity-85 hover:opacity-100"
+                          }`}
+                          aria-label={color}
+                        >
+                          {isSelected && (
+                            <Check
+                              className={`w-3 h-3 ${
+                                color === "#ffffff" ? "text-foreground" : "text-white"
+                              }`}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {currentShapeFillColor && (
+                    <div className="space-y-2.5 pt-2 border-t border-border/60">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {lang === "th" ? "ความทึบสีพื้น" : "Fill Opacity"}
+                        </span>
+                        <span className="text-[11px] font-medium text-foreground tabular-nums">
+                          {currentShapeFillOpacity}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="h-3.5 w-3.5 rounded-[3px] border border-border/70 shadow-2xs shrink-0"
+                          style={{
+                            backgroundColor: currentShapeFillColor,
+                            opacity: Math.max(0.2, currentShapeFillOpacity / 100),
+                          }}
+                        />
+                        <Slider
+                          min={10}
+                          max={100}
+                          step={1}
+                          value={[currentShapeFillOpacity]}
+                          onValueChange={([op]) => handleSetShapeFillOpacity(op)}
+                          className={pdfSliderCls}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+            )}
+          </>
+        )}
+
+        {/* Delete Selected */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full transition-colors text-foreground hover:bg-muted/80 disabled:opacity-40 cursor-pointer"
+              disabled={!hasSelection}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setPdfViewerState((prev) =>
+                  prev ? { ...prev, hasSelection: false, selectedMeta: null } : null
+                );
+                pdfEditorRef.current?.sendCommand("deleteSelected");
+              }}
+            >
+              {renderToolIconLocal("trash")}
+              <span className="sr-only">{lang === "th" ? "ลบวัตถุที่เลือก" : "Delete Selected"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "ลบวัตถุที่เลือก" : "Delete Selected"}
+          </TooltipContent>
+        </Tooltip>
+
+        <div className="h-4 w-px shrink-0 bg-border" />
+
+        {/* Thumbnails Sidebar */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={toolBtnCls(showThumbnails)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pdfEditorRef.current?.sendCommand("toggleThumbnails")}
+            >
+              {renderToolIconLocal("layoutGrid")}
+              <span className="sr-only">{lang === "th" ? "รูปตัวอย่างหน้า" : "Thumbnails"}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {lang === "th" ? "เปิด/ปิด รูปตัวอย่างหน้า" : "Toggle Page Thumbnails"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Bookmarks / Outline */}
+        <Popover
+          open={pdfBookmarkOpen}
+          onOpenChange={(open) => {
+            setPdfBookmarkOpen(open);
+            if (open) {
+              const latest = pdfEditorRef.current?.getBookmarks();
+              if (latest) setPdfBookmarks(latest);
+              const existing = (latest || pdfBookmarks).find(
+                (b) => b.page === currentPageNum
+              );
+              setPdfBookmarkTitleInput(existing?.title || "");
+            }
+          }}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={toolBtnCls(pdfBookmarkOpen)}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  {renderToolIconLocal("bookmark")}
+                  <span className="sr-only">
+                    {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>
+              {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+            </TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="end"
+            className="w-72 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Bookmark className="w-3.5 h-3.5 text-primary" />
+                {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+              </span>
+              <span className="text-[11px] font-medium text-muted-foreground tracking-wide tabular-nums select-none shrink-0">
+                {lang === "th" ? `หน้า ${currentPageNum}` : `Page ${currentPageNum}`}
+              </span>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const label =
+                  pdfBookmarkTitleInput.trim() ||
+                  (lang === "th" ? `หน้า ${currentPageNum}` : `Page ${currentPageNum}`);
+                const next = pdfEditorRef.current?.addBookmark(currentPageNum, label);
+                if (next) setPdfBookmarks(next);
+                setPdfBookmarkTitleInput("");
+              }}
+              className="flex items-center gap-1.5"
+            >
+              <Input
+                value={pdfBookmarkTitleInput}
+                onChange={(e) => setPdfBookmarkTitleInput(e.target.value)}
+                placeholder={
+                  lang === "th"
+                    ? `ชื่อบุ๊กมาร์ก (หน้า ${currentPageNum})...`
+                    : `Bookmark title (p. ${currentPageNum})...`
+                }
+                className="h-8 rounded-xl text-xs border-border/70 bg-background px-2.5 focus-visible:ring-1 focus-visible:ring-primary"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8 px-2.5 rounded-xl text-xs shrink-0 gap-1"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {lang === "th" ? "บันทึก" : "Save"}
+              </Button>
+            </form>
+
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-0.5">
+              {pdfBookmarks.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-[11px] font-medium text-muted-foreground px-1">
+                    {lang === "th" ? "บุ๊กมาร์กที่บันทึกไว้" : "Saved Bookmarks"}
+                  </div>
+                  {pdfBookmarks.map((bm) => {
+                    const isActive = bm.page === currentPageNum;
+                    return (
+                      <div
+                        key={bm.id}
+                        onClick={() => {
+                          if (bm.page) {
+                            setPdfViewerState((prev) =>
+                              prev ? { ...prev, currentPage: bm.page } : prev
+                            );
+                            pdfEditorRef.current?.sendCommand("goToPage", { page: bm.page });
+                            setPdfBookmarkOpen(false);
+                          }
+                        }}
+                        className={`group flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors cursor-pointer ${
+                          isActive
+                            ? "bg-primary/12 text-primary font-medium"
+                            : "text-foreground hover:bg-muted/70"
+                        }`}
+                      >
+                        <span className="truncate flex-1 flex items-center gap-1.5">
+                          <Bookmark
+                            className={`h-3 w-3 shrink-0 ${
+                              isActive
+                                ? "text-primary"
+                                : "text-muted-foreground"
+                            }`}
+                          />
+                          <span className="truncate">{bm.title}</span>
+                        </span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span className="text-[11px] tabular-nums text-muted-foreground">
+                            {lang === "th" ? `หน้า ${bm.page}` : `p. ${bm.page}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const next = pdfEditorRef.current?.removeBookmark(bm.id);
+                              if (next) setPdfBookmarks(next);
+                            }}
+                            aria-label={lang === "th" ? "ลบบุ๊กมาร์ก" : "Remove bookmark"}
+                            className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {flatOutlineItems.length > 0 && (
+                <div
+                  className={`space-y-1 ${
+                    pdfBookmarks.length > 0 ? "pt-2 border-t border-border/60" : ""
+                  }`}
+                >
+                  <div className="text-[11px] font-medium text-muted-foreground px-1">
+                    {lang === "th" ? "สารบัญเอกสาร" : "Document Outline"}
+                  </div>
+                  {flatOutlineItems.map((item, idx) => {
+                    const isActive = item.page != null && item.page === currentPageNum;
+                    return (
+                      <button
+                        key={`${idx}-${item.title}`}
+                        type="button"
+                        disabled={item.page == null}
+                        onClick={() => {
+                          if (item.page != null) {
+                            pdfEditorRef.current?.sendCommand("goToPage", {
+                              page: item.page,
+                            });
+                            setPdfBookmarkOpen(false);
+                          }
+                        }}
+                        style={{ paddingLeft: `${8 + item.depth * 10}px` }}
+                        className={`w-full flex items-center justify-between gap-2 rounded-lg pr-2 py-1.5 text-xs text-left transition-colors ${
+                          item.page == null
+                            ? "opacity-50 cursor-default"
+                            : isActive
+                            ? "bg-primary/12 text-primary font-medium cursor-pointer"
+                            : "text-foreground hover:bg-muted/70 cursor-pointer"
+                        }`}
+                      >
+                        <span className="truncate flex-1">{item.title}</span>
+                        {item.page != null && (
+                          <span className="text-[11px] tabular-nums text-muted-foreground shrink-0">
+                            {item.page}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {pdfBookmarks.length === 0 && flatOutlineItems.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-3 px-2">
+                  {lang === "th"
+                    ? "ยังไม่มีบุ๊กมาร์ก กดปุ่มบันทึกด้านบนเพื่อคั่นหน้าปัจจุบัน"
+                    : "No bookmarks yet. Save one above to mark the current page."}
+                </p>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+    );
+  };
+
 
 
 
@@ -13248,10 +15746,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <TooltipProvider delayDuration={420}>
       <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={settings.showToolbar === false || isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || isCssFile(note) || isImageFile(note) || isVideoFile(note) || isBinaryFile(note)) && !isMobile) ? "hidden" : "px-3 py-2 sm:px-4 md:px-6"}>
+          <div className={
+            (isPdfFile(note)
+              ? (isReadingMode || (isPdfLoadingSource || !isPdfViewLoaded) || isNoteCurrentlyLocked || versionHistoryOpen)
+              : (settings.showToolbar === false || isReadingMode || isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || note.contentFormat === "javascript" || note.contentFormat === "js" || isCssFile(note) || isJsFile(note) || isImageFile(note) || isVideoFile(note) || isBinaryFile(note)) && !isMobile)))
+              ? "hidden"
+              : "px-3 py-2 sm:px-4 md:px-6"
+          }>
             <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-3">
         <div ref={mobileToolbarAreaRef} className={`min-w-0 ${isMobile ? "order-2" : ""}`}>
-          {!isReadingMode && settings.showToolbar !== false && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
+          {!isReadingMode && isPdfFile(note) && !(isPdfLoadingSource || !isPdfViewLoaded) ? (
+            renderPdfToolbar()
+          ) : !isReadingMode && settings.showToolbar !== false && ((note.fileName?.toLowerCase().endsWith('.txt') || note.fileName?.toLowerCase().endsWith('.md') || note.fileName?.toLowerCase().endsWith('.markdown')) || (!note.fileName && (getContentFormat() === 'markdown' || getContentFormat() === 'plain'))) ? (() => {
             const ALL_TOOLBAR_ITEMS: Array<{
               id: string;
               group: "history" | "heading" | "typography" | "inline" | "block" | "media" | "ai";
@@ -13622,7 +16128,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const activeSettingFontId = settings?.editorFontFamily || settings?.fontFamily || "inter";
                   const settingFont = findMatchingFontOption(activeSettingFontId, customFonts) || FONT_OPTIONS[0];
                   const settingFontName = settingFont
-                    ? (settingFont.isCustom ? settingFont.displayName : (t(settingFont.nameKey as any) || settingFont.id))
+                    ? ("isCustom" in settingFont && settingFont.isCustom ? settingFont.displayName : (t(settingFont.nameKey as any) || settingFont.id))
                     : (t("editor.defaultFont") || "Default");
 
                   const foundFont = findMatchingFontOption(activeFont, customFonts);
@@ -15864,7 +18370,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }}
           className={`flex flex-col cursor-default ${
-            isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
+            isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || isPdfFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
               ? "flex-1 min-h-0 min-w-0 overflow-hidden"
               : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
           } w-full`}
@@ -15971,6 +18477,58 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </div>
               )}
             </div>
+          ) : isPdfFile(note) ? (
+            <PdfEditorView
+              key={note.id}
+              ref={pdfEditorRef}
+              noteId={note.id}
+              fileName={note.fileName || note.title || "document.pdf"}
+              filePath={pdfLoadedNoteId === note.id ? pdfFullPath : (note as any)?.fullPath}
+              folderPath={pdfLoadedNoteId === note.id ? (pdfWorkspaceFolder || note.folderPath) : note.folderPath}
+              fileSize={activeFileSize}
+              pdfBase64={pdfLoadedNoteId === note.id ? pdfBase64 : null}
+              pdfUrl={pdfLoadedNoteId === note.id ? pdfBlobUrl : null}
+              isLoadingSource={pdfLoadedNoteId !== note.id || isPdfLoadingSource}
+              sourceError={pdfLoadedNoteId === note.id ? pdfSourceError : null}
+              readOnly={isReadingMode}
+              isVisible={isVisible}
+              language={lang}
+              onBookmarksChange={setPdfBookmarks}
+              onDirtyChange={(dirty) => {
+                setSaveStatus(dirty ? "unsaved" : "saved");
+              }}
+              onSavingChange={(saving) => {
+                if (saving) setSaveStatus("saving");
+              }}
+              onSaved={(savedAt) => {
+                setLastEditedTime(savedAt.getTime());
+                setSaveStatus("manually_saved");
+              }}
+              onViewerStateChange={(st) => {
+                setPdfViewerState(st);
+                if (st?.currentTool) {
+                  setPdfActiveTool(st.currentTool);
+                }
+                if (st.searchStats) {
+                  setPdfSearchStats({
+                    total: st.searchStats.total,
+                    current: st.searchStats.current,
+                  });
+                }
+              }}
+              onReplacePdfBase64={(newBase64, newByteLength) => {
+                setPdfBase64(newBase64);
+                setActiveFileSize(newByteLength);
+              }}
+              onUpdatePdfFileSize={(newByteLength) => {
+                setActiveFileSize(newByteLength);
+              }}
+              onRequestSave={() => void handleSaveFile()}
+              onRequestFind={() => handlePdfSearchOpenChange(true)}
+              onRequestPrint={() => void pdfEditorRef.current?.printPdf()}
+              onPdfLoaded={() => setIsPdfViewLoaded(true)}
+              onOpenExternal={() => void handleOpenInSystemApp()}
+            />
           ) : isBinaryFile(note) ? (
             <div className="flex-1 min-h-0 min-w-0 w-full h-full flex flex-col items-center justify-center gap-3.5 p-6 text-muted-foreground">
               {(() => {
@@ -16014,6 +18572,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             </div>
           ) : note.contentFormat === "css" || isCssFile(note) ? (
             <HtmlCodeEditor
+              ref={codeEditorRef}
               key={note.id}
               value={codeEditorContentMap.get(note.id) ?? note.content}
               onChange={handleCodeEditorChange}
@@ -16023,7 +18582,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               spellCheck={spellCheckEnabled}
               noteId={note.id}
               language="css"
+              showIndentGuides={settings.showCodeIndentGuides !== false}
               isVisible={isVisible}
+              onOpenSearch={handleOpenCodeSearch}
+            />
+          ) : note.contentFormat === "javascript" || note.contentFormat === "js" || isJsFile(note) ? (
+            <HtmlCodeEditor
+              ref={codeEditorRef}
+              key={note.id}
+              value={codeEditorContentMap.get(note.id) ?? note.content}
+              onChange={handleCodeEditorChange}
+              fontSize={editorFontSize}
+              onCursorChange={(line, col) => setHtmlCursor({ line, col })}
+              onBlur={() => flushDebouncedContentSave(note)}
+              spellCheck={spellCheckEnabled}
+              noteId={note.id}
+              language="javascript"
+              showIndentGuides={settings.showCodeIndentGuides !== false}
+              isVisible={isVisible}
+              onOpenSearch={handleOpenCodeSearch}
             />
           ) : note.contentFormat === "html" || isHtmlFile(note) ? (
             <div className="relative flex-1 w-full h-full min-h-0 overflow-hidden flex flex-col">
@@ -16074,6 +18651,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               {/* Code Editor View */}
               <div className={`flex-1 w-full h-full min-h-0 overflow-hidden ${htmlPreviewOpen ? "hidden" : "flex flex-col"}`}>
                 <HtmlCodeEditor
+                  ref={codeEditorRef}
                   key={note.id}
                   value={codeEditorContentMap.get(note.id) ?? note.content}
                   onChange={handleCodeEditorChange}
@@ -16083,6 +18661,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   spellCheck={spellCheckEnabled}
                   noteId={note.id}
                   isVisible={isVisible && !htmlPreviewOpen}
+                  showIndentGuides={settings.showCodeIndentGuides !== false}
+                  onOpenSearch={handleOpenCodeSearch}
                 />
               </div>
             </div>
@@ -16629,6 +19209,308 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   </Tooltip>
                 </div>
               </>
+            ) : isPdfFile(note) ? (
+              <>
+                {/* Left side: Prev / Page X / Y Jump / Next | File Size | PDF Document */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {pdfViewerState && pdfViewerState.totalPages > 0 && (
+                    <>
+                      <div className="flex items-center gap-0.5">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              disabled={pdfViewerState.currentPage <= 1}
+                              onClick={() => pdfEditorRef.current?.sendCommand("prevPage")}
+                              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer disabled:opacity-35 disabled:pointer-events-none"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                              <span className="sr-only">
+                                {lang === "th" ? "หน้าก่อนหน้า" : "Previous Page"}
+                              </span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {lang === "th" ? "หน้าก่อนหน้า" : "Previous Page"}
+                          </TooltipContent>
+                        </Tooltip>
+
+                        <Popover
+                          open={pdfPageJumpOpen}
+                          onOpenChange={(open) => {
+                            setPdfPageJumpOpen(open);
+                            if (open) {
+                              setPdfPageJumpValue(String(pdfViewerState.currentPage));
+                            }
+                          }}
+                        >
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="tabular-nums text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                                >
+                                  {lang === "th"
+                                    ? `หน้า ${pdfViewerState.currentPage} / ${pdfViewerState.totalPages}`
+                                    : `Page ${pdfViewerState.currentPage} / ${pdfViewerState.totalPages}`}
+                                </button>
+                              </PopoverTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {lang === "th"
+                                ? "คลิกเพื่อข้ามไปยังหน้าที่ต้องการ"
+                                : "Click to jump to page"}
+                            </TooltipContent>
+                          </Tooltip>
+                          <PopoverContent
+                            side="top"
+                            align="start"
+                            sideOffset={6}
+                            className="w-48 p-2 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md"
+                          >
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const target = parseInt(pdfPageJumpValue.trim(), 10);
+                                if (!isNaN(target) && pdfViewerState.totalPages > 0) {
+                                  const clamped = Math.max(
+                                    1,
+                                    Math.min(pdfViewerState.totalPages, target)
+                                  );
+                                  pdfEditorRef.current?.sendCommand("goToPage", { page: clamped });
+                                  setPdfPageJumpOpen(false);
+                                }
+                              }}
+                              className="flex items-center gap-1.5"
+                            >
+                              <Input
+                                type="number"
+                                min={1}
+                                max={pdfViewerState.totalPages}
+                                value={pdfPageJumpValue}
+                                onChange={(e) => setPdfPageJumpValue(e.target.value)}
+                                placeholder={`1-${pdfViewerState.totalPages}`}
+                                className="h-7 rounded-lg text-xs tabular-nums border-border/70 bg-background px-2 focus-visible:ring-1 focus-visible:ring-primary"
+                                autoFocus
+                              />
+                              <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
+                                / {pdfViewerState.totalPages}
+                              </span>
+                              <Button
+                                type="submit"
+                                size="sm"
+                                className="h-7 px-2.5 rounded-lg text-xs shrink-0"
+                              >
+                                {lang === "th" ? "ไป" : "Go"}
+                              </Button>
+                            </form>
+                          </PopoverContent>
+                        </Popover>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              disabled={pdfViewerState.currentPage >= pdfViewerState.totalPages}
+                              onClick={() => pdfEditorRef.current?.sendCommand("nextPage")}
+                              className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer disabled:opacity-35 disabled:pointer-events-none"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                              <span className="sr-only">
+                                {lang === "th" ? "หน้าถัดไป" : "Next Page"}
+                              </span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {lang === "th" ? "หน้าถัดไป" : "Next Page"}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  {activeFileSize != null && (
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-default hover:text-foreground transition-colors">
+                            {formatFileSize(activeFileSize)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <div className="h-3 w-[1px] bg-border/60" />
+                    </>
+                  )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
+                        {getFileFormatLabel(note)}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Right side: Zoom Out | % Presets & Fit Width | Zoom In | Open in App */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rawScale = pdfViewerState?.scale || 1.25;
+                          const currentPct = Math.round((rawScale / 1.25) * 100);
+                          const nextPct = Math.max(25, (Math.ceil(currentPct / 25) - 1) * 25);
+                          const nextScale = (nextPct / 100) * 1.25;
+                          setPdfViewerState((prev) =>
+                            prev ? { ...prev, scale: nextScale } : prev
+                          );
+                          pdfEditorRef.current?.sendCommand("setZoomDirect", {
+                            scale: nextScale,
+                          });
+                        }}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
+                      >
+                        {(() => {
+                          const ZoomOutIconComp = getToolbarIcon("zoomOut", settings.iconPack);
+                          return <ZoomOutIconComp className="h-3.5 w-3.5" />;
+                        })()}
+                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomOut") || "Zoom Out"}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <DropdownMenu>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60 flex items-center gap-0.5"
+                          >
+                            <span>{`${Math.round(((pdfViewerState?.scale || 1.25) / 1.25) * 100)}%`}</span>
+                            <ChevronDown className="h-2.5 w-2.5 opacity-60 shrink-0" />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {lang === "th" ? "ปรับขนาดการซูม" : "Zoom Options"}
+                      </TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent
+                      side="top"
+                      align="center"
+                      className="w-36 rounded-xl p-1.5 shadow-md"
+                    >
+                      <DropdownMenuItem
+                        onClick={() => pdfEditorRef.current?.sendCommand("fitWidth")}
+                        className="cursor-pointer py-1.5 px-2.5 rounded-lg text-xs flex items-center justify-between"
+                      >
+                        <span>{lang === "th" ? "พอดีความกว้าง" : "Fit to Width"}</span>
+                      </DropdownMenuItem>
+                      <div className="my-1 h-px bg-border/60" />
+                      {[50, 75, 100, 125, 150, 200].map((pct) => {
+                        const currentPct = Math.round(
+                          ((pdfViewerState?.scale || 1.25) / 1.25) * 100
+                        );
+                        const isPctActive = currentPct === pct;
+                        return (
+                          <DropdownMenuItem
+                            key={pct}
+                            onClick={() => {
+                              const nextScale = (pct / 100) * 1.25;
+                              setPdfViewerState((prev) =>
+                                prev ? { ...prev, scale: nextScale } : prev
+                              );
+                              if (pct === 100) {
+                                pdfEditorRef.current?.sendCommand("zoomReset");
+                              } else {
+                                pdfEditorRef.current?.sendCommand("setZoomDirect", {
+                                  scale: nextScale,
+                                });
+                              }
+                            }}
+                            className={`cursor-pointer py-1 px-2.5 rounded-lg text-xs tabular-nums flex items-center justify-between ${
+                              isPctActive
+                                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                : ""
+                            }`}
+                          >
+                            <span>{`${pct}%`}</span>
+                            {isPctActive && (
+                              <Check className="h-3.5 w-3.5 stroke-[2.5] text-primary shrink-0" />
+                            )}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rawScale = pdfViewerState?.scale || 1.25;
+                          const currentPct = Math.round((rawScale / 1.25) * 100);
+                          const nextPct = Math.min(500, (Math.floor(currentPct / 25) + 1) * 25);
+                          const nextScale = (nextPct / 100) * 1.25;
+                          setPdfViewerState((prev) =>
+                            prev ? { ...prev, scale: nextScale } : prev
+                          );
+                          pdfEditorRef.current?.sendCommand("setZoomDirect", {
+                            scale: nextScale,
+                          });
+                        }}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
+                      >
+                        {(() => {
+                          const ZoomInIconComp = getToolbarIcon("zoomIn", settings.iconPack);
+                          return <ZoomInIconComp className="h-3.5 w-3.5" />;
+                        })()}
+                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.zoomIn") || "Zoom In"}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <div className="h-3 w-[1px] bg-border/60" />
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenInSystemApp()}
+                        className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
+                      >
+                        {(() => {
+                          const ExtIconComp = getToolbarIcon("externalLink", settings.iconPack);
+                          return <ExtIconComp className="h-3 w-3" />;
+                        })()}
+                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </>
             ) : isBinaryFile(note) ? (
               <>
                 {/* Left side: File Size | Format */}
@@ -16698,7 +19580,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
                   {settings.showWordCount !== false && (
                     <>
-                      {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                      {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isJsFile(note) || isCodeFile(note)) && (
                         <>
                           <div className="h-3 w-[1px] bg-border/60" />
 
@@ -16858,7 +19740,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </TooltipContent>
                   </Tooltip>
 
-                  {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isCodeFile(note)) && (
+                  {!(note?.contentFormat === "html" || note?.contentFormat === "css" || isHtmlFile(note) || isCssFile(note) || isJsFile(note) || isCodeFile(note)) && (
                     <>
                       <div className="h-3 w-[1px] bg-border/60" />
 
@@ -16940,6 +19822,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }}
               onExportPdf={handleExportPdf}
               onExportWord={handleExportWord}
+              isPdf={isPdfFile(note)}
+              onExportFlattenedPdf={() => void pdfEditorRef.current?.exportFlattenedPdfAs()}
+              onExportFormPdf={() => void pdfEditorRef.current?.exportFormPdfAs()}
               imageDimensions={imageDimensions}
               fileSize={activeFileSize ?? note?.fileSize}
             />
@@ -16964,12 +19849,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClose={() => setVersionHistoryOpen(false)}
               note={note}
               currentWordCount={
-                (isHtmlFile(note) || isCssFile(note))
+                (isHtmlFile(note) || isCssFile(note) || isJsFile(note))
                   ? (note.content ? note.content.trim().split(/\s+/).filter(Boolean).length : 0)
                   : editorStats.wordCount
               }
               currentCharCount={
-                (isHtmlFile(note) || isCssFile(note))
+                (isHtmlFile(note) || isCssFile(note) || isJsFile(note))
                   ? (note.content ? note.content.length : 0)
                   : editorStats.charCount
               }
@@ -17403,13 +20288,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       </Dialog>
 
       <WorkspaceVideoPickerDialog
-        isOpen={workspaceVideoDialogOpen}
-        onClose={() => setWorkspaceVideoDialogOpen(false)}
-        notes={notes}
-        currentNote={note}
-        rootDirHandle={rootDirHandle}
-        assetBlobUrlMap={assetBlobUrlMap}
-        onSelectVideo={handleInsertWorkspaceVideo}
+        {...({
+          isOpen: workspaceVideoDialogOpen,
+          onClose: () => setWorkspaceVideoDialogOpen(false),
+          notes,
+          currentNote: note,
+          rootDirHandle,
+          assetBlobUrlMap,
+          onSelectVideo: handleInsertWorkspaceVideo,
+        } as any)}
       />
 
       <FloatingAudioRecorder

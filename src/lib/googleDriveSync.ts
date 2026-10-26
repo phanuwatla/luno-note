@@ -21,6 +21,8 @@ import {
   clearFolderPathCache,
   LunoFolderStructure,
   DriveFileItem,
+  ensureDriveFolderPath,
+  uploadDriveAttachmentFile,
 } from "./googleDriveApi";
 
 export type CloudSyncStatus =
@@ -306,7 +308,7 @@ class GoogleDriveSyncEngine {
 
         if (!matchingNote) {
           let content = "";
-          let format: "markdown" | "html" | "plain" = "markdown";
+          let format: "markdown" | "html" | "plain" | "css" | "javascript" = "markdown";
 
           if (isImage || isBinary) {
             format = "plain";
@@ -355,10 +357,10 @@ class GoogleDriveSyncEngine {
           } else {
             // Download text/markdown file
             content = await fetchDriveFileContent(accessToken, file.id);
-            format = file.name.endsWith(".html") ? "html" : file.name.endsWith(".txt") ? "plain" : "markdown";
+            format = file.name.endsWith(".html") || file.name.endsWith(".htm") ? "html" : file.name.endsWith(".css") ? "css" : (file.name.endsWith(".js") || file.name.endsWith(".mjs") || file.name.endsWith(".cjs")) ? "javascript" : file.name.endsWith(".txt") ? "plain" : "markdown";
           }
 
-          const baseName = file.name.replace(/\.(md|txt|html|png|jpg|jpeg|gif|webp|svg|bmp|ico|pdf|mp4|mp3|zip)$/i, "");
+          const baseName = file.name.replace(/\.(md|txt|html|css|js|mjs|cjs|png|jpg|jpeg|gif|webp|svg|bmp|ico|pdf|mp4|mp3|zip)$/i, "");
           const newId = crypto.randomUUID();
           this.noteIdToDriveFileId.set(newId, file.id);
 

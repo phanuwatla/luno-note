@@ -146,16 +146,19 @@ export type ExtendedFileSystemHandle = FileSystemFileHandle | FileSystemDirector
 export type OpenFolderPending = {
   kind: "file" | "folder";
   fileName?: string;
-  contentFormat?: "plain" | "markdown" | "html" | "css";
+  initialName?: string;
+  contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js";
   folderName?: string;
 };
 
 export type CreateNoteOptions = {
   fileName?: string;
-  contentFormat?: "plain" | "markdown" | "html" | "css";
+  initialName?: string;
+  contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js";
   initialContent?: string;
   icon?: string;
   iconColor?: string;
+  templateType?: string;
 };
 
 export async function requestPermissionIfAvailable(

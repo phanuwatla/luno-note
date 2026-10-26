@@ -104,16 +104,7 @@ function getHostFromUrl(url: string, title?: string): string {
   }
 }
 
-// Global Electron API declaration
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron?: boolean;
-      openExternal?: (url: string) => Promise<boolean>;
-      [key: string]: unknown;
-    };
-  }
-}
+
 
 interface WebViewerViewProps {
   tabId?: string;
@@ -1038,7 +1029,7 @@ export default function WebViewerView({
                 ref={webviewRef}
                 src={initialSrcRef.current}
                 partition="persist:luno_webviewer"
-                allowpopups="true"
+                allowpopups={true}
                 webpreferences="contextIsolation=yes"
                 className="w-full h-full flex-1 border-0 bg-white"
                 style={{ width: "100%", height: "100%" }}

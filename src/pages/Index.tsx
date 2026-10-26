@@ -47,7 +47,7 @@ import { createCloudWorkspace } from "@/lib/googleDriveApi";
 import { getWelcomeNoteContent, WELCOME_NOTE_FILENAME } from "@/lib/welcomeNote";
 import { PinLockModal, type PinLockModalMode } from "@/components/PinLockModal";
 import { encryptNoteContent, decryptNoteContent, isEncryptedNote, getRemainingLockoutSeconds, clearPinLockout } from "@/lib/noteCrypto";
-import { clearNoteVersionHistory } from "@/lib/versionHistoryStorage";
+import { clearNoteVersionHistory, renameNoteVersionHistory } from "@/lib/versionHistoryStorage";
 import { getNoteTemplateContent, getNoteTemplateMetadata, getTemplateIcon, getDefaultTemplateForExtension, replaceFirstH1InMarkdown, type NoteTemplateType } from "@/lib/templates";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
 import { clearNoteEditorState, noteEditorStateMap } from "@/components/Editor";
@@ -55,6 +55,32 @@ import { getAutoFolderIconAndColor } from "@/lib/iconPacks";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { setCustomFontWorkspaceHandle, loadCustomFonts } from "@/lib/customFontStore";
 import { isSensitiveWebUrl, openExternalUrl } from "@/lib/urlUtils";
+import { getLocalWorkspaceManifest, type CloudWorkspaceInfo } from "@/lib/workspaceIdentity";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  finalizeAllOpenPdfSessions,
+  finalizePdfTabSession,
+  getUnsavedPdfNoteIds,
+  isPdfTabDirty,
+  savePdfTabAnnotations,
+} from "@/components/PdfEditorView";
+
+type PendingPdfCloseAction =
+  | { type: "tab"; id: string }
+  | { type: "other"; keepId: string }
+  | { type: "all" }
+  | { type: "right"; targetId: string }
+  | { type: "app" };
 
 export default function Index() {
   const { t, language } = useTranslation();
@@ -1433,12 +1459,12 @@ export default function Index() {
     return unlockedSessionPinsRef.current.get(noteId);
   }, []);
 
-  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" }) => {
+  const normalizeNewFileOptions = (options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js" }) => {
     const raw = (options?.fileName ?? "").trim();
     const safe = raw.replace(/[\\/:*?"<>|]/g, "_");
 
     const defaultExt = settings.defaultExtension || "md";
-    const defaultFormat = defaultExt === "html" ? ("html" as const) : defaultExt === "css" ? ("css" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
+    const defaultFormat = (defaultExt as string) === "html" ? ("html" as const) : (defaultExt as string) === "css" ? ("css" as const) : ((defaultExt as string) === "js" || (defaultExt as string) === "javascript") ? ("javascript" as const) : defaultExt === "txt" ? ("plain" as const) : ("markdown" as const);
 
     if (!safe) {
       const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
@@ -1448,7 +1474,9 @@ export default function Index() {
       } else if (settings.newFilePattern === "daily") {
         baseName = `Daily-${dateStr}`;
       }
-      return { fileName: `${baseName}.${defaultExt}`, contentFormat: defaultFormat };
+      const desiredExt = (options?.contentFormat === "javascript" || options?.contentFormat === "js") ? "js" : options?.contentFormat === "html" ? "html" : options?.contentFormat === "css" ? "css" : options?.contentFormat === "plain" ? "txt" : options?.contentFormat === "markdown" ? "md" : defaultExt;
+      const desiredFmt = (options?.contentFormat === "javascript" || options?.contentFormat === "js") ? ("javascript" as const) : options?.contentFormat === "html" ? ("html" as const) : options?.contentFormat === "css" ? ("css" as const) : options?.contentFormat === "plain" ? ("plain" as const) : options?.contentFormat === "markdown" ? ("markdown" as const) : defaultFormat;
+      return { fileName: `${baseName}.${desiredExt}`, contentFormat: desiredFmt };
     }
 
     const dotIndex = safe.lastIndexOf(".");
@@ -1468,6 +1496,9 @@ export default function Index() {
     if (extFromName === "css") {
       return { fileName: `${base}.css`, contentFormat: "css" as const };
     }
+    if (extFromName === "js" || extFromName === "javascript" || extFromName === "mjs" || extFromName === "cjs") {
+      return { fileName: `${base}.${extFromName === "javascript" ? "js" : extFromName}`, contentFormat: "javascript" as const };
+    }
 
     if (desiredFormat === "markdown") {
       return { fileName: `${base}.md`, contentFormat: "markdown" as const };
@@ -1477,6 +1508,9 @@ export default function Index() {
     }
     if (desiredFormat === "css") {
       return { fileName: `${base}.css`, contentFormat: "css" as const };
+    }
+    if (desiredFormat === "javascript" || desiredFormat === "js") {
+      return { fileName: `${base}.js`, contentFormat: "javascript" as const };
     }
     return { fileName: `${base}.${defaultExt}`, contentFormat: defaultFormat };
   };
@@ -1736,7 +1770,7 @@ export default function Index() {
 
     const entries: Array<{
       fileName: string;
-      contentFormat: "plain" | "markdown" | "html" | "css";
+      contentFormat: "plain" | "markdown" | "html" | "css" | "javascript";
       fileType?: "image" | "binary";
       handle: FileSystemFileHandle;
       folderPath: string;
@@ -1805,12 +1839,12 @@ export default function Index() {
             const ext = dotIdx >= 0 ? lname.slice(dotIdx) : "";
 
             let fileType: "image" | "binary" | undefined;
-            let contentFormat: "plain" | "markdown" | "html" | "css" = "plain";
+            let contentFormat: "plain" | "markdown" | "html" | "css" | "javascript" = "plain";
 
             if (IMAGE_EXTS.has(ext)) {
               fileType = "image";
             } else if (TEXT_EXTS.has(ext)) {
-              contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : "plain";
+              contentFormat = ext === ".md" || ext === ".markdown" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : (ext === ".js" || ext === ".mjs" || ext === ".cjs") ? "javascript" : "plain";
             } else {
               fileType = "binary";
             }
@@ -1842,7 +1876,7 @@ export default function Index() {
   }, []);
 
   const syncFolderFromDisk = useCallback(
-    async (dirHandle: FileSystemDirectoryHandle, selectRelativePath?: string, isNewWorkspace?: boolean) => {
+    async (dirHandle: FileSystemDirectoryHandle, selectRelativePath?: string | Set<string>, isNewWorkspace?: boolean) => {
       const { entries: scannedEntries, folderPaths: scannedFolderPaths } = await scanFolderEntries(dirHandle);
       setOpenedFolderPaths(Array.from(scannedFolderPaths));
 
@@ -1855,7 +1889,7 @@ export default function Index() {
         content: string;
         fileName?: string;
         isLinkedFile?: boolean;
-        contentFormat?: "plain" | "markdown" | "html";
+        contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js";
         folderPath?: string;
         fileType?: "image" | "binary";
         fileSize?: number;
@@ -1955,7 +1989,7 @@ export default function Index() {
         return nextNotes;
       }
 
-      const targetPathToOpen = selectRelativePath || activeRelativePath;
+      const targetPathToOpen = typeof selectRelativePath === "string" ? selectRelativePath : activeRelativePath;
       if (targetPathToOpen) {
         const nextActive = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === targetPathToOpen);
         if (nextActive) {
@@ -1989,9 +2023,10 @@ export default function Index() {
     const { fileName: rawDesiredFileName, contentFormat } = normalizeNewFileOptions(options);
     const desiredFileName = getUniqueFileNameInNotes(normalizedPath, rawDesiredFileName, notesRef.current);
     const isTxt = desiredFileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+    const isCodeOrPlain = isTxt || contentFormat === "css" || contentFormat === "javascript" || desiredFileName.endsWith(".css") || desiredFileName.endsWith(".js") || desiredFileName.endsWith(".mjs") || desiredFileName.endsWith(".cjs");
     const rawTitle = extractBaseTitleFromFileName(desiredFileName);
-    const initialTitle = isTxt ? "" : (rawTitle || "Untitled");
-    const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, desiredFileName);
+    const initialTitle = isCodeOrPlain ? "" : (rawTitle || "Untitled");
+    const effectiveTemplate = (options?.templateType || getDefaultTemplateForExtension(settings, desiredFileName)) as NoteTemplateType;
     const templateContent = getNoteTemplateContent(
       effectiveTemplate,
       settings.language,
@@ -2000,8 +2035,8 @@ export default function Index() {
       settings.timeFormat,
       settings.iconPack
     );
-    let initialContent = options?.initialContent ?? (templateContent ? templateContent : (isTxt ? "" : `<h1>${initialTitle}</h1>`));
-    if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isTxt && (desiredFileName.endsWith(".md") || desiredFileName.endsWith(".markdown"))))) {
+    let initialContent = options?.initialContent ?? (templateContent ? templateContent : (isCodeOrPlain ? "" : `<h1>${initialTitle}</h1>`));
+    if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isCodeOrPlain && (desiredFileName.endsWith(".md") || desiredFileName.endsWith(".markdown"))))) {
       initialContent = updateFrontmatterIcon(initialContent, options.icon, options.iconColor);
     }
 
@@ -2027,7 +2062,7 @@ export default function Index() {
         );
 
         const createdRelPath = getRelativePath(normalizedPath, desiredFileName);
-        if (options?.icon && (isTxt || contentFormat === "html" || desiredFileName.endsWith(".html") || desiredFileName.endsWith(".htm") || desiredFileName.endsWith(".txt"))) {
+        if (options?.icon && (isCodeOrPlain || contentFormat === "html" || desiredFileName.endsWith(".html") || desiredFileName.endsWith(".htm") || desiredFileName.endsWith(".txt"))) {
           setFileIcon(createdRelPath, options.icon, options.iconColor);
         }
 
@@ -2046,6 +2081,7 @@ export default function Index() {
         );
 
         const targetId = createdNote?.id ?? newNoteId;
+        clearNoteVersionHistory(targetId, createdRelPath);
         if (targetId && (options?.icon || options?.iconColor)) {
           handleUpdateNote(targetId, {
             icon: options?.icon,
@@ -2069,6 +2105,7 @@ export default function Index() {
     // 2. Fallback if no folder handle opened
     if (!openedRootDirHandle) {
       const note = createNote(normalizedPath || undefined);
+      clearNoteVersionHistory(note.id, desiredFileName);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
@@ -2092,9 +2129,10 @@ export default function Index() {
 
       const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
       const isFileTxt = fileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+      const isCodeOrPlain = isFileTxt || contentFormat === "css" || contentFormat === "javascript" || fileName.endsWith(".css") || fileName.endsWith(".js") || fileName.endsWith(".mjs") || fileName.endsWith(".cjs");
       const rawFileTitle = extractBaseTitleFromFileName(fileName);
-      const fileTitle = isFileTxt ? "" : (rawFileTitle || "Untitled");
-      const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, fileName);
+      const fileTitle = isCodeOrPlain ? "" : (rawFileTitle || "Untitled");
+      const effectiveTemplate = (options?.templateType || getDefaultTemplateForExtension(settings, fileName)) as NoteTemplateType;
       const fileTemplateContent = getNoteTemplateContent(
         effectiveTemplate,
         settings.language,
@@ -2103,12 +2141,12 @@ export default function Index() {
         settings.timeFormat,
         settings.iconPack
       );
-      let fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isFileTxt ? "" : `<h1>${fileTitle}</h1>`));
-      if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isFileTxt && (fileName.endsWith(".md") || fileName.endsWith(".markdown"))))) {
+      let fileContent = options?.initialContent ?? (fileTemplateContent ? fileTemplateContent : (isCodeOrPlain ? "" : `<h1>${fileTitle}</h1>`));
+      if (options?.icon && (contentFormat === "markdown" || (!contentFormat && !isCodeOrPlain && (fileName.endsWith(".md") || fileName.endsWith(".markdown"))))) {
         fileContent = updateFrontmatterIcon(fileContent, options.icon, options.iconColor);
       }
       const relPath = getRelativePath(normalizedPath, fileName);
-      if (options?.icon && (isFileTxt || contentFormat === "html" || fileName.endsWith(".html") || fileName.endsWith(".htm") || fileName.endsWith(".txt"))) {
+      if (options?.icon && (isCodeOrPlain || contentFormat === "html" || fileName.endsWith(".html") || fileName.endsWith(".htm") || fileName.endsWith(".txt"))) {
         setFileIcon(relPath, options.icon, options.iconColor);
       }
       clearDeletedRelativePath(relPath);
@@ -2119,6 +2157,7 @@ export default function Index() {
       await writable.close();
 
       const note = createNote(normalizedPath || undefined);
+      clearNoteVersionHistory(note.id, relPath, openedRootDirHandle);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName,
@@ -2141,6 +2180,7 @@ export default function Index() {
     } catch (error) {
       console.error("Create file in folder failed", error);
       const note = createNote(normalizedPath || undefined);
+      clearNoteVersionHistory(note.id, desiredFileName);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName: desiredFileName,
@@ -2289,6 +2329,8 @@ export default function Index() {
             }
 
             updateNote(note.id, { fileName: safeName, title: extractBaseTitleFromFileName(safeName) });
+            const newRelPath = getRelativePath(note.folderPath || "", safeName);
+            void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, null);
 
             const nextItems = entries.map((e: any) => {
               const relPath = e.relativePath;
@@ -2334,12 +2376,13 @@ export default function Index() {
         n.id === note.id ? { ...n, fileName: finalName, title: extractBaseTitleFromFileName(finalName) } : n
       );
       updateNote(note.id, { fileName: finalName, title: extractBaseTitleFromFileName(finalName) });
+      void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, openedRootDirHandle);
 
       if (settings.storageMode === "gdrive" && isGoogleDriveConnected() && note.driveFileId) {
         void renameDriveNote(note, finalName);
       }
 
-      await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
+      await syncFolderFromDisk(openedRootDirHandle, newRelPath);
     } catch (error) {
       console.error("Rename file failed", error);
       clearDeletedRelativePath(oldRelPath);
@@ -2843,6 +2886,8 @@ export default function Index() {
 
           const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
           if (ok) {
+            const newRelPath = getRelativePath(targetFolderPath, note.fileName);
+            void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, null);
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
             setOpenedFolderPaths(folderPaths);
 
@@ -2888,9 +2933,10 @@ export default function Index() {
         folderPath: targetFolderPath,
         fileName: targetName,
       });
+      void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, openedRootDirHandle);
 
       await sourceDir.removeEntry(note.fileName);
-      await syncFolderFromDisk(openedRootDirHandle, undefined, newRelPath);
+      await syncFolderFromDisk(openedRootDirHandle, newRelPath);
     } catch (error) {
       console.error("Move file failed", error);
       clearDeletedRelativePath(oldRelPath);
@@ -2929,6 +2975,8 @@ export default function Index() {
             const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
             if (ok) {
               movedIds.add(note.id);
+              const newRelPath = getRelativePath(targetFolderPath, note.fileName!);
+              void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, null);
             }
           }
 
@@ -2994,6 +3042,7 @@ export default function Index() {
             folderPath: targetFolderPath,
             fileName: targetName,
           });
+          void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, openedRootDirHandle);
 
           await sourceDir.removeEntry(note.fileName!);
           movedCount++;
@@ -3148,6 +3197,7 @@ export default function Index() {
           }
 
           const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
+          clearNoteVersionHistory(targetNote.id, relPath, openedRootDirHandle);
           if (settings.fileIcons?.[relPath]) {
             removeFileIcon(relPath);
           }
@@ -3549,7 +3599,7 @@ export default function Index() {
   const createNoteInFolderWithDir = async (
     targetRootDirHandle: FileSystemDirectoryHandle,
     folderPath?: string,
-    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" }
+    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; templateType?: NoteTemplateType }
   ) => {
     const normalizedPath = folderPath ?? activeTabNote?.folderPath ?? "";
     const { fileName: desiredFileName, contentFormat } = normalizeNewFileOptions(options);
@@ -3564,11 +3614,12 @@ export default function Index() {
       const fileName = await resolveUniqueFileName(targetDir, desiredFileName);
       const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
       const isFileTxt = fileName.toLowerCase().endsWith(".txt") || contentFormat === "plain";
+      const isCodeOrPlain = isFileTxt || contentFormat === "css" || contentFormat === "javascript" || fileName.endsWith(".css") || fileName.endsWith(".js") || fileName.endsWith(".mjs") || fileName.endsWith(".cjs");
       const fileTitle = extractBaseTitleFromFileName(fileName);
       const relPath = getRelativePath(normalizedPath, fileName);
       clearDeletedRelativePath(relPath);
 
-      const effectiveTemplate = options?.templateType || getDefaultTemplateForExtension(settings, fileName);
+      const effectiveTemplate = (options?.templateType || getDefaultTemplateForExtension(settings, fileName)) as NoteTemplateType;
       const templateContent = getNoteTemplateContent(
         effectiveTemplate,
         settings.language,
@@ -3577,12 +3628,13 @@ export default function Index() {
         settings.timeFormat,
         settings.iconPack
       );
-      const fileContent = isFileTxt && !templateContent ? "" : templateContent;
+      const fileContent = isCodeOrPlain && !templateContent ? "" : templateContent;
       const writable = await fileHandle.createWritable();
       await writable.write(fileContent);
       await writable.close();
 
       const note = createNote(normalizedPath || undefined);
+      clearNoteVersionHistory(note.id, relPath, openedRootDirHandle);
       unmarkNoteAsDeleted(note.id);
       updateNote(note.id, {
         fileName,
@@ -3636,7 +3688,7 @@ export default function Index() {
     }
   };
 
-  const handleOpenFolder = async (pending?: { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html"; folderName?: string }) => {
+  const handleOpenFolder = async (pending?: { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; folderName?: string }) => {
     const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
 
     // 1. Electron Desktop Native Dialog & Tree Read
@@ -3989,15 +4041,12 @@ export default function Index() {
       const permState = await dirHandle.requestPermission({ mode: "readwrite" });
       if (permState === "granted") {
         setPendingReconnectDirHandle(null);
-        await scanAndLoadFolderEntries(dirHandle, {
-          onSuccess: (notesLoaded) => {
-            const folderName = dirHandle.name || "Untitled Workspace";
-            setOpenedFolderName(folderName);
-            setRootFolderName(folderName);
-            restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup, dirHandle, isFirstTimeOnVersionRef.current);
-            isFirstTimeOnVersionRef.current = false;
-          },
-        });
+        const notesLoaded = (await syncFolderFromDisk(dirHandle)) || [];
+        const folderName = dirHandle.name || "Untitled Workspace";
+        setOpenedFolderName(folderName);
+        setRootFolderName(folderName);
+        restoreTabsFromSession(notesLoaded, settings.reopenTabs, settings.onStartup, dirHandle, isFirstTimeOnVersionRef.current);
+        isFirstTimeOnVersionRef.current = false;
       } else {
         void handleOpenFolder();
       }
@@ -4269,7 +4318,9 @@ export default function Index() {
       ]);
       if (active) {
         if (workspaceSettings) {
-          updateSettings(workspaceSettings);
+          // Workspace settings should never overwrite global/device user profile
+          const { userName: _ignored, ...wsSettings } = workspaceSettings as any;
+          updateSettings(wsSettings);
         } else if (settings) {
           await saveWorkspaceSettings(openedRootDirHandle, settings);
         }
@@ -4632,11 +4683,18 @@ export default function Index() {
     };
   }, [handleOpenSettings]);
 
-  const handleCloseTab = useCallback(
+  const [pendingPdfCloseRequest, setPendingPdfCloseRequest] = useState<{
+    dirtyNoteIds: string[];
+    action: PendingPdfCloseAction;
+  } | null>(null);
+  const [isSavingPendingPdfClose, setIsSavingPendingPdfClose] = useState(false);
+
+  const executeCloseTab = useCallback(
     (id: string) => {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
       }
+      void finalizePdfTabSession(id);
       clearNoteEditorHistory(id);
       if (lastActiveNoteId === id) {
         const nextValid = openTabIds.find((t) => t !== id && !isSystemOrWebTab(t)) ?? null;
@@ -4658,13 +4716,31 @@ export default function Index() {
     [closeTab, notes, lastActiveNoteId, lastActiveSplitNoteId, openTabIds]
   );
 
-  const handleCloseOtherTabs = useCallback(
+  const handleCloseTab = useCallback(
+    (id: string) => {
+      if (isPdfTabDirty(id)) {
+        if (activeTabId !== id) {
+          openTab(id);
+        }
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: [id],
+          action: { type: "tab", id },
+        });
+        return;
+      }
+      executeCloseTab(id);
+    },
+    [activeTabId, openTab, executeCloseTab]
+  );
+
+  const executeCloseOtherTabs = useCallback(
     (keepId: string) => {
       const tabsToClose = openTabIds.filter((id) => id !== keepId);
       tabsToClose.forEach((id) => {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
         }
+        void finalizePdfTabSession(id);
         clearNoteEditorHistory(id);
       });
       if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
@@ -4687,11 +4763,31 @@ export default function Index() {
     [openTabIds, closeOtherTabs, lastActiveNoteId, lastActiveSplitNoteId]
   );
 
-  const handleCloseAllTabs = useCallback(() => {
+  const handleCloseOtherTabs = useCallback(
+    (keepId: string) => {
+      const tabsToClose = openTabIds.filter((id) => id !== keepId);
+      const dirtyIds = tabsToClose.filter((id) => isPdfTabDirty(id));
+      if (dirtyIds.length > 0) {
+        if (activeTabId !== dirtyIds[0]) {
+          openTab(dirtyIds[0]);
+        }
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: dirtyIds,
+          action: { type: "other", keepId },
+        });
+        return;
+      }
+      executeCloseOtherTabs(keepId);
+    },
+    [openTabIds, activeTabId, openTab, executeCloseOtherTabs]
+  );
+
+  const executeCloseAllTabs = useCallback(() => {
     openTabIds.forEach((id) => {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
       }
+      void finalizePdfTabSession(id);
       clearNoteEditorHistory(id);
     });
     setLastActiveNoteId(null);
@@ -4700,7 +4796,22 @@ export default function Index() {
     setWebTabs({});
   }, [openTabIds, closeAllTabs]);
 
-  const handleCloseTabsToRight = useCallback(
+  const handleCloseAllTabs = useCallback(() => {
+    const dirtyIds = openTabIds.filter((id) => isPdfTabDirty(id));
+    if (dirtyIds.length > 0) {
+      if (activeTabId !== dirtyIds[0]) {
+        openTab(dirtyIds[0]);
+      }
+      setPendingPdfCloseRequest({
+        dirtyNoteIds: dirtyIds,
+        action: { type: "all" },
+      });
+      return;
+    }
+    executeCloseAllTabs();
+  }, [openTabIds, activeTabId, openTab, executeCloseAllTabs]);
+
+  const executeCloseTabsToRight = useCallback(
     (targetId: string) => {
       const idx = openTabIds.indexOf(targetId);
       if (idx === -1) return;
@@ -4709,6 +4820,7 @@ export default function Index() {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
         }
+        void finalizePdfTabSession(id);
         clearNoteEditorHistory(id);
       });
       if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
@@ -4732,6 +4844,143 @@ export default function Index() {
     },
     [openTabIds, closeTabsToRight, lastActiveNoteId, lastActiveSplitNoteId]
   );
+
+  const handleCloseTabsToRight = useCallback(
+    (targetId: string) => {
+      const idx = openTabIds.indexOf(targetId);
+      if (idx === -1) return;
+      const tabsToClose = openTabIds.slice(idx + 1);
+      const dirtyIds = tabsToClose.filter((id) => isPdfTabDirty(id));
+      if (dirtyIds.length > 0) {
+        if (activeTabId !== dirtyIds[0]) {
+          openTab(dirtyIds[0]);
+        }
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: dirtyIds,
+          action: { type: "right", targetId },
+        });
+        return;
+      }
+      executeCloseTabsToRight(targetId);
+    },
+    [openTabIds, activeTabId, openTab, executeCloseTabsToRight]
+  );
+
+  useEffect(() => {
+    const handleRequestAppClose = (e: Event) => {
+      const dirtyIds = getUnsavedPdfNoteIds();
+      if (dirtyIds.length > 0) {
+        e.preventDefault();
+        if (activeTabId !== dirtyIds[0]) {
+          openTab(dirtyIds[0]);
+        }
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: dirtyIds,
+          action: { type: "app" },
+        });
+      }
+    };
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const dirtyIds = getUnsavedPdfNoteIds();
+      if (dirtyIds.length > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+        return;
+      }
+      void finalizeAllOpenPdfSessions();
+    };
+    window.addEventListener("luno:request-app-close", handleRequestAppClose);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("luno:request-app-close", handleRequestAppClose);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [activeTabId, openTab]);
+
+  const finishPendingPdfCloseAction = useCallback(
+    async (action: PendingPdfCloseAction) => {
+      if (action.type === "tab") {
+        executeCloseTab(action.id);
+      } else if (action.type === "other") {
+        executeCloseOtherTabs(action.keepId);
+      } else if (action.type === "all") {
+        executeCloseAllTabs();
+      } else if (action.type === "right") {
+        executeCloseTabsToRight(action.targetId);
+      } else if (action.type === "app") {
+        await finalizeAllOpenPdfSessions();
+        if (window.electronAPI?.close) {
+          window.electronAPI.close();
+        } else {
+          window.close();
+        }
+      }
+    },
+    [executeCloseTab, executeCloseOtherTabs, executeCloseAllTabs, executeCloseTabsToRight]
+  );
+
+  const handleConfirmPendingPdfSaveAndClose = useCallback(async () => {
+    if (!pendingPdfCloseRequest || isSavingPendingPdfClose) return;
+    const currentId = pendingPdfCloseRequest.dirtyNoteIds[0];
+    if (!currentId) return;
+    setIsSavingPendingPdfClose(true);
+    try {
+      const saved = await savePdfTabAnnotations(currentId);
+      if (!saved) {
+        setIsSavingPendingPdfClose(false);
+        return;
+      }
+      await finalizePdfTabSession(currentId);
+      const remainingDirtyIds = pendingPdfCloseRequest.dirtyNoteIds
+        .slice(1)
+        .filter((id) => isPdfTabDirty(id));
+      if (remainingDirtyIds.length > 0) {
+        openTab(remainingDirtyIds[0]);
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: remainingDirtyIds,
+          action: pendingPdfCloseRequest.action,
+        });
+      } else {
+        const action = pendingPdfCloseRequest.action;
+        setPendingPdfCloseRequest(null);
+        await finishPendingPdfCloseAction(action);
+      }
+    } finally {
+      setIsSavingPendingPdfClose(false);
+    }
+  }, [pendingPdfCloseRequest, isSavingPendingPdfClose, openTab, finishPendingPdfCloseAction]);
+
+  const handleDiscardPendingPdfAndClose = useCallback(async () => {
+    if (!pendingPdfCloseRequest || isSavingPendingPdfClose) return;
+    const currentId = pendingPdfCloseRequest.dirtyNoteIds[0];
+    if (!currentId) return;
+    setIsSavingPendingPdfClose(true);
+    try {
+      await finalizePdfTabSession(currentId, { discardUnsaved: true });
+      const remainingDirtyIds = pendingPdfCloseRequest.dirtyNoteIds
+        .slice(1)
+        .filter((id) => isPdfTabDirty(id));
+      if (remainingDirtyIds.length > 0) {
+        openTab(remainingDirtyIds[0]);
+        setPendingPdfCloseRequest({
+          dirtyNoteIds: remainingDirtyIds,
+          action: pendingPdfCloseRequest.action,
+        });
+      } else {
+        const action = pendingPdfCloseRequest.action;
+        setPendingPdfCloseRequest(null);
+        await finishPendingPdfCloseAction(action);
+      }
+    } finally {
+      setIsSavingPendingPdfClose(false);
+    }
+  }, [pendingPdfCloseRequest, isSavingPendingPdfClose, openTab, finishPendingPdfCloseAction]);
+
+  const pendingPdfTargetNote = useMemo(() => {
+    const targetId = pendingPdfCloseRequest?.dirtyNoteIds[0];
+    if (!targetId) return null;
+    return notes.find((n) => n.id === targetId) ?? null;
+  }, [pendingPdfCloseRequest, notes]);
 
   const handleDuplicateTab = useCallback(
     async (note: Note) => {
@@ -4949,20 +5198,29 @@ export default function Index() {
   }, [restoreFromTrash, replaceNotes, openedRootDirHandle, t, syncFolderFromDisk]);
 
   const handleDeletePermanently = useCallback((ids: string[]) => {
+    ids.forEach((id) => {
+      const trashed = trashedNotes.find((n) => n.id === id);
+      const relPath = trashed?.fileName ? getRelativePath(trashed.folderPath || "", trashed.fileName) : null;
+      clearNoteVersionHistory(id, relPath, openedRootDirHandle);
+    });
     deletePermanently(ids);
     toast({
       title: t("trash.title"),
       description: t("trash.deleteSuccess"),
     });
-  }, [deletePermanently, t]);
+  }, [deletePermanently, trashedNotes, openedRootDirHandle, t]);
 
   const handleEmptyTrash = useCallback(() => {
+    trashedNotes.forEach((tNote) => {
+      const relPath = tNote.fileName ? getRelativePath(tNote.folderPath || "", tNote.fileName) : null;
+      clearNoteVersionHistory(tNote.id, relPath, openedRootDirHandle);
+    });
     emptyTrash();
     toast({
       title: t("trash.title"),
       description: t("trash.emptySuccess"),
     });
-  }, [emptyTrash, t]);
+  }, [emptyTrash, trashedNotes, openedRootDirHandle, t]);
 
   const handleDeleteNote = (id: string): boolean => {
     const targetNote = notes.find((n) => n.id === id);
@@ -4975,6 +5233,7 @@ export default function Index() {
     if (targetNote.fileName) {
       const relPath = getRelativePath(targetNote.folderPath || "", targetNote.fileName);
       trackDeletedRelativePath(relPath);
+      clearNoteVersionHistory(id, relPath, openedRootDirHandle);
     }
     if (splitTabId === id) {
       setSplitTabId(null);
@@ -5110,7 +5369,7 @@ export default function Index() {
         } catch (e) {
           console.warn("Disk file removal warning:", e);
         } finally {
-          await syncFolderFromDisk(openedRootDirHandle, new Set([relPath]));
+          await syncFolderFromDisk(openedRootDirHandle, relPath);
         }
       })();
     } else {
@@ -5133,7 +5392,7 @@ export default function Index() {
 
   const handleCreateNote = (
     folderPath?: string,
-    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" },
+    options?: { fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js" },
   ): Note | void => {
     void createNoteInFolder(folderPath, options);
   };
@@ -6180,6 +6439,72 @@ export default function Index() {
         onConfirmRemovePin={handleConfirmRemovePin}
         onConfirmChangePin={handleConfirmChangePin}
       />
+
+      {/* Unsaved PDF Changes Confirmation Modal */}
+      <AlertDialog
+        open={Boolean(pendingPdfCloseRequest)}
+        onOpenChange={(open) => {
+          if (!open && !isSavingPendingPdfClose) {
+            setPendingPdfCloseRequest(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isTh
+                ? "บันทึกการเปลี่ยนแปลงก่อนปิดหรือไม่?"
+                : "Save changes before closing?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const pdfName =
+                  pendingPdfTargetNote?.fileName ||
+                  pendingPdfTargetNote?.title ||
+                  "PDF";
+                return isTh
+                  ? `ไฟล์ "${pdfName}" มีการแก้ไขที่ยังไม่ได้บันทึก คุณต้องการบันทึกการเปลี่ยนแปลงก่อนปิดหรือไม่?`
+                  : `"${pdfName}" has unsaved changes. Do you want to save your changes before closing?`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={isSavingPendingPdfClose}
+              onClick={() => setPendingPdfCloseRequest(null)}
+            >
+              {t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}
+            </AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSavingPendingPdfClose}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDiscardPendingPdfAndClose();
+              }}
+            >
+              {isTh ? "ไม่บันทึก" : "Don't Save"}
+            </Button>
+            <AlertDialogAction
+              disabled={isSavingPendingPdfClose}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmPendingPdfSaveAndClose();
+              }}
+            >
+              {isSavingPendingPdfClose ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {isTh ? "กำลังบันทึก..." : "Saving..."}
+                </span>
+              ) : (
+                isTh ? "บันทึก" : "Save"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Global In-App Video Picture-in-Picture Player (Floats across all tabs/workspaces) */}
       <GlobalVideoPip onNavigateToNote={(noteId) => openTab(noteId)} />

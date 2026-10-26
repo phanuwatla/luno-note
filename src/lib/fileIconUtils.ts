@@ -44,7 +44,7 @@ export function getDefaultFileIconKey(fileName?: string, fileType?: string, cont
 
   // 6. PDF
   if (ext === "pdf") {
-    return "filePdf";
+    return "file";
   }
 
   // 7. Code / Markup / Styles / Scripts
@@ -58,6 +58,8 @@ export function getDefaultFileIconKey(fileName?: string, fileType?: string, cont
     ].includes(ext) ||
     contentFormat === "html" ||
     contentFormat === "css" ||
+    contentFormat === "javascript" ||
+    contentFormat === "js" ||
     contentFormat === "code"
   ) {
     return "fileCode";
@@ -87,7 +89,7 @@ export function getNoteDefaultIconKey(note: Pick<Note, "fileName" | "fileType" |
 export type FileCategory = "markdown" | "text" | "code" | "image" | "audio" | "video" | "binary";
 
 export function getFileCategory(
-  note?: { fileName?: string; fileType?: string; contentFormat?: string; content?: string } | null
+  note?: { fileName?: string; fileType?: string; contentFormat?: string; content?: string; title?: string } | null
 ): FileCategory {
   if (!note) return "markdown";
   if (note.fileType === "image") return "image";
@@ -141,7 +143,9 @@ export function getFileCategory(
       "wasm", "env", "ini", "conf", "config", "dockerfile", "makefile"
     ].includes(ext) ||
     note.contentFormat === "html" ||
-    note.contentFormat === "css"
+    note.contentFormat === "css" ||
+    note.contentFormat === "javascript" ||
+    note.contentFormat === "js"
   ) {
     return "code";
   }
@@ -201,7 +205,7 @@ export function getFileFormatLabel(
 
   if (note.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
   if (note.contentFormat === "css" || name.endsWith(".css")) return "CSS";
-  if (name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs")) return "JavaScript";
+  if (note.contentFormat === "javascript" || note.contentFormat === "js" || name.endsWith(".js") || name.endsWith(".mjs") || name.endsWith(".cjs")) return "JavaScript";
   if (name.endsWith(".jsx")) return "React JSX";
   if (name.endsWith(".ts")) return "TypeScript";
   if (name.endsWith(".tsx")) return "React TSX";

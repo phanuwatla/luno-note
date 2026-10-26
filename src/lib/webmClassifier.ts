@@ -122,6 +122,7 @@ export function isKnownWebmAudioName(name: string): boolean {
 
 export interface MediaMetadata {
   fileType?: string;
+  contentFormat?: string;
   content?: string;
   mimeType?: string;
   type?: string;

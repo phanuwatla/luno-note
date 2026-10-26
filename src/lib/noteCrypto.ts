@@ -22,7 +22,7 @@ export interface EncryptedPayload {
 
 /**
  * Checks if a given file name / note can be locked with PIN encryption.
- * Supported text types: Markdown (.md, .markdown), Text (.txt), HTML (.html, .htm), and CSS (.css).
+ * Supported text types: Markdown (.md, .markdown), Text (.txt), HTML (.html, .htm), CSS (.css), and JavaScript (.js, .mjs, .cjs).
  */
 export function isLockableTextFile(fileName?: string, fileType?: string): boolean {
   if (fileType === "image" || fileType === "binary" || fileType === "settings" || fileType === "luno-ai" || fileType === "web-viewer") {
@@ -36,7 +36,10 @@ export function isLockableTextFile(fileName?: string, fileType?: string): boolea
     lower.endsWith(".txt") ||
     lower.endsWith(".html") ||
     lower.endsWith(".htm") ||
-    lower.endsWith(".css")
+    lower.endsWith(".css") ||
+    lower.endsWith(".js") ||
+    lower.endsWith(".mjs") ||
+    lower.endsWith(".cjs")
   );
 }
 
@@ -81,7 +84,7 @@ async function deriveKeyFromPin(
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: salt as unknown as BufferSource,
       iterations,
       hash: "SHA-256",
     },
@@ -232,7 +235,7 @@ export async function encryptNoteContent(
   const encryptedBuffer = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
-      iv,
+      iv: iv as unknown as BufferSource,
     },
     key,
     plaintextBuffer
@@ -279,10 +282,10 @@ export async function decryptNoteContent(encryptedContent: string, pin: string):
     const decryptedBuffer = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv,
+        iv: iv as unknown as BufferSource,
       },
       key,
-      ciphertext
+      ciphertext as unknown as BufferSource
     );
 
     const dec = new TextDecoder();

@@ -39,8 +39,9 @@ import AudioExtension from "@/components/editor/AudioExtension";
 import VideoExtension from "@/components/editor/VideoExtension";
 import { getTagColorClass } from "@/lib/tagColors";
 import { parseFrontmatterAndTags } from "@/lib/frontmatter";
-import { useAppSettings, FONT_FAMILY_CSS } from "@/hooks/useAppSettings";
+import { useAppSettings, FONT_FAMILY_CSS, type AppTheme } from "@/hooks/useAppSettings";
 import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
+import HeadingToggle from "@/lib/headingToggle";
 
 export interface NoteEditorPreviewProps {
   content: string;
@@ -50,8 +51,8 @@ export interface NoteEditorPreviewProps {
   fontSize?: number;
   lineHeight?: string;
   fontFamily?: string;
-  theme?: string;
-  tagColorStyle?: string;
+  theme?: AppTheme;
+  tagColorStyle?: "multicolor" | "accent";
   accentHeadings?: boolean;
   editorWidth?: "compact" | "normal" | "full";
   showCodeLineNumbers?: boolean;
@@ -85,7 +86,7 @@ export default function NoteEditorPreview({
 }: NoteEditorPreviewProps) {
   const { settings } = useAppSettings();
 
-  const resolvedFontSize = fontSize ?? settings.fontSize ?? 15;
+  const resolvedFontSize = fontSize ?? settings.editorFontSize ?? 15;
   const resolvedLineHeight =
     lineHeight ??
     (settings.lineHeight === "1.4" ? 1.4 : settings.lineHeight === "1.8" ? 1.8 : 1.6);
@@ -268,6 +269,9 @@ export default function NoteEditorPreview({
       }),
       InlineCodeHighlight.configure({
         enabled: settings.highlightInlineCode === true,
+      }),
+      HeadingToggle.configure({
+        enabled: (settings as any).toggleHeading !== false,
       }),
       Underline,
       Highlight,
@@ -497,7 +501,7 @@ export default function NoteEditorPreview({
   // Keep content in sync when parsedHtml changes
   useEffect(() => {
     if (editor && !editor.isDestroyed) {
-      editor.commands.setContent(parsedHtml, false);
+      editor.commands.setContent(parsedHtml, { emitUpdate: false });
     }
   }, [editor, parsedHtml]);
 

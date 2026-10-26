@@ -27,7 +27,7 @@ describe("Smart typography and autolinks setting toggle", () => {
     editor.commands.setContent("<p>word--</p>");
     editor.commands.focus("end");
     // Simulate typing the matching trigger
-    editor.view.someProp("handleTextInput", (f) => f(editor.view, 7, 7, " "));
+    editor.view.someProp("handleTextInput", (f: any) => f(editor.view, 7, 7, " "));
     // Or dispatching input rules directly
     expect(editor.getText()).toBeDefined();
 
@@ -38,7 +38,7 @@ describe("Smart typography and autolinks setting toggle", () => {
     editor.view.dispatch(editor.state.tr.insertText("--"));
     // En-dash replaces '--' with '–'
     // Since inputrules trigger on text input:
-    editor.view.someProp("handleTextInput", (f) => f(editor.view, 6, 6, " "));
+    editor.view.someProp("handleTextInput", (f: any) => f(editor.view, 6, 6, " "));
     
     editor.destroy();
   });
@@ -62,15 +62,16 @@ describe("Smart typography and autolinks setting toggle", () => {
     });
 
     // Verify storage initialization
-    expect(editor.storage.smartTypography).toBeDefined();
-    expect(editor.storage.smartTypography.enabled).toBe(true);
+    const storage = editor.storage as any;
+    expect(storage.smartTypography).toBeDefined();
+    expect(storage.smartTypography.enabled).toBe(true);
 
     // Disable smart typography dynamically
     isEnabled = false;
-    editor.storage.smartTypography.enabled = false;
+    storage.smartTypography.enabled = false;
 
     // Check that storage and callback both reflect disabled state
-    expect(editor.storage.smartTypography.enabled).toBe(false);
+    expect(storage.smartTypography.enabled).toBe(false);
 
     editor.destroy();
   });

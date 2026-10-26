@@ -20,9 +20,9 @@ export interface Note {
   updatedAt: number;
   fileName?: string;
   isLinkedFile?: boolean;
-  contentFormat?: "plain" | "markdown" | "html" | "css";
+  contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js";
   folderPath?: string;
-  fileType?: "image" | "binary" | "settings" | "luno-ai" | "web-viewer";
+  fileType?: "image" | "video" | "audio" | "binary" | "settings" | "luno-ai" | "web-viewer" | "whats-new" | "help" | "home" | "trash" | "templates" | "relations" | "favorites" | "tags" | "other";
   url?: string;
   faviconUrl?: string;
   isFavorite?: boolean;
@@ -173,7 +173,7 @@ export function useNotes() {
     return note;
   }, []);
 
-  const bulkCreateNotes = useCallback(async (items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>) => {
+  const bulkCreateNotes = useCallback(async (items: Array<{ id?: string; title?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; folderPath?: string; fileType?: Note["fileType"]; tags?: string[] }>) => {
     const now = Date.now();
     const newNotes: Note[] = [];
     for (const item of items) {
@@ -224,7 +224,7 @@ export function useNotes() {
     return newNotes;
   }, []);
 
-  const replaceNotes = useCallback((items: Array<{ id?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html"; folderPath?: string; fileType?: "image" | "binary" | "settings" | "luno-ai"; tags?: string[] }>, isNewWorkspace: boolean = false) => {
+  const replaceNotes = useCallback((items: Array<{ id?: string; title?: string; content: string; fileName?: string; isLinkedFile?: boolean; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; folderPath?: string; fileType?: Note["fileType"]; tags?: string[]; createdAt?: number; updatedAt?: number; }>, isNewWorkspace: boolean = false) => {
     const now = Date.now();
 
     const prevNotesMap = new Map<string, Note>();
@@ -300,6 +300,8 @@ export function useNotes() {
         iconColor: (item as any).iconColor !== undefined ? (item as any).iconColor : (existingNote?.iconColor ?? fmIconColor),
         driveFileId: (item as any).driveFileId ?? existingNote?.driveFileId,
         driveSyncedAt: (item as any).driveSyncedAt ?? existingNote?.driveSyncedAt,
+        fullPath: (item as any).fullPath ?? (existingNote as any)?.fullPath,
+        fileSize: (item as any).fileSize ?? (existingNote as any)?.fileSize,
       };
     });
 

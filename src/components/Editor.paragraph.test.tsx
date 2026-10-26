@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { marked } from "marked";
 import { Editor as CoreEditor, Editor } from "@tiptap/core";
+import { EditorState } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -336,11 +337,11 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     const initialChildCount = editor.state.doc.childCount;
 
     // Simulate tab restore / workspace sync triggering setContent
-    editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
+    (editor.commands.setContent as any)(cleanHtml, false, { preserveWhitespace: "full" });
     expect(editor.state.doc.childCount).toBe(initialChildCount);
 
     // Simulate another reopen
-    editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
+    (editor.commands.setContent as any)(cleanHtml, false, { preserveWhitespace: "full" });
     expect(editor.state.doc.childCount).toBe(initialChildCount);
 
     expect(normalizeSaved(td.turndown(editor.getHTML()))).toBe(markdown);
@@ -361,7 +362,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
       const cleanHtml = parsed.replace(/>\s+</g, "><");
 
       // 2. Load into editor via setContent (Paragraph A, 1 empty paragraph, Paragraph B = 3 nodes)
-      editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
+      (editor.commands.setContent as any)(cleanHtml, false, { preserveWhitespace: "full" });
       expect(editor.state.doc.childCount).toBe(3);
 
       // 3. Serialize back out via turndown and normalize
@@ -404,7 +405,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
         const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
         const cleanHtml = parsed.replace(/>\s+</g, "><");
 
-        editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
+        (editor.commands.setContent as any)(cleanHtml, false, { preserveWhitespace: "full" });
         const html = editor.getHTML();
         current = normalizeSaved(td.turndown(html));
         expect(current).toBe(tc.input);
@@ -441,7 +442,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
       const parsed = marked.parse(preprocessed, { async: false, gfm: true, breaks: true }) as string;
       const cleanHtml = parsed.replace(/>\s+</g, "><");
 
-      editor.commands.setContent(cleanHtml, false, { preserveWhitespace: "full" });
+      (editor.commands.setContent as any)(cleanHtml, false, { preserveWhitespace: "full" });
 
       // Verify the blockquote did NOT swallow the paragraph
       const html = editor.getHTML();
@@ -481,8 +482,8 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     noteEditorStateMap.set("note-1", editor.state);
 
     // 3. Switch to Note 2 (Fresh note)
-    editor.commands.setContent("<p>Initial Note 2</p>", false, { preserveWhitespace: "full" });
-    const cleanNote2State = editor.state.constructor.create({
+    (editor.commands.setContent as any)("<p>Initial Note 2</p>", false, { preserveWhitespace: "full" });
+    const cleanNote2State = EditorState.create({
       doc: editor.state.doc,
       plugins: editor.state.plugins,
     });
@@ -529,8 +530,8 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     expect(noteEditorStateMap.has("note-2")).toBe(true);
 
     // 7. Reopening Note 1 tab resets history so undo/redo are clean (depth 0)
-    editor.commands.setContent("<p>Initial Note 1 - Edited</p>", false, { preserveWhitespace: "full" });
-    const freshNote1State = editor.state.constructor.create({
+    (editor.commands.setContent as any)("<p>Initial Note 1 - Edited</p>", false, { preserveWhitespace: "full" });
+    const freshNote1State = EditorState.create({
       doc: editor.state.doc,
       plugins: editor.state.plugins,
     });
@@ -723,7 +724,7 @@ describe("Markdown empty paragraphs and blank lines semantics and roundtrip", ()
     });
 
     const json = editor.getJSON();
-    const paragraph = json.content[0];
+    const paragraph = json.content[0] as any;
 
     // Verify there are multiple distinct text nodes and not a single merged text node "#Programming#University#Projects#Ideas"
     const codeTexts = paragraph.content.filter((c: any) => c.marks && c.marks.some((m: any) => m.type === "code"));
@@ -1355,7 +1356,7 @@ This is HTML with inline styling.
     });
 
     // Reset clean state as done on loading a new note
-    const cleanState = editor.state.constructor.create({
+    const cleanState = EditorState.create({
       doc: editor.state.doc,
       plugins: editor.state.plugins,
     });
@@ -2027,7 +2028,7 @@ This is HTML with inline styling.
       const plugin = editor.state.plugins.find((p) => (p as any).key === "spellCheckDecoration$");
       expect(plugin).toBeDefined();
 
-      const initialDecos = plugin?.props.decorations?.(editor.state);
+      const initialDecos = (plugin as any)?.props.decorations?.call(plugin, editor.state);
       expect(initialDecos).toBeDefined();
 
       // Type in paragraph 2 (end of document)
@@ -2035,12 +2036,12 @@ This is HTML with inline styling.
       editor.commands.insertContent(" พิมพ์ข้อความเพิ่มอย่างรวดเร็ว");
 
       // Verify that decorations in paragraph 1 were preserved by incremental mapping
-      const updatedDecos = plugin?.props.decorations?.(editor.state);
+      const updatedDecos = (plugin as any)?.props.decorations?.call(plugin, editor.state);
       expect(updatedDecos).toBeDefined();
 
       // Type a misspelled word in paragraph 2: "คอมพิวเตอร์" vs misspelled "คอมพิวเตอณ์"
       editor.commands.insertContent(" เทคโนโลยีใหม่");
-      const postDecos = plugin?.props.decorations?.(editor.state);
+      const postDecos = (plugin as any)?.props.decorations?.call(plugin, editor.state);
       expect(postDecos).toBeDefined();
 
       editor.destroy();
@@ -2102,7 +2103,7 @@ This is HTML with inline styling.
       // 2. SpellCheck decoration should NOT flag words inside hashtags
       const spellPlugin = editor.state.plugins.find((p: any) => p.key.startsWith("spellCheckDecoration"));
       expect(spellPlugin).toBeDefined();
-      const spellDecos = spellPlugin!.props.decorations?.(editor.state);
+      const spellDecos: any = (spellPlugin as any)?.props.decorations?.call(spellPlugin, editor.state);
       const foundSpellErrors = spellDecos ? spellDecos.find() : [];
       // No spell errors should be placed inside the hashtag #kkggggggg
       expect(foundSpellErrors.some((d: any) => d.spec?.["data-spell-word"] === "kkggggggg")).toBe(false);

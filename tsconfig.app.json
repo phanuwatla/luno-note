@@ -26,7 +26,8 @@
     "target": "ES2021",
     "types": [
       "vitest/globals",
-      "node"
+      "node",
+      "@testing-library/jest-dom"
     ],
     "useDefineForClassFields": true
   },

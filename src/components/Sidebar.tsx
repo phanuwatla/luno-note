@@ -86,7 +86,7 @@ interface SidebarProps {
   onReconnectFolder?: () => void;
   onSelect: (id: string) => void;
   onUpdateNote?: (id: string, patch: Partial<Note>) => void;
-  onCreate: (folderPath?: string, options?: CreateNoteOptions) => void | Promise<void>;
+  onCreate: (folderPath?: string, options?: CreateNoteOptions) => any;
   onCreateFolder?: (folderPath?: string, folderName?: string) => void;
   onCopyFile?: (note: Note) => void;
   onCopyFiles?: (notes: Note[]) => void;
@@ -499,6 +499,11 @@ function MarkdownIndicator({ active, className = "" }: { active: boolean; classN
   );
 }
 
+function getNoteExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
 function SidebarComponent({
   notes,
   folderPaths = [],
@@ -796,7 +801,7 @@ function SidebarComponent({
     }
   };
 
-  const [tagsFilterType, setTagsFilterType] = useState<"all" | "md" | "txt" | "html" | "image">("all");
+  const [tagsFilterType, setTagsFilterType] = useState<"all" | "md" | "txt" | "html" | "image" | "other">("all");
   const [tagsSortBy, setTagsSortBy] = useState<WorkspaceSortBy>(() => {
     try {
       const storage = getLocalStorage();
@@ -1028,7 +1033,7 @@ function SidebarComponent({
   };
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
-  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css"; folderName?: string }>(null);
+  const [pendingCreate, setPendingCreate] = useState<null | { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; folderName?: string }>(null);
 
   const openFolderBeforeCreation = () => {
     if (!openedFolderName && onOpenFolder) {
@@ -1059,7 +1064,7 @@ function SidebarComponent({
   const [renameFileDialogOpen, setRenameFileDialogOpen] = useState(false);
   const [renameFolderDialogOpen, setRenameFolderDialogOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
-  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html">(() => settings.defaultExtension);
+  const [newFileExt, setNewFileExt] = useState<"txt" | "md" | "html" | "css" | "js">(() => settings.defaultExtension);
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [lastSelectedNoteId, setLastSelectedNoteId] = useState<string | null>(null);
@@ -1118,9 +1123,9 @@ function SidebarComponent({
     if (!openedFolderName) return;
 
     if (pendingCreate.kind === "file") {
-      const defaultExt = settings.defaultExtension || "md";
-      const defaultFormat = defaultExt === "html" ? "html" as const : defaultExt === "txt" ? "plain" as const : "markdown" as const;
-      const fileName = pendingCreate.fileName ?? `Untitled.${defaultExt}`;
+      const defaultExtStr = String(settings.defaultExtension || "md");
+      const defaultFormat = defaultExtStr === "html" ? ("html" as const) : defaultExtStr === "css" ? ("css" as const) : (defaultExtStr === "js" || defaultExtStr === "javascript") ? ("javascript" as const) : defaultExtStr === "txt" ? ("plain" as const) : ("markdown" as const);
+      const fileName = pendingCreate.fileName ?? `Untitled.${defaultExtStr}`;
       const contentFormat = pendingCreate.contentFormat ?? defaultFormat;
       onCreate(selectedFolderPath || currentFolderPath, { fileName, contentFormat });
     } else if (pendingCreate.kind === "folder") {
@@ -1604,9 +1609,17 @@ function SidebarComponent({
   };
 
   const handleCreateFromDialog = async () => {
-    const baseName = newFileName.trim();
-    const ext = newFileExt || settings.defaultExtension;
-    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : ext === "css" ? "css" : "plain";
+    let base = newFileName.trim();
+    let ext = newFileExt || settings.defaultExtension;
+    const dotIdx = base.lastIndexOf(".");
+    if (dotIdx > 0) {
+      const typedExt = base.slice(dotIdx + 1).toLowerCase();
+      if (["js", "mjs", "cjs", "css", "html", "htm", "md", "markdown", "txt"].includes(typedExt)) {
+        ext = (typedExt === "markdown" ? "md" : typedExt === "htm" ? "html" : typedExt) as "txt" | "md" | "html" | "css" | "js";
+        base = base.slice(0, dotIdx);
+      }
+    }
+    const contentFormat = ext === "md" ? "markdown" : ext === "html" ? "html" : ext === "css" ? "css" : ext === "js" ? "javascript" : "plain";
 
     const dateStr = formatDateForFileName(new Date(), settings.dateFormat);
     let defaultBaseName = "Untitled";
@@ -1616,7 +1629,7 @@ function SidebarComponent({
       defaultBaseName = `Daily-${dateStr}`;
     }
 
-    const fileName = baseName ? `${baseName}.${ext}` : `${defaultBaseName}.${ext}`;
+    const fileName = base ? `${base}.${ext}` : `${defaultBaseName}.${ext}`;
 
     if (!openedFolderName && onOpenFolder) {
       setPendingCreate({ kind: "file", fileName, contentFormat });
@@ -3523,7 +3536,8 @@ function SidebarComponent({
                               if (tagsFilterType === "md") return ext === "md";
                               if (tagsFilterType === "txt") return ext === "txt";
                               if (tagsFilterType === "html") return ext === "html";
-                              if (tagsFilterType === "other") return !["md", "txt", "html"].includes(ext);
+                              if (tagsFilterType === "image") return ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext) || note.fileType === "image";
+                              if (tagsFilterType === "other") return !["md", "txt", "html", "png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext);
                               return true;
                             });
                             const sortedTagNotes = sortNotesList(filteredTagNotes, tagsSortBy);
@@ -4463,7 +4477,7 @@ function SidebarComponent({
               <label htmlFor="new-file-ext" className="mb-2 block text-sm font-medium text-foreground">
                 {t("sidebar.fileTypeLabel")}
               </label>
-              <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v as "txt" | "md" | "html" | "css")}>
+              <Select value={newFileExt} onValueChange={(v) => setNewFileExt(v as "txt" | "md" | "html" | "css" | "js")}>
                 <SelectTrigger id="new-file-ext" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -4472,6 +4486,7 @@ function SidebarComponent({
                   <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
                   <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
                   <SelectItem value="css">{t("sidebar.fileTypeCss") || "CSS (.css)"}</SelectItem>
+                  <SelectItem value="js">{t("sidebar.fileTypeJs") || "JavaScript (.js)"}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

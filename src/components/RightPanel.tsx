@@ -54,6 +54,9 @@ interface RightPanelProps {
   onExport?: () => void;
   onExportPdf?: () => void;
   onExportWord?: () => void;
+  isPdf?: boolean;
+  onExportFlattenedPdf?: () => void;
+  onExportFormPdf?: () => void;
   onSelectNote?: (id: string) => void;
   imageDimensions?: { width: number; height: number } | null;
   fileSize?: number | null;
@@ -79,6 +82,9 @@ function RightPanelComponent({
   onExport,
   onExportPdf,
   onExportWord,
+  isPdf,
+  onExportFlattenedPdf,
+  onExportFormPdf,
   onSelectNote,
   imageDimensions,
   fileSize,
@@ -101,6 +107,16 @@ function RightPanelComponent({
     fileCategory === "audio" ||
     fileCategory === "video" ||
     fileCategory === "binary";
+
+  const isPdfFile = useMemo(
+    () =>
+      Boolean(
+        isPdf ||
+        note?.fileName?.toLowerCase().endsWith(".pdf") ||
+        note?.title?.toLowerCase().endsWith(".pdf")
+      ),
+    [isPdf, note?.fileName, note?.title]
+  );
 
   const [localDimensions, setLocalDimensions] = useState<{ width: number; height: number } | null>(null);
 
@@ -856,7 +872,32 @@ function RightPanelComponent({
                   <span>{t("sidebar.duplicateAction")}</span>
                 </button>
 
-                {!isNonTextMedia && (
+                {isPdfFile ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-foreground/90 hover:bg-muted transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {renderIcon("download", "h-4 w-4 text-muted-foreground shrink-0")}
+                          <span>{t("rightPanel.export")}</span>
+                        </div>
+                        {renderIcon("chevronRight", "h-3.5 w-3.5 text-muted-foreground/60")}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" side="top" className="w-56">
+                      <DropdownMenuItem disabled={!note} onClick={onExportFlattenedPdf}>
+                        {renderIcon("fileText", "h-4 w-4")}
+                        <span>{t("editor.exportFlattenedPdf") || "Flattened PDF"}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled={!note} onClick={onExportFormPdf}>
+                        {renderIcon("fileCode", "h-4 w-4")}
+                        <span>{t("editor.exportFormPdf") || "Form Data PDF"}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : !isNonTextMedia && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button

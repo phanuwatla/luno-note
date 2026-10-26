@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="@testing-library/jest-dom" />
 
 export interface UpdateInfo {
   version: string;
@@ -21,8 +22,9 @@ export interface ElectronAPI {
   snapWindow?: (boundsRatio: { xRatio: number; yRatio: number; wRatio: number; hRatio: number }) => void;
   close?: () => void;
   isMaximized?: () => Promise<boolean>;
+  openExternal?: (url: string) => Promise<boolean>;
   getAppVersion?: () => Promise<string>;
-  checkForUpdates?: () => Promise<{ success: boolean; isDev?: boolean; updateInfo?: UpdateInfo; error?: string; currentVersion?: string; message?: string }>;
+  checkForUpdates?: () => Promise<{ success: boolean; isDev?: boolean; updateInfo?: UpdateInfo; error?: string; currentVersion?: string; message?: string; isUpdateAvailable?: boolean }>;
   downloadUpdate?: () => Promise<{ success: boolean; error?: string }>;
   quitAndInstallUpdate?: () => Promise<boolean>;
   onUpdateChecking?: (callback: () => void) => () => void;

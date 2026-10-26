@@ -4175,3 +4175,139 @@ button[class*="text-danger"] > svg:not([class*="text-"]) {
   color: currentColor !important;
 }
 
+/* Heading Fold & Toggle Styles */
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6,
+.editor-markdown-content h1,
+.editor-markdown-content h2,
+.editor-markdown-content h3,
+.editor-markdown-content h4,
+.editor-markdown-content h5,
+.editor-markdown-content h6 {
+  position: relative;
+}
+
+/* Position toggle button in the left margin gutter so it does not crowd or displace heading text */
+.luno-heading-fold-btn {
+  position: absolute;
+  left: -1.35em;
+  top: 0.65em;
+  transform: translateY(-50%);
+  width: 1.1em;
+  height: 1.1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+  color: hsl(var(--muted-foreground));
+  border-radius: 4px;
+  z-index: 2;
+}
+
+/* Hover: show toggle button when expanded */
+.ProseMirror h1:hover > .luno-heading-fold-btn,
+.ProseMirror h2:hover > .luno-heading-fold-btn,
+.ProseMirror h3:hover > .luno-heading-fold-btn,
+.ProseMirror h4:hover > .luno-heading-fold-btn,
+.ProseMirror h5:hover > .luno-heading-fold-btn,
+.ProseMirror h6:hover > .luno-heading-fold-btn,
+.editor-markdown-content h1:hover > .luno-heading-fold-btn,
+.editor-markdown-content h2:hover > .luno-heading-fold-btn,
+.editor-markdown-content h3:hover > .luno-heading-fold-btn,
+.editor-markdown-content h4:hover > .luno-heading-fold-btn,
+.editor-markdown-content h5:hover > .luno-heading-fold-btn,
+.editor-markdown-content h6:hover > .luno-heading-fold-btn,
+.luno-heading-fold-btn:hover {
+  opacity: 0.7;
+}
+
+.luno-heading-fold-btn:hover {
+  opacity: 1;
+  background-color: hsl(var(--muted) / 0.8);
+  color: hsl(var(--foreground));
+}
+
+/* When folded: always visible normally */
+.luno-heading-fold-btn[data-folded="true"] {
+  opacity: 1 !important;
+  color: hsl(var(--primary)) !important;
+}
+
+.luno-heading-fold-icon {
+  width: 0.8em;
+  height: 0.8em;
+  transition: transform 150ms ease;
+}
+
+.luno-heading-fold-icon.is-open {
+  transform: rotate(90deg);
+}
+
+.luno-heading-fold-icon.is-folded {
+  transform: rotate(0deg);
+}
+
+.luno-heading-folded-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5em;
+  padding: 0.05em 0.45em;
+  font-size: 0.65em;
+  line-height: 1.2;
+  font-weight: 700;
+  border-radius: 4px;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+  letter-spacing: 0.12em;
+  transition: all 150ms ease;
+}
+
+.luno-heading-folded-badge:hover {
+  background-color: hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary));
+}
+
+/* Comfortable spacing when heading is folded (collapsed), keeping normal spacing when expanded */
+.ProseMirror h1.luno-heading-folded,
+.ProseMirror h2.luno-heading-folded,
+.ProseMirror h3.luno-heading-folded,
+.ProseMirror h4.luno-heading-folded,
+.ProseMirror h5.luno-heading-folded,
+.ProseMirror h6.luno-heading-folded,
+.editor-markdown-content h1.luno-heading-folded,
+.editor-markdown-content h2.luno-heading-folded,
+.editor-markdown-content h3.luno-heading-folded,
+.editor-markdown-content h4.luno-heading-folded,
+.editor-markdown-content h5.luno-heading-folded,
+.editor-markdown-content h6.luno-heading-folded {
+  margin-top: 0.55em !important;
+  margin-bottom: 0.25em !important;
+}
+
+/* Spacing between consecutive folded headings */
+.luno-heading-folded + .luno-heading-folded,
+.luno-heading-folded-hidden ~ h1.luno-heading-folded,
+.luno-heading-folded-hidden ~ h2.luno-heading-folded,
+.luno-heading-folded-hidden ~ h3.luno-heading-folded,
+.luno-heading-folded-hidden ~ h4.luno-heading-folded,
+.luno-heading-folded-hidden ~ h5.luno-heading-folded,
+.luno-heading-folded-hidden ~ h6.luno-heading-folded {
+  margin-top: 0.5em !important;
+  margin-bottom: 0.2em !important;
+}
+
+.luno-heading-folded-hidden {
+  display: none !important;
+}

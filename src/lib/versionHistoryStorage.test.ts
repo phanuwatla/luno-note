@@ -9,6 +9,8 @@ import {
   getHistoryDiskFilename,
   getLegacyHistoryDiskFilename,
   loadWorkspaceHistoryFromDisk,
+  deleteWorkspaceHistoryFromDisk,
+  renameNoteVersionHistory,
 } from "./versionHistoryStorage";
 import type { Note } from "@/hooks/useNotes";
 
@@ -418,6 +420,90 @@ describe("versionHistoryStorage", () => {
       expect(loaded?.length).toBe(1);
       expect(loaded?.[0].id).toBe("legacy-snap-1");
       expect(loaded?.[0].content).toBe("Legacy content");
+
+      delete (window as any).electronAPI;
+    });
+
+    it("should migrate version history and delete old path files when renaming a file", async () => {
+      const oldRelPath = "Untitled.md";
+      const newRelPath = "Meeting Notes.md";
+      const note: Note = {
+        id: "note-rename-1",
+        fileName: "Untitled.md",
+        title: "Untitled",
+        content: "# Old Untitled Content",
+        createdAt: Date.now() - 50000,
+        updatedAt: Date.now() - 50000,
+      };
+
+      // Save a snapshot under Untitled.md
+      const snap = saveVersionSnapshot(note, "manual", "Initial Draft");
+      expect(snap).not.toBeNull();
+      expect(getNoteVersionHistory(note).length).toBe(1);
+
+      // Rename from Untitled.md to Meeting Notes.md
+      await renameNoteVersionHistory(oldRelPath, newRelPath, note.id);
+
+      // Untitled.md history should be cleared!
+      const oldHistory = getNoteVersionHistory("", oldRelPath);
+      expect(oldHistory.length).toBe(0);
+
+      // New path should have the migrated snapshot with updated relPath
+      const newHistory = getNoteVersionHistory(note.id, newRelPath);
+      expect(newHistory.length).toBe(1);
+      expect(newHistory[0].relPath).toBe(newRelPath);
+      expect(newHistory[0].content).toBe("# Old Untitled Content");
+    });
+
+    it("should not assign old untitled history to a newly created file with the same untitled name", () => {
+      const oldNoteId = "old-untitled-note-111";
+      const oldNote: Note = {
+        id: oldNoteId,
+        fileName: "Untitled.md",
+        title: "Untitled",
+        content: "# Content from previous file",
+        createdAt: Date.now() - 100000,
+        updatedAt: Date.now() - 100000,
+      };
+
+      // Pretend an old Untitled.md was saved in the past
+      saveVersionSnapshot(oldNote, "manual", "Old File Snapshot");
+
+      // Now user creates a brand new note that also gets named Untitled.md
+      const freshNote: Note = {
+        id: "brand-new-note-222", // new ID
+        fileName: "Untitled.md",
+        title: "",
+        content: "<h1>Untitled</h1>",
+        createdAt: Date.now(), // just now
+        updatedAt: Date.now(),
+      };
+
+      // The new note should NOT pull in the old note's history!
+      const freshHistory = getNoteVersionHistory(freshNote);
+      expect(freshHistory.length).toBe(0);
+    });
+
+    it("should delete disk history when deleteWorkspaceHistoryFromDisk is called", async () => {
+      const relPath = "ToDelete.md";
+      const safeFilename = getHistoryDiskFilename(relPath);
+      const legacyFilename = getLegacyHistoryDiskFilename(relPath);
+
+      const deletedPaths: string[] = [];
+      (window as any).electronAPI = {
+        getSavedWorkspace: async () => ({ folderPath: "/workspace" }),
+        deleteFileOrFolder: async (p: string) => {
+          deletedPaths.push(p);
+          return true;
+        },
+      };
+
+      await deleteWorkspaceHistoryFromDisk(null, relPath);
+
+      expect(deletedPaths).toContain(`/workspace/.luno/history/${safeFilename}`);
+      if (safeFilename !== legacyFilename) {
+        expect(deletedPaths).toContain(`/workspace/.luno/history/${legacyFilename}`);
+      }
 
       delete (window as any).electronAPI;
     });

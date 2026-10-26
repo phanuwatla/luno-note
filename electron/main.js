@@ -175,7 +175,7 @@ async function resolveWorkspacesFolderId(accessToken) {
 }
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
-const TEXT_EXTS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".js", ".ts", ".jsx", ".tsx", ".json", ".css", ".scss", ".yaml", ".yml", ".xml", ".py"]);
+const TEXT_EXTS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx", ".json", ".css", ".scss", ".yaml", ".yml", ".xml", ".py"]);
 
 const IGNORED_SCAN_FOLDERS = new Set([
   "node_modules",
@@ -536,7 +536,7 @@ function scanWorkspaceTree(rootDir) {
         if (IMAGE_EXTS.has(ext)) {
           fileType = "image";
         } else if (TEXT_EXTS.has(ext) || ext === "") {
-          contentFormat = ext === ".md" || ext === ".markdown" || ext === "" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : "plain";
+          contentFormat = ext === ".md" || ext === ".markdown" || ext === "" ? "markdown" : ext === ".html" || ext === ".htm" ? "html" : ext === ".css" ? "css" : (ext === ".js" || ext === ".mjs" || ext === ".cjs") ? "javascript" : "plain";
           // Only read content for files <= 2MB to prevent renderer/main process blocking
           if (size <= 2 * 1024 * 1024) {
             try {
@@ -2283,6 +2283,16 @@ function setupIpcHandlers() {
     return "";
   });
 
+  ipcMain.handle("file-exists", (event, fullPath) => {
+    try {
+      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+        return true;
+      }
+    } catch (err) {
+      console.warn("Failed checking file existence:", fullPath, err);
+    }
+    return false;
+  });
   ipcMain.handle("read-image-data-url", (event, fullPath) => {
     try {
       if (fs.existsSync(fullPath)) {
@@ -2329,10 +2339,10 @@ function setupIpcHandlers() {
     return "";
   });
 
-  ipcMain.handle("write-file-content", (event, { fullPath, content }) => {
+  ipcMain.handle("write-file-content", (event, arg1, arg2) => { const fullPath = typeof arg1 === "string" ? arg1 : arg1?.fullPath; const content = typeof arg1 === "string" ? arg2 : arg1?.content;
     try {
       if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
-        console.warn("Blocked writing to protected or invalid path:", fullPath);
+        if (fullPath) console.warn("Blocked writing to protected or invalid path:", fullPath);
         return false;
       }
       const normalizedPath = path.normalize(fullPath);

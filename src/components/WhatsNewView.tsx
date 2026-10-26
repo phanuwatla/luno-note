@@ -71,9 +71,178 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.3.5",
+    version: "1.4.0",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "Interactive Inko PDF Editor & Annotations, CodeMirror 6 Engine, Collapsible Headings, Dual View Modes & JavaScript Support",
+      th: "ระบบแก้ไขและขีดเขียน PDF (Inko Editor), เอนจินโค้ด CodeMirror 6, พับเก็บเนื้อหาตามหัวข้อ (Heading Fold), มุมมองการ์ด/รายการ และรองรับไฟล์ JavaScript",
+    },
+    highlights: [
+      {
+        title: {
+          en: "Interactive PDF Editor & Vector Annotations (Inko Viewer)",
+          th: "ระบบแก้ไขและขีดเขียนเอกสาร PDF แบบอินเตอร์แอคทีฟ (Inko Viewer)",
+        },
+        description: {
+          en: "Open, annotate, highlight, draw freehand, insert geometric shapes and text notes directly on PDF documents. Annotations are stored non-destructively in sidecar data preserving pristine base PDFs, complete with thumbnail navigation, bookmarks, and in-PDF search.",
+          th: "เปิด อ่าน และขีดเขียนเน้นข้อความ วาดเส้นอิสระ แทรกรูปทรงเรขาคณิต และกล่องข้อความลงบนไฟล์ PDF ได้อย่างลื่นไหล พร้อมระบบบันทึกแบบ Non-destructive ที่แยกชั้นคำอธิบายเพื่อรักษาไฟล์ต้นฉบับ มีระบบสารบัญ บุ๊กมาร์ก และค้นหาข้อความใน PDF ครบครัน",
+        },
+        icon: FileText,
+        badge: { en: "PDF Editor", th: "แก้ไข PDF", variant: "default" },
+      },
+      {
+        title: {
+          en: "CodeMirror 6 Engine with Visual Indent Guides",
+          th: "เอนจินเขียนโค้ด CodeMirror 6 พร้อมเส้นนำสายตาย่อหน้า (Indent Guides)",
+        },
+        description: {
+          en: "Upgraded HTML, CSS, and JavaScript editor powered by CodeMirror 6, featuring customizable vertical indentation guide lines, interactive color badges with color picker, code folding, smart tab indenting, and integrated Find and Replace.",
+          th: "ยกระดับการเขียนโค้ด HTML, CSS และ JavaScript ด้วยเอนจิน CodeMirror 6 สมรรถนะสูง มาพร้อมเส้นนำสายตาการย่อหน้า (Indent Guides), วิดเจ็ตพรีวิวสีและ Color Picker บนโค้ดสี Hex, การพับเก็บโค้ด (Code Folding) และระบบค้นหาแทนที่ข้อความ (Find & Replace)",
+        },
+        icon: FileCode,
+        badge: { en: "Code Editor", th: "ตัวแก้ไขโค้ด", variant: "default" },
+      },
+      {
+        title: {
+          en: "Collapsible Headings & Document Sections (Heading Toggle)",
+          th: "พับเก็บเนื้อหาตามระดับหัวข้อ (Collapsible Headings)",
+        },
+        description: {
+          en: "Collapse and expand any section under H1–H6 headings in the note editor with interactive chevron toggles, keeping long notes clean and organized. Folds are preserved per-note across tab switches and app restarts.",
+          th: "จัดระเบียบบันทึกขนาดยาวได้อย่างสะดวกด้วยปุ่มลูกศร Toggle หน้าหัวข้อ H1-H6 เพื่อพับเก็บหรือเปิดขยายเนื้อหาในแต่ละตอน พร้อมจดจำสถานะการพับแยกรายโน้ตแม้ย้ายแท็บหรือปิดเปิดโปรแกรมใหม่",
+        },
+        icon: ChevronRight,
+        badge: { en: "Editor", th: "เอดิเตอร์", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Favorites & Tags Dual View Modes (List / Card View)",
+          th: "สลับมุมมองแบบรายการหรือการ์ดในหน้ารายการโปรดและแท็ก (List & Card Views)",
+        },
+        description: {
+          en: "Switch between compact list view and visual card grid view in Favorites and Tags tab views, with synchronized custom note and folder icons and colors matching the sidebar tree.",
+          th: "เลือกดูรายการโน้ตโปรดและแท็กได้ทั้งแบบตารางสรุปย่อ (List View) หรือมุมมองการ์ด (Card View) พร้อมดึงไอคอนและสีประจำโน้ต/โฟลเดอร์มาแสดงผลตรงกับแถบด้านข้างอย่างสวยงามลงตัว",
+        },
+        icon: Layers,
+        badge: { en: "UI / UX", th: "ประสบการณ์ผู้ใช้", variant: "outline" },
+      },
+      {
+        title: {
+          en: "Native JavaScript File Support & Clean Workspace Portability",
+          th: "รองรับไฟล์ JavaScript และการพกพา Workspace แบบแยกโปรไฟล์ส่วนตัว",
+        },
+        description: {
+          en: "Create and edit .js, .mjs, and .cjs files natively with syntax highlighting. Workspace settings now isolate personal usernames to preserve portability across different devices and shared folders.",
+          th: "สร้างและแก้ไขไฟล์ .js, .mjs, .cjs ได้โดยตรง พร้อมระบบคัดแยกชื่อผู้ใช้ส่วนตัว (UserName) ออกจากการตั้งค่า Workspace ทำให้พกพาหรือซิงค์โฟลเดอร์ข้ามเครื่องได้อย่างปลอดภัยโดยไม่ทับชื่อโปรไฟล์",
+        },
+        icon: Globe,
+        badge: { en: "Workspace", th: "เวิร์กสเปซ", variant: "default" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "PDF Editor & Annotation", th: "ระบบเอกสาร PDF และการขีดเขียน" },
+        items: [
+          {
+            en: "Full Inko viewer integration with pen, highlighter, shapes (rectangle, circle, line, arrow), text boxes, eraser, and laser pointer.",
+            th: "ผนวก Inko viewer สำหรับวาดเขียน ไฮไลต์ แทรกรูปทรงเรขาคณิต (สี่เหลี่ยม, วงกลม, เส้นตรง, ลูกศร), กล่องข้อความ, ยางลบ และเลเซอร์พอยเตอร์",
+          },
+          {
+            en: "Non-destructive sidecar annotations (.luno-pdf) saving edits separately while keeping base PDF files untouched.",
+            th: "ระบบบันทึกแบบแยกชั้นคำอธิบาย (.luno-pdf) ไม่ดัดแปลงไฟล์ PDF ต้นฉบับ ป้องกันการสูญเสียข้อมูล",
+          },
+          {
+            en: "Smart dirty detection and confirmation dialog when closing tabs with unsaved PDF annotations.",
+            th: "ระบบแจ้งเตือนบันทึกคำอธิบาย PDF อัตโนมัติเมื่อมีการปิดแท็บหรือปิดโปรแกรม ป้องกันงานวาดตกหล่น",
+          },
+          {
+            en: "Export support for Flattened PDF (baked annotations) and standard PDF with form data.",
+            th: "รองรับการส่งออก PDF รวมลายเส้น (Flattened) และส่งออกพร้อมข้อมูลแบบฟอร์ม",
+          },
+          {
+            en: "Interactive in-PDF search, zoom scale controls, page thumbnail drawer, and page bookmarking.",
+            th: "ระบบค้นหาข้อความใน PDF, ปรับระดับการซูม, ถาดภาพขนาดย่อของหน้า และการคั่นหน้า (Bookmarks)",
+          },
+        ],
+      },
+      {
+        category: { en: "Code Editor (CodeMirror 6)", th: "ตัวแก้ไขโค้ด (CodeMirror 6)" },
+        items: [
+          {
+            en: "Replaced legacy code editor with modern CodeMirror 6 supporting HTML, CSS, and JavaScript (.js, .mjs, .cjs).",
+            th: "เปลี่ยนระบบแก้ไขโค้ดเป็น CodeMirror 6 สมรรถนะสูง รองรับ HTML, CSS และ JavaScript (.js, .mjs, .cjs)",
+          },
+          {
+            en: "Visual indentation guide lines with customizable toggle in Settings > General.",
+            th: "เพิ่มเส้นนำสายตาการย่อหน้าโค้ด (Indent Guides) พร้อมสวิตช์เปิด-ปิดในการตั้งค่า",
+          },
+          {
+            en: "Interactive color badge widgets and color picker popup on hex colors.",
+            th: "แสดงวิดเจ็ตพรีวิวสีและกล่อง Color Picker เมื่อคลิกที่รหัสสี Hex ในโค้ด",
+          },
+          {
+            en: "Floating search and replace bar with match counter and navigation shortcuts.",
+            th: "แถบค้นหาและแทนที่ข้อความพร้อมตัวนับผลลัพธ์และคีย์ลัดนำทาง",
+          },
+          {
+            en: "Code folding gutter and smooth horizontal scrolling extension for wide code lines.",
+            th: "แถบพับเก็บโค้ด (Code Folding) และระบบเลื่อนหน้าจอแนวนอนที่ลื่นไหลสำหรับบรรทัดยาว",
+          },
+        ],
+      },
+      {
+        category: { en: "Note Editor & Formatting", th: "ตัวแก้ไขโน้ตและการจัดรูปแบบ" },
+        items: [
+          {
+            en: "Heading Toggle: collapsible headings with animated chevron controls for H1-H6 sections.",
+            th: "ฟังก์ชัน Heading Toggle พับเก็บหรือขยายเนื้อหาใต้หัวข้อ H1-H6 พร้อมลูกศร Toggle",
+          },
+          {
+            en: "Persistent heading fold state preserved across tab switches and app sessions.",
+            th: "จดจำสถานะการพับเก็บเนื้อหาแยกรายโน้ต ไม่สูญหายเมื่อสลับแท็บหรือเปิดโปรแกรมใหม่",
+          },
+          {
+            en: "Setting in Settings > General to enable or disable Heading Folding toggles globally.",
+            th: "เพิ่มตัวเลือกเปิด-ปิดฟังก์ชันพับเก็บหัวข้อในหน้า การตั้งค่า > ทั่วไป",
+          },
+        ],
+      },
+      {
+        category: { en: "Workspace & Version History", th: "เวิร์กสเปซและประวัติเวอร์ชัน" },
+        items: [
+          {
+            en: "Favorites and Tags tab views now support toggling between List View and visual Card Grid View.",
+            th: "หน้ารายการโปรดและแท็กรองรับการสลับมุมมองระหว่างแบบรายการ (List) และแบบการ์ด (Card Grid)",
+          },
+          {
+            en: "Custom note and folder icons and colors are synchronized across Favorites and Tags views.",
+            th: "ซิงค์ไอคอนและสีประจำโน้ต/โฟลเดอร์ให้ตรงกับ Sidebar ในหน้ารายการโปรดและแท็ก",
+          },
+          {
+            en: "Native creation and recognition for JavaScript files (.js, .mjs, .cjs).",
+            th: "รองรับการสร้างและจัดการไฟล์ JavaScript (.js, .mjs, .cjs) อย่างเต็มรูปแบบ",
+          },
+          {
+            en: "Workspace configuration (.luno/settings.json) isolates personal username, preventing profile overwrite across devices.",
+            th: "แยกการบันทึกชื่อผู้ใช้ (UserName) ออกจากการตั้งค่า Workspace ทำให้แชร์โฟลเดอร์ข้ามเครื่องได้อย่างปลอดภัย",
+          },
+          {
+            en: "Version history accurately tracks and previews all file formats (.md, .html, .css, .js, .txt) and cleans up on rename or deletion.",
+            th: "ระบบประวัติเวอร์ชันบันทึกสแนปช็อตครอบคลุมทุกประเภทไฟล์ พร้อมอัปเดตพาธเมื่อเปลี่ยนชื่อและล้างข้อมูลเมื่อลบโน้ต",
+          },
+          {
+            en: "WindowControls intercepts exit events when unsaved PDF annotations are open, offering Save / Discard / Cancel.",
+            th: "ระบบควบคุมหน้าต่างดักจับการปิดโปรแกรมเมื่อมี PDF ที่ยังไม่ได้บันทึก พร้อมตัวเลือกบันทึก ละทิ้ง หรือยกเลิก",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.3.5",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "Luno AI High-Fidelity Markdown & Code Highlighting, Webview Security Delegation, Process Optimization & Profile Ergonomics",
       th: "ระบบเรนเดอร์ Markdown และไฮไลต์โค้ดคุณภาพสูงใน Luno AI, ยกระดับความปลอดภัยลิงก์ภายนอก, ปรับปรุงสถาปัตยกรรมระบบ และเพิ่มความสะดวกในการตั้งค่า",

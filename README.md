@@ -6,26 +6,27 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.3.5-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.3.5)
+[![Version](https://img.shields.io/badge/version-1.4.0-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.4.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.3.5-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.4.0-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.3.5](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.3.5](#what-is-new-in-version-135) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.4.0](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.4.0](#what-is-new-in-version-140) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.3.5
+## What Is New in Version 1.4.0
 
-- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **Luno AI High-Fidelity Markdown & Syntax Highlighting**: AI assistant messages now render with rich syntax-highlighted code blocks across numerous languages, language badge headers, one-click copy code buttons with tooltips, optional code line numbers matching editor settings, tables, task lists, and accent headings.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Sensitive URL Delegation & External Browser Security**: Automatic interception of authentication, cloud console, and API key portals (Google AI Studio, Cloud Console, Google Drive, OpenAI, Anthropic, OpenRouter) to open safely in your default system browser, preventing bot blocks and securing credentials.
-- <img src="./assets/icons/device-desktop.svg" width="16" height="16" align="center" /> **Streamlined Architecture & Process Cleanup**: Eliminated external PowerShell watchers and background binaries in favor of pure JavaScript, removed redundant unpacking, and optimized Windows desktop installer with explicit shortcuts and asInvoker privileges.
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Profile Ergonomics & Floating Tooltip Polish**: Added a one-click button in Settings > System/Other to restore detected OS username, paired with distinct copy prompt vs copy response actions and floating tooltips in AI chat.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Inko PDF Editor & Vector Annotations**: Full PDF reading and annotation system with pen, highlighter, geometric shapes (rectangle, circle, line, arrow), text boxes, eraser, and laser pointer. Uses non-destructive sidecar annotations (.luno-pdf) preserving the original PDF, complete with in-PDF search, bookmarks, and thumbnail navigation.
+- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **CodeMirror 6 Engine & Indentation Guides**: High-performance code editor for HTML, CSS, and JavaScript (.js, .mjs, .cjs) with vertical indentation guide lines, interactive color preview badges with color picker, code folding, and floating search and replace.
+- <img src="./assets/icons/chevron-right.svg" width="16" height="16" align="center" /> **Collapsible Headings (Heading Toggle)**: Fold and collapse any section under H1–H6 headings in the note editor with interactive chevron toggles, with persistent per-note fold state and global setting.
+- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Favorites & Tags Dual View Modes**: Toggle seamlessly between compact List View and visual Card Grid View in Favorites and Tags tab views with synchronized note/folder icons and colors matching the sidebar tree.
+- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Native JavaScript & Clean Workspace Portability**: Full support for .js, .mjs, and .cjs files, paired with machine-isolated workspace settings that safeguard individual usernames across shared workspaces and devices.
 
 ---
 
@@ -52,7 +53,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.3.5.exe`** | Automated Windows installer with differential update support | [![Download v1.3.5](https://img.shields.io/badge/Download-v1.3.5-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.3.5/luno-note-setup-1.3.5.exe) |
+| **`luno-note-setup-1.4.0.exe`** | Automated Windows installer with differential update support | [![Download v1.4.0](https://img.shields.io/badge/Download-v1.4.0-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.4.0/luno-note-setup-1.4.0.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 

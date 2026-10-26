@@ -85,7 +85,8 @@ export default function VersionHistorySplitDiffView({
     if (fn.endsWith(".html") || fn.endsWith(".htm") || targetNote?.contentFormat === "html" || snapshotFormat === "html") return "html";
     if (fn.endsWith(".txt") || targetNote?.contentFormat === "plain" || snapshotFormat === "plain") return "plain";
     if (snapshotFormat === "markdown" || targetNote?.contentFormat === "markdown") return "markdown";
-    return resolveNoteContentFormat(targetNote);
+    const resolved = resolveNoteContentFormat(targetNote);
+    return resolved === "javascript" ? "plain" : resolved;
   };
 
   const historicalFormat = useMemo(
@@ -164,7 +165,7 @@ export default function VersionHistorySplitDiffView({
     try {
       await navigator.clipboard.writeText(version.content || "");
       setCopied(true);
-      const timeLabel = formatSnapshotTime(version.timestamp);
+      const timeLabel = formatRelativeDateTime(version.timestamp, settings.dateFormat, settings.timeFormat, settings.language);
       const triggerLabel =
         version.label ||
         (version.trigger === "manual"

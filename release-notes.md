@@ -1,3 +1,46 @@
+## Release Notes - Luno Note v1.4.0
+
+### Overview
+Luno Note version 1.4.0 is a major milestone release introducing an interactive in-app PDF editor and vector annotation suite (Inko Viewer), a high-performance CodeMirror 6 code editor engine with vertical indentation guides, collapsible heading folding (Heading Toggle) for structured writing, dual view modes (List & Card View) in Favorites and Tags, native JavaScript file support, and machine-isolated workspace settings for seamless multi-device portability.
+
+### Key Improvements & New Features
+
+#### 1. Interactive Inko PDF Editor & Vector Annotations
+- **Complete In-App PDF Annotation Suite**: Full integrated Inko viewer featuring pen, highlighter, geometric shapes (rectangle, circle, line, arrow), text boxes, eraser, and laser pointer.
+- **Non-Destructive Sidecar Architecture**: All drawings, shapes, and notes are saved separately in a lightweight sidecar format (`.luno-pdf`), guaranteeing the original base PDF remains completely untouched and pristine.
+- **Smart Unsaved Changes Protection**: Automatic dirty detection and friendly confirmation dialog when closing tabs, closing other tabs, closing tabs to the right, closing all tabs, or exiting the application with unsaved PDF changes (Save / Discard / Cancel).
+- **Flexible Export Capabilities**: Export as Flattened PDF (baked-in vector drawings and annotations) or original PDF with form data.
+- **Reading Ergonomics**: Integrated in-PDF search with highlight navigation, zoom controls, thumbnail drawer, and page bookmarking.
+
+#### 2. Advanced Code Editor Powered by CodeMirror 6
+- **Next-Generation Code Engine**: Upgraded HTML, CSS, and JavaScript (.js, .mjs, .cjs) editing to CodeMirror 6 for lightning-fast responsiveness and syntax accuracy.
+- **Visual Indentation Guide Lines**: Added subtle vertical indentation lines with customizable toggle in Settings > General (`showCodeIndentGuides`).
+- **Interactive Color Widgets & Picker**: Automatic color badge previews directly alongside hexadecimal color codes, with click-to-edit color picker.
+- **Integrated Search and Replace**: Floating find and replace panel with instant match counter, case sensitivity options, and keyboard shortcuts.
+- **Code Folding & Wide-Line Scrolling**: Built-in fold gutters for blocks and functions, coupled with smooth horizontal document-width scrolling.
+
+#### 3. Collapsible Headings & Document Sections (Heading Toggle)
+- **Interactive Chevron Toggles**: Fold and collapse any section under H1–H6 headings directly in the note editor, keeping large documents clean and scannable.
+- **Title Protection**: Document title (first H1) remains permanently unfolded for clean navigation.
+- **Per-Note Persistence**: Remembers folded heading states per note across tab switches and application restarts.
+- **Global Preference Setting**: Toggle heading fold arrows on or off via Settings > General (`toggleHeading`).
+
+#### 4. Dual View Modes for Favorites & Tags (List & Card Views)
+- **Flexible Presentation**: Seamlessly switch between compact List View and visual Card Grid View in both Favorites and Tags tab views.
+- **Visual Harmony**: Automatically pulls custom note and folder icons and colors to match the sidebar tree view.
+- **Persistent View Preference**: Preserves preferred view mode across application restarts.
+
+#### 5. Native JavaScript Support & Clean Workspace Portability
+- **Extended File Format Handling**: Native file creation, scanning, and editing for JavaScript files (`.js`, `.mjs`, `.cjs`) alongside Markdown, HTML, CSS, and Plain Text.
+- **Machine-Isolated User Settings**: Personal user profile names (`userName`) are cleanly segregated from workspace configurations (`.luno/settings.json`), preventing profile overwrite when sharing or synchronizing workspaces across multiple devices.
+- **Comprehensive Version History**: Automatic snapshots and diff previews across all supported file types, with automatic snapshot renaming on file rename and disk cleanup on note deletion.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.4.0.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.3.5
 
 ### Overview

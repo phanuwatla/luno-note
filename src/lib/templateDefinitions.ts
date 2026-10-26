@@ -11,6 +11,7 @@ export interface TemplateItemDef {
   category: "work" | "daily" | "web" | "study" | "dev" | "general";
   icon: string;
   color?: string;
+  tags?: string[];
 }
 
 export const TEMPLATE_CATEGORIES = [

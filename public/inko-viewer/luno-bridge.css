@@ -1,0 +1,964 @@
+/* ==========================================================================
+   Luno Note Design System Bridge for Inko PDF Viewer
+   Ensures 100% visual consistency across all Luno themes, appearance modes,
+   dark/light schemes, font families, and capsule toolbar components.
+   ========================================================================== */
+
+:root {
+  --luno-background: #ffffff;
+  --luno-foreground: #171717;
+  --luno-card: #fafafa;
+  --luno-card-foreground: #171717;
+  --luno-popover: #ffffff;
+  --luno-popover-foreground: #171717;
+  --luno-primary: #3b82f6;
+  --luno-primary-foreground: #ffffff;
+  --luno-secondary: #f5f5f5;
+  --luno-secondary-foreground: #262626;
+  --luno-muted: #f5f5f5;
+  --luno-muted-foreground: #737373;
+  --luno-accent: #f0f0f0;
+  --luno-accent-foreground: #262626;
+  --luno-destructive: #ef4444;
+  --luno-border: #e5e5e5;
+  --luno-radius: 0.75rem;
+  --luno-font-family: 'Inter', 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+  --luno-page-canvas-bg: #f1f3f5;
+
+  font-family: var(--luno-font-family) !important;
+  color: var(--luno-foreground) !important;
+  background-color: var(--luno-background) !important;
+}
+
+html,
+body,
+#app,
+button,
+input,
+textarea,
+select,
+dialog,
+output {
+  font-family: var(--luno-font-family) !important;
+}
+
+/* Match Luno Note's sleek 6px scrollbars */
+::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--luno-muted-foreground) 28%, transparent) !important;
+  border-radius: 9999px !important;
+  border: none !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--luno-muted-foreground) 45%, transparent) !important;
+}
+
+/* Main container & layout */
+.pdf-viewer-container.svelte-rgy47c {
+  background-color: var(--luno-background) !important;
+  color: var(--luno-foreground) !important;
+}
+
+.viewer-content.svelte-rgy47c {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 1px solid color-mix(in srgb, var(--luno-border) 50%, transparent);
+}
+
+/* ==========================================================================
+   Hide Inko's Internal Toolbar Completely
+   Luno Note renders the real native React capsule toolbar on the outer shell
+   so it has 100% UI/UX consistency, matching font, Radix tooltips & Lucide icons.
+   ========================================================================== */
+.toolbar.svelte-1v2nhp7 {
+  display: none !important;
+}
+
+.viewer-content.svelte-rgy47c {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: none !important;
+}
+
+.toolbar-scroll.svelte-1v2nhp7 {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  overflow-x: auto !important;
+  scrollbar-width: none !important;
+}
+
+.toolbar-scroll.svelte-1v2nhp7::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* ==========================================================================
+   Toolbar Item Ordering & Grouping — Matches Luno Note Normal Editor Toolbar
+   Layout: [Undo | Redo] [ | ] [Annotation Tools] [ | ] [Document Panels]
+   ========================================================================== */
+
+/* Group 1: Undo & Redo (History) — First on Left (like Luno Note) */
+.toolbar .inko-toolbar-section:has(.history-action-btn) {
+  order: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+}
+
+.toolbar .inko-toolbar-section:has(.history-action-btn)::before {
+  display: none !important; /* No left divider before first item */
+}
+
+/* Group 2: Drawing & Annotation Tools — In the center */
+.toolbar .inko-toolbar-section.tools {
+  order: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+}
+
+/* Luno-standard 1px vertical divider between Undo/Redo and Tools */
+.toolbar .inko-toolbar-section.tools::before {
+  content: '' !important;
+  display: block !important;
+  width: 1px !important;
+  height: 16px !important;
+  background: var(--luno-border) !important;
+  margin-left: 2px !important;
+  margin-right: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+/* Group 3: Document Panels (Thumbnails & Bookmarks) */
+.toolbar .inko-toolbar-section:has(.thumbnail-toggle-btn),
+.toolbar .inko-toolbar-section:has(.outline-toggle-btn) {
+  order: 3 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+}
+
+/* Luno-standard 1px vertical divider between Tools and Document Panels */
+.toolbar .inko-toolbar-section:has(.thumbnail-toggle-btn)::before,
+.toolbar .inko-toolbar-section:has(.outline-toggle-btn)::before {
+  content: '' !important;
+  display: block !important;
+  width: 1px !important;
+  height: 16px !important;
+  background: var(--luno-border) !important;
+  margin-left: 2px !important;
+  margin-right: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+/* Group 4: Action Panels (Layer History) */
+.toolbar .toolbar-actions.svelte-1v2nhp7 {
+  order: 4 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  margin-left: 0 !important;
+}
+
+/* Hide Redundant Toolbar Controls:
+   - Zoom controls & percentage (already in bottom status bar)
+   - Save button (already in top breadcrumb action bar + Ctrl+S)
+   - Page navigation input (already in status bar Page X / Y + thumbnails)
+   - Orientation button
+   - Duplicate search button
+*/
+.toolbar .zoom-controls,
+.toolbar .inko-toolbar-section:has(.zoom-info),
+.toolbar .inko-toolbar-section:has(.orientation-btn),
+.toolbar .zoom-info.svelte-5hf7o9,
+.toolbar .orientation-btn.svelte-5hf7o9,
+.toolbar .search-btn.svelte-1eg8nc4,
+.toolbar .save-btn.svelte-1eg8nc4,
+.toolbar .page-info.svelte-14t1ssw,
+.toolbar .page-input.svelte-14t1ssw,
+.toolbar .page-divider.svelte-14t1ssw,
+.toolbar .page-total.svelte-14t1ssw {
+  display: none !important;
+}
+
+/* Toolbar Ghost Capsule Buttons — Matches Luno Note Buttons */
+.toolbar .inko-toolbar-button,
+.toolbar .history-action-btn,
+.toolbar .tool-btn.svelte-fwvfpg,
+.toolbar .thumbnail-toggle-btn.svelte-14t1ssw,
+.toolbar .outline-toggle-btn.svelte-14t1ssw,
+.toolbar .history-btn.svelte-1eg8nc4 {
+  min-height: 32px !important;
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border-radius: 9999px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--luno-foreground) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease !important;
+  cursor: pointer !important;
+}
+
+.toolbar .inko-toolbar-button svg,
+.toolbar .history-action-btn svg,
+.toolbar .tool-btn svg,
+.toolbar .thumbnail-toggle-btn svg,
+.toolbar .outline-toggle-btn svg,
+.toolbar .history-btn svg,
+.toolbar .delete-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+  stroke-width: 2 !important;
+}
+
+/* Hover States — Matches Luno Note ghost button hover */
+.toolbar .inko-toolbar-button:hover:not(:disabled):not(.active),
+.toolbar .history-action-btn:hover:not(:disabled),
+.toolbar .tool-btn.svelte-fwvfpg:hover:not(:disabled):not(.active),
+.toolbar .thumbnail-toggle-btn.svelte-14t1ssw:hover:not(:disabled),
+.toolbar .outline-toggle-btn.svelte-14t1ssw:hover:not(:disabled):not(.active),
+.toolbar .history-btn.svelte-1eg8nc4:hover:not(:disabled):not(.active) {
+  background: var(--luno-accent) !important;
+  color: var(--luno-accent-foreground) !important;
+  border-color: transparent !important;
+}
+
+/* Disabled States — Matches Luno Note disabled:opacity-40 disabled:cursor-not-allowed */
+.toolbar .inko-toolbar-button:disabled,
+.toolbar .history-action-btn:disabled,
+.toolbar .tool-btn:disabled,
+.toolbar .thumbnail-toggle-btn:disabled,
+.toolbar .outline-toggle-btn:disabled,
+.toolbar .history-btn:disabled,
+.toolbar .delete-btn:disabled {
+  opacity: 0.38 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+/* Active Toolbar Button State — Matches Luno Note text-primary & accent pill */
+.toolbar .tool-btn.active.svelte-fwvfpg,
+.toolbar .outline-toggle-btn.active.svelte-14t1ssw,
+.toolbar .history-btn.active.svelte-1eg8nc4,
+.toolbar .thumbnail-toggle-btn.svelte-14t1ssw[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--luno-primary) 15%, var(--luno-background)) !important;
+  color: var(--luno-primary) !important;
+  border-color: color-mix(in srgb, var(--luno-primary) 30%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.toolbar .tool-btn.has-options.svelte-fwvfpg::after {
+  right: 4px !important;
+  bottom: 4px !important;
+  width: 4px !important;
+  height: 4px !important;
+  background: var(--luno-muted-foreground) !important;
+}
+
+.toolbar .tool-btn.has-options.active.svelte-fwvfpg::after {
+  background: var(--luno-primary) !important;
+  opacity: 1 !important;
+}
+
+/* Delete Selection Button — Soft Destructive Pill */
+.toolbar .delete-btn.svelte-fwvfpg {
+  min-height: 32px !important;
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border-radius: 9999px !important;
+  background: color-mix(in srgb, var(--luno-destructive) 14%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--luno-destructive) 30%, transparent) !important;
+  color: var(--luno-destructive) !important;
+  box-shadow: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.toolbar .delete-btn.svelte-fwvfpg:hover:not(:disabled) {
+  background: var(--luno-destructive) !important;
+  border-color: var(--luno-destructive) !important;
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   PDF Scroll Viewport & Page Cards
+   ========================================================================== */
+.scroll-viewer.svelte-1n4mkoh {
+  background-color: var(--luno-page-canvas-bg) !important;
+}
+
+.scroll-content.svelte-1n4mkoh {
+  gap: 20px !important;
+  padding: 24px 16px 36px 16px !important;
+}
+
+.scroll-page-container.svelte-1n4mkoh,
+.scroll-page-container.svelte-1n4mkoh:focus,
+.scroll-page-container.svelte-1n4mkoh:focus-visible,
+.scroll-page-container.svelte-1n4mkoh:focus-within {
+  border-radius: 6px !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.14), 0 0 0 1px color-mix(in srgb, var(--luno-border) 80%, transparent) !important;
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+/* Remove page/canvas focus outline ring when selecting or deleting annotations */
+.scroll-viewer,
+.scroll-viewer:focus,
+.scroll-viewer:focus-visible,
+.scroll-viewer.svelte-1n4mkoh:focus,
+.scroll-viewer.svelte-1n4mkoh:focus-visible,
+.scroll-page-container:focus,
+.scroll-page-container:focus-visible,
+.scroll-page-container:focus-within,
+.scroll-page-canvas-paper,
+.scroll-page-canvas-paper:focus,
+.scroll-page-canvas-paper:focus-visible,
+.scroll-page-canvas-paper.svelte-1n4mkoh:focus,
+.scroll-page-canvas-paper.svelte-1n4mkoh:focus-visible,
+.scroll-page-canvas-pdf:focus,
+.scroll-page-canvas-pdf:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+/* Suppress Inko's internal outline panel in favor of Luno Note's native Popover */
+#inko-outline-panel,
+aside.outline-panel {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ==========================================================================
+   Thumbnail Sidebar — Matches Workspace Images Grid & Item Card Design
+   ========================================================================== */
+.thumbnail-sidebar,
+.thumbnail-sidebar.svelte-1j3q3im {
+  width: 192px !important;
+  min-width: 192px !important;
+  background-color: var(--luno-background) !important;
+  border-right: 1px solid var(--luno-border) !important;
+}
+
+.file-name-display,
+.file-name-display.svelte-1j3q3im {
+  display: none !important;
+}
+
+.thumbnail-list-container,
+.thumbnail-list-container.svelte-1j3q3im {
+  padding: 12px 10px !important;
+}
+
+.thumbnail-list,
+.thumbnail-list.svelte-1j3q3im {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+/* Default state: border-border/60 bg-card rounded-lg p-1.5 transition-all duration-150 */
+.thumbnail-container,
+.thumbnail-container.svelte-w5ul4i {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 160px !important;
+  padding: 6px !important;
+  border-radius: 8px !important; /* sleek reduced roundness (rounded-lg) */
+  border: 1px solid color-mix(in srgb, var(--luno-border) 60%, transparent) !important; /* border-border/60 */
+  background-color: var(--luno-card) !important; /* bg-card */
+  box-shadow: none !important;
+  outline: none !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important; /* transition-all duration-150 */
+  box-sizing: border-box !important;
+}
+
+/* Hover state (when not active): hover:border-border hover:bg-muted/40 */
+.thumbnail-container:hover:not(.active),
+.thumbnail-container.svelte-w5ul4i:hover:not(.active) {
+  border-color: var(--luno-border) !important; /* hover:border-border */
+  background-color: color-mix(in srgb, var(--luno-muted) 40%, transparent) !important; /* hover:bg-muted/40 */
+}
+
+/* Hover label (group-hover:text-primary transition-colors) */
+.thumbnail-container:hover:not(.active) .thumbnail-label,
+.thumbnail-container.svelte-w5ul4i:hover:not(.active) .thumbnail-label.svelte-w5ul4i {
+  color: var(--luno-primary) !important; /* group-hover:text-primary */
+}
+
+/* Active / Selected state: border-primary bg-primary/10 shadow-xs */
+.thumbnail-container.active,
+.thumbnail-container.active.svelte-w5ul4i {
+  border: 1px solid var(--luno-primary) !important; /* border-primary */
+  background-color: color-mix(in srgb, var(--luno-primary) 10%, transparent) !important; /* bg-primary/10 */
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important; /* shadow-xs */
+  outline: none !important;
+}
+
+/* Inner preview wrapper: rounded-md overflow-hidden bg-muted/30 border border-border/30 */
+.thumbnail-content,
+.thumbnail-content.svelte-w5ul4i {
+  position: relative !important;
+  width: 100% !important;
+  min-height: 110px !important;
+  border-radius: 6px !important; /* rounded-md */
+  overflow: hidden !important;
+  background-color: color-mix(in srgb, var(--luno-muted) 30%, transparent) !important; /* bg-muted/30 */
+  border: 1px solid color-mix(in srgb, var(--luno-border) 30%, transparent) !important; /* border-border/30 */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 4px !important;
+  box-sizing: border-box !important;
+}
+
+.thumbnail-canvas,
+.thumbnail-canvas.svelte-w5ul4i {
+  display: block !important;
+  max-width: 100% !important;
+  height: auto !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Label: text-xs font-semibold text-foreground truncate leading-tight group-hover:text-primary */
+.thumbnail-label,
+.thumbnail-label.svelte-w5ul4i {
+  display: block !important;
+  text-align: center !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  color: var(--luno-muted-foreground) !important;
+  margin-top: 5px !important;
+  transition: color 0.15s ease !important;
+  line-height: 1.25 !important;
+  user-select: none !important;
+}
+
+/* Active label: text-primary font-semibold */
+.thumbnail-container.active .thumbnail-label,
+.thumbnail-container.active.svelte-w5ul4i .thumbnail-label.svelte-w5ul4i {
+  color: var(--luno-primary) !important;
+  font-weight: 600 !important;
+}
+
+/* Keyboard focus */
+.thumbnail-container:focus-visible,
+.thumbnail-container.svelte-w5ul4i:focus-visible {
+  outline: none !important;
+  border-color: var(--luno-primary) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--luno-primary) 20%, transparent) !important;
+}
+
+/* ==========================================================================
+   Search Popover — Matches Luno Floating Search Bar
+   ========================================================================== */
+.pdf-search-popover.svelte-rgy47c {
+  top: 10px !important;
+  right: 14px !important;
+}
+
+.pdf-search-bar.svelte-16aw3il {
+  min-width: min(23rem, calc(100vw - 2rem)) !important;
+  padding: 6px 8px !important;
+  gap: 4px !important;
+  border-radius: 12px !important;
+  background: var(--luno-popover) !important;
+  border: 1px solid var(--luno-border) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 4px 10px -4px rgba(0, 0, 0, 0.1) !important;
+}
+
+.pdf-search-bar input.svelte-16aw3il {
+  height: 30px !important;
+  padding: 0 10px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--luno-border) !important;
+  background: var(--luno-background) !important;
+  color: var(--luno-foreground) !important;
+}
+
+.pdf-search-bar input.svelte-16aw3il:focus-visible {
+  outline: none !important;
+  border-color: var(--luno-primary) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--luno-primary) 20%, transparent) !important;
+}
+
+.pdf-search-bar output.svelte-16aw3il {
+  font-size: 11px !important;
+  color: var(--luno-muted-foreground) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.pdf-search-bar button.svelte-16aw3il {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  border-radius: 6px !important;
+  color: var(--luno-foreground) !important;
+  font-size: 13px !important;
+}
+
+.pdf-search-bar button.svelte-16aw3il:hover:not(:disabled) {
+  background: var(--luno-accent) !important;
+  color: var(--luno-accent-foreground) !important;
+}
+
+/* ==========================================================================
+   Tool Options Sheet, Bookmarks Outline Panel, History Panel & Text Modal
+   Matches Luno Radix Popover / Dialog Design
+   ========================================================================== */
+.tool-sheet.svelte-4ivet9,
+.outline-panel.svelte-x5fhuu,
+.user-canvas-data-list.svelte-12tttnt,
+.input-container.svelte-1gqxnj5 {
+  background: var(--luno-popover) !important;
+  color: var(--luno-popover-foreground) !important;
+  border: 1px solid var(--luno-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.24), 0 4px 12px -2px rgba(0, 0, 0, 0.12) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+
+.outline-panel.svelte-x5fhuu,
+.user-canvas-data-list.svelte-12tttnt {
+  top: 56px !important;
+  right: 14px !important;
+}
+
+.panel-header.svelte-x5fhuu,
+.list-header.svelte-12tttnt {
+  border-bottom: 1px solid var(--luno-border) !important;
+  padding: 10px 14px !important;
+}
+
+.panel-header.svelte-x5fhuu h3,
+.list-header.svelte-12tttnt h3,
+.tool-sheet-header.svelte-4ivet9 h3 {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--luno-foreground) !important;
+}
+
+.close-btn.svelte-x5fhuu,
+.close-btn.svelte-12tttnt,
+.sheet-close-btn.svelte-4ivet9 {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  border-radius: 6px !important;
+  font-size: 18px !important;
+  color: var(--luno-muted-foreground) !important;
+}
+
+.close-btn.svelte-x5fhuu:hover,
+.close-btn.svelte-12tttnt:hover,
+.sheet-close-btn.svelte-4ivet9:hover {
+  background: var(--luno-accent) !important;
+  color: var(--luno-foreground) !important;
+}
+
+.outline-entry.svelte-x5fhuu {
+  font-size: 12.5px !important;
+  color: var(--luno-foreground) !important;
+  border-radius: 6px !important;
+  min-height: 32px !important;
+}
+
+.outline-entry.svelte-x5fhuu:hover:not([aria-disabled="true"]) {
+  background: var(--luno-accent) !important;
+}
+
+.outline-row.is-active.svelte-x5fhuu {
+  background: color-mix(in srgb, var(--luno-primary) 12%, transparent) !important;
+  box-shadow: inset 2px 0 0 var(--luno-primary) !important;
+}
+
+.tool-preview.svelte-4ivet9 {
+  background: var(--luno-secondary) !important;
+  border: 1px solid var(--luno-border) !important;
+  border-radius: 8px !important;
+}
+
+.tool-section.svelte-4ivet9 {
+  border-top: 1px solid var(--luno-border) !important;
+}
+
+.tool-section-label.svelte-4ivet9,
+.slider-label.svelte-4ivet9 {
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: var(--luno-muted-foreground) !important;
+}
+
+.width-btn-sheet.svelte-4ivet9 {
+  min-height: 32px !important;
+  height: 32px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--luno-border) !important;
+  background: var(--luno-secondary) !important;
+  color: var(--luno-foreground) !important;
+}
+
+.width-btn-sheet.active.svelte-4ivet9 {
+  background: color-mix(in srgb, var(--luno-primary) 15%, var(--luno-background)) !important;
+  border-color: var(--luno-primary) !important;
+  color: var(--luno-primary) !important;
+}
+
+/* Text Annotation Modal (overridden below by inline in-place editor) */
+.input-container.svelte-1gqxnj5 h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+}
+
+.font-size-chip.svelte-1gqxnj5 {
+  min-height: 32px !important;
+  min-width: 36px !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--luno-border) !important;
+  background: var(--luno-secondary) !important;
+  color: var(--luno-foreground) !important;
+  font-size: 12px !important;
+}
+
+.font-size-chip.active.svelte-1gqxnj5 {
+  background: var(--luno-primary) !important;
+  border-color: var(--luno-primary) !important;
+  color: var(--luno-primary-foreground) !important;
+}
+
+.btn.svelte-1gqxnj5 {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 16px !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+.cancel-btn.svelte-1gqxnj5 {
+  background: var(--luno-secondary) !important;
+  border: 1px solid var(--luno-border) !important;
+  color: var(--luno-foreground) !important;
+}
+
+.cancel-btn.svelte-1gqxnj5:hover {
+  background: var(--luno-accent) !important;
+}
+
+.confirm-btn.svelte-1gqxnj5 {
+  background: var(--luno-primary) !important;
+  border: 1px solid var(--luno-primary) !important;
+  color: var(--luno-primary-foreground) !important;
+}
+
+/* Suppress Inko's internal tool hints & toast popups completely in favor of Luno Note's UI */
+.tool-hint.svelte-1afkrtp,
+.toast-stack.svelte-1r5ofwb,
+.toast.svelte-1r5ofwb,
+[role="region"].toast-stack {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Suppress Inko's internal search bar popup in favor of Luno Note's native Popover */
+.pdf-search-bar,
+form.pdf-search-bar,
+[role="search"].pdf-search-bar {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ==========================================================================
+   Editor-Style Text Selection & Highlighting
+   ========================================================================== */
+/* Text layer font & line-height isolation to prevent oversized bounds and overlap stripes */
+.scroll-viewer .inko-text-layer,
+.scroll-viewer .inko-text-layer *,
+.scroll-viewer .textLayer,
+.scroll-viewer .textLayer * {
+  font-family: sans-serif !important;
+}
+
+.scroll-viewer .inko-text-layer :is(span, br),
+.scroll-viewer .textLayer :is(span, br) {
+  line-height: 0.95 !important;
+}
+
+/* Hides native semi-transparent selection to eliminate span overlap stripes.
+   Unified, snug, stripe-free selection is rendered by Luno's selection overlay. */
+.scroll-viewer .inko-text-layer ::selection,
+.scroll-viewer .textLayer ::selection,
+.dark .scroll-viewer .inko-text-layer ::selection,
+.dark .scroll-viewer .textLayer ::selection,
+[data-theme="dark"] .scroll-viewer .inko-text-layer ::selection,
+[data-theme="dark"] .scroll-viewer .textLayer ::selection {
+  background-color: transparent !important;
+  color: transparent !important;
+}
+
+.luno-selection-layer {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 25 !important;
+  pointer-events: none !important;
+}
+
+/* PDF pages are rendered on white paper in both light & dark app themes:
+   Always use multiply (never screen, which turns colors white/invisible on white paper!) */
+.luno-selection-box,
+.dark .luno-selection-box,
+[data-theme="dark"] .luno-selection-box {
+  position: absolute !important;
+  pointer-events: none !important;
+  transition: none !important;
+  border-radius: 2px !important;
+  mix-blend-mode: multiply !important;
+}
+
+.scroll-page-canvas-paper,
+.dark .scroll-page-canvas-paper,
+[data-theme="dark"] .scroll-page-canvas-paper {
+  mix-blend-mode: multiply !important;
+}
+
+/* ==========================================================================
+   Per-Tool Layer Hit-Testing & Universal Cursors
+   ========================================================================== */
+
+/* 1. Content Select (Select PDF Text): text layer active, paper canvas pass-through */
+body[data-tool="contentSelect"] .inko-text-layer,
+body[data-tool="contentSelect"] .textLayer,
+.scroll-viewer[data-tool="contentSelect"] .inko-text-layer {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+  z-index: 30 !important;
+}
+
+body[data-tool="contentSelect"] .inko-text-layer *,
+body[data-tool="contentSelect"] .textLayer * {
+  cursor: text !important;
+}
+
+body[data-tool="contentSelect"] .scroll-page-canvas-paper {
+  pointer-events: none !important;
+}
+
+/* 2. Smart Dual-Mode Highlighter:
+   - Text spans capture pointer for crisp text-line highlighting
+   - Non-text areas (images, diagrams, scanned PDFs, margins) pass through to Paper canvas for freehand highlight */
+body[data-tool="highlighter"] .inko-text-layer,
+body[data-tool="highlighter"] .textLayer {
+  pointer-events: none !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  z-index: 32 !important;
+}
+
+body[data-tool="highlighter"] .inko-text-layer span,
+body[data-tool="highlighter"] .textLayer span {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+}
+
+body[data-tool="highlighter"].is-selecting-text .inko-text-layer,
+body[data-tool="highlighter"].is-selecting-text .textLayer {
+  pointer-events: auto !important;
+  cursor: text !important;
+}
+
+body[data-tool="highlighter"].is-selecting-text .scroll-page-canvas-paper {
+  pointer-events: none !important;
+}
+
+body[data-tool="highlighter"]:not(.is-selecting-text) .scroll-page-canvas-paper {
+  pointer-events: auto !important;
+  cursor: crosshair;
+  z-index: 30 !important;
+}
+
+/* 3. Select & Move Mode:
+   - Paper canvas receives pointer events directly; DO NOT use !important on cursor so JS move/resize cursors work! */
+body[data-tool="select"] .scroll-page-canvas-paper,
+.scroll-viewer[data-tool="select"] .scroll-page-canvas-paper,
+.scroll-viewer.select-mode .scroll-page-canvas-paper {
+  pointer-events: auto !important;
+  cursor: default;
+  z-index: 35 !important;
+}
+
+/* 4. Drawing, Shapes, Eraser & Text Modes:
+   - Paper canvas receives all pointer events; text layer disabled */
+body[data-tool="pen"] .scroll-page-canvas-paper,
+body[data-tool="rectangle"] .scroll-page-canvas-paper,
+body[data-tool="circle"] .scroll-page-canvas-paper,
+body[data-tool="line"] .scroll-page-canvas-paper,
+body[data-tool="arrow"] .scroll-page-canvas-paper {
+  pointer-events: auto !important;
+  cursor: crosshair;
+  z-index: 35 !important;
+}
+
+body[data-tool="eraser"] .scroll-page-canvas-paper {
+  pointer-events: auto !important;
+  cursor: crosshair;
+  z-index: 35 !important;
+}
+
+body[data-tool="text"] .scroll-page-canvas-paper {
+  pointer-events: auto !important;
+  cursor: text;
+  z-index: 35 !important;
+}
+
+body[data-tool="select"] .inko-text-layer,
+body[data-tool="select"] .textLayer,
+body[data-tool="pen"] .inko-text-layer,
+body[data-tool="pen"] .textLayer,
+body[data-tool="eraser"] .inko-text-layer,
+body[data-tool="eraser"] .textLayer,
+body[data-tool="text"] .inko-text-layer,
+body[data-tool="text"] .textLayer,
+body[data-tool="rectangle"] .inko-text-layer,
+body[data-tool="rectangle"] .textLayer,
+body[data-tool="circle"] .inko-text-layer,
+body[data-tool="circle"] .textLayer,
+body[data-tool="line"] .inko-text-layer,
+body[data-tool="line"] .textLayer,
+body[data-tool="arrow"] .inko-text-layer,
+body[data-tool="arrow"] .textLayer {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* ==========================================================================
+   Inline In-Place Text Annotation Editor (1:1 WYSIWYG on White PDF Paper)
+   ========================================================================== */
+dialog.overlay-dialog,
+.overlay-dialog.svelte-1gqxnj5 {
+  position: fixed !important;
+  inset: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  z-index: 99999 !important;
+}
+
+dialog.overlay-dialog::backdrop {
+  display: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  pointer-events: none !important;
+}
+
+.overlay-dialog .input-container {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  display: inline-block !important;
+}
+
+.overlay-dialog h2,
+.overlay-dialog #text-input-dialog-title,
+.overlay-dialog .visually-hidden,
+.overlay-dialog .text-input-label,
+.overlay-dialog fieldset.font-size-row,
+.overlay-dialog .font-size-row,
+.overlay-dialog .font-size-label,
+.overlay-dialog .dialog-actions,
+.overlay-dialog .validation-error,
+.overlay-dialog .input-container > div:last-child {
+  display: none !important;
+}
+
+/* Transparent 1:1 WYSIWYG inline text box with crisp 1px steel-blue frame */
+.overlay-dialog textarea#text-input-overlay-field,
+.overlay-dialog textarea.text-input,
+.dark .overlay-dialog textarea#text-input-overlay-field,
+.dark .overlay-dialog textarea.text-input,
+[data-theme="dark"] .overlay-dialog textarea#text-input-overlay-field,
+[data-theme="dark"] .overlay-dialog textarea.text-input {
+  background: transparent !important;
+  color: #1e293b;
+  border: 1px solid #6b9ac4 !important;
+  border-radius: 0px !important;
+  box-shadow: none !important;
+  padding: 0px 2px !important;
+  margin: 0 !important;
+  outline: none !important;
+  min-width: 2px !important;
+  min-height: 0 !important;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 32px) !important;
+  line-height: 1.25 !important;
+  font-family: sans-serif !important;
+  resize: none !important;
+  backdrop-filter: none !important;
+  white-space: pre !important;
+  overflow: hidden !important;
+  box-sizing: content-box !important;
+  caret-color: currentColor !important;
+}
+
+.overlay-dialog textarea#text-input-overlay-field::placeholder,
+.overlay-dialog textarea.text-input::placeholder {
+  color: transparent !important;
+  opacity: 0 !important;
+}
+
+

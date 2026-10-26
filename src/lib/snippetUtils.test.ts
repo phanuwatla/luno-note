@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { stripHtmlAndMarkdown, getNotePreviewSnippet } from "./snippetUtils";
 import type { Note } from "@/hooks/useNotes";
 
@@ -51,6 +51,7 @@ Here is the body content.`;
     const imgNote: Note = {
       id: "2",
       title: "Photo.png",
+      content: "",
       fileType: "image",
       createdAt: Date.now(),
       updatedAt: Date.now(),

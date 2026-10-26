@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import WebViewerView from "./WebViewerView";
 import { AppSettingsProvider } from "@/hooks/useAppSettings";
@@ -6,6 +6,9 @@ import type { Note } from "@/hooks/useNotes";
 import * as toastHook from "@/hooks/use-toast";
 
 describe("WebViewerView Insert Link Functionality", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
   const note1: Note = {
     id: "note-1",
     title: "My Note 1",
@@ -117,13 +120,13 @@ describe("WebViewerView Insert Link Functionality", () => {
     expect(menuBtn).toBeInTheDocument();
 
     // Initially panel is not open
-    expect(screen.queryByRole("button", { name: /History|ประวัติ/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(History|ประวัติ)$/i })).not.toBeInTheDocument();
 
     // Click three-dots button to open right panel
     fireEvent.click(menuBtn);
 
     // Panel tabs should be visible
-    expect(screen.getByRole("button", { name: /History|ประวัติ/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^(History|ประวัติ)$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Bookmarks|บุ๊กมาร์ก/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Privacy|ความเป็นส่วนตัว/i })).toBeInTheDocument();
 

@@ -201,4 +201,35 @@ describe("RightPanel Component - File Type Specific Info Display", () => {
     );
     expect(screen.getByText(/Change Icon|sidebar\.changeNoteIcon/i)).toBeInTheDocument();
   });
+
+  it("renders Export action in RightPanel for PDF files", () => {
+    const pdfNote: Note = {
+      id: "note-pdf",
+      title: "Sample Document",
+      fileName: "sample.pdf",
+      fileType: "binary",
+      content: "",
+      createdAt: 1724119800000,
+      updatedAt: 1724120000000,
+      fileSize: 1048576,
+    };
+
+    const mockExportFlattened = vi.fn();
+    const mockExportForm = vi.fn();
+
+    renderWithProviders(
+      <RightPanel
+        isOpen={true}
+        onClose={vi.fn()}
+        note={pdfNote}
+        isPdf={true}
+        onExportFlattenedPdf={mockExportFlattened}
+        onExportFormPdf={mockExportForm}
+      />
+    );
+
+    // Export button should be visible in ACTIONS
+    const exportButton = screen.getByText(/Export|ส่งออก/i);
+    expect(exportButton).toBeInTheDocument();
+  });
 });

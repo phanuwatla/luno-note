@@ -738,11 +738,13 @@ export interface AppSettings {
   showWordCount: boolean;
   autoPairBrackets: boolean;
   showCodeLineNumbers: boolean;
+  showCodeIndentGuides: boolean;
   highlightInlineCode: boolean;
   spellCheck: boolean;
   wrongLanguageSuggestion: boolean;
   smartTypography: boolean;
   enableSlashCommand: boolean;
+  toggleHeading: boolean;
   toolbarItemsOrder: string[];
   hiddenToolbarItems: string[];
 
@@ -902,11 +904,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showWordCount: true,
   autoPairBrackets: true,
   showCodeLineNumbers: false,
+  showCodeIndentGuides: true,
   highlightInlineCode: false,
   spellCheck: true,
   wrongLanguageSuggestion: true,
   smartTypography: true,
   enableSlashCommand: true,
+  toggleHeading: true,
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
@@ -971,6 +975,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const showWordCount = raw?.showWordCount !== false;
   const autoPairBrackets = raw?.autoPairBrackets !== false;
   const showCodeLineNumbers = raw?.showCodeLineNumbers === true;
+  const showCodeIndentGuides = raw?.showCodeIndentGuides !== false;
   const highlightInlineCode = raw?.highlightInlineCode === true;
 
   const mapLegacyToolId = (id: string) => {
@@ -1125,11 +1130,13 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     showWordCount,
     autoPairBrackets,
     showCodeLineNumbers,
+    showCodeIndentGuides,
     highlightInlineCode,
     spellCheck: raw?.spellCheck !== undefined ? Boolean(raw.spellCheck) : DEFAULT_SETTINGS.spellCheck,
     wrongLanguageSuggestion: raw?.wrongLanguageSuggestion !== undefined ? Boolean(raw.wrongLanguageSuggestion) : DEFAULT_SETTINGS.wrongLanguageSuggestion,
     smartTypography: raw?.smartTypography !== undefined ? Boolean(raw.smartTypography) : DEFAULT_SETTINGS.smartTypography,
     enableSlashCommand: raw?.enableSlashCommand !== undefined ? Boolean(raw.enableSlashCommand) : DEFAULT_SETTINGS.enableSlashCommand,
+    toggleHeading: raw?.toggleHeading !== undefined ? Boolean(raw.toggleHeading) : ((raw as any)?.foldHeading !== undefined ? Boolean((raw as any).foldHeading) : DEFAULT_SETTINGS.toggleHeading),
     toolbarItemsOrder,
     hiddenToolbarItems,
     geminiApiKey,
@@ -1153,14 +1160,43 @@ function saveSettings(settings: AppSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
+/**
+ * Strips user-level / machine-level preferences (like userName) before writing
+ * workspace configuration, ensuring workspace portability and preserving individual user profile.
+ */
+export function sanitizeWorkspaceSettingsPayload(settings: Partial<AppSettings>): Record<string, any> {
+  const payload = { ...settings };
+  delete (payload as any).userName;
+  return payload;
+}
+
+/**
+ * Normalizes settings read from a workspace .luno/settings.json file,
+ * strictly guaranteeing userName is excluded and never overwrites global user preferences.
+ */
+export function parseWorkspaceSettings(jsonString: string): Partial<AppSettings> | null {
+  try {
+    const parsed = JSON.parse(jsonString);
+    if (!parsed || typeof parsed !== "object") return null;
+    delete parsed.userName;
+    const normalized = normalizeSettings(parsed);
+    delete (normalized as Partial<AppSettings>).userName;
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
 export async function saveWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle | null, settings: AppSettings) {
   const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const workspaceSettings = sanitizeWorkspaceSettingsPayload(settings);
+
   if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
         const fullPath = `${saved.folderPath}/.luno/settings.json`;
-        await electronAPI.writeFileContent({ fullPath, content: JSON.stringify(settings, null, 2) });
+        await electronAPI.writeFileContent({ fullPath, content: JSON.stringify(workspaceSettings, null, 2) });
         return;
       }
     } catch (err) {
@@ -1174,14 +1210,14 @@ export async function saveWorkspaceSettings(rootDirHandle: FileSystemDirectoryHa
     const metaDir = await rootDirHandle.getDirectoryHandle(".luno", { create: true });
     const fileHandle = await metaDir.getFileHandle("settings.json", { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(settings, null, 2));
+    await writable.write(JSON.stringify(workspaceSettings, null, 2));
     await writable.close();
   } catch (err) {
     console.warn("Failed to write .luno/settings.json", err);
   }
 }
 
-export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle | null): Promise<AppSettings | null> {
+export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle | null): Promise<Partial<AppSettings> | null> {
   const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
     try {
@@ -1190,7 +1226,7 @@ export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHa
         const fullPath = `${saved.folderPath}/.luno/settings.json`;
         const content = await electronAPI.readFileContent(fullPath);
         if (content) {
-          return normalizeSettings(JSON.parse(content));
+          return parseWorkspaceSettings(content);
         }
       }
     } catch (err) {
@@ -1205,7 +1241,7 @@ export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHa
     const fileHandle = await metaDir.getFileHandle("settings.json", { create: false });
     const file = await fileHandle.getFile();
     const text = await file.text();
-    return normalizeSettings(JSON.parse(text));
+    return parseWorkspaceSettings(text);
   } catch {
     return null;
   }
@@ -1507,6 +1543,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         fileIcons: prev.fileIcons || {},
         geminiApiKey: prev.geminiApiKey || "",
         googleDriveClientId: prev.googleDriveClientId || "",
+        userName: prev.userName || "",
       };
       saveSettings(next);
       return next;

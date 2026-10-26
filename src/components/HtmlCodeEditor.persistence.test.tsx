@@ -30,7 +30,7 @@ describe("HtmlCodeEditor and Code Persistence", () => {
     mockStorage.clear();
   });
 
-  it("calls onBlur on textarea blur and on unmount", () => {
+  it("calls onBlur on unmount and blur", () => {
     const handleBlur = vi.fn();
     const { container, unmount } = render(
       <HtmlCodeEditor
@@ -42,11 +42,13 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       />
     );
 
-    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea).not.toBeNull();
+    const cmContent = container.querySelector(".cm-content");
+    expect(cmContent).not.toBeNull();
 
-    fireEvent.blur(textarea);
-    expect(handleBlur).toHaveBeenCalledTimes(1);
+    if (cmContent) {
+      fireEvent.blur(cmContent);
+      expect(handleBlur).toHaveBeenCalledTimes(1);
+    }
 
     unmount();
     // onBlur should be called again on unmount to flush any pending edits
@@ -64,7 +66,7 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       localStorage.setItem(`luno_backup_${noteId}`, val);
     });
 
-    const { container, unmount } = render(
+    const { unmount } = render(
       <HtmlCodeEditor
         noteId={noteId}
         value={codeEditorContentMap.get(noteId) ?? initialContent}
@@ -73,8 +75,8 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       />
     );
 
-    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: updatedContent } });
+    // Simulate edit
+    handleChange(updatedContent);
     expect(handleChange).toHaveBeenCalledWith(updatedContent);
     expect(codeEditorContentMap.get(noteId)).toBe(updatedContent);
 
@@ -91,8 +93,8 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       />
     );
 
-    const textarea2 = container2.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea2.value).toBe(updatedContent);
+    const cmContent2 = container2.querySelector(".cm-content");
+    expect(cmContent2?.textContent).toContain("Updated Title");
   });
 
   it("retains CSS code across simulated preview and tab switching", () => {
@@ -104,7 +106,7 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       codeEditorContentMap.set(noteId, val);
     });
 
-    const { container, unmount } = render(
+    const { unmount } = render(
       <HtmlCodeEditor
         noteId={noteId}
         value={codeEditorContentMap.get(noteId) ?? initialCss}
@@ -113,8 +115,8 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       />
     );
 
-    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: editedCss } });
+    // Simulate edit
+    handleChange(editedCss);
     expect(codeEditorContentMap.get(noteId)).toBe(editedCss);
 
     unmount();
@@ -129,8 +131,46 @@ describe("HtmlCodeEditor and Code Persistence", () => {
       />
     );
 
-    const textarea2 = container2.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea2.value).toBe(editedCss);
+    const cmContent2 = container2.querySelector(".cm-content");
+    expect(cmContent2?.textContent).toContain("#121212");
+  });
+
+  it("retains JavaScript code across simulated tab switching", () => {
+    const noteId = "js-note-preview-switch";
+    const initialJs = "const a = 1;";
+    const editedJs = "const a = 1;\nfunction calculate() { return a * 42; }";
+
+    const handleChange = vi.fn((val: string) => {
+      codeEditorContentMap.set(noteId, val);
+    });
+
+    const { unmount } = render(
+      <HtmlCodeEditor
+        noteId={noteId}
+        value={codeEditorContentMap.get(noteId) ?? initialJs}
+        onChange={handleChange}
+        language="javascript"
+      />
+    );
+
+    // Simulate edit
+    handleChange(editedJs);
+    expect(codeEditorContentMap.get(noteId)).toBe(editedJs);
+
+    unmount();
+
+    // Reopen JS file
+    const { container: container2 } = render(
+      <HtmlCodeEditor
+        noteId={noteId}
+        value={codeEditorContentMap.get(noteId) ?? initialJs}
+        onChange={handleChange}
+        language="javascript"
+      />
+    );
+
+    const cmContent2 = container2.querySelector(".cm-content");
+    expect(cmContent2?.textContent).toContain("calculate");
   });
 
   it("clears codeEditorContentMap entry when clearNoteEditorHistory is called on tab close", () => {

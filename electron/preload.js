@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   readDirectoryFiles: (folderPath) => ipcRenderer.invoke("read-directory-files", folderPath),
   readFileContent: (fullPath) => ipcRenderer.invoke("read-file-content", fullPath),
   readFileBase64: (fullPath) => ipcRenderer.invoke("read-file-base64", fullPath),
+  fileExists: (fullPath) => ipcRenderer.invoke("file-exists", fullPath),
   readImageDataUrl: (fullPath) => ipcRenderer.invoke("read-image-data-url", fullPath),
   readFileBuffer: (fullPath) => ipcRenderer.invoke("read-file-buffer", fullPath),
   getPathForFile: (file) => {
@@ -57,10 +58,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     } catch {}
     return file?.path || "";
   },
-  writeFileContent: (data) => ipcRenderer.invoke("write-file-content", data),
+  writeFileContent: (data, content) => ipcRenderer.invoke("write-file-content", typeof data === "string" ? { fullPath: data, content } : data),
   writeFileBase64: (data) => ipcRenderer.invoke("write-file-base64", data),
   writeFileBuffer: (data) => ipcRenderer.invoke("write-file-buffer", data),
   deleteFileOrFolder: (fullPath) => ipcRenderer.invoke("delete-file-or-folder", fullPath),
+  deleteFile: (fullPath) => ipcRenderer.invoke("delete-file-or-folder", fullPath),
   createWorkspaceFolder: (data) => ipcRenderer.invoke("create-workspace-folder", data),
   renameFileOrFolder: (data) => ipcRenderer.invoke("rename-file-or-folder", data),
   copyFileOrFolder: (data) => ipcRenderer.invoke("copy-file-or-folder", data),

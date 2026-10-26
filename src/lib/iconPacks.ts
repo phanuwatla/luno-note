@@ -8,6 +8,7 @@ import * as PhosphorIcons from "@phosphor-icons/react";
 import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 
 export type IconPackId = "lucide" | "tabler" | "phosphor";
+export type IconPack = IconPackId;
 
 export interface IconPackOption {
   id: IconPackId;
@@ -448,14 +449,19 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     phosphor: PhosphorIcons.Table || PhosphorIcons.FileXls,
   },
   filePdf: {
-    lucide: LucideIcons.FileText,
-    tabler: TablerIcons.IconFileTypePdf || TablerIcons.IconFileText,
-    phosphor: PhosphorIcons.FilePdf || PhosphorIcons.FileText,
+    lucide: LucideIcons.File,
+    tabler: TablerIcons.IconFile,
+    phosphor: PhosphorIcons.File,
   },
   file: {
     lucide: LucideIcons.File,
     tabler: TablerIcons.IconFile,
     phosphor: PhosphorIcons.File,
+  },
+  select: {
+    lucide: LucideIcons.MousePointer2,
+    tabler: TablerIcons.IconPointer || TablerIcons.IconPointer2,
+    phosphor: PhosphorIcons.Cursor,
   },
   settings: {
     lucide: LucideIcons.Settings,
@@ -762,12 +768,63 @@ export const TOOLBAR_ICON_MAP: Record<string, { lucide: any; tabler: any; phosph
     tabler: TablerIcons.IconPhotoOff,
     phosphor: PhosphorIcons.ImageSquare,
   },
+  textSelect: {
+    lucide: LucideIcons.TextCursor || LucideIcons.Type,
+    tabler: TablerIcons.IconCursorText || TablerIcons.IconLetterT,
+    phosphor: PhosphorIcons.CursorText || PhosphorIcons.TextT,
+  },
+  pen: {
+    lucide: LucideIcons.Pen,
+    tabler: TablerIcons.IconBallpen || TablerIcons.IconPencil,
+    phosphor: PhosphorIcons.Pen || PhosphorIcons.PencilSimple,
+  },
+  eraser: {
+    lucide: LucideIcons.Eraser,
+    tabler: TablerIcons.IconEraser,
+    phosphor: PhosphorIcons.Eraser,
+  },
+  textBox: {
+    lucide: LucideIcons.Type,
+    tabler: TablerIcons.IconTypography || TablerIcons.IconLetterT,
+    phosphor: PhosphorIcons.TextT,
+  },
+  shapeSquare: {
+    lucide: LucideIcons.Square,
+    tabler: TablerIcons.IconSquare,
+    phosphor: PhosphorIcons.Square,
+  },
+  shapeCircle: {
+    lucide: LucideIcons.Circle,
+    tabler: TablerIcons.IconCircle,
+    phosphor: PhosphorIcons.Circle,
+  },
+  shapeLine: {
+    lucide: LucideIcons.Slash || LucideIcons.Minus,
+    tabler: TablerIcons.IconSlash || TablerIcons.IconMinus,
+    phosphor: PhosphorIcons.LineSegment || PhosphorIcons.Minus,
+  },
+  shapeArrow: {
+    lucide: LucideIcons.MoveUpRight || LucideIcons.ArrowUpRight,
+    tabler: TablerIcons.IconArrowUpRight,
+    phosphor: PhosphorIcons.ArrowUpRight,
+  },
+  bookmark: {
+    lucide: LucideIcons.Bookmark,
+    tabler: TablerIcons.IconBookmark,
+    phosphor: PhosphorIcons.BookmarkSimple || PhosphorIcons.Bookmark,
+  },
+  printer: {
+    lucide: LucideIcons.Printer,
+    tabler: TablerIcons.IconPrinter,
+    phosphor: PhosphorIcons.Printer,
+  },
 };
 
-export function getToolbarIcon(toolId: string, pack: IconPackId = "lucide") {
+export function getToolbarIcon(toolId: string, pack: IconPackId = "lucide", fallback?: any) {
   const entry = TOOLBAR_ICON_MAP[toolId];
-  if (!entry) return LucideIcons.HelpCircle;
-  return entry[pack] || entry.lucide || LucideIcons.HelpCircle;
+  const defaultIcon = fallback || LucideIcons.HelpCircle;
+  if (!entry) return defaultIcon;
+  return entry[pack] || entry.lucide || defaultIcon;
 }
 
 // Preset Emojis categorized
