@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { MediaLightbox } from "@/components/shared/MediaLightbox";
 import { NodeViewWrapper, NodeViewProps } from "@tiptap/react";
 import { VideoOff, Maximize2, RotateCcw, X, Trash2, Link as LinkIcon } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -30,16 +30,34 @@ const pendingVideoResolutions = new Map<string, Promise<string | null>>();
 videoLocalCache.set = function (key: string, value: string) {
   const existing = videoLocalCache.get(key);
   if (existing && existing !== value && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const [k, v] of videoLocalCache.entries()) {
+      if (k !== key && v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
   if (videoLocalCache.size >= MAX_VIDEO_CACHE && !videoLocalCache.has(key)) {
     const oldestKey = videoLocalCache.keys().next().value;
     if (oldestKey) {
       const oldVal = videoLocalCache.get(oldestKey);
-      if (oldVal && oldVal.startsWith("blob:")) {
-        try { URL.revokeObjectURL(oldVal); } catch {}
-      }
       origVideoDelete(oldestKey);
+      if (oldVal && oldVal.startsWith("blob:") && oldVal !== value) {
+        let stillReferenced = false;
+        for (const v of videoLocalCache.values()) {
+          if (v === oldVal) {
+            stillReferenced = true;
+            break;
+          }
+        }
+        if (!stillReferenced) {
+          try { URL.revokeObjectURL(oldVal); } catch { /* ignore */ }
+        }
+      }
     }
   }
   return origVideoSet(key, value);
@@ -47,10 +65,20 @@ videoLocalCache.set = function (key: string, value: string) {
 
 videoLocalCache.delete = function (key: string) {
   const existing = videoLocalCache.get(key);
+  const res = origVideoDelete(key);
   if (existing && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const v of videoLocalCache.values()) {
+      if (v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
-  return origVideoDelete(key);
+  return res;
 };
 
 export function getVideoMimeType(filePath: string): string {
@@ -74,7 +102,7 @@ export function sanitizeVideoRelPath(raw: string): string {
   }
   try {
     clean = decodeURIComponent(clean);
-  } catch {}
+  } catch { /* ignore */ }
   while (clean.startsWith("../") || clean.startsWith("./")) {
     clean = clean.replace(/^(\.\.\/|\.\/)/, "");
   }
@@ -252,18 +280,6 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
     }
   }, [width, isResizing]);
 
-  // Handle ESC key to close full-screen preview
-  useEffect(() => {
-    if (!isPreviewOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsPreviewOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPreviewOpen]);
-
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -348,7 +364,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
                     const mime = getVideoMimeType(cleanRel);
                     recoveredBlobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
                   }
-                } catch {}
+                } catch { /* ignore */ }
               }
               if (!recoveredBlobUrl && electronAPI.readImageDataUrl) {
                 const dUrl = await electronAPI.readImageDataUrl(fullPath);
@@ -414,13 +430,13 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
               onClick={() => {
                 const target = dataRelativeSrc || src;
                 if (target) {
-                  void copyTextToClipboard(target, t("editor.copiedVideoPath") || "คัดลอกพาธวิดีโอแล้ว");
+                  void copyTextToClipboard(target, t("editor.copiedVideoPath"));
                 }
               }}
               className="gap-2.5"
             >
               <LinkIcon className="h-4 w-4" />
-              <span>{t("editor.copyVideoPath") || "คัดลอกพาธวิดีโอ"}</span>
+              <span>{t("editor.copyVideoPath")}</span>
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
@@ -429,7 +445,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
               className="gap-2.5 text-destructive focus:text-destructive"
             >
               <Trash2 className="h-4 w-4" />
-              <span>{t("editor.deleteVideo") || "ลบวิดีโอ"}</span>
+              <span>{t("editor.deleteVideo")}</span>
               <ContextMenuShortcut>Del</ContextMenuShortcut>
             </ContextMenuItem>
           </ContextMenuContent>
@@ -491,7 +507,10 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
           dataRelativeSrc={dataRelativeSrc}
           onDelete={deleteNode}
           onResetSize={handleResetSize}
-          onViewFull={() => setIsPreviewOpen(true)}
+          onViewFull={() => {
+            containerRef.current?.querySelector("video")?.pause();
+            setIsPreviewOpen(true);
+          }}
           onError={handlePlayerError}
         />
 
@@ -499,7 +518,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
         {isResizing && currentWidth && (
           <div
             style={{ fontFamily: "var(--app-font-family, sans-serif)" }}
-            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-semibold shadow-xs backdrop-blur-sm z-40 pointer-events-none"
+            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-semibold shadow-sm backdrop-blur-sm z-40 pointer-events-none"
           >
             {currentWidth}px
           </div>
@@ -517,15 +536,16 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      containerRef.current?.querySelector("video")?.pause();
                       setIsPreviewOpen(true);
                     }}
-                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                   >
                     <Maximize2 className="w-3.5 h-3.5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="left">
-                  {t("editor.videoViewFull") || "View full video"}
+                  {t("editor.videoViewFull")}
                 </TooltipContent>
               </Tooltip>
 
@@ -536,13 +556,13 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
                     <button
                       type="button"
                       onClick={handleResetSize}
-                      className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                      className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="left">
-                    {t("editor.videoResetSize") || "Reset video size"}
+                    {t("editor.videoResetSize")}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -557,7 +577,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
               <TooltipTrigger asChild>
                 <div
                   onPointerDown={handlePointerDown}
-                  className={`absolute bottom-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-foreground border border-border shadow-xs cursor-nwse-resize z-40 backdrop-blur-sm transition-transform ${
+                  className={`absolute bottom-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-foreground border border-border shadow-sm cursor-nwse-resize z-40 backdrop-blur-sm transition-transform ${
                     isResizing ? "scale-110 text-primary border-primary" : "hover:scale-105"
                   }`}
                 >
@@ -577,7 +597,7 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {t("editor.videoResizeTooltip") || "Resize video"}
+                {t("editor.videoResizeTooltip")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -585,53 +605,21 @@ const VideoNodeViewComponent: React.FC<NodeViewProps> = ({
       </div>
 
       {/* Full-Screen Video Lightbox Preview Modal */}
-      {isPreviewOpen &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none animate-in fade-in-0 duration-200"
-            onClick={() => setIsPreviewOpen(false)}
-          >
-            {/* Top Bar with Close Button */}
-            <div
-              className="absolute top-4 right-4 z-50 flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setIsPreviewOpen(false)}
-                      className="p-2 rounded-xl bg-background/20 hover:bg-background/40 text-white border border-white/20 shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {t("editor.videoCloseFull") || "Close"} (Esc)
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-
-            {/* Video Preview Container */}
-            <div
-              className="relative max-w-[92vw] max-h-[88vh] flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <VideoPlayer
-                src={displaySrc}
-                title={displayTitle}
-                noteId={currentTabId}
-                autoPlay
-                className="max-w-full max-h-[88vh]"
-                onError={handlePlayerError}
-              />
-            </div>
-          </div>,
-          document.body
-        )}
+      <MediaLightbox
+        open={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        ariaLabel={displayTitle || t("editor.videoCloseFull")}
+        closeTooltip={`${t("editor.videoCloseFull")} (Esc)`}
+      >
+        <VideoPlayer
+          src={displaySrc}
+          title={displayTitle}
+          noteId={currentTabId}
+          autoPlay
+          className="max-w-full max-h-[88vh]"
+          onError={handlePlayerError}
+        />
+      </MediaLightbox>
     </NodeViewWrapper>
   );
 };

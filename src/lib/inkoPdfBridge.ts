@@ -794,7 +794,7 @@ function getCandidateBookmarkStorageKeys(params: {
   folderPath?: string | null;
 }): string[] {
   return getCandidateSidecarStorageKeys(params).map((k) =>
-    k.replace(/^luno-pdf-sidecar:/, 'luno-pdf-bookmarks:')
+    k.replace(/^luno-pdf-annotations:/, 'luno-pdf-bookmarks:')
   );
 }
 
@@ -930,7 +930,7 @@ export async function loadPdfAnnotationSidecar(params: {
     for (const sidecarPath of candidatePaths) {
       try {
         const res = await window.electronAPI.readFileContent(sidecarPath);
-        const rawContent = typeof res === 'string' ? res : res?.content;
+        const rawContent = typeof res === 'string' ? res : (res as any)?.content;
         if (rawContent && typeof rawContent === 'string') {
           const parsed = JSON.parse(rawContent) as PdfAnnotationSidecarData;
           if (parsed && typeof parsed.canvasData === 'string') {
@@ -1020,7 +1020,7 @@ export async function savePdfAnnotationSidecar(params: {
     minute: '2-digit',
   });
 
-  let history = Array.isArray(params.existingHistory)
+  let history: InkoUserCanvasItem[] = Array.isArray(params.existingHistory)
     ? params.existingHistory.map((item) => ({ ...item, isCurrent: false }))
     : [];
 
@@ -1516,7 +1516,7 @@ export function mountInkoViewer(
             });
             window.dispatchEvent(fakeEvent);
           }
-        } catch {}
+        } catch { /* ignore */ }
         break;
       }
 

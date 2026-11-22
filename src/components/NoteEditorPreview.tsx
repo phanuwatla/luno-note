@@ -54,7 +54,7 @@ export interface NoteEditorPreviewProps {
   theme?: AppTheme;
   tagColorStyle?: "multicolor" | "accent";
   accentHeadings?: boolean;
-  editorWidth?: "compact" | "normal" | "full";
+  editorWidth?: "compact" | "standard" | "normal" | "full";
   showCodeLineNumbers?: boolean;
   assetBlobUrlMap?: Map<string, string>;
   className?: string;

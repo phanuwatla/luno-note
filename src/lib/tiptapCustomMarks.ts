@@ -478,8 +478,6 @@ export const TextAlign = Extension.create<TextAlignOptions>({
 
   addKeyboardShortcuts() {
     return {
-      "Mod-Shift-l": () => this.editor.commands.setTextAlign("left"),
-      "Mod-Shift-L": () => this.editor.commands.setTextAlign("left"),
       "Mod-Shift-e": () => this.editor.commands.setTextAlign("center"),
       "Mod-Shift-E": () => this.editor.commands.setTextAlign("center"),
       "Mod-Shift-r": () => this.editor.commands.setTextAlign("right"),

@@ -148,7 +148,7 @@ describe("VideoExtension", () => {
     expect(pip?.videoWidth).toBe(1920);
     expect(pip?.videoHeight).toBe(1080);
     expect(pip?.containerWidth).toBe(640);
-    expect(pip?.videoWidth! / pip?.videoHeight!).toBeCloseTo(16 / 9);
+    expect((pip?.videoWidth ?? 0) / (pip?.videoHeight ?? 1)).toBeCloseTo(16 / 9);
 
     videoPipStore.close();
     expect(videoPipStore.get()).toBeNull();

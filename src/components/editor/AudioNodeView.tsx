@@ -11,16 +11,34 @@ const origAudioDelete = audioLocalCache.delete.bind(audioLocalCache);
 audioLocalCache.set = function (key: string, value: string) {
   const existing = audioLocalCache.get(key);
   if (existing && existing !== value && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const [k, v] of audioLocalCache.entries()) {
+      if (k !== key && v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
   if (audioLocalCache.size >= MAX_AUDIO_CACHE && !audioLocalCache.has(key)) {
     const oldestKey = audioLocalCache.keys().next().value;
     if (oldestKey) {
       const oldVal = audioLocalCache.get(oldestKey);
-      if (oldVal && oldVal.startsWith("blob:")) {
-        try { URL.revokeObjectURL(oldVal); } catch {}
-      }
       origAudioDelete(oldestKey);
+      if (oldVal && oldVal.startsWith("blob:") && oldVal !== value) {
+        let stillReferenced = false;
+        for (const v of audioLocalCache.values()) {
+          if (v === oldVal) {
+            stillReferenced = true;
+            break;
+          }
+        }
+        if (!stillReferenced) {
+          try { URL.revokeObjectURL(oldVal); } catch { /* ignore */ }
+        }
+      }
     }
   }
   return origAudioSet(key, value);
@@ -28,10 +46,20 @@ audioLocalCache.set = function (key: string, value: string) {
 
 audioLocalCache.delete = function (key: string) {
   const existing = audioLocalCache.get(key);
+  const res = origAudioDelete(key);
   if (existing && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const v of audioLocalCache.values()) {
+      if (v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
-  return origAudioDelete(key);
+  return res;
 };
 
 const pendingAudioResolutions = new Map<string, Promise<string | null>>();
@@ -57,7 +85,7 @@ export function sanitizeAudioRelPath(raw: string): string {
   }
   try {
     clean = decodeURIComponent(clean);
-  } catch {}
+  } catch { /* ignore */ }
   while (clean.startsWith("../") || clean.startsWith("./")) {
     clean = clean.replace(/^(\.\.\/|\.\/)/, "");
   }
@@ -237,7 +265,7 @@ const AudioNodeViewComponent: React.FC<NodeViewProps> = ({
                     const mime = getAudioMimeType(cleanRel);
                     recoveredBlobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
                   }
-                } catch {}
+                } catch { /* ignore */ }
               }
               if (!recoveredBlobUrl && electronAPI.readFileBase64) {
                 const b64 = await electronAPI.readFileBase64(fullPath);

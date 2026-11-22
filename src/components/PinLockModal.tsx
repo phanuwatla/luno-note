@@ -63,11 +63,11 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
 
     if (mode === "set") {
       if (pin.length !== 6) {
-        setError(t("pinLock.pinLengthError") || "PIN must be exactly 6 digits.");
+        setError(t("pinLock.pinLengthError"));
         return;
       }
       if (pin !== confirmPin) {
-        setError(t("pinLock.pinMismatch") || "PIN confirmation does not match.");
+        setError(t("pinLock.pinMismatch"));
         return;
       }
 
@@ -85,15 +85,13 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
       if (remaining > 0) {
         const isTh = settings?.language === "th";
         setError(
-          isTh
-            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
-            : `Too many failed attempts. Please wait ${remaining}s.`
+          t("pinLock.tooManyFailedAttemptsPlease", { remaining })
         );
         return;
       }
 
       if (currentPin.length !== 6) {
-        setError(t("pinLock.pinLengthError") || "PIN must be exactly 6 digits.");
+        setError(t("pinLock.pinLengthError"));
         return;
       }
 
@@ -108,12 +106,10 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           const isTh = settings?.language === "th";
           if (lockout > 0) {
             setError(
-              isTh
-                ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
-                : `Too many failed attempts. Please wait ${lockout}s.`
+              t("pinLock.tooManyFailedAttemptsPlease2", { lockout })
             );
           } else {
-            setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+            setError(t("pinLock.incorrectPin"));
           }
         } else {
           setError(err.message || "Failed to remove PIN");
@@ -126,23 +122,21 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
       if (remaining > 0) {
         const isTh = settings?.language === "th";
         setError(
-          isTh
-            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
-            : `Too many failed attempts. Please wait ${remaining}s.`
+          t("pinLock.tooManyFailedAttemptsPlease", { remaining })
         );
         return;
       }
 
       if (currentPin.length !== 6) {
-        setError(t("pinLock.pinLengthError") || "Current PIN must be 6 digits.");
+        setError(t("pinLock.pinLengthError"));
         return;
       }
       if (pin.length !== 6) {
-        setError(t("pinLock.pinLengthError") || "New PIN must be 6 digits.");
+        setError(t("pinLock.pinLengthError"));
         return;
       }
       if (pin !== confirmPin) {
-        setError(t("pinLock.pinMismatch") || "New PIN confirmation does not match.");
+        setError(t("pinLock.pinMismatch"));
         return;
       }
 
@@ -157,12 +151,10 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           const isTh = settings?.language === "th";
           if (lockout > 0) {
             setError(
-              isTh
-                ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
-                : `Too many failed attempts. Please wait ${lockout}s.`
+              t("pinLock.tooManyFailedAttemptsPlease2", { lockout })
             );
           } else {
-            setError(t("pinLock.incorrectPin") || "Incorrect current PIN. Please try again.");
+            setError(t("pinLock.incorrectPin"));
           }
         } else {
           setError(err.message || "Failed to change PIN");
@@ -179,17 +171,17 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
         <DialogHeader>
           <DialogTitle>
             {mode === "set"
-              ? t("pinLock.lockTitle") || "Lock Note with PIN"
+              ? t("pinLock.lockTitle")
               : mode === "remove"
-              ? t("pinLock.removeLockTitle") || "Remove PIN"
-              : t("pinLock.changePinTitle") || "Change PIN"}
+              ? t("pinLock.removeLockTitle")
+              : t("pinLock.changePinTitle")}
           </DialogTitle>
           <DialogDescription>
             {mode === "set"
-              ? t("pinLock.lockDesc") || "Set a 6-digit PIN to encrypt this note with AES-256."
+              ? t("pinLock.lockDesc")
               : mode === "remove"
-              ? t("pinLock.removeLockDesc") || "Enter your current 6-digit PIN to remove protection from this note."
-              : t("pinLock.changePinDesc") || "Enter your current PIN and choose a new 6-digit PIN."}
+              ? t("pinLock.removeLockDesc")
+              : t("pinLock.changePinDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -197,7 +189,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           {mode === "change" || mode === "remove" ? (
             <div>
               <label className="mb-2 block text-sm font-medium text-foreground">
-                {t("pinLock.currentPin") || "Current 6-Digit PIN"}
+                {t("pinLock.currentPin")}
               </label>
               <input
                 ref={inputRef}
@@ -218,7 +210,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
             <>
               <div>
                 <label className="mb-2 block text-sm font-medium text-foreground">
-                  {mode === "change" ? (t("pinLock.newPin") || "New 6-Digit PIN") : (t("pinLock.enterPin") || "6-Digit PIN")}
+                  {mode === "change" ? (t("pinLock.newPin")) : (t("pinLock.enterPin"))}
                 </label>
                 <input
                   ref={mode === "set" ? inputRef : undefined}
@@ -236,7 +228,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-foreground">
-                  {mode === "change" ? (t("pinLock.confirmNewPin") || "Confirm New PIN") : (t("pinLock.confirmPin") || "Confirm PIN")}
+                  {mode === "change" ? (t("pinLock.confirmNewPin")) : (t("pinLock.confirmPin"))}
                 </label>
                 <input
                   type={showPin ? "text" : "password"}
@@ -260,7 +252,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 cursor-pointer select-none transition-colors"
             >
               {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{showPin ? (t("pinLock.hidePin") || "Hide PIN") : (t("pinLock.showPin") || "Show PIN")}</span>
+              <span>{showPin ? (t("pinLock.hidePin")) : (t("pinLock.showPin"))}</span>
             </button>
             <span className="text-[11px] text-muted-foreground/70">AES-GCM 256-bit</span>
           </div>
@@ -279,7 +271,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
               onClick={() => onOpenChange(false)}
               disabled={loading}
             >
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
@@ -288,11 +280,11 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
               {loading ? (
                 <span>...</span>
               ) : mode === "set" ? (
-                t("pinLock.setPinBtn") || "Lock Note"
+                t("pinLock.setPinBtn")
               ) : mode === "remove" ? (
-                t("pinLock.removeLockBtn") || "Remove PIN"
+                t("pinLock.removeLockBtn")
               ) : (
-                t("pinLock.changePinBtn") || "Update PIN"
+                t("pinLock.changePinBtn")
               )}
             </Button>
           </DialogFooter>

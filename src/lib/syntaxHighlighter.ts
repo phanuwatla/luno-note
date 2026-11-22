@@ -1,3 +1,5 @@
+import { escapeHtml } from "@/lib/htmlUtils";
+export { escapeHtml };
 import { createLowlight, common } from "lowlight";
 
 /**
@@ -85,15 +87,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   kt: "kotlin",
 };
 
-export function escapeHtml(s: string): string {
-  if (typeof s !== "string") return "";
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+// escapeHtml is re-exported from @/lib/htmlUtils
 
 function hastNodeToHtml(node: any): string {
   if (!node) return "";

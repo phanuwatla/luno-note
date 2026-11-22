@@ -3,6 +3,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useAppSettingsSafe } from "@/hooks/useAppSettings";
+import { translations } from "@/translation";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -31,6 +33,10 @@ const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, onKeyDown, ...props }, ref) => {
+  const appSettings = useAppSettingsSafe();
+  const lang = appSettings?.settings?.language || "en";
+  const closeLabel = translations[lang]?.common?.close || translations.en.common.close;
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(e);
     if (e.defaultPrevented) return;
@@ -57,8 +63,8 @@ const DialogContent = React.forwardRef<
         const container = e.currentTarget;
         const submitBtn =
           (container.querySelector('button[type="submit"]:not([disabled])') as HTMLButtonElement) ||
-          (container.querySelector('[class*="DialogFooter"] button:not([disabled]):last-child') as HTMLButtonElement) ||
-          (container.querySelector('button[data-dialog-confirm="true"]:not([disabled])') as HTMLButtonElement);
+          (container.querySelector('button[data-dialog-confirm="true"]:not([disabled])') as HTMLButtonElement) ||
+          (container.querySelector('[data-dialog-footer="true"] button:not([disabled]):last-child') as HTMLButtonElement);
 
         if (submitBtn && submitBtn !== target) {
           e.preventDefault();
@@ -75,15 +81,18 @@ const DialogContent = React.forwardRef<
         ref={ref}
         onKeyDown={handleKeyDown}
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-5 sm:p-6 shadow-xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-2xl sm:rounded-2xl",
+          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-5 sm:p-6 shadow-xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-2xl",
           className,
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-accent data-[state=open]:text-muted-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        <DialogPrimitive.Close
+          aria-label={closeLabel}
+          className="absolute right-4 top-4 rounded-lg p-0.5 opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-accent data-[state=open]:text-muted-foreground hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none"
+        >
           <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{closeLabel}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPortal>
@@ -97,7 +106,11 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 DialogHeader.displayName = "DialogHeader";
 
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)} {...props} />
+  <div
+    data-dialog-footer="true"
+    className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2", className)}
+    {...props}
+  />
 );
 DialogFooter.displayName = "DialogFooter";
 

@@ -290,4 +290,29 @@ my name is #nongying
     expect(reParsed.allTags).toEqual(["feedback", "checklist", "newproperty", "nongying"]);
     expect(reParsed.frontmatterRaw).not.toContain("nongying");
   });
+
+  it("does not mutate #tags inside fenced code blocks or inline code when renaming or removing tags", () => {
+    const md = `---
+tags:
+  - oldtag
+---
+
+Normal paragraph with #oldtag.
+
+\`\`\`bash
+#oldtag inside bash comment
+\`\`\`
+
+Inline \`#oldtag\` should stay untouched.`;
+
+    const renamed = renameTagInMarkdown(md, "oldtag", "newtag");
+    expect(renamed).toContain("Normal paragraph with #newtag.");
+    expect(renamed).toContain("#oldtag inside bash comment");
+    expect(renamed).toContain("Inline `#oldtag` should stay untouched.");
+
+    const removed = removeTagFromMarkdown(renamed, "newtag");
+    expect(removed).not.toContain("Normal paragraph with #newtag");
+    expect(removed).toContain("#oldtag inside bash comment");
+    expect(removed).toContain("Inline `#oldtag` should stay untouched.");
+  });
 });

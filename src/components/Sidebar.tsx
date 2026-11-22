@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, memo, lazy, Suspense } from "react";
 import { Note } from "@/hooks/useNotes";
 import { isEncryptedNote, isLockableTextFile } from "@/lib/noteCrypto";
-import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
 import {
   Plus,
   Search,
@@ -65,7 +66,8 @@ import { PanelRightOpenIcon } from "@/components/icons/PanelRightOpenIcon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTrash, type TrashedNote } from "@/hooks/useTrash";
-import { EditorCheckbox } from "@/components/ui/EditorCheckbox";
+import { EditorCheckbox } from "@/components/shared/EditorCheckbox";
+import { PageLoader } from "@/components/shared/PageLoader";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { isMarkdownNote } from "@/lib/frontmatter";
@@ -163,7 +165,7 @@ function getInitialOpenFolders(openedFolderName?: string | null): Set<string> {
         }
       }
     }
-  } catch {}
+  } catch { /* ignore */ }
   return new Set(["__opened_root__"]);
 }
 
@@ -182,7 +184,7 @@ function getInitialOpenTemplateFolders(): Set<string> {
         }
       }
     }
-  } catch {}
+  } catch { /* ignore */ }
   return new Set(["work", "daily", "study", "dev", "web"]);
 }
 
@@ -199,7 +201,7 @@ function getInitialOpenTags(openedFolderName?: string | null): Set<string> {
         }
       }
     }
-  } catch {}
+  } catch { /* ignore */ }
   return new Set();
 }
 
@@ -456,26 +458,7 @@ function getFileType(note: Note): "txt" | "md" | "html" | "css" | "image" | "bin
 }
 
 function NoteIcon({ note, active }: { note: Note; active: boolean }) {
-  const { settings } = useAppSettings();
-  if (settings?.showFileIcons === false) {
-    return null;
-  }
-  const pack = settings?.iconPack || "lucide";
-  const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
-  if (note.isLocked) {
-    const LockIcon = getToolbarIcon("lock", pack);
-    return <LockIcon className={cls} />;
-  }
-  const defaultKey = getNoteDefaultIconKey(note);
-  const IconComp = getToolbarIcon(defaultKey, pack);
-  return <IconComp className={cls} />;
+  return <SharedNoteIcon note={note} className="h-3.5 w-3.5" active={active} />;
 }
 
 function MarkdownIndicator({ active, className = "" }: { active: boolean; className?: string }) {
@@ -587,7 +570,7 @@ function SidebarComponent({
       try {
         const storage = getLocalStorage();
         storage?.setItem(OPEN_TEMPLATE_FOLDERS_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch {}
+      } catch { /* ignore */ }
       return next;
     });
   };
@@ -613,7 +596,7 @@ function SidebarComponent({
         const storage = getLocalStorage();
         const wsKey = openedFolderName || "__global__";
         storage?.setItem(OPEN_TAGS_STORAGE_PREFIX + wsKey, JSON.stringify(Array.from(next)));
-      } catch {}
+      } catch { /* ignore */ }
       return next;
     });
   };
@@ -1476,7 +1459,7 @@ function SidebarComponent({
     const text = paths.join("\n");
     await copyToClipboard(text);
     toast({
-      title: t("sidebar.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+      title: t("sidebar.copiedRelativePath"),
       description: text,
     });
   }, [getContextTargetNotes, t]);
@@ -1495,7 +1478,7 @@ function SidebarComponent({
     const text = paths.join("\n");
     await copyToClipboard(text);
     toast({
-      title: t("sidebar.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+      title: t("sidebar.copiedAbsolutePath"),
       description: text,
     });
   }, [getContextTargetNotes, getWorkspacePath, t]);
@@ -1504,7 +1487,7 @@ function SidebarComponent({
     const rel = folderPath === "__opened_root__" ? "" : folderPath;
     await copyToClipboard(rel);
     toast({
-      title: t("sidebar.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+      title: t("sidebar.copiedRelativePath"),
       description: rel,
     });
   }, [t]);
@@ -1516,7 +1499,7 @@ function SidebarComponent({
     const full = cleanWs ? (rel ? `${cleanWs}/${rel.replace(/^[\\/]+/, "")}` : cleanWs) : rel;
     await copyToClipboard(full);
     toast({
-      title: t("sidebar.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+      title: t("sidebar.copiedAbsolutePath"),
       description: full,
     });
   }, [getWorkspacePath, t]);
@@ -1794,8 +1777,8 @@ function SidebarComponent({
                     badge.style.fontWeight = "600";
                     badge.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
                     badge.style.pointerEvents = "none";
-                    badge.style.zIndex = "99999";
-                    badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files") || "files"}`;
+                    badge.style.zIndex = "90";
+                    badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files")}`;
                     document.body.appendChild(badge);
                     event.dataTransfer.setDragImage(badge, 20, 15);
                     requestAnimationFrame(() => {
@@ -1851,12 +1834,12 @@ function SidebarComponent({
                     ) : (
                       <NoteIcon note={note} active={false} />
                     )}
-                    <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
+                    <span>{t("sidebar.changeIcon")}</span>
                   </ContextMenuItem>
                   {Boolean(noteCustomIcon) && (
                     <ContextMenuItem onClick={() => handleRemoveNoteIcon(note)} className="gap-2 text-muted-foreground hover:text-foreground cursor-pointer">
                       <Trash2 className="h-4 w-4" />
-                      <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                      <span>{t("sidebar.removeIcon")}</span>
                     </ContextMenuItem>
                   )}
                   <ContextMenuSeparator />
@@ -1881,11 +1864,11 @@ function SidebarComponent({
               <span>
                 {isMultiSelected
                   ? allFavorited
-                    ? `${t("sidebar.unfavorite") || "Remove from Favorites"} (${targetCount})`
-                    : `${t("sidebar.favorite") || "Add to Favorites"} (${targetCount})`
+                    ? `${t("sidebar.unfavorite")} (${targetCount})`
+                    : `${t("sidebar.favorite")} (${targetCount})`
                   : note.isFavorite
-                    ? (t("sidebar.unfavorite") || "Remove from Favorites")
-                    : (t("sidebar.favorite") || "Add to Favorites")}
+                    ? (t("sidebar.unfavorite"))
+                    : (t("sidebar.favorite"))}
               </span>
             </ContextMenuItem>
             <ContextMenuItem onClick={() => handleCopyFromContext(note)} className="gap-2">
@@ -1940,17 +1923,17 @@ function SidebarComponent({
                 {!note.isLocked ? (
                   <ContextMenuItem onClick={() => onOpenPinModal?.(note, "set")} className="gap-2">
                     <Lock className="h-4 w-4" />
-                    <span>{t("sidebar.lockNote") || "Lock with PIN"}</span>
+                    <span>{t("sidebar.lockNote")}</span>
                   </ContextMenuItem>
                 ) : (
                   <>
                     <ContextMenuItem onClick={() => onOpenPinModal?.(note, "remove")} className="gap-2">
                       <Unlock className="h-4 w-4" />
-                      <span>{t("sidebar.unlockNote") || "Remove PIN"}</span>
+                      <span>{t("sidebar.unlockNote")}</span>
                     </ContextMenuItem>
                     <ContextMenuItem onClick={() => onOpenPinModal?.(note, "change")} className="gap-2">
                       <Key className="h-4 w-4" />
-                      <span>{t("sidebar.changePin") || "Change PIN"}</span>
+                      <span>{t("sidebar.changePin")}</span>
                     </ContextMenuItem>
                   </>
                 )}
@@ -1999,8 +1982,8 @@ function SidebarComponent({
                   badge.style.fontWeight = "600";
                   badge.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
                   badge.style.pointerEvents = "none";
-                  badge.style.zIndex = "99999";
-                  badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files") || "files"}`;
+                  badge.style.zIndex = "90";
+                  badge.innerText = `📄 ${dragNotes.length} ${t("sidebar.files")}`;
                   document.body.appendChild(badge);
                   event.dataTransfer.setDragImage(badge, 20, 15);
                   requestAnimationFrame(() => {
@@ -2067,12 +2050,12 @@ function SidebarComponent({
                   ) : (
                     <NoteIcon note={note} active={false} />
                   )}
-                  <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
+                  <span>{t("sidebar.changeIcon")}</span>
                 </ContextMenuItem>
                 {Boolean(noteCustomIcon) && (
                   <ContextMenuItem onClick={() => handleRemoveNoteIcon(note)} className="gap-2 text-muted-foreground hover:text-foreground cursor-pointer">
                     <Trash2 className="h-4 w-4" />
-                    <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                    <span>{t("sidebar.removeIcon")}</span>
                   </ContextMenuItem>
                 )}
                 <ContextMenuSeparator />
@@ -2097,11 +2080,11 @@ function SidebarComponent({
             <span>
               {isMultiSelected
                 ? allFavorited
-                  ? `${t("sidebar.unfavorite") || "Remove from Favorites"} (${targetCount})`
-                  : `${t("sidebar.favorite") || "Add to Favorites"} (${targetCount})`
+                  ? `${t("sidebar.unfavorite")} (${targetCount})`
+                  : `${t("sidebar.favorite")} (${targetCount})`
                 : note.isFavorite
-                  ? (t("sidebar.unfavorite") || "Remove from Favorites")
-                  : (t("sidebar.favorite") || "Add to Favorites")}
+                  ? (t("sidebar.unfavorite"))
+                  : (t("sidebar.favorite"))}
             </span>
           </ContextMenuItem>
           <ContextMenuItem onClick={() => handleCopyFromContext(note)} className="gap-2">
@@ -2156,17 +2139,17 @@ function SidebarComponent({
               {!note.isLocked ? (
                 <ContextMenuItem onClick={() => onOpenPinModal?.(note, "set")} className="gap-2">
                   <Lock className="h-4 w-4" />
-                  <span>{t("sidebar.lockNote") || "Lock with PIN"}</span>
+                  <span>{t("sidebar.lockNote")}</span>
                 </ContextMenuItem>
               ) : (
                 <>
                   <ContextMenuItem onClick={() => onOpenPinModal?.(note, "remove")} className="gap-2">
                     <Unlock className="h-4 w-4" />
-                    <span>{t("sidebar.unlockNote") || "Remove PIN"}</span>
+                    <span>{t("sidebar.unlockNote")}</span>
                   </ContextMenuItem>
                   <ContextMenuItem onClick={() => onOpenPinModal?.(note, "change")} className="gap-2">
                     <Key className="h-4 w-4" />
-                    <span>{t("sidebar.changePin") || "Change PIN"}</span>
+                    <span>{t("sidebar.changePin")}</span>
                   </ContextMenuItem>
                 </>
               )}
@@ -2198,7 +2181,7 @@ function SidebarComponent({
               className="sticky w-full bg-sidebar"
               style={{
                 top: `${depth * (settings.sidebarDensity === "compact" ? 26 : 30)}px`,
-                zIndex: 35 - Math.min(depth, 25),
+                zIndex: 20 - Math.min(depth, 10),
               }}
             >
               <button
@@ -2310,12 +2293,12 @@ function SidebarComponent({
                     return <FolderIconComp className="h-4 w-4 shrink-0 text-primary" />;
                   })()
                 )}
-                <span>{t("sidebar.changeIcon") || "Change Icon"}</span>
+                <span>{t("sidebar.changeIcon")}</span>
               </ContextMenuItem>
               {settings.folderIcons?.[node.path] && (
                 <ContextMenuItem onClick={() => removeFolderIcon(node.path)} className="gap-2 text-muted-foreground hover:text-foreground">
                   <Trash2 className="h-4 w-4" />
-                  <span>{t("sidebar.removeIcon") || "Remove Icon"}</span>
+                  <span>{t("sidebar.removeIcon")}</span>
                 </ContextMenuItem>
               )}
               <ContextMenuSeparator />
@@ -2407,7 +2390,7 @@ function SidebarComponent({
               <div className="h-[1px] bg-sidebar-border/60 my-1 -mx-1" />
               <ContextMenuItem onClick={onCloseWorkspace} className="gap-2">
                 <LogOut className="h-4 w-4" />
-                <span>{t("sidebar.closeWorkspace") || "Close Workspace"}</span>
+                <span>{t("sidebar.closeWorkspace")}</span>
               </ContextMenuItem>
             </>
           )}
@@ -2435,12 +2418,12 @@ function SidebarComponent({
       <DropdownMenuItem
         onClick={() => onSortChange("name-asc")}
         className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-          activeSort === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+          activeSort === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
         }`}
       >
         <div className="flex items-center gap-2.5">
           <ArrowDownAZ className="h-4 w-4" />
-          <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+          <span>{t("sidebar.sortNameAsc")}</span>
         </div>
         {activeSort === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
       </DropdownMenuItem>
@@ -2448,12 +2431,12 @@ function SidebarComponent({
       <DropdownMenuItem
         onClick={() => onSortChange("name-desc")}
         className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-          activeSort === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+          activeSort === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
         }`}
       >
         <div className="flex items-center gap-2.5">
           <ArrowUpAZ className="h-4 w-4" />
-          <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+          <span>{t("sidebar.sortNameDesc")}</span>
         </div>
         {activeSort === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
       </DropdownMenuItem>
@@ -2463,12 +2446,12 @@ function SidebarComponent({
           <DropdownMenuItem
             onClick={() => onSortChange("modified-desc")}
             className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-              activeSort === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+              activeSort === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
             }`}
           >
             <div className="flex items-center gap-2.5">
               <Clock className="h-4 w-4" />
-              <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+              <span>{t("sidebar.sortModifiedDesc")}</span>
             </div>
             {activeSort === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
           </DropdownMenuItem>
@@ -2476,12 +2459,12 @@ function SidebarComponent({
           <DropdownMenuItem
             onClick={() => onSortChange("modified-asc")}
             className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-              activeSort === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+              activeSort === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
             }`}
           >
             <div className="flex items-center gap-2.5">
               <Clock className="h-4 w-4 opacity-60" />
-              <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+              <span>{t("sidebar.sortModifiedAsc")}</span>
             </div>
             {activeSort === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
           </DropdownMenuItem>
@@ -2489,12 +2472,12 @@ function SidebarComponent({
           <DropdownMenuItem
             onClick={() => onSortChange("created-desc")}
             className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-              activeSort === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+              activeSort === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
             }`}
           >
             <div className="flex items-center gap-2.5">
               <Calendar className="h-4 w-4" />
-              <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+              <span>{t("sidebar.sortCreatedDesc")}</span>
             </div>
             {activeSort === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
           </DropdownMenuItem>
@@ -2502,12 +2485,12 @@ function SidebarComponent({
           <DropdownMenuItem
             onClick={() => onSortChange("created-asc")}
             className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-              activeSort === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+              activeSort === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
             }`}
           >
             <div className="flex items-center gap-2.5">
               <Calendar className="h-4 w-4 opacity-60" />
-              <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+              <span>{t("sidebar.sortCreatedAsc")}</span>
             </div>
             {activeSort === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
           </DropdownMenuItem>
@@ -2526,68 +2509,68 @@ function SidebarComponent({
       <DropdownMenuItem
         onClick={() => onFilterChange("all")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
+        <span>{t("trash.filterAll")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => onFilterChange("md")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
+        <span>{t("trash.filterMd")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => onFilterChange("txt")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
+        <span>{t("trash.filterTxt")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => onFilterChange("html")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
+        <span>{t("trash.filterHtml")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => onFilterChange("image")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "image" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{isTh ? "รูปภาพ" : "Images"}</span>
+        <span>{t("favorites.images")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         onClick={() => onFilterChange("other")}
         className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-          currentFilter === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+          currentFilter === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
         }`}
       >
         <span className="w-4 h-4 flex items-center justify-center shrink-0">
           {currentFilter === "other" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
         </span>
-        <span>{t("trash.filterOther") || (isTh ? "ไฟล์อื่นๆ" : "Other files")}</span>
+        <span>{t("trash.filterOther")}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   );
@@ -2660,7 +2643,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.workspace") || "Workspace"}
+                    {t("sidebar.workspace")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2697,7 +2680,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}
+                    {t("sidebar.searchShortPlaceholder")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2724,7 +2707,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}
+                    {t("sidebar.templates")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2751,7 +2734,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.lunoAi") || "Luno AI"}
+                    {t("sidebar.lunoAi")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2778,7 +2761,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.favorites") || (isTh ? "รายการโปรด" : "Favorites")}
+                    {t("sidebar.favorites")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2805,7 +2788,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.tags") || (isTh ? "แท็ก" : "Tags")}
+                    {t("sidebar.tags")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -2832,7 +2815,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.trash") || (isTh ? "ถังขยะ" : "Trash")}
+                    {t("sidebar.trash")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -2850,7 +2833,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.help") || "Help"}
+                    {t("sidebar.help")}
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -2864,7 +2847,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("settings.title") || "Settings"}
+                    {t("settings.title")}
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -2878,7 +2861,7 @@ function SidebarComponent({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.toggleTheme") || "Toggle Theme"}
+                    {t("sidebar.toggleTheme")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -2931,7 +2914,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {sortDropdownMenuContent}
                         </DropdownMenu>
@@ -2989,7 +2972,7 @@ function SidebarComponent({
                               }}
                             >
                               <Globe className="h-4 w-4" />
-                              <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+                              <span>{t("sidebar.newWebPage")}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {
@@ -2998,7 +2981,7 @@ function SidebarComponent({
                               }}
                             >
                               {renderIcon("relations", "h-4 w-4")}
-                              <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                              <span>{t("sidebar.newRelations")}</span>
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -3024,7 +3007,7 @@ function SidebarComponent({
                     {/* Search Panel Header */}
                     <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
                       <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
-                        {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "SEARCH")} ({searchFilteredNotes.length})
+                        {t("sidebar.searchShortPlaceholder")} ({searchFilteredNotes.length})
                       </span>
                       <div className="flex items-center gap-1 h-6">
                         {/* Filter Dropdown */}
@@ -3046,7 +3029,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                            <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                           </Tooltip>
                           {renderFilterMenuContent(searchFilterType, setSearchFilterType)}
                         </DropdownMenu>
@@ -3066,7 +3049,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {renderSortMenuContent(searchSortBy, handleSearchSortChange)}
                         </DropdownMenu>
@@ -3106,7 +3089,7 @@ function SidebarComponent({
                     {/* Templates Panel Header */}
                     <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
                       <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
-                        {t("sidebar.templates") || (isTh ? "เทมเพลต" : "TEMPLATES")} ({totalFilteredTemplates})
+                        {t("sidebar.templates")} ({totalFilteredTemplates})
                       </span>
                       <div className="flex items-center gap-1 h-6">
                         {/* Filter Dropdown */}
@@ -3128,7 +3111,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                            <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                           </Tooltip>
                           {renderFilterMenuContent(templatesFilterType, setTemplatesFilterType)}
                         </DropdownMenu>
@@ -3148,7 +3131,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {renderSortMenuContent(templatesSortBy, handleTemplatesSortChange, true)}
                         </DropdownMenu>
@@ -3160,7 +3143,7 @@ function SidebarComponent({
                       {totalFilteredTemplates === 0 ? (
                         <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
                           <LayoutTemplate size={24} className="mb-2 opacity-30 text-primary" />
-                          <p className="text-xs">{isTh ? "ไม่พบเทมเพลตที่ตรงกับตัวกรอง" : "No templates match filter"}</p>
+                          <p className="text-xs">{t("sidebar.noTemplatesMatchFilter")}</p>
                         </div>
                       ) : (
                         <div className="space-y-0.5">
@@ -3255,7 +3238,7 @@ function SidebarComponent({
                                               {renderCustomIcon(template.icon, "h-3.5 w-3.5 shrink-0", { color: template.color })}
                                               <span className="truncate font-normal">{templateTitle}</span>
                                               <div className="ml-auto flex items-center gap-1 shrink-0">
-                                                <span className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/80 px-1 py-0.2 rounded bg-sidebar-accent/50">
+                                                <span className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/80 px-1 py-0.5 rounded bg-sidebar-accent/50">
                                                   .{template.formatExt}
                                                 </span>
                                               </div>
@@ -3283,8 +3266,8 @@ function SidebarComponent({
                     <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1.5 rounded-lg">
                       <span className="text-[10px] font-semibold tracking-wider text-foreground uppercase truncate pr-1 leading-none flex items-center h-6 select-none">
                         {lunoAiHistoryOpen
-                          ? (t("lunoAi.chatHistory") || "Chat History")
-                          : (t("sidebar.lunoAi") || "Luno AI")}
+                          ? (t("lunoAi.chatHistory"))
+                          : (t("sidebar.lunoAi"))}
                       </span>
                       <div className="flex items-center gap-1 shrink-0 h-6">
                         {lunoAiHistoryOpen ? (
@@ -3304,7 +3287,7 @@ function SidebarComponent({
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.clearAll") || "Clear all history"}</TooltipContent>
+                              <TooltipContent>{t("lunoAi.clearAll")}</TooltipContent>
                             </Tooltip>
 
                             {/* Close History Button */}
@@ -3322,7 +3305,7 @@ function SidebarComponent({
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.closePanel") || "Close history"}</TooltipContent>
+                              <TooltipContent>{t("lunoAi.closePanel")}</TooltipContent>
                             </Tooltip>
                           </>
                         ) : (
@@ -3342,7 +3325,7 @@ function SidebarComponent({
                                   <Plus className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.newChat") || "New Chat"}</TooltipContent>
+                              <TooltipContent>{t("lunoAi.newChat")}</TooltipContent>
                             </Tooltip>
 
                             {/* History Button */}
@@ -3360,7 +3343,7 @@ function SidebarComponent({
                                   <History className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.chatHistory") || "Chat History"}</TooltipContent>
+                              <TooltipContent>{t("lunoAi.chatHistory")}</TooltipContent>
                             </Tooltip>
                           </>
                         )}
@@ -3368,28 +3351,82 @@ function SidebarComponent({
                     </div>
 
                     {/* Luno AI View Body */}
-                    <div className="flex-1 overflow-hidden min-h-0">
-                      <Suspense fallback={<div className="flex h-full items-center justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}>
+                    <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
+                      <Suspense fallback={<PageLoader compact />}>
                         <LunoAiView
                           isSidebar={true}
                           notes={notes}
                           openedFolderName={openedFolderName}
                           activeNote={notes.find((n) => n.id === activeNoteId) ?? null}
-                          onInsertToActiveNote={(text) => {
+                          onInsertToActiveNote={(text, imagePayload) => {
                             const targetNote = notes.find((n) => n.id === activeNoteId) ?? notes[0];
-                            if (targetNote && onUpdateNote) {
+                            if (!targetNote) return;
+                            let wasHandled = false;
+                            window.dispatchEvent(
+                              new CustomEvent("luno:insert-to-active-editor", {
+                                detail: {
+                                  noteId: targetNote.id,
+                                  text,
+                                  images: imagePayload?.images,
+                                  captionText: imagePayload?.captionText,
+                                  onHandled: () => {
+                                    wasHandled = true;
+                                  },
+                                },
+                              })
+                            );
+                            if (!wasHandled && onUpdateNote) {
+                              const isHtml =
+                                targetNote.contentFormat === "html" ||
+                                Boolean(targetNote.fileName?.toLowerCase().endsWith(".html"));
+                              const contentToAppend = isHtml && imagePayload?.htmlContent ? imagePayload.htmlContent : text;
                               const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              const updatedContent = existingContent.trim()
+                                ? `${existingContent}\n\n${contentToAppend}`
+                                : contentToAppend;
                               onUpdateNote(targetNote.id, { content: updatedContent });
                             }
+                            toast({
+                              title: t("lunoAi.insertSuccessTitle"),
+                              description: t("lunoAi.insertToNoteSuccess", {
+                                name: targetNote.fileName || targetNote.title || "Note",
+                              }),
+                            });
                           }}
-                          onInsertToSelectedNote={(targetNoteId, text) => {
+                          onInsertToSelectedNote={(targetNoteId, text, imagePayload) => {
                             const targetNote = notes.find((n) => n.id === targetNoteId);
-                            if (targetNote && onUpdateNote) {
+                            if (!targetNote) return;
+                            let wasHandled = false;
+                            window.dispatchEvent(
+                              new CustomEvent("luno:insert-to-active-editor", {
+                                detail: {
+                                  noteId: targetNote.id,
+                                  text,
+                                  images: imagePayload?.images,
+                                  captionText: imagePayload?.captionText,
+                                  onHandled: () => {
+                                    wasHandled = true;
+                                  },
+                                },
+                              })
+                            );
+                            if (!wasHandled && onUpdateNote) {
+                              const isHtml =
+                                targetNote.contentFormat === "html" ||
+                                Boolean(targetNote.fileName?.toLowerCase().endsWith(".html"));
+                              const contentToAppend = isHtml && imagePayload?.htmlContent ? imagePayload.htmlContent : text;
                               const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
+                              const updatedContent = existingContent.trim()
+                                ? `${existingContent}\n\n${contentToAppend}`
+                                : contentToAppend;
                               onUpdateNote(targetNote.id, { content: updatedContent });
                             }
+                            toast({
+                              title: t("lunoAi.insertSuccessTitle"),
+                              description: t("lunoAi.insertToNoteSuccess", {
+                                name: targetNote.fileName || targetNote.title || "Note",
+                              }),
+                            });
                           }}
                           onCreateNewNote={(fileName, content, folderPath) => {
                             void onCreate(folderPath, { initialName: fileName, initialContent: content });
@@ -3426,7 +3463,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                            <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                           </Tooltip>
                           {renderFilterMenuContent(favoritesFilterType, setFavoritesFilterType)}
                         </DropdownMenu>
@@ -3445,7 +3482,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {renderSortMenuContent(favoritesSortBy, handleFavoritesSortChange)}
                         </DropdownMenu>
@@ -3457,7 +3494,7 @@ function SidebarComponent({
                       {filteredFavoriteNotes.length === 0 ? (
                         <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
                           <Star size={24} className="mb-2 opacity-30 text-amber-500" />
-                          <p className="text-xs">{t("sidebar.noFavorites") || "No favorites yet"}</p>
+                          <p className="text-xs">{t("sidebar.noFavorites")}</p>
                         </div>
                       ) : (
                         filteredFavoriteNotes.map((note) => renderNote(note, 0, false))
@@ -3490,7 +3527,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                            <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                           </Tooltip>
                           {renderFilterMenuContent(tagsFilterType, setTagsFilterType)}
                         </DropdownMenu>
@@ -3509,7 +3546,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {renderSortMenuContent(tagsSortBy, handleTagsSortChange)}
                         </DropdownMenu>
@@ -3521,7 +3558,7 @@ function SidebarComponent({
                       {vaultTagCounts.length === 0 ? (
                         <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
                           <Tag size={24} className="mb-2 opacity-30 text-primary" />
-                          <p className="text-xs">{t("sidebar.noTags") || "No tags yet"}</p>
+                          <p className="text-xs">{t("sidebar.noTags")}</p>
                         </div>
                       ) : (
                         <div className="space-y-0.5">
@@ -3608,7 +3645,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                            <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                           </Tooltip>
                           {renderFilterMenuContent(trashFilterType, setTrashFilterType)}
                         </DropdownMenu>
@@ -3628,7 +3665,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                            <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                           </Tooltip>
                           {renderSortMenuContent(trashSortBy, handleTrashSortChange)}
                         </DropdownMenu>
@@ -3648,7 +3685,7 @@ function SidebarComponent({
                                 </Button>
                               </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <TooltipContent>{t("trash.moreOptions") || (isTh ? "ตัวเลือกเพิ่มเติม" : "More options")}</TooltipContent>
+                            <TooltipContent>{t("trash.moreOptions")}</TooltipContent>
                           </Tooltip>
                           <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                             {filteredTrashList.length > 0 && (
@@ -3659,8 +3696,8 @@ function SidebarComponent({
                                 <Check className="h-4 w-4" />
                                 <span>
                                   {allFilteredTrashSelected
-                                    ? (isTh ? "ยกเลิกการเลือกทั้งหมด" : "Deselect all")
-                                    : (isTh ? "เลือกทั้งหมด" : "Select all")}
+                                    ? (t("sidebar.deselectAll"))
+                                    : (t("sidebar.selectAll"))}
                                 </span>
                               </DropdownMenuItem>
                             )}
@@ -3671,7 +3708,7 @@ function SidebarComponent({
                                   className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                 >
                                   <RotateCcw className="h-4 w-4" />
-                                  <span>{isTh ? `กู้คืน (${selectedTrashIds.length})` : `Restore (${selectedTrashIds.length})`}</span>
+                                  <span>{t("sidebar.restore", { v0: selectedTrashIds.length })}</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   variant="destructive"
@@ -3679,7 +3716,7 @@ function SidebarComponent({
                                   className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                 >
                                   <Trash2 className="h-4 w-4 text-destructive" />
-                                  <span>{isTh ? `ลบถาวร (${selectedTrashIds.length})` : `Delete (${selectedTrashIds.length})`}</span>
+                                  <span>{t("sidebar.delete", { v0: selectedTrashIds.length })}</span>
                                 </DropdownMenuItem>
                                 <ContextMenuSeparator className="my-1" />
                               </>
@@ -3690,7 +3727,7 @@ function SidebarComponent({
                               className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                             >
                               <RotateCcw className="h-4 w-4" />
-                              <span>{isTh ? "กู้คืนไฟล์ทั้งหมด" : "Restore all files"}</span>
+                              <span>{t("trash.restoreAllFiles")}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               variant="destructive"
@@ -3699,7 +3736,7 @@ function SidebarComponent({
                               className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
-                              <span>{t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty trash")}</span>
+                              <span>{t("trash.emptyTrash")}</span>
                             </DropdownMenuItem>
                             {onOpenSettings && (
                               <>
@@ -3709,7 +3746,7 @@ function SidebarComponent({
                                   className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                 >
                                   <Settings className="h-4 w-4 text-muted-foreground" />
-                                  <span>{isTh ? "ตั้งค่าถังขยะ" : "Settings"}</span>
+                                  <span>{t("trash.settings")}</span>
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -3723,13 +3760,13 @@ function SidebarComponent({
                       {filteredTrashList.length === 0 ? (
                         <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground my-auto">
                           <Trash2 size={24} className="mb-2 opacity-30 text-muted-foreground" />
-                          <p className="text-xs font-medium">{currentTrashList.length === 0 ? (t("trash.emptyTrashEmpty") || "Trash is empty") : (isTh ? "ไม่พบไฟล์ที่ตรงกับตัวกรอง" : "No files match filter")}</p>
+                          <p className="text-xs font-medium">{currentTrashList.length === 0 ? (t("trash.emptyTrashEmpty")) : (t("sidebar.noFilesMatchFilter"))}</p>
                         </div>
                       ) : (
                         <div className="space-y-0.5 flex-1">
                           {filteredTrashList.map((item) => {
                             const isSelected = selectedTrashIds.includes(item.id);
-                            const noteLabel = item.fileName || item.title || (isTh ? "ไม่มีชื่อ" : "Untitled");
+                            const noteLabel = item.fileName || item.title || (t("editor.untitled"));
 
                             return (
                               <ContextMenu key={item.id}>
@@ -3783,7 +3820,7 @@ function SidebarComponent({
                                             className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                           >
                                             <RotateCcw className="h-4 w-4" />
-                                            <span>{t("trash.restore") || (isTh ? "กู้คืน" : "Restore")}</span>
+                                            <span>{t("trash.restore")}</span>
                                           </DropdownMenuItem>
                                           <DropdownMenuItem
                                             variant="destructive"
@@ -3791,7 +3828,7 @@ function SidebarComponent({
                                             className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                           >
                                             <Trash2 className="h-4 w-4 text-destructive" />
-                                            <span>{t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}</span>
+                                            <span>{t("trash.deletePermanently")}</span>
                                           </DropdownMenuItem>
                                         </DropdownMenuContent>
                                       </DropdownMenu>
@@ -3804,7 +3841,7 @@ function SidebarComponent({
                                     className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                   >
                                     <RotateCcw className="h-4 w-4" />
-                                    <span>{t("trash.restore") || (isTh ? "กู้คืน" : "Restore")}</span>
+                                    <span>{t("trash.restore")}</span>
                                   </ContextMenuItem>
                                   <ContextMenuItem
                                     variant="destructive"
@@ -3812,7 +3849,7 @@ function SidebarComponent({
                                     className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                   >
                                     <Trash2 className="h-4 w-4 text-destructive" />
-                                    <span>{t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}</span>
+                                    <span>{t("trash.deletePermanently")}</span>
                                   </ContextMenuItem>
                                 </ContextMenuContent>
                               </ContextMenu>
@@ -3826,7 +3863,7 @@ function SidebarComponent({
                     {selectedTrashIds.length > 0 && (
                       <div className="px-3 py-2 border-t border-sidebar-border/60 bg-sidebar flex items-center justify-between gap-1.5 shrink-0 select-none">
                         <span className="text-[11px] font-medium text-muted-foreground truncate">
-                          {isTh ? `เลือก ${selectedTrashIds.length} รายการ` : `${selectedTrashIds.length} selected`}
+                          {t("trash.selected", { v0: selectedTrashIds.length })}
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
@@ -3835,7 +3872,7 @@ function SidebarComponent({
                             className="px-2.5 py-1 rounded-[10px] bg-transparent text-foreground hover:bg-sidebar-accent hover:text-foreground text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
                           >
                             <RotateCcw className="h-3 w-3" />
-                            <span>{isTh ? "กู้คืน" : "Restore"}</span>
+                            <span>{t("versionHistoryPanel.restore")}</span>
                           </button>
                           <button
                             type="button"
@@ -3843,7 +3880,7 @@ function SidebarComponent({
                             className="px-2.5 py-1 rounded-[10px] bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
                           >
                             <Trash2 className="h-3 w-3" />
-                            <span>{isTh ? "ลบถาวร" : "Delete"}</span>
+                            <span>{t("sidebar.delete2")}</span>
                           </button>
                         </div>
                       </div>
@@ -3879,7 +3916,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.openSidebar") || "Open Sidebar"}
+                  {t("sidebar.openSidebar")}
                 </TooltipContent>
               </Tooltip>
 
@@ -3898,7 +3935,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}
+                  {t("sidebar.searchShortPlaceholder")}
                 </TooltipContent>
               </Tooltip>
 
@@ -3921,7 +3958,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.home") || "Home"}
+                  {t("sidebar.home")}
                 </TooltipContent>
               </Tooltip>
 
@@ -3944,7 +3981,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}
+                  {t("sidebar.templates")}
                 </TooltipContent>
               </Tooltip>
 
@@ -3967,7 +4004,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.lunoAi") || "Luno AI"}
+                  {t("sidebar.lunoAi")}
                 </TooltipContent>
               </Tooltip>
 
@@ -3990,7 +4027,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.favorites") || (isTh ? "รายการโปรด" : "Favorites")}
+                  {t("sidebar.favorites")}
                 </TooltipContent>
               </Tooltip>
 
@@ -4013,7 +4050,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.tags") || (isTh ? "แท็ก" : "Tags")}
+                  {t("sidebar.tags")}
                 </TooltipContent>
               </Tooltip>
 
@@ -4036,7 +4073,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.trash") || (isTh ? "ถังขยะ" : "Trash")}
+                  {t("sidebar.trash")}
                 </TooltipContent>
               </Tooltip>
 
@@ -4055,7 +4092,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.openFolderAction") || (isTh ? "เปิดโฟลเดอร์" : "Open Folder")}
+                  {t("sidebar.openFolderAction")}
                 </TooltipContent>
               </Tooltip>
 
@@ -4073,7 +4110,7 @@ function SidebarComponent({
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
-                    {t("sidebar.newNote") || (isTh ? "สร้างโน้ตใหม่" : "New Note")}
+                    {t("sidebar.newNote")}
                   </TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-52">
@@ -4094,7 +4131,7 @@ function SidebarComponent({
                     }}
                   >
                     <Globe className="h-4 w-4" />
-                    <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+                    <span>{t("sidebar.newWebPage")}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => {
@@ -4103,7 +4140,7 @@ function SidebarComponent({
                     }}
                   >
                     {renderIcon("relations", "h-4 w-4")}
-                    <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                    <span>{t("sidebar.newRelations")}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -4122,7 +4159,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("sidebar.help") || "Help"}
+                  {t("sidebar.help")}
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -4136,7 +4173,7 @@ function SidebarComponent({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                  {t("settings.title") || "Settings"}
+                  {t("settings.title")}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -4205,7 +4242,7 @@ function SidebarComponent({
                 }`}
               >
                 {renderIcon("templates", `h-4 w-4 shrink-0 ${activeNoteId === "templates" ? "text-primary" : "text-foreground"}`)}
-                <span>{t("sidebar.templates") || (isTh ? "เทมเพลต" : "Templates")}</span>
+                <span>{t("sidebar.templates")}</span>
               </button>
               <button
                 type="button"
@@ -4304,7 +4341,7 @@ function SidebarComponent({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("sidebar.sort") || "Sort by"}</TooltipContent>
+                    <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                   </Tooltip>
                   {sortDropdownMenuContent}
                 </DropdownMenu>
@@ -4359,7 +4396,7 @@ function SidebarComponent({
                       }}
                     >
                       <Globe className="h-4 w-4" />
-                      <span>{t("sidebar.newWebPage") || "Web Page"}</span>
+                      <span>{t("sidebar.newWebPage")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => {
@@ -4368,7 +4405,7 @@ function SidebarComponent({
                       }}
                     >
                       {renderIcon("relations", "h-4 w-4")}
-                      <span>{t("sidebar.newRelations") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+                      <span>{t("sidebar.newRelations")}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -4485,8 +4522,8 @@ function SidebarComponent({
                   <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
                   <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
                   <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
-                  <SelectItem value="css">{t("sidebar.fileTypeCss") || "CSS (.css)"}</SelectItem>
-                  <SelectItem value="js">{t("sidebar.fileTypeJs") || "JavaScript (.js)"}</SelectItem>
+                  <SelectItem value="css">{t("sidebar.fileTypeCss")}</SelectItem>
+                  <SelectItem value="js">{t("sidebar.fileTypeJs")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -4621,18 +4658,16 @@ function SidebarComponent({
           <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
           <AlertDialogDescription>
             {deleteConfirmTargets.length === 1
-              ? (isTh
-                  ? `แน่ใจไหมที่จะย้ายไฟล์ "${deleteConfirmTargets[0].fileName || deleteConfirmTargets[0].title || "ไม่มีชื่อ"}" ไปที่ถังขยะ?`
-                  : `Are you sure you want to move "${deleteConfirmTargets[0].fileName || deleteConfirmTargets[0].title || "Untitled"}" to trash?`)
-              : (isTh
-                  ? `แน่ใจไหมที่จะย้ายไฟล์ที่เลือกจำนวน ${deleteConfirmTargets.length} รายการไปที่ถังขยะ?`
-                  : `Are you sure you want to move ${deleteConfirmTargets.length} selected files to trash?`)}
+              ? t("editor.moveSingleFileToTrashConfirm", {
+                  name: deleteConfirmTargets[0].fileName || deleteConfirmTargets[0].title || t("editor.untitled"),
+                })
+              : (t("sidebar.areYouSureYouWant", { v0: deleteConfirmTargets.length }))}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={handleDeleteConfirmed}
           >
             {t("sidebar.deleteFileAction")}
@@ -4646,15 +4681,13 @@ function SidebarComponent({
         <AlertDialogHeader>
           <AlertDialogTitle>{t("sidebar.deleteFolderAction")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {isTh
-              ? `แน่ใจไหมที่จะย้ายโฟลเดอร์ "${deleteFolderTargetPath ? deleteFolderTargetPath.split("/").pop() : ""}" และเนื้อหาทั้งหมดไปที่ถังขยะ?`
-              : `Are you sure you want to move folder "${deleteFolderTargetPath ? deleteFolderTargetPath.split("/").pop() : ""}" and all its contents to trash?`}
+            {t("sidebar.areYouSureYouWant2", { v0: deleteFolderTargetPath ? deleteFolderTargetPath.split("/").pop() : "" })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={handleDeleteFolderConfirmed}
           >
             {t("sidebar.deleteFolderAction")}
@@ -4667,15 +4700,13 @@ function SidebarComponent({
     <AlertDialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("trash.emptyTrashConfirmTitle") || (isTh ? "แน่ใจใช่ไหมที่จะล้างถังขยะทั้งหมด?" : "Are you sure you want to empty all trash?")}</AlertDialogTitle>
+          <AlertDialogTitle>{t("trash.emptyTrashConfirmTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("trash.emptyTrashConfirmDesc", { count: currentTrashList.length }) || (isTh
-              ? `ไฟล์ทั้งหมดที่อยู่ในถังขยะ (${currentTrashList.length} รายการ) จะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
-              : `All ${currentTrashList.length} files in the trash will be permanently deleted. This action cannot be undone.`)}
+            {t("trash.emptyTrashConfirmDesc", { count: currentTrashList.length })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.cancel") || "Cancel"}</AlertDialogCancel>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={() => {
@@ -4684,7 +4715,7 @@ function SidebarComponent({
               setSelectedTrashIds([]);
             }}
           >
-            {t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty Trash")}
+            {t("trash.emptyTrash")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -4695,7 +4726,7 @@ function SidebarComponent({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t("trash.deleteConfirmTitle") || (isTh ? "ลบไฟล์อย่างถาวรหรือไม่?" : "Delete file permanently?")}
+            {t("trash.deleteConfirmTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {pendingDeleteTrashIds.length === 1
@@ -4703,21 +4734,19 @@ function SidebarComponent({
                   const note = currentTrashList.find((n) => n.id === pendingDeleteTrashIds[0]);
                   const name = note?.fileName || note?.title;
                   return name
-                    ? (t("trash.deleteConfirmDesc", { file: name }) || (isTh ? `ไฟล์ "${name}" จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก` : `The file "${name}" will be permanently deleted and cannot be recovered.`))
-                    : (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก" : "This file will be permanently deleted and cannot be recovered.");
+                    ? (t("trash.deleteConfirmDesc", { file: name }))
+                    : (t("trash.thisFileWillBePermanently"));
                 })()
-              : (t("trash.deleteBatchConfirmDesc", { count: pendingDeleteTrashIds.length }) || (isTh
-                  ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteTrashIds.length} รายการจะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
-                  : `These ${pendingDeleteTrashIds.length} files will be permanently deleted and cannot be recovered.`))}
+              : (t("trash.deleteBatchConfirmDesc", { count: pendingDeleteTrashIds.length }))}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.cancel") || "Cancel"}</AlertDialogCancel>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={handleConfirmPermanentDeleteTrash}
           >
-            {t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}
+            {t("trash.deletePermanently")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -4733,8 +4762,8 @@ function SidebarComponent({
           }}
           title={
             iconPickerTarget?.type === "folder"
-              ? (t("sidebar.changeFolderIcon") || "Change Folder Icon")
-              : (t("sidebar.changeNoteIcon") || "Change Note Icon")
+              ? (t("sidebar.changeFolderIcon"))
+              : (t("sidebar.changeNoteIcon"))
           }
           initialIcon={
             iconPickerTarget?.type === "folder"
@@ -4788,11 +4817,16 @@ function SidebarComponent({
 
 function areSidebarPropsEqual(prevProps: SidebarProps, nextProps: SidebarProps): boolean {
   if (prevProps.sidebarOpen !== nextProps.sidebarOpen) return false;
+  if (prevProps.sidebarWidth !== nextProps.sidebarWidth) return false;
   if (prevProps.activeNoteId !== nextProps.activeNoteId) return false;
   if (prevProps.openedFolderName !== nextProps.openedFolderName) return false;
   if (prevProps.pendingReconnectFolder !== nextProps.pendingReconnectFolder) return false;
   if (prevProps.isMobile !== nextProps.isMobile) return false;
   if (prevProps.isCloudWorkspace !== nextProps.isCloudWorkspace) return false;
+  if (prevProps.isLoadingWorkspace !== nextProps.isLoadingWorkspace) return false;
+  if (prevProps.canPaste !== nextProps.canPaste) return false;
+  if (prevProps.trashCount !== nextProps.trashCount) return false;
+  if (prevProps.trashedNotes !== nextProps.trashedNotes) return false;
   if (prevProps.onSelect !== nextProps.onSelect) return false;
 
   const prevFp = prevProps.folderPaths;
@@ -4824,7 +4858,9 @@ function areSidebarPropsEqual(prevProps: SidebarProps, nextProps: SidebarProps):
       p.icon !== n.icon ||
       p.iconColor !== n.iconColor ||
       p.fileSize !== n.fileSize ||
-      (p.tags?.length || 0) !== (n.tags?.length || 0)
+      p.updatedAt !== n.updatedAt ||
+      (p.tags?.length || 0) !== (n.tags?.length || 0) ||
+      (p.tags && n.tags && p.tags.some((t, idx) => t !== n.tags![idx]))
     ) {
       return false;
     }

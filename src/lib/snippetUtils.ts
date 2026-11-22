@@ -1,4 +1,6 @@
+import { translate } from "@/translation/translate";
 import { parseFrontmatterAndTags } from "./frontmatter";
+import { isEncryptedNote } from "./noteCrypto";
 import type { Note } from "@/hooks/useNotes";
 
 /**
@@ -80,8 +82,8 @@ export function stripHtmlAndMarkdown(content?: string): string {
  */
 export function getNotePreviewSnippet(note: Note, maxLength = 160, isTh = false): string {
   if (!note) return "";
-  if (note.fileType === "image") return isTh ? "ไฟล์รูปภาพ" : "Image file";
-  if (!note.content) return "";
+  if (note.fileType === "image") return translate(isTh ? "th" : "en", "snippets.imageFile");
+  if (!note.content || (note.isLocked && !note.isDecrypted) || isEncryptedNote(note.content)) return "";
 
   const clean = stripHtmlAndMarkdown(note.content);
   return clean.slice(0, maxLength);

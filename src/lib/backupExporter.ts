@@ -1,7 +1,9 @@
+import { translate, getActiveAppLanguage } from "@/translation/translate";
 import JSZip from "jszip";
 import type { Note } from "@/hooks/useNotes";
 import { APP_VERSION } from "@/lib/appVersion";
 import { formatDateForFileName } from "@/lib/dateTimeFormatter";
+import { isVirtualTab } from "@/lib/systemTabs";
 
 export interface BackupExportOptions {
   notes: Note[];
@@ -19,6 +21,7 @@ export interface BackupExportResult {
 }
 
 function sanitizeFileName(name: string): string {
+  // eslint-disable-next-line no-control-regex
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
 }
 
@@ -36,28 +39,47 @@ export async function exportWorkspaceBackupZip(
 ): Promise<BackupExportResult> {
   const { notes, workspaceName } = options;
   if (!notes || notes.length === 0) {
-    return { success: false, count: 0, error: "No notes found to export" };
+    return { success: false, count: 0, error: translate(getActiveAppLanguage(), "uiMisc.noNotesToExport") };
   }
 
   const zip = new JSZip();
   let exportedCount = 0;
+  const usedZipPaths = new Set<string>();
+  const exportableNotes = notes.filter(
+    (note) => !isVirtualTab(note) && note.fileType !== "luno-ai" && note.fileType !== "web-viewer"
+  );
 
   // 1. Process and add each note
-  for (const note of notes) {
-    // Skip internal virtual notes if any
-    if (note.fileType === "luno-ai" || note.fileType === "web-viewer") {
-      continue;
-    }
-
+  for (const note of exportableNotes) {
     let fileName = note.fileName ? sanitizeFileName(note.fileName) : "";
     if (!fileName) {
-      const ext = note.contentFormat === "html" ? ".html" : note.contentFormat === "plain" ? ".txt" : ".md";
+      const ext =
+        note.contentFormat === "html"
+          ? ".html"
+          : note.contentFormat === "css"
+          ? ".css"
+          : note.contentFormat === "javascript"
+          ? ".js"
+          : note.contentFormat === "plain"
+          ? ".txt"
+          : ".md";
       fileName = sanitizeFileName(note.title || "Untitled") + ext;
     }
 
-    // Determine target relative path in ZIP
+    // Determine target relative path in ZIP and deduplicate collisions
     const folder = note.folderPath ? note.folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") : "";
-    const zipEntryPath = folder ? `${folder}/${fileName}` : fileName;
+    let zipEntryPath = folder ? `${folder}/${fileName}` : fileName;
+    if (usedZipPaths.has(zipEntryPath.toLowerCase())) {
+      const dotIdx = fileName.lastIndexOf(".");
+      const base = dotIdx > 0 ? fileName.slice(0, dotIdx) : fileName;
+      const ext = dotIdx > 0 ? fileName.slice(dotIdx) : "";
+      let counter = 2;
+      while (usedZipPaths.has((folder ? `${folder}/${base}-${counter}${ext}` : `${base}-${counter}${ext}`).toLowerCase())) {
+        counter++;
+      }
+      zipEntryPath = folder ? `${folder}/${base}-${counter}${ext}` : `${base}-${counter}${ext}`;
+    }
+    usedZipPaths.add(zipEntryPath.toLowerCase());
 
     const fileDate = new Date(note.updatedAt || note.createdAt || Date.now());
 
@@ -97,7 +119,7 @@ export async function exportWorkspaceBackupZip(
     exportedAt: new Date().toISOString(),
     workspaceName: workspaceName || "Luno Workspace",
     totalNotes: exportedCount,
-    notes: notes.map((n) => ({
+    notes: exportableNotes.map((n) => ({
       id: n.id,
       title: n.title,
       fileName: n.fileName,

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { Note } from "@/hooks/useNotes";
 import { isEncryptedNote } from "@/lib/noteCrypto";
+import { formatFileSize } from "@/lib/fileIconUtils";
 
 export interface TrashedNote extends Note {
   deletedAt: number;
@@ -26,9 +27,7 @@ export function calculateNoteSize(note: Partial<Note>): number {
 
 export function formatByteSize(bytes: number): string {
   if (bytes <= 0 || isNaN(bytes)) return "0 KB";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return formatFileSize(bytes);
 }
 
 function loadTrash(): TrashedNote[] {

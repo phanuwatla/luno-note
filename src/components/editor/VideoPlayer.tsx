@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { VolumeHoverSlider } from "./VolumeHoverSlider";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -607,7 +608,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
       isDraggingPipRef.current = false;
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {}
+      } catch { /* ignore */ }
     }
   };
 
@@ -828,16 +829,16 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                   {displayFileName}
                 </p>
                 <div className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground truncate max-w-full">
-                  <span>{t("editor.videoUnsupported") || "This video format cannot be previewed in the browser."}</span>
+                  <span>{t("editor.videoUnsupported")}</span>
                 </div>
               </>
             ) : (
               <>
                 <p className="text-xs sm:text-sm font-semibold text-foreground truncate max-w-full">
-                  {t("editor.videoLoadError") || "Video could not be played"}
+                  {t("editor.videoLoadError")}
                 </p>
                 <div className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground truncate max-w-full">
-                  <span>{t("editor.videoUnsupported") || "This video format cannot be previewed in the browser."}</span>
+                  <span>{t("editor.videoUnsupported")}</span>
                 </div>
               </>
             )}
@@ -850,7 +851,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
               onClick={onOpenInSystemApp}
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              {t("editor.openInDefaultApp") || "Open in Default App"}
+              {t("editor.openInDefaultApp")}
             </Button>
           )}
         </div>
@@ -868,7 +869,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         top: pipPos ? `${pipPos.y}px` : undefined,
         bottom: pipPos ? undefined : "24px",
         right: pipPos ? undefined : "24px",
-        zIndex: 99998,
+        zIndex: 45,
         width: "380px",
         maxWidth: "calc(100vw - 32px)",
       }
@@ -894,11 +895,11 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           style={computedWrapperStyle}
-          className={`relative inline-block max-w-full ${dynamicVideoRadiusCls} overflow-hidden border border-border/80 shadow-2xs bg-muted/20 dark:bg-black select-none outline-none group/player ${
+          className={`relative inline-block max-w-full ${dynamicVideoRadiusCls} overflow-hidden border border-border/80 shadow-sm bg-muted/20 dark:bg-black select-none outline-none group/player ${
         isFullscreen
-          ? "!fixed !inset-0 !z-[99999] !w-screen !h-screen !max-w-none !max-h-none !rounded-none !border-none !shadow-none !m-0 !p-0 flex flex-col items-center justify-center bg-black"
+          ? "!fixed !inset-0 !z-[90] !w-screen !h-screen !max-w-none !max-h-none !rounded-none !border-none !shadow-none !m-0 !p-0 flex flex-col items-center justify-center bg-black"
           : isFloatingPip
-          ? "!fixed !z-[99998] border border-border bg-black rounded-2xl shadow-lg"
+          ? "!fixed !z-[45] border border-border bg-black rounded-2xl shadow-lg"
           : ""
       } ${className}`}
     >
@@ -950,7 +951,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                {t("editor.videoReturnFromPip") || "Return to note"}
+                {t("editor.videoReturnFromPip")}
               </TooltipContent>
             </Tooltip>
 
@@ -972,7 +973,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                {t("editor.videoCloseFull") || "Close"}
+                {t("editor.videoCloseFull")}
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1021,7 +1022,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
       {!hasStarted && (
         <div
           onClick={togglePlay}
-          className="absolute inset-0 flex items-center justify-center z-15 bg-black/20 hover:bg-black/30 transition-colors cursor-pointer"
+          className="absolute inset-0 flex items-center justify-center z-20 bg-black/20 hover:bg-black/30 transition-colors cursor-pointer"
         >
           <button
             type="button"
@@ -1064,7 +1065,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                   onClick={togglePlay}
                   className={`${
                     isMini || isVeryCompact ? "h-6 w-6" : isCompact ? "h-6.5 w-6.5" : "h-7 w-7"
-                  } rounded-full bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 flex items-center justify-center transition-transform active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:outline-none`}
+                  } rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 flex items-center justify-center transition-transform active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:outline-none`}
                 >
                   {isPlaying ? (
                     <Pause className={isMini || isVeryCompact ? "h-3 w-3 fill-current" : "h-3.5 w-3.5 fill-current"} />
@@ -1074,7 +1075,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {isPlaying ? t("editor.videoPause") || "Pause" : t("editor.videoPlay") || "Play"}
+                {isPlaying ? t("editor.videoPause") : t("editor.videoPlay")}
               </TooltipContent>
             </Tooltip>
 
@@ -1100,23 +1101,18 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    {isMuted ? t("editor.videoUnmute") || "Unmute" : t("editor.videoMute") || "Mute"}
+                    {isMuted ? t("editor.videoUnmute") : t("editor.videoMute")}
                   </TooltipContent>
                 </Tooltip>
 
                 {/* Volume Slider on Hover */}
                 {!isVeryCompact && (
-                  <div className={`w-0 ${isMini ? "group-hover/vol:w-12" : "group-hover/vol:w-16"} transition-all duration-200 overflow-hidden flex items-center`}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={isMuted ? 0 : volume}
-                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                      className={`${isMini ? "w-12" : "w-16"} h-1 accent-primary cursor-pointer bg-muted-foreground/30 dark:bg-white/30 rounded-full`}
-                    />
-                  </div>
+                  <VolumeHoverSlider
+                    volume={volume}
+                    isMuted={isMuted}
+                    onVolumeChange={handleVolumeChange}
+                    compact={isMini}
+                  />
                 )}
               </div>
             )}
@@ -1204,7 +1200,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    {t("editor.videoSpeed") || "Playback speed"}
+                    {t("editor.videoSpeed")}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -1228,7 +1224,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    {t("editor.videoLoop") || "Loop"}
+                    {t("editor.videoLoop")}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -1252,7 +1248,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    {t("editor.videoPip") || "Picture in Picture"}
+                    {t("editor.videoPip")}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -1276,8 +1272,8 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {isFullscreen
-                    ? t("editor.videoExitFullscreen") || "Exit fullscreen"
-                    : t("editor.videoFullscreen") || "Fullscreen"}
+                    ? t("editor.videoExitFullscreen")
+                    : t("editor.videoFullscreen")}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -1289,7 +1285,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
     <ContextMenuContent className="w-56 rounded-xl">
       <ContextMenuItem onClick={togglePlay} className="gap-2.5">
         {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
-        <span>{isPlaying ? (t("editor.videoPause") || "หยุดชั่วคราว") : (t("editor.videoPlay") || "เล่น")}</span>
+        <span>{isPlaying ? (t("editor.videoPause")) : (t("editor.videoPlay"))}</span>
       </ContextMenuItem>
 
       <ContextMenuItem
@@ -1300,32 +1296,32 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         className="gap-2.5"
       >
         <Maximize2 className="h-4 w-4" />
-        <span>{t("editor.videoViewFull") || "ดูวิดีโอขนาดเต็ม"}</span>
+        <span>{t("editor.videoViewFull")}</span>
       </ContextMenuItem>
 
       {!isFloatingPip && (
         <ContextMenuItem onClick={togglePiP} className="gap-2.5">
           <PictureInPicture2 className="h-4 w-4" />
-          <span>{t("editor.videoPip") || "เล่นแบบย่อมุมจอ"}</span>
+          <span>{t("editor.videoPip")}</span>
         </ContextMenuItem>
       )}
 
       <ContextMenuItem onClick={toggleMute} className="gap-2.5">
         {isMuted || volume === 0 ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-        <span>{isMuted || volume === 0 ? (t("editor.videoUnmute") || "เปิดเสียง") : (t("editor.videoMute") || "ปิดเสียง")}</span>
+        <span>{isMuted || volume === 0 ? (t("editor.videoUnmute")) : (t("editor.videoMute"))}</span>
       </ContextMenuItem>
 
       <ContextMenuItem
         onClick={toggleLoop}
         className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
           isLooping
-            ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+            ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
             : ""
         }`}
       >
         <div className="flex items-center gap-2.5">
           <Repeat className={`h-4 w-4 shrink-0 ${isLooping ? "text-primary" : ""}`} />
-          <span>{t("editor.videoLoop") || "เล่นวนซ้ำ"}</span>
+          <span>{t("editor.videoLoop")}</span>
         </div>
         {isLooping && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
       </ContextMenuItem>
@@ -1333,7 +1329,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
       <ContextMenuSub>
         <ContextMenuSubTrigger className="gap-2.5">
           <Gauge className="h-4 w-4" />
-          <span>{t("editor.videoSpeed") || "ความเร็วในการเล่น"} ({playbackRate}x)</span>
+          <span>{t("editor.videoSpeed")} ({playbackRate}x)</span>
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="w-36 rounded-xl">
           {[1, 1.25, 1.5, 2].map((rate) => (
@@ -1345,7 +1341,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 if (videoRef.current) videoRef.current.playbackRate = rate;
               }}
             >
-              {rate}x {rate === 1 && `(${t("editor.speedNormal") || "ปกติ"})`}
+              {rate}x {rate === 1 && `(${t("editor.speedNormal")})`}
             </ContextMenuCheckboxItem>
           ))}
         </ContextMenuSubContent>
@@ -1361,7 +1357,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         className="gap-2.5"
       >
         <ExternalLink className="h-4 w-4" />
-        <span>{t("editor.openInDefaultApp") || "เปิดในโปรแกรมเริ่มต้น"}</span>
+        <span>{t("editor.openInDefaultApp")}</span>
       </ContextMenuItem>
 
       <ContextMenuItem
@@ -1369,49 +1365,49 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         className="gap-2.5"
       >
         <FolderOpen className="h-4 w-4" />
-        <span>{t("editor.revealInFolder") || "แสดงในโฟลเดอร์"}</span>
+        <span>{t("editor.revealInFolder")}</span>
       </ContextMenuItem>
 
       <ContextMenuSub>
         <ContextMenuSubTrigger className="gap-2.5">
           <LinkIcon className="h-4 w-4" />
-          <span>{t("editor.copyVideoPath") || "คัดลอกพาธวิดีโอ"}</span>
+          <span>{t("editor.copyVideoPath")}</span>
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="w-48 rounded-xl">
           <ContextMenuItem
             onClick={() => {
               void copyMediaPath(src, dataRelativeSrc, "relative", {
-                title: t("editor.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+                title: t("editor.copiedRelativePath"),
               });
             }}
             className="gap-2.5 cursor-pointer"
           >
             <FileText className="h-4 w-4" />
-            <span>{t("editor.copyRelativePath") || "คัดลอกพาธสัมพัทธ์"}</span>
+            <span>{t("editor.copyRelativePath")}</span>
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => {
               void copyMediaPath(src, dataRelativeSrc, "full", {
-                title: t("editor.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+                title: t("editor.copiedAbsolutePath"),
               });
             }}
             className="gap-2.5 cursor-pointer"
           >
             <Folder className="h-4 w-4" />
-            <span>{t("editor.copyAbsolutePath") || "คัดลอกพาธแบบเต็ม"}</span>
+            <span>{t("editor.copyAbsolutePath")}</span>
           </ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
 
       <ContextMenuItem onClick={() => downloadMediaFile(src, title || "video.mp4")} className="gap-2.5">
         <Download className="h-4 w-4" />
-        <span>{t("editor.downloadVideo") || "ดาวน์โหลดวิดีโอ"}</span>
+        <span>{t("editor.downloadVideo")}</span>
       </ContextMenuItem>
 
       {Boolean(width && onResetSize) && (
         <ContextMenuItem onClick={onResetSize} className="gap-2.5">
           <RotateCcw className="h-4 w-4" />
-          <span>{t("editor.videoResetSize") || "รีเซ็ตขนาดเดิม"}</span>
+          <span>{t("editor.videoResetSize")}</span>
         </ContextMenuItem>
       )}
 
@@ -1422,13 +1418,13 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
           onClick={() => {
             const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
             const md = targetRel ? `<video src="${targetRel}" controls></video>` : `<video src="${src}" controls></video>`;
-            void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+            void copyTextToClipboard(md, t("editor.copiedMarkdown"));
             onDelete();
           }}
           className="gap-2.5"
         >
           <Scissors className="h-4 w-4" />
-          <span>{t("editor.cut") || "ตัด"}</span>
+          <span>{t("editor.cut")}</span>
           <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
         </ContextMenuItem>
       )}
@@ -1437,12 +1433,12 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
         onClick={() => {
           const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
           const md = targetRel ? `<video src="${targetRel}" controls></video>` : `<video src="${src}" controls></video>`;
-          void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+          void copyTextToClipboard(md, t("editor.copiedMarkdown"));
         }}
         className="gap-2.5"
       >
         <Copy className="h-4 w-4" />
-        <span>{t("editor.copyMarkdown") || "คัดลอก Markdown"}</span>
+        <span>{t("editor.copyMarkdown")}</span>
         <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
       </ContextMenuItem>
 
@@ -1453,7 +1449,7 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
           className="gap-2.5 text-destructive focus:text-destructive"
         >
           <Trash2 className="h-4 w-4" />
-          <span>{t("editor.deleteVideo") || "ลบวิดีโอ"}</span>
+          <span>{t("editor.deleteVideo")}</span>
           <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
       )}
@@ -1501,12 +1497,12 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
                 <>
                   <p className="text-xs sm:text-sm font-semibold text-foreground truncate max-w-full">{title}</p>
                   <div className="flex items-center gap-2 text-[11px] sm:text-xs text-muted-foreground truncate max-w-full">
-                    <span>{t("editor.videoPlayingInPip") || "Video is playing in Picture-in-Picture"}</span>
+                    <span>{t("editor.videoPlayingInPip")}</span>
                   </div>
                 </>
               ) : (
                 <p className="text-xs sm:text-sm font-semibold text-foreground truncate max-w-full">
-                  {t("editor.videoPlayingInPip") || "Video is playing in Picture-in-Picture"}
+                  {t("editor.videoPlayingInPip")}
                 </p>
               )}
             </div>
@@ -1528,11 +1524,11 @@ const VideoPlayerComponent: React.FC<VideoPlayerProps> = ({
               }}
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              {t("editor.videoReturnFromPip") || "Return to note"}
+              {t("editor.videoReturnFromPip")}
             </Button>
           </div>
         </div>
-      ) : isFullscreen && !Boolean(typeof document !== "undefined" && (document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)) ? (
+      ) : isFullscreen && !(typeof document !== "undefined" && (document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)) ? (
         <>
           <div
             ref={originalParentRef}

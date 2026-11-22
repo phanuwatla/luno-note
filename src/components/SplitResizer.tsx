@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 
 interface SplitResizerProps {
   onResize: (delta: number) => void;
@@ -7,27 +7,39 @@ interface SplitResizerProps {
 export default function SplitResizer({ onResize }: SplitResizerProps) {
   const dragging = useRef(false);
   const lastX = useRef(0);
+  const onResizeRef = useRef(onResize);
+  onResizeRef.current = onResize;
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+    };
+  }, []);
 
   const onMouseDown = (e: React.MouseEvent) => {
     dragging.current = true;
     lastX.current = e.clientX;
     document.body.style.cursor = "col-resize";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = ev.clientX - lastX.current;
+      lastX.current = ev.clientX;
+      onResizeRef.current(delta);
+    };
+
+    const onMouseUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      cleanupRef.current = null;
+    };
+
+    cleanupRef.current = onMouseUp;
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  };
-
-  const onMouseMove = (e: MouseEvent) => {
-    if (!dragging.current) return;
-    const delta = e.clientX - lastX.current;
-    lastX.current = e.clientX;
-    onResize(delta);
-  };
-
-  const onMouseUp = () => {
-    dragging.current = false;
-    document.body.style.cursor = "";
-    window.removeEventListener("mousemove", onMouseMove);
-    window.removeEventListener("mouseup", onMouseUp);
   };
 
   return (

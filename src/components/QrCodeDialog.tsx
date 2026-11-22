@@ -50,6 +50,7 @@ import {
 } from "@/lib/qrCode";
 import { ICON_COLOR_PALETTE } from "@/lib/iconPacks";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 export interface QrCodeData {
   text: string;
@@ -246,29 +247,29 @@ export function QrCodeDialog({
           if (textareaRef.current.value && textareaRef.current.value.trim()) {
             clipText = textareaRef.current.value.trim();
           }
-        } catch {}
+        } catch { /* ignore */ }
       }
 
       if (clipText) {
         setText(clipText);
         toast({
-          title: t("editor.qrPasteSuccess") || "Pasted from Clipboard",
-          description: t("editor.qrPasteDesc") || `"${clipText.slice(0, 40)}${clipText.length > 40 ? "..." : ""}"`,
+          title: t("editor.qrPasteSuccess"),
+          description: t("editor.qrPasteDesc"),
         });
         setTimeout(() => textareaRef.current?.focus(), 50);
       } else {
         textareaRef.current?.focus();
         toast({
-          title: t("editor.qrContent") || "QR Content",
-          description: t("editor.qrPasteEmptyDesc") || "Clipboard is empty or text could not be read. Press Ctrl+V inside the text box.",
+          title: t("editor.qrContent"),
+          description: t("editor.qrPasteEmptyDesc"),
         });
       }
     } catch (err) {
       console.warn("handlePasteClipboard error:", err);
       textareaRef.current?.focus();
       toast({
-        title: t("common.error") || "Error",
-        description: t("editor.qrPasteErrorDesc") || "Failed to read clipboard. Press Ctrl+V inside the text box.",
+        title: t("common.error"),
+        description: t("editor.qrPasteErrorDesc"),
         variant: "destructive",
       });
     }
@@ -319,8 +320,8 @@ export function QrCodeDialog({
       if (imageCopied) {
         setCopied(true);
         toast({
-          title: t("editor.qrCopiedToast") || "QR Code Copied",
-          description: t("editor.qrCopyImageDesc") || "QR Code image is ready to paste anywhere.",
+          title: t("editor.qrCopiedToast"),
+          description: t("editor.qrCopyImageDesc"),
         });
         setTimeout(() => setCopied(false), 2500);
         return;
@@ -334,15 +335,15 @@ export function QrCodeDialog({
       }
       setCopied(true);
       toast({
-        title: t("editor.qrCopiedToast") || "QR Code Copied",
-        description: t("editor.qrCopyTextDesc") || "QR Code content text copied to clipboard.",
+        title: t("editor.qrCopiedToast"),
+        description: t("editor.qrCopyTextDesc"),
       });
       setTimeout(() => setCopied(false), 2500);
     } catch (err) {
       console.warn("handleCopyImage error:", err);
       toast({
-        title: t("common.error") || "Error",
-        description: t("editor.qrCopyErrorDesc") || "Failed to copy QR Code image to clipboard.",
+        title: t("common.error"),
+        description: t("editor.qrCopyErrorDesc"),
         variant: "destructive",
       });
     }
@@ -361,13 +362,13 @@ export function QrCodeDialog({
         margin: 3,
       });
       toast({
-        title: t("editor.qrDownloadSuccess") || "QR Code Downloaded",
-        description: t("editor.qrDownloadDesc") || "Saved QR Code as PNG image file.",
+        title: t("editor.qrDownloadSuccess"),
+        description: t("editor.qrDownloadDesc"),
       });
     } catch {
       toast({
-        title: t("common.error") || "Error",
-        description: t("editor.qrDownloadErrorDesc") || "Failed to download QR Code image.",
+        title: t("common.error"),
+        description: t("editor.qrDownloadErrorDesc"),
         variant: "destructive",
       });
     }
@@ -404,18 +405,18 @@ export function QrCodeDialog({
       onOpenChange(false);
       toast({
         title: mode === "edit"
-          ? (t("editor.qrSaveSuccess") || "บันทึกคิวอาร์โค้ดแล้ว")
-          : (t("editor.qrInsertSuccess") || "QR Code Inserted"),
+          ? (t("editor.qrSaveSuccess"))
+          : (t("editor.qrInsertSuccess")),
         description: mode === "edit"
-          ? (t("editor.qrSaveDesc") || "อัปเดตคิวอาร์โค้ดในโน้ตเรียบร้อยแล้ว")
-          : (t("editor.qrInsertDesc") || "Inserted QR Code directly into your note."),
+          ? (t("editor.qrSaveDesc"))
+          : (t("editor.qrInsertDesc")),
       });
     } catch {
       toast({
-        title: t("common.error") || "Error",
+        title: t("common.error"),
         description: mode === "edit"
-          ? (t("editor.qrSaveErrorDesc") || "เกิดข้อผิดพลาดในการบันทึกคิวอาร์โค้ด")
-          : (t("editor.qrInsertErrorDesc") || "Failed to insert QR Code into note."),
+          ? (t("editor.qrSaveErrorDesc"))
+          : (t("editor.qrInsertErrorDesc")),
         variant: "destructive",
       });
     } finally {
@@ -425,18 +426,18 @@ export function QrCodeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-[650px] rounded-2xl p-5 sm:p-6 overflow-hidden">
+      <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-[650px] rounded-2xl p-5 sm:p-6">
         {/* Header */}
         <DialogHeader>
           <DialogTitle>
             {mode === "edit"
-              ? (t("editor.qrEditTitle") || "แก้ไขคิวอาร์โค้ด (QR Code)")
-              : (t("editor.qrCodeGenerator") || "สร้างคิวอาร์โค้ด (QR Code)")}
+              ? (t("editor.qrEditTitle"))
+              : (t("editor.qrCodeGenerator"))}
           </DialogTitle>
           <DialogDescription>
             {mode === "edit"
-              ? (t("editor.qrEditDesc") || "ปรับแต่งและแก้ไขคิวอาร์โค้ดในโน้ตของคุณ")
-              : (t("editor.qrCodeDialogDesc") || "สร้างและปรับแต่งคิวอาร์โค้ดเพื่อแทรกลงในโน้ต")}
+              ? (t("editor.qrEditDesc"))
+              : (t("editor.qrCodeDialogDesc"))}
           </DialogDescription>
         </DialogHeader>
 
@@ -449,7 +450,7 @@ export function QrCodeDialog({
               <div className="space-y-1.5 min-w-0">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="qr-content" className="text-xs font-semibold text-foreground">
-                    {t("editor.qrContent") || "QR Content / URL"}
+                    {t("editor.qrContent")}
                   </Label>
                   <button
                     type="button"
@@ -463,13 +464,13 @@ export function QrCodeDialog({
                 <Textarea
                   ref={textareaRef}
                   id="qr-content"
-                  placeholder={t("editor.qrContentPlaceholder") || "Enter URL or text (e.g. https://example.com)..."}
+                  placeholder={t("editor.qrContentPlaceholder")}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   className="min-h-[85px] text-xs resize-none rounded-xl border-border bg-background focus:border-primary transition-colors"
                 />
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
-                  <span>{t("editor.qrCharCount", { count: text.length }) || `${text.length} chars`}</span>
+                  <span>{t("editor.qrCharCount", { count: text.length })}</span>
                   {text.length > 500 && (
                     <span className="text-amber-500 font-medium">Large payload</span>
                   )}
@@ -481,7 +482,7 @@ export function QrCodeDialog({
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                     <Palette className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span>{t("editor.qrFgColor") || "Foreground Color"}</span>
+                    <span>{t("editor.qrFgColor")}</span>
                   </Label>
                   <span
                     className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground uppercase"
@@ -532,7 +533,7 @@ export function QrCodeDialog({
                                   }}
                                 >
                                   {isSelected && (
-                                    <Check className="w-3 h-3 text-white drop-shadow-xs" />
+                                    <Check className="w-3 h-3 text-white drop-shadow-sm" />
                                   )}
                                 </button>
                               </TooltipTrigger>
@@ -568,7 +569,7 @@ export function QrCodeDialog({
                                         ? "conic-gradient(from 0deg, #f43f5e, #fb923c, #facc15, #4ade80, #38bdf8, #818cf8, #c084fc, #f43f5e)"
                                         : undefined,
                                     }}
-                                    className={`w-5 h-5 rounded-full border border-transparent transition-all cursor-pointer shrink-0 flex items-center justify-center relative shadow-2xs ${
+                                    className={`w-5 h-5 rounded-full border border-transparent transition-all cursor-pointer shrink-0 flex items-center justify-center relative shadow-sm ${
                                       isCustomSelected
                                         ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105 opacity-100"
                                         : "opacity-80 hover:opacity-100 hover:scale-105"
@@ -579,18 +580,18 @@ export function QrCodeDialog({
                                 </PopoverTrigger>
                               </TooltipTrigger>
                               <TooltipContent side="top" className="text-xs">
-                                {t("settings.themeCustom") || "Custom Color"}
+                                {t("settings.themeCustom")}
                               </TooltipContent>
                             </Tooltip>
                             <PopoverContent
                               align="start"
-                              className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md z-50"
+                              className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md z-[60]"
                             >
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                   <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                                     <Palette className="w-3.5 h-3.5 text-primary" />
-                                    {t("settings.customAccentColor") || "Custom Color"}
+                                    {t("settings.customAccentColor")}
                                   </span>
                                   <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                                     {selectedColor || "#26A295"}
@@ -598,7 +599,7 @@ export function QrCodeDialog({
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                                  <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                                     <input
                                       type="color"
                                       value={
@@ -615,14 +616,14 @@ export function QrCodeDialog({
                                     value={selectedColor || "#26A295"}
                                     onChange={(e) => setSelectedColor(e.target.value)}
                                     placeholder="#26A295"
-                                    className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                                    className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                                     maxLength={7}
                                   />
                                 </div>
 
                                 <div>
                                   <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
-                                    {t("settings.quickPresets") || "Quick Presets"}
+                                    {t("settings.quickPresets")}
                                   </span>
                                   <div className="flex flex-wrap gap-1.5">
                                     {[
@@ -649,7 +650,7 @@ export function QrCodeDialog({
                                         className={`h-5 w-5 rounded-full transition-transform cursor-pointer ${
                                           selectedColor.toLowerCase() === color.toLowerCase()
                                             ? "ring-2 ring-primary ring-offset-1 scale-110"
-                                            : "hover:scale-115 opacity-85 hover:opacity-100"
+                                            : "hover:scale-110 opacity-85 hover:opacity-100"
                                         }`}
                                       />
                                     ))}
@@ -699,7 +700,7 @@ export function QrCodeDialog({
               <div className="grid grid-cols-2 gap-2.5 pt-0.5 min-w-0">
                 <div className="space-y-1.5 min-w-0">
                   <Label className="text-xs font-semibold text-foreground">
-                    {t("editor.qrBgColor") || "Background"}
+                    {t("editor.qrBgColor")}
                   </Label>
                   <Select
                     value={bgType}
@@ -710,13 +711,13 @@ export function QrCodeDialog({
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
                       <SelectItem value="white" className="text-xs">
-                        {t("editor.qrBgWhite") || "White"}
+                        {t("editor.qrBgWhite")}
                       </SelectItem>
                       <SelectItem value="transparent" className="text-xs">
-                        {t("editor.qrBgTransparent") || "Transparent"}
+                        {t("editor.qrBgTransparent")}
                       </SelectItem>
                       <SelectItem value="dark" className="text-xs">
-                        {t("editor.qrBgDark") || "Dark"}
+                        {t("editor.qrBgDark")}
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -724,7 +725,7 @@ export function QrCodeDialog({
 
                 <div className="space-y-1.5 min-w-0">
                   <Label className="text-xs font-semibold text-foreground">
-                    {t("editor.qrErrorCorrection") || "ECC Level"}
+                    {t("editor.qrErrorCorrection")}
                   </Label>
                   <Select
                     value={errorCorrectionLevel}
@@ -735,16 +736,16 @@ export function QrCodeDialog({
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
                       <SelectItem value="L" className="text-xs">
-                        {t("editor.qrEccLow") || "Low (7%)"}
+                        {t("editor.qrEccLow")}
                       </SelectItem>
                       <SelectItem value="M" className="text-xs">
-                        {t("editor.qrEccMedium") || "Medium (15%)"}
+                        {t("editor.qrEccMedium")}
                       </SelectItem>
                       <SelectItem value="Q" className="text-xs">
-                        {t("editor.qrEccQuartile") || "Quartile (25%)"}
+                        {t("editor.qrEccQuartile")}
                       </SelectItem>
                       <SelectItem value="H" className="text-xs">
-                        {t("editor.qrEccHigh") || "High (30%)"}
+                        {t("editor.qrEccHigh")}
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -769,7 +770,7 @@ export function QrCodeDialog({
                         type="button"
                         disabled={!qrSvg}
                         onClick={handleCopyImage}
-                        className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border/60 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
+                        className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border/60 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-sm"
                         aria-label="Copy QR Code Image"
                       >
                         {copied ? (
@@ -780,7 +781,7 @@ export function QrCodeDialog({
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                      {copied ? (t("common.copied") || "Copied") : (t("editor.qrCopyImage") || "Copy Image")}
+                      {copied ? (t("common.copied")) : (t("editor.qrCopyImage"))}
                     </TooltipContent>
                   </Tooltip>
 
@@ -790,14 +791,14 @@ export function QrCodeDialog({
                         type="button"
                         disabled={!qrSvg}
                         onClick={handleDownload}
-                        className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border/60 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
+                        className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border/60 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-sm"
                         aria-label="Download QR Code PNG"
                       >
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4} className="text-xs">
-                      {t("editor.qrDownloadPng") || "Download PNG"}
+                      {t("editor.qrDownloadPng")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -807,7 +808,7 @@ export function QrCodeDialog({
               <div className="w-full flex-1 flex items-center justify-center py-1 min-h-[170px]">
                 {qrSvg ? (
                   <div
-                    className={`aspect-square w-full max-w-[200px] p-3 rounded-2xl border border-border/40 shadow-xs flex items-center justify-center transition-all ${
+                    className={`aspect-square w-full max-w-[200px] p-3 rounded-2xl border border-border/40 shadow-sm flex items-center justify-center transition-all ${
                       bgType === "transparent"
                         ? "border-dashed bg-muted/20"
                         : bgType === "dark"
@@ -817,14 +818,14 @@ export function QrCodeDialog({
                   >
                     <div
                       className="w-full h-full [&>svg]:w-full [&>svg]:h-full flex items-center justify-center"
-                      dangerouslySetInnerHTML={{ __html: qrSvg }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(qrSvg) }}
                     />
                   </div>
                 ) : (
                   <div className="aspect-square w-full max-w-[200px] rounded-2xl border border-dashed border-border/50 flex flex-col items-center justify-center text-center p-4 text-muted-foreground/60 space-y-2 bg-background/50">
                     <QrCode className="h-10 w-10 stroke-[1.2] opacity-40" />
                     <span className="text-[11px] leading-tight px-1">
-                      {t("editor.qrContentPlaceholder") || "Enter text or URL to preview"}
+                      {t("editor.qrContentPlaceholder")}
                     </span>
                   </div>
                 )}
@@ -841,7 +842,7 @@ export function QrCodeDialog({
             onClick={() => onOpenChange(false)}
             className="rounded-xl"
           >
-            {t("common.cancel") || "Cancel"}
+            {t("common.cancel")}
           </Button>
 
           <Button
@@ -851,8 +852,8 @@ export function QrCodeDialog({
             className="rounded-xl font-medium"
           >
             {mode === "edit"
-              ? (t("common.save") || "บันทึก")
-              : (t("editor.qrInsertIntoNote") || "Insert into Note")}
+              ? (t("common.save"))
+              : (t("editor.qrInsertIntoNote"))}
           </Button>
         </DialogFooter>
       </DialogContent>

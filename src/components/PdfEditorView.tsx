@@ -9,7 +9,9 @@ import React, {
 import { toast } from '@/hooks/use-toast';
 import { ExternalLink, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PageLoader } from '@/components/shared/PageLoader';
 import { useAppSettings } from '@/hooks/useAppSettings';
+import { translate } from '@/translation/translate';
 import { getToolbarIcon } from '@/lib/iconPacks';
 import { saveVersionSnapshot } from '@/lib/versionHistoryStorage';
 import {
@@ -351,7 +353,9 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
     const [viewerError, setViewerError] = useState<string | null>(null);
 
     const isThai = language === 'th';
-    const { iconPack } = useAppSettings();
+    const t = useCallback((key: string, vars?: Record<string, string | number>) => translate(language || 'en', key, vars), [language]);
+    const { settings } = useAppSettings();
+    const iconPack = settings.iconPack;
     const FileTextIcon = getToolbarIcon('fileText', iconPack, FileText);
     const ExternalLinkIcon = getToolbarIcon('externalLink', iconPack, ExternalLink);
 
@@ -359,7 +363,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
       if (filePath && (filePath.includes(':') || filePath.startsWith('/'))) {
         return filePath;
       }
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
       if (electronAPI?.getSavedWorkspace && fileName) {
         try {
           const saved = await electronAPI.getSavedWorkspace();
@@ -391,7 +395,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             existingHistory: historyEntriesRef.current,
             bookmarks: nextBookmarks,
             addHistoryVersion: false,
-            userName: isThai ? 'ผู้ใช้ Luno' : 'Luno User',
+            userName: t("pdfEditor.lunoUser"),
           });
         })();
       },
@@ -404,7 +408,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
 
     const addBookmark = useCallback(
       (page: number, title?: string): PdfPageBookmark[] => {
-        const defaultTitle = isThai ? `หน้า ${page}` : `Page ${page}`;
+        const defaultTitle = t("pdfEditor.page", { page });
         const newBm: PdfPageBookmark = {
           id: `bm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           page,
@@ -467,7 +471,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
               if (typeof savedScroll === 'number') scrollEl.scrollTop = savedScroll;
               if (typeof savedScrollLeft === 'number') scrollEl.scrollLeft = savedScrollLeft;
             }
-          } catch {}
+          } catch { /* ignore */ }
           setTimeout(() => {
             isRestoringViewportRef.current = false;
           }, 120);
@@ -504,7 +508,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             existingHistory: historyEntriesRef.current,
             bookmarks: bookmarksRef.current,
             addHistoryVersion,
-            userName: isThai ? 'ผู้ใช้ Luno' : 'Luno User',
+            userName: t("pdfEditor.lunoUser"),
           });
           savedCanvasDataRef.current = canvasData;
           latestCanvasDataRef.current = canvasData;
@@ -520,10 +524,8 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         } catch (err) {
           console.error('[PdfEditorView] Failed to save PDF annotations:', err);
           toast({
-            title: isThai ? 'ไม่สามารถบันทึกได้' : 'Failed to save',
-            description: isThai
-              ? 'ไม่สามารถบันทึกคำอธิบายประกอบ PDF ได้'
-              : 'Failed to save PDF annotations',
+            title: t("pdfEditor.failedToSave"),
+            description: t("pdfEditor.failedToSavePdfAnnotations"),
             variant: 'destructive',
           });
           return false;
@@ -666,7 +668,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             onPdfLoadedProp?.();
             try {
               instance.sendCommand('setTool', { tool: 'select' });
-            } catch {}
+            } catch { /* ignore */ }
             const attachScrollListener = (iframe: HTMLIFrameElement | null | undefined) => {
               try {
                 const scrollEl = iframe?.contentDocument?.querySelector('.scroll-viewer');
@@ -680,7 +682,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
                   },
                   { passive: true }
                 );
-              } catch {}
+              } catch { /* ignore */ }
             };
             setTimeout(() => {
               restoreViewportState(instance);
@@ -701,11 +703,9 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             if (mountCancelledRef.current) return;
             if (!success) {
               toast({
-                title: isThai ? 'ไม่สามารถบันทึกได้' : 'Failed to save',
+                title: t("pdfEditor.failedToSave"),
                 description: message ||
-                  (isThai
-                    ? 'ไม่สามารถบันทึกคำอธิบายประกอบ PDF ได้'
-                    : 'Failed to save PDF annotations'),
+                  (t("pdfEditor.failedToSavePdfAnnotations")),
                 variant: 'destructive',
               });
               pendingSaveResolverRef.current?.(false);
@@ -715,7 +715,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             const ok = await persistCanvasData(canvasData, true);
             if (ok) {
               toast({
-                title: isThai ? 'บันทึกไฟล์แล้ว' : 'File saved',
+                title: t("editor.saveToastTitle"),
                 description: fileName,
               });
             }
@@ -777,7 +777,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             if (scrollEl) {
               pdfScrollPositionMap.set(noteId, scrollEl.scrollTop);
             }
-          } catch {}
+          } catch { /* ignore */ }
           if (latestCanvasDataRef.current) {
             pdfDraftCanvasDataMap.set(noteId, latestCanvasDataRef.current);
           }
@@ -846,7 +846,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         try {
           const cw = instanceRef.current.iframe?.contentWindow as any;
           cw?.__commitActiveTextOverlay?.();
-        } catch {}
+        } catch { /* ignore */ }
 
         // 1. Persist editable vector annotation sidecar (syncing live JSON first)
         const liveJson = instanceRef.current.getCanvasJson();
@@ -855,7 +855,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
 
         // 2. Export flattened PDF for external viewers while preserving clean unburned .base.pdf for Luno editing
         const targetFullPath = await resolveNativeFullPath();
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (targetFullPath && electronAPI) {
           try {
             // Backup pristine un-annotated base PDF once BEFORE overwriting targetFullPath with flattened pixels
@@ -886,8 +886,8 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
                   fullPath: targetFullPath,
                   buffer: pdfBytes,
                 });
-                if (res && res.success === false) {
-                  console.warn('writeFileBuffer warning:', res.error);
+                if (!res) {
+                  console.warn('writeFileBuffer warning: failed writing PDF buffer');
                 }
               } else if (electronAPI.writeFileBase64) {
                 const b64 = arrayBufferToBase64(pdfBytes);
@@ -895,8 +895,8 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
                   fullPath: targetFullPath,
                   base64: b64,
                 });
-                if (res && res.success === false) {
-                  console.warn('writeFileBase64 warning:', res.error);
+                if (!res) {
+                  console.warn('writeFileBase64 warning: failed writing PDF base64');
                 }
               }
               // Update displayed file size WITHOUT replacing live pdfBase64 (prevents remount & double-burn!)
@@ -909,13 +909,13 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
 
         // 3. Save a version history snapshot matching other editors
         try {
-          saveVersionSnapshot(noteId, {
-            noteId,
+          saveVersionSnapshot({
+            id: noteId,
             title: fileName.replace(/\.pdf$/i, ''),
-            relPath: folderPath ? `${folderPath}/${fileName}` : fileName,
+            fileName,
+            folderPath: folderPath || undefined,
             content: canvasData || `[PDF Document: ${fileName}]`,
-            trigger: 'manual',
-          });
+          } as any);
         } catch {
           /* ignore */
         }
@@ -925,17 +925,15 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         onSaved?.(new Date());
 
         toast({
-          title: isThai ? 'บันทึกไฟล์แล้ว' : 'File saved',
+          title: t("editor.saveToastTitle"),
           description: fileName,
         });
         return true;
       } catch (err) {
         console.error('[PdfEditorView] saveAnnotations failed:', err);
         toast({
-          title: isThai ? 'ไม่สามารถบันทึกได้' : 'Failed to save',
-          description: isThai
-            ? 'ไม่สามารถบันทึกไฟล์ PDF ได้'
-            : 'Failed to save PDF document',
+          title: t("pdfEditor.failedToSave"),
+          description: t("pdfEditor.failedToSavePdfDocument"),
           variant: 'destructive',
         });
         return false;
@@ -974,15 +972,15 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         }
 
         const targetFullPath = await resolveNativeFullPath();
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
 
         if (targetFullPath && electronAPI?.writeFileBuffer) {
           const res = await electronAPI.writeFileBuffer({
             fullPath: targetFullPath,
             buffer: pdfBytes,
           });
-          if (res && res.success === false) {
-            throw new Error(res?.error || 'Failed to write flattened PDF file');
+          if (!res) {
+            throw new Error('Failed to write flattened PDF file');
           }
         } else if (targetFullPath && electronAPI?.writeFileBase64) {
           const b64 = arrayBufferToBase64(pdfBytes);
@@ -990,8 +988,8 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             fullPath: targetFullPath,
             base64: b64,
           });
-          if (res && res.success === false) {
-            throw new Error(res?.error || 'Failed to write flattened PDF file');
+          if (!res) {
+            throw new Error('Failed to write flattened PDF file');
           }
         } else {
           triggerBrowserPdfDownload(pdfBytes, fileName);
@@ -999,6 +997,9 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
 
         const newBase64 = arrayBufferToBase64(pdfBytes);
         cleanBase64Ref.current = { noteId, base64: newBase64 };
+        pdfSessionCleanBase64Map.set(noteId, newBase64);
+        pdfSessionSavedCanvasDataMap.set(noteId, '');
+        pdfSessionDirtyMap.set(noteId, false);
         await clearPdfAnnotationSidecar({ noteId, fileName, filePath, folderPath });
         clearPdfEditorDraft(noteId);
         latestCanvasDataRef.current = '';
@@ -1010,17 +1011,15 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         onReplacePdfBase64?.(newBase64, pdfBytes.byteLength);
 
         toast({
-          title: isThai ? 'บันทึกไฟล์แล้ว' : 'File saved',
+          title: t("editor.saveToastTitle"),
           description: fileName,
         });
         return true;
       } catch (err) {
         console.error('[PdfEditorView] Failed to flatten & save PDF:', err);
         toast({
-          title: isThai ? 'ไม่สามารถบันทึกได้' : 'Failed to save',
-          description: isThai
-            ? 'ไม่สามารถรวมเลเยอร์ลงไฟล์ PDF ได้'
-            : 'Failed to flatten and save PDF',
+          title: t("pdfEditor.failedToSave"),
+          description: t("pdfEditor.failedToFlattenAndSave"),
           variant: 'destructive',
         });
         return false;
@@ -1051,44 +1050,43 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
 
         const baseName = fileName.replace(/\.pdf$/i, '');
         const defaultExportName = `${baseName}-annotated.pdf`;
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
 
         if (electronAPI?.showSaveDialog && electronAPI?.writeFileBuffer) {
           const dialogRes = await electronAPI.showSaveDialog({
-            title: isThai ? 'ส่งออกไฟล์ PDF ที่รวมคำอธิบายประกอบ' : 'Export Flattened PDF',
+            title: t("pdfEditor.exportFlattenedPdf"),
             defaultPath: defaultExportName,
             filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
           });
-          if (dialogRes.canceled || !dialogRes.filePath) {
+          const targetPath = typeof dialogRes === 'string' ? dialogRes : (dialogRes as any)?.filePath;
+          if (!targetPath || (typeof dialogRes === 'object' && (dialogRes as any)?.canceled)) {
             return false;
           }
           const writeRes = await electronAPI.writeFileBuffer({
-            fullPath: dialogRes.filePath,
+            fullPath: targetPath,
             buffer: pdfBytes,
           });
-          if (writeRes && writeRes.success === false) {
-            throw new Error(writeRes?.error || 'Failed to write exported PDF');
+          if (!writeRes || (typeof writeRes === 'object' && (writeRes as any).success === false)) {
+            throw new Error((writeRes as any)?.error || 'Failed to write exported PDF');
           }
           toast({
-            title: isThai ? 'ส่งออกไฟล์แล้ว' : 'File exported',
-            description: dialogRes.filePath.split(/[/\\]/).pop() || defaultExportName,
+            title: t("pdfEditor.fileExported"),
+            description: targetPath.split(/[/\\]/).pop() || defaultExportName,
           });
           return true;
         }
 
         triggerBrowserPdfDownload(pdfBytes, defaultExportName);
         toast({
-          title: isThai ? 'ดาวน์โหลดไฟล์แล้ว' : 'File downloaded',
+          title: t("pdfEditor.fileDownloaded"),
           description: defaultExportName,
         });
         return true;
       } catch (err) {
         console.error('[PdfEditorView] Failed to export flattened PDF:', err);
         toast({
-          title: isThai ? 'เกิดข้อผิดพลาดในการส่งออก' : 'Export Error',
-          description: isThai
-            ? 'ไม่สามารถส่งออกไฟล์ PDF ได้'
-            : 'Failed to export PDF',
+          title: t("pdfEditor.exportError"),
+          description: t("pdfEditor.failedToExportPdf"),
           variant: 'destructive',
         });
         return false;
@@ -1105,41 +1103,42 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         const baseName = fileName.replace(/\.pdf$/i, '');
         const defaultExportName = `${baseName}-form.pdf`;
 
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (electronAPI?.showSaveDialog && electronAPI?.writeFileBuffer) {
           const dialogRes = await electronAPI.showSaveDialog({
-            title: isThai ? 'ส่งออกไฟล์ PDF (เฉพาะข้อมูลแบบฟอร์ม)' : 'Export Form PDF',
+            title: t("pdfEditor.exportFormPdf"),
             defaultPath: defaultExportName,
             filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
           });
-          if (dialogRes.canceled || !dialogRes.filePath) {
+          const targetPath = typeof dialogRes === 'string' ? dialogRes : (dialogRes as any)?.filePath;
+          if (!targetPath || (typeof dialogRes === 'object' && (dialogRes as any)?.canceled)) {
             return false;
           }
           const writeRes = await electronAPI.writeFileBuffer({
-            fullPath: dialogRes.filePath,
+            fullPath: targetPath,
             buffer: pdfBytes,
           });
-          if (!writeRes?.success) {
-            throw new Error(writeRes?.error || 'Failed to write exported PDF');
+          if (!writeRes || (typeof writeRes === 'object' && (writeRes as any).success === false)) {
+            throw new Error((writeRes as any)?.error || 'Failed to write exported PDF');
           }
           toast({
-            title: isThai ? 'ส่งออกไฟล์แล้ว' : 'File exported',
-            description: (dialogRes.filePath || '').split(/[/\\]/).pop() || defaultExportName,
+            title: t("pdfEditor.fileExported"),
+            description: targetPath.split(/[/\\]/).pop() || defaultExportName,
           });
           return true;
         }
 
         triggerBrowserPdfDownload(pdfBytes, defaultExportName);
         toast({
-          title: isThai ? 'ดาวน์โหลดไฟล์แล้ว' : 'File downloaded',
+          title: t("pdfEditor.fileDownloaded"),
           description: defaultExportName,
         });
         return true;
       } catch (err) {
         console.error('[PdfEditorView] Failed to export form PDF:', err);
         toast({
-          title: isThai ? 'เกิดข้อผิดพลาดในการส่งออก' : 'Export Error',
-          description: isThai ? 'ส่งออกไฟล์ PDF ไม่สำเร็จ' : 'Failed to export PDF',
+          title: t("pdfEditor.exportError"),
+          description: t("pdfEditor.failedToExportPdf2"),
           variant: 'destructive',
         });
         return false;
@@ -1280,7 +1279,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             cw.__inkoNextPage();
             return;
           }
-        } catch {}
+        } catch { /* ignore */ }
         instanceRef.current?.sendCommand(command, payload as any);
       },
       [noteId]
@@ -1308,7 +1307,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
         if (cw && typeof cw.__highlightTextSelection === 'function') {
           return Boolean(cw.__highlightTextSelection());
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('highlightSelection' as InkoViewerCommand);
       return false;
     }, []);
@@ -1324,7 +1323,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__setInkoTool(tool);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setTool', { tool });
     }, []);
 
@@ -1336,7 +1335,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetBrushColor(color);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setColor', { color });
     }, []);
 
@@ -1348,7 +1347,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetShapeStrokeColor(color);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setShapeStrokeColor', { color: color || 'transparent' });
     }, []);
 
@@ -1360,7 +1359,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetShapeFillColor(color);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setShapeFillColor', { color: color || 'transparent' });
     }, []);
 
@@ -1372,7 +1371,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetShapeFillOpacity(opacity);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setShapeFillOpacity', { opacity });
     }, []);
 
@@ -1384,7 +1383,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetHighlightColor(color);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setHighlightColor', { color });
     }, []);
 
@@ -1396,7 +1395,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetHighlightWidth(width);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setHighlightWidth', { width });
     }, []);
 
@@ -1408,7 +1407,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetEraserWidth(width);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setEraserWidth', { width });
     }, []);
 
@@ -1420,7 +1419,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetBrushWidth(width);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setWidth', { width });
     }, []);
 
@@ -1432,7 +1431,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           cw.__inkoSetFontSize(fontSize);
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
       instanceRef.current?.sendCommand('setFontSize', { fontSize });
     }, []);
 
@@ -1461,7 +1460,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             }
             const sv = instanceRef.current?.getScrollViewer();
             if (sv?.undo) return Boolean(sv.undo());
-          } catch {}
+          } catch { /* ignore */ }
           sendCommand('undo');
           return true;
         },
@@ -1478,7 +1477,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
             }
             const sv = instanceRef.current?.getScrollViewer();
             if (sv?.redo) return Boolean(sv.redo());
-          } catch {}
+          } catch { /* ignore */ }
           sendCommand('redo');
           return true;
         },
@@ -1550,31 +1549,25 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
           className="flex-1 w-full h-full overflow-hidden"
         />
 
-        {/* File-preview styled Loading Overlay (No container box around spinner) */}
+        {/* File-preview styled Loading Overlay (Matches startup loader style) */}
         {(isLoadingSource || (!isPdfLoaded && !displayError)) && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background gap-3.5 p-6 text-muted-foreground select-none">
-            <Loader2 className="h-9 w-9 text-primary animate-spin stroke-[1.75]" />
-            <div className="flex flex-col items-center gap-1 text-center">
-              <p className="text-sm font-semibold text-foreground max-w-md truncate">{fileName}</p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>{isThai ? 'เอกสาร PDF' : 'PDF Document'}</span>
-                {fileSize != null && (
-                  <>
-                    <span>•</span>
-                    <span>{formatBytes(fileSize)}</span>
-                  </>
-                )}
-                <span>•</span>
-                <span>{isThai ? 'กำลังโหลด...' : 'Loading...'}</span>
-              </div>
-            </div>
-          </div>
+          <PageLoader
+            className="absolute inset-0 z-10"
+            title={fileName}
+            description={[
+              t("pdfEditor.pdfDocument"),
+              fileSize != null ? formatBytes(fileSize) : null,
+              t("common.loading"),
+            ]
+              .filter(Boolean)
+              .join(" • ")}
+          />
         )}
 
         {/* Luno-styled Error Fallback */}
         {displayError && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background p-8 select-none">
-            <div className="max-w-md w-full rounded-2xl border border-border bg-card p-6 text-center space-y-4 shadow-xs">
+            <div className="max-w-md w-full rounded-2xl border border-border bg-card p-6 text-center space-y-4 shadow-sm">
               <div className="mx-auto h-12 w-12 rounded-xl bg-destructive/10 border border-destructive/20 flex items-center justify-center">
                 <FileTextIcon className="h-6 w-6 text-destructive" />
               </div>
@@ -1591,7 +1584,7 @@ export const PdfEditorView = forwardRef<PdfEditorViewHandle, PdfEditorViewProps>
                     className="gap-1.5 rounded-lg text-xs"
                   >
                     <ExternalLinkIcon className="h-3.5 w-3.5" />
-                    {isThai ? 'เปิดด้วยโปรแกรมภายนอก' : 'Open in External App'}
+                    {t("pdfEditor.openInExternalApp")}
                   </Button>
                 </div>
               )}

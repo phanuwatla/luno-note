@@ -1,3 +1,4 @@
+import { isVirtualTabId } from "@/lib/systemTabs";
 import { useState, useCallback, useRef } from "react";
 import type { Note } from "@/hooks/useNotes";
 import { APP_VERSION } from "@/lib/appVersion";
@@ -40,7 +41,7 @@ export async function saveWorkspaceSession(
   openTabPaths: string[],
   activeTabPath: string | null
 ) {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   const sessionData: WorkspaceSessionData = {
     openTabs: openTabPaths,
     activeTab: activeTabPath,
@@ -76,7 +77,7 @@ export async function saveWorkspaceSession(
 export async function loadWorkspaceSession(
   rootDirHandle: FileSystemDirectoryHandle | null
 ): Promise<WorkspaceSessionData | null> {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -121,19 +122,7 @@ export async function loadWorkspaceSession(
 }
 
 export function isSystemOrWebTab(id: string): boolean {
-  return (
-    id === "settings" || id.startsWith("settings:") ||
-    id === "luno-ai" || id.startsWith("luno-ai:") ||
-    id === "home" || id.startsWith("home:") ||
-    id === "help" || id.startsWith("help:") ||
-    id === "trash" || id.startsWith("trash:") ||
-    id === "templates" || id.startsWith("templates:") ||
-    id === "relations" || id.startsWith("relations:") ||
-    id === "favorites" || id.startsWith("favorites:") ||
-    id === "tags" || id.startsWith("tags:") ||
-    id === "whats-new" || id.startsWith("whats-new:") ||
-    id.startsWith("web:")
-  );
+  return isVirtualTabId(id);
 }
 
 export function isTabAllowedInCompactLayout(id: string): boolean {
@@ -229,7 +218,12 @@ function scheduleSaveWorkspaceSession(
   }, 400);
 }
 
-function saveTabs(openTabIds: string[], activeTabId: string | null, notes?: Note[]) {
+function saveTabs(
+  openTabIds: string[],
+  activeTabId: string | null,
+  notes?: Note[],
+  rootDirHandle?: FileSystemDirectoryHandle | null
+) {
   try {
     localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(openTabIds));
     localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, JSON.stringify(activeTabId));
@@ -239,19 +233,25 @@ function saveTabs(openTabIds: string[], activeTabId: string | null, notes?: Note
       const activePath = activeTabId ? getTabPath(activeTabId, notes) : null;
       localStorage.setItem(TAB_PATHS_STORAGE_KEY, JSON.stringify(paths));
       localStorage.setItem(ACTIVE_TAB_PATH_STORAGE_KEY, JSON.stringify(activePath));
-      scheduleSaveWorkspaceSession(null, paths, activePath);
+      scheduleSaveWorkspaceSession(rootDirHandle ?? null, paths, activePath);
     }
   } catch {
     /* ignore storage errors */
   }
 }
 
-export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
-  const initial = loadSavedTabs();
-  const [openTabIds, setOpenTabIds] = useState<string[]>(initial.openTabIds);
-  const [activeTabId, setActiveTabId] = useState<string | null>(initial.activeTabId);
-  const openTabIdsRef = useRef<string[]>(initial.openTabIds);
-  const activeTabIdRef = useRef<string | null>(initial.activeTabId);
+export function useTabs(
+  notesRef?: React.MutableRefObject<Note[]>,
+  rootDirHandleRef?: React.MutableRefObject<FileSystemDirectoryHandle | null>
+) {
+  const initialRef = useRef<ReturnType<typeof loadSavedTabs> | null>(null);
+  if (initialRef.current === null) {
+    initialRef.current = loadSavedTabs();
+  }
+  const [openTabIds, setOpenTabIds] = useState<string[]>(() => initialRef.current!.openTabIds);
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => initialRef.current!.activeTabId);
+  const openTabIdsRef = useRef<string[]>(initialRef.current.openTabIds);
+  const activeTabIdRef = useRef<string | null>(initialRef.current.activeTabId);
 
   const syncedSetOpenTabIds = useCallback((updater: (prev: string[]) => string[]) => {
     setOpenTabIds((prev) => {
@@ -260,17 +260,17 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
         return prev;
       }
       openTabIdsRef.current = next;
-      saveTabs(next, activeTabIdRef.current, notesRef?.current);
+      saveTabs(next, activeTabIdRef.current, notesRef?.current, rootDirHandleRef?.current);
       return next;
     });
-  }, [notesRef]);
+  }, [notesRef, rootDirHandleRef]);
 
   const syncedSetActiveTabId = useCallback((id: string | null) => {
     if (activeTabIdRef.current === id) return;
     activeTabIdRef.current = id;
     setActiveTabId(id);
-    saveTabs(openTabIdsRef.current, id, notesRef?.current);
-  }, [notesRef]);
+    saveTabs(openTabIdsRef.current, id, notesRef?.current, rootDirHandleRef?.current);
+  }, [notesRef, rootDirHandleRef]);
 
   const openTab = useCallback((id: string) => {
     if (!openTabIdsRef.current.includes(id)) {
@@ -363,7 +363,7 @@ export function useTabs(notesRef?: React.MutableRefObject<Note[]>) {
       try {
         localStorage.removeItem(TAB_PATHS_STORAGE_KEY);
         localStorage.removeItem(ACTIVE_TAB_PATH_STORAGE_KEY);
-      } catch {}
+      } catch { /* ignore */ }
     }
   }, []);
 

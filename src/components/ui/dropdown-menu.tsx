@@ -25,7 +25,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] outline-none transition-colors data-[state=open]:bg-primary/15 data-[state=open]:text-primary data-[state=open]:font-medium focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary data-[highlighted]:font-medium hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg:not(.text-primary)]:text-muted-foreground focus:[&>svg]:text-primary data-[highlighted]:[&>svg]:text-primary hover:[&>svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=open]:[&>svg]:text-primary [&.text-primary>svg]:text-primary [&.text-primary_svg]:text-primary",
+      "flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] outline-none transition-colors data-[state=open]:bg-primary/15 data-[state=open]:text-primary data-[state=open]:font-medium focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary data-[highlighted]:font-medium hover:bg-primary/[0.08] data-[highlighted]:hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:hover:text-primary [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg:not(.text-primary)]:text-muted-foreground focus:[&>svg]:text-primary data-[highlighted]:[&>svg]:text-primary hover:[&>svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=open]:[&>svg]:text-primary [&.text-primary>svg]:text-primary [&.text-primary_svg]:text-primary",
       inset && "pl-8",
       className,
     )}
@@ -45,7 +45,7 @@ const DropdownMenuSubContent = React.forwardRef<
     <DropdownMenuPrimitive.SubContent
       ref={ref}
       className={cn(
-        "z-50 min-w-[9rem] overflow-hidden rounded-xl border border-border/80 bg-popover p-1.5 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-[60] min-w-[9rem] overflow-hidden rounded-xl border border-border/80 bg-popover p-1.5 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className,
       )}
       {...props}
@@ -64,7 +64,7 @@ const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       collisionPadding={collisionPadding}
       className={cn(
-        "z-50 min-w-[9rem] overflow-hidden rounded-xl border border-border/80 bg-popover p-1.5 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-[60] min-w-[9rem] overflow-hidden rounded-xl border border-border/80 bg-popover p-1.5 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className,
       )}
       {...props}
@@ -93,7 +93,7 @@ const DropdownMenuItem = React.forwardRef<
         "relative flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         isDestructive
           ? "text-destructive focus:bg-destructive/10 focus:text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive hover:bg-destructive/10 hover:text-destructive [&>svg]:text-destructive focus:[&>svg]:text-destructive data-[highlighted]:[&>svg]:text-destructive hover:[&>svg]:text-destructive hover:[&_svg]:text-destructive data-[highlighted]:hover:[&_svg]:text-destructive"
-          : "focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary data-[highlighted]:font-medium hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/18 data-[state=checked]:data-[highlighted]:bg-primary/18 [&>svg:not(.text-primary)]:text-muted-foreground focus:[&>svg]:text-primary data-[highlighted]:[&>svg]:text-primary hover:[&>svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:[&>svg]:text-primary [&.text-primary>svg]:text-primary [&.text-primary_svg]:text-primary",
+          : "focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary data-[highlighted]:font-medium hover:bg-primary/[0.08] data-[highlighted]:hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:hover:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/[0.18] data-[state=checked]:data-[highlighted]:bg-primary/[0.18] [&>svg:not(.text-primary)]:text-muted-foreground focus:[&>svg]:text-primary data-[highlighted]:[&>svg]:text-primary hover:[&>svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:[&>svg]:text-primary [&.text-primary>svg]:text-primary [&.text-primary_svg]:text-primary",
         "[&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0",
         inset && "pl-8",
         className,
@@ -111,7 +111,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-3 text-[13px] outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/18 data-[state=checked]:data-[highlighted]:bg-primary/18",
+      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-3 text-[13px] outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/[0.08] data-[highlighted]:hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/[0.18] data-[state=checked]:data-[highlighted]:bg-primary/[0.18]",
       className,
     )}
     checked={checked}
@@ -134,7 +134,7 @@ const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-3 text-[13px] outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/8 data-[highlighted]:hover:bg-primary/8 hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/18 data-[state=checked]:data-[highlighted]:bg-primary/18",
+      "relative flex cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-3 text-[13px] outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/15 focus:text-primary focus:font-medium data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary hover:bg-primary/[0.08] data-[highlighted]:hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary data-[highlighted]:hover:[&>svg]:text-primary data-[highlighted]:hover:[&_svg]:text-primary data-[state=checked]:bg-primary/15 data-[state=checked]:text-primary data-[state=checked]:font-semibold data-[state=checked]:hover:bg-primary/[0.18] data-[state=checked]:data-[highlighted]:bg-primary/[0.18]",
       className,
     )}
     {...props}

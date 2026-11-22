@@ -38,7 +38,7 @@ export async function getLocalWorkspaceManifest(
   fallbackName?: string
 ): Promise<WorkspaceManifest | null> {
   try {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     // 1. Electron Desktop Environment
     if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent && electronAPI?.writeFileContent) {
@@ -170,7 +170,7 @@ export function registerKnownLocalWorkspace(manifest: WorkspaceManifest, pathOrH
 export async function getAllKnownLocalManifests(): Promise<WorkspaceManifest[]> {
   const manifests: WorkspaceManifest[] = [];
   const seenIds = new Set<string>();
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
 
   if (electronAPI?.getSavedWorkspace) {
     try {

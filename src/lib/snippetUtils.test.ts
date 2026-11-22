@@ -59,4 +59,17 @@ Here is the body content.`;
     expect(getNotePreviewSnippet(imgNote, 100, true)).toBe("ไฟล์รูปภาพ");
     expect(getNotePreviewSnippet(imgNote, 100, false)).toBe("Image file");
   });
+
+  it("never leaks encrypted note envelope or locked note content in preview snippets", () => {
+    const lockedNote: Note = {
+      id: "3",
+      title: "Secret Note",
+      content: "<!-- LUNO_ENCRYPTED_PAYLOAD_START -->\neyJsdW5vX2xvY2tlZCI6dHJ1ZX0=\n<!-- LUNO_ENCRYPTED_PAYLOAD_END -->",
+      isLocked: true,
+      isDecrypted: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    expect(getNotePreviewSnippet(lockedNote, 100)).toBe("");
+  });
 });

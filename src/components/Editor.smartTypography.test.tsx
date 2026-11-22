@@ -6,7 +6,7 @@ import { Link } from "@tiptap/extension-link";
 
 describe("Smart typography and autolinks setting toggle", () => {
   it("converts typography shortcuts (quotes, dashes, arrows, symbols) when enabled", () => {
-    let isSmartTypoEnabled = true;
+    const isSmartTypoEnabled = true;
 
     const editor = new TiptapEditor({
       extensions: [

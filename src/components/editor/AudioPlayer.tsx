@@ -40,6 +40,7 @@ import {
 } from "./mediaContextMenuUtils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { VolumeHoverSlider } from "./VolumeHoverSlider";
 
 function formatTime(seconds: number): string {
   if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return "00:00";
@@ -295,7 +296,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 <button
                   type="button"
                   onClick={togglePlay}
-                  className="h-7 w-7 rounded-full bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 flex items-center justify-center transition-transform active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:outline-none"
+                  className="h-7 w-7 rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 flex items-center justify-center transition-transform active:scale-95 cursor-pointer shrink-0 focus:outline-none focus-visible:outline-none"
                 >
                   {isPlaying ? (
                     <Pause className="h-3.5 w-3.5 fill-current" />
@@ -305,7 +306,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {isPlaying ? (t("editor.videoPause") || "Pause") : (t("editor.videoPlay") || "Play")}
+                {isPlaying ? (t("editor.videoPause")) : (t("editor.videoPlay"))}
               </TooltipContent>
             </Tooltip>
 
@@ -328,22 +329,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {isMuted ? (t("editor.videoUnmute") || "Unmute") : (t("editor.videoMute") || "Mute")}
+                  {isMuted ? (t("editor.videoUnmute")) : (t("editor.videoMute"))}
                 </TooltipContent>
               </Tooltip>
 
               {/* Volume Slider on Hover */}
-              <div className="w-0 group-hover/vol:w-16 transition-all duration-200 overflow-hidden flex items-center">
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                  className="w-16 h-1 accent-primary cursor-pointer bg-muted-foreground/30 dark:bg-white/30 rounded-full"
-                />
-              </div>
+              <VolumeHoverSlider
+                volume={volume}
+                isMuted={isMuted}
+                onVolumeChange={handleVolumeChange}
+              />
             </div>
 
             {/* Time Display (Interface Font) */}
@@ -422,7 +417,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {t("editor.audioSpeed") || t("editor.videoSpeed") || "Playback speed"}
+                  {t("editor.audioSpeed")}
                 </TooltipContent>
               </Tooltip>
 
@@ -442,7 +437,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {t("editor.audioLoop") || t("editor.videoLoop") || "Loop"}
+                  {t("editor.audioLoop")}
                 </TooltipContent>
               </Tooltip>
 
@@ -458,7 +453,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {t("editor.audioDownload") || "Download"}
+                  {t("editor.audioDownload")}
                 </TooltipContent>
               </Tooltip>
 
@@ -475,7 +470,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    {t("common.delete") || "Delete"}
+                    {t("common.delete")}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -485,20 +480,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         <ContextMenuContent className="w-56 rounded-xl">
           <ContextMenuItem onClick={togglePlay} className="gap-2.5">
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
-            <span>{isPlaying ? (t("editor.videoPause") || "หยุดชั่วคราว") : (t("editor.videoPlay") || "เล่น")}</span>
+            <span>{isPlaying ? (t("editor.videoPause")) : (t("editor.videoPlay"))}</span>
           </ContextMenuItem>
 
           <ContextMenuItem
             onClick={toggleLoop}
             className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
               isLooping
-                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
                 : ""
             }`}
           >
             <div className="flex items-center gap-2.5">
               <Repeat className={`h-4 w-4 shrink-0 ${isLooping ? "text-primary" : ""}`} />
-              <span>{t("editor.audioLoop") || t("editor.videoLoop") || "เล่นวนซ้ำ"}</span>
+              <span>{t("editor.audioLoop")}</span>
             </div>
             {isLooping && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
           </ContextMenuItem>
@@ -506,7 +501,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <ContextMenuSub>
             <ContextMenuSubTrigger className="gap-2.5">
               <Gauge className="h-4 w-4" />
-              <span>{t("editor.audioSpeed") || "ความเร็วในการเล่น"} ({playbackRate}x)</span>
+              <span>{t("editor.audioSpeed")} ({playbackRate}x)</span>
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-36 rounded-xl">
               {[1, 1.25, 1.5, 2].map((rate) => (
@@ -518,7 +513,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                     if (audioRef.current) audioRef.current.playbackRate = rate;
                   }}
                 >
-                  {rate}x {rate === 1 && `(${t("editor.speedNormal") || "ปกติ"})`}
+                  {rate}x {rate === 1 && `(${t("editor.speedNormal")})`}
                 </ContextMenuCheckboxItem>
               ))}
             </ContextMenuSubContent>
@@ -531,7 +526,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             className="gap-2.5"
           >
             <ExternalLink className="h-4 w-4" />
-            <span>{t("editor.openInDefaultApp") || "เปิดในโปรแกรมเริ่มต้น"}</span>
+            <span>{t("editor.openInDefaultApp")}</span>
           </ContextMenuItem>
 
           <ContextMenuItem
@@ -539,43 +534,43 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             className="gap-2.5"
           >
             <FolderOpen className="h-4 w-4" />
-            <span>{t("editor.revealInFolder") || "แสดงในโฟลเดอร์"}</span>
+            <span>{t("editor.revealInFolder")}</span>
           </ContextMenuItem>
 
           <ContextMenuSub>
             <ContextMenuSubTrigger className="gap-2.5">
               <LinkIcon className="h-4 w-4" />
-              <span>{t("editor.copyAudioPath") || "คัดลอกพาธไฟล์เสียง"}</span>
+              <span>{t("editor.copyAudioPath")}</span>
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-48 rounded-xl">
               <ContextMenuItem
                 onClick={() => {
                   void copyMediaPath(src, dataRelativeSrc, "relative", {
-                    title: t("editor.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+                    title: t("editor.copiedRelativePath"),
                   });
                 }}
                 className="gap-2.5 cursor-pointer"
               >
                 <FileText className="h-4 w-4" />
-                <span>{t("editor.copyRelativePath") || "คัดลอกพาธสัมพัทธ์"}</span>
+                <span>{t("editor.copyRelativePath")}</span>
               </ContextMenuItem>
               <ContextMenuItem
                 onClick={() => {
                   void copyMediaPath(src, dataRelativeSrc, "full", {
-                    title: t("editor.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+                    title: t("editor.copiedAbsolutePath"),
                   });
                 }}
                 className="gap-2.5 cursor-pointer"
               >
                 <Folder className="h-4 w-4" />
-                <span>{t("editor.copyAbsolutePath") || "คัดลอกพาธแบบเต็ม"}</span>
+                <span>{t("editor.copyAbsolutePath")}</span>
               </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
 
           <ContextMenuItem onClick={handleDownload} className="gap-2.5">
             <Download className="h-4 w-4" />
-            <span>{t("editor.audioDownload") || "ดาวน์โหลดไฟล์เสียง"}</span>
+            <span>{t("editor.audioDownload")}</span>
           </ContextMenuItem>
 
           <ContextMenuSeparator />
@@ -585,13 +580,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               onClick={() => {
                 const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
                 const md = targetRel ? `<audio src="${targetRel}" controls></audio>` : `<audio src="${src}" controls></audio>`;
-                void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+                void copyTextToClipboard(md, t("editor.copiedMarkdown"));
                 onDelete();
               }}
               className="gap-2.5"
             >
               <Scissors className="h-4 w-4" />
-              <span>{t("editor.cut") || "ตัด"}</span>
+              <span>{t("editor.cut")}</span>
               <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
             </ContextMenuItem>
           )}
@@ -600,12 +595,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onClick={() => {
               const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
               const md = targetRel ? `<audio src="${targetRel}" controls></audio>` : `<audio src="${src}" controls></audio>`;
-              void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+              void copyTextToClipboard(md, t("editor.copiedMarkdown"));
             }}
             className="gap-2.5"
           >
             <Copy className="h-4 w-4" />
-            <span>{t("editor.copyMarkdown") || "คัดลอก Markdown"}</span>
+            <span>{t("editor.copyMarkdown")}</span>
             <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
           </ContextMenuItem>
 
@@ -616,7 +611,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               className="gap-2.5 text-destructive focus:text-destructive"
             >
               <Trash2 className="h-4 w-4" />
-              <span>{t("editor.deleteAudio") || "ลบไฟล์เสียง"}</span>
+              <span>{t("editor.deleteAudio")}</span>
               <ContextMenuShortcut>Del</ContextMenuShortcut>
             </ContextMenuItem>
           )}

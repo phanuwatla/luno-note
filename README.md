@@ -6,27 +6,27 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.4.0-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.4.0)
+[![Version](https://img.shields.io/badge/version-1.4.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.4.1)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.4.0-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.4.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
 Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
 
-[Download Version 1.4.0](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.4.0](#what-is-new-in-version-140) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.4.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.4.1](#what-is-new-in-version-141) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.4.0
+## What Is New in Version 1.4.1
 
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Inko PDF Editor & Vector Annotations**: Full PDF reading and annotation system with pen, highlighter, geometric shapes (rectangle, circle, line, arrow), text boxes, eraser, and laser pointer. Uses non-destructive sidecar annotations (.luno-pdf) preserving the original PDF, complete with in-PDF search, bookmarks, and thumbnail navigation.
-- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **CodeMirror 6 Engine & Indentation Guides**: High-performance code editor for HTML, CSS, and JavaScript (.js, .mjs, .cjs) with vertical indentation guide lines, interactive color preview badges with color picker, code folding, and floating search and replace.
-- <img src="./assets/icons/chevron-right.svg" width="16" height="16" align="center" /> **Collapsible Headings (Heading Toggle)**: Fold and collapse any section under H1–H6 headings in the note editor with interactive chevron toggles, with persistent per-note fold state and global setting.
-- <img src="./assets/icons/folders.svg" width="16" height="16" align="center" /> **Favorites & Tags Dual View Modes**: Toggle seamlessly between compact List View and visual Card Grid View in Favorites and Tags tab views with synchronized note/folder icons and colors matching the sidebar tree.
-- <img src="./assets/icons/cloud.svg" width="16" height="16" align="center" /> **Native JavaScript & Clean Workspace Portability**: Full support for .js, .mjs, and .cjs files, paired with machine-isolated workspace settings that safeguard individual usernames across shared workspaces and devices.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **System-wide Thai/English Mistyping Fixer (System Fix Language)**: Seamlessly convert mistyped text between Thai (Kedmanee) and English (QWERTY) keyboard layouts across any Windows application with a global hotkey, powered by a high-performance native background helper (`LunoFixLang.exe`) and dictionary heuristics.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Multimodal AI Vision & Image Attachments**: Attach and analyze images directly in the Luno AI chat panel using Gemini multimodal vision models for visual explanations, diagram understanding, and OCR assistance.
+- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Table Controls (TableInteractiveOverlay)**: Effortless one-click controls to insert, delete, and reorder table rows and columns, toggle header rows, and manage cells directly on the editor surface.
+- <img src="./assets/icons/video.svg" width="16" height="16" align="center" /> **Enhanced Media Players with Hover Volume Control**: Embedded audio and video players feature an intuitive hover volume slider and unified workspace media selection dialogs.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **System Architecture & Standards Compliance**: Full adherence to repository engineering standards, symlink-aware Electron path confinement, credential encryption via `safeStorage`, 15 standard Radix UI primitives, tree-shaken icon registries, and 100% dictionary-driven localization.
 
 ---
 
@@ -53,7 +53,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.4.0.exe`** | Automated Windows installer with differential update support | [![Download v1.4.0](https://img.shields.io/badge/Download-v1.4.0-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.4.0/luno-note-setup-1.4.0.exe) |
+| **`luno-note-setup-1.4.1.exe`** | Automated Windows installer with differential update support | [![Download v1.4.1](https://img.shields.io/badge/Download-v1.4.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.4.1/luno-note-setup-1.4.1.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 
@@ -70,8 +70,8 @@ Luno Note Desktop includes integrated update distribution powered by `electron-u
 
 ## Architecture and Technology Stack
 
-- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **Frontend Framework**: [React 19](https://react.dev/), [Vite](https://vite.dev/), [TypeScript](https://www.typescriptlang.org/)
-- <img src="./assets/icons/device-desktop.svg" width="16" height="16" align="center" /> **Desktop Runtime**: [Electron](https://www.electronjs.org/) and [Tauri](https://tauri.app/)
+- <img src="./assets/icons/code.svg" width="16" height="16" align="center" /> **Frontend Framework**: [React 18](https://react.dev/), [Vite](https://vite.dev/), [TypeScript](https://www.typescriptlang.org/)
+- <img src="./assets/icons/device-desktop.svg" width="16" height="16" align="center" /> **Desktop Runtime**: [Electron](https://www.electronjs.org/)
 - <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text Engine**: [TipTap](https://tiptap.dev/) Core with Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
 - <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Styling and UI Components**: [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/)
 - <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Audio and Text)
@@ -83,7 +83,7 @@ Luno Note Desktop includes integrated update distribution powered by `electron-u
 
 ### Prerequisites
 - Node.js (version 20 or higher recommended)
-- npm or bun
+- npm
 
 ### Local Environment Setup
 ```bash
@@ -109,6 +109,12 @@ npm run build
 # Package Windows desktop installer
 npm run electron:build
 ```
+
+---
+
+## Engineering & Design Standards
+
+Contributors and AI agents must follow the Luno Note system standards documented in [docs/standards/](docs/standards/engineering-standards.md) and enforced by the repository skill at `.agents/skills/luno-note-standards/SKILL.md`.
 
 ---
 

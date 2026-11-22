@@ -290,7 +290,7 @@ export function cleanAiOutputText(rawText: string): string {
     if (doubleQuoteMatches.length > 0) {
       // Pick the last valid non-source quote
       const lastQuote = doubleQuoteMatches[doubleQuoteMatches.length - 1][1];
-      if (lastQuote && !lastQuote.includes("ทันใดนั้นแมว")) {
+      if (lastQuote) {
         return lastQuote.trim();
       }
     }
@@ -320,6 +320,14 @@ export function formatModelName(modelName?: string): string {
   if (clean === "gemini-1.5-flash") return "Gemini 1.5 Flash";
   if (clean === "gemini-1.5-pro") return "Gemini 1.5 Pro";
   if (clean === "gemini-2.5-flash") return "Gemini 2.5 Flash";
+  if (clean === "gemini-2.5-flash-image") return "Gemini 2.5 Flash Image";
+  if (clean === "gemini-2.0-flash-exp-image-generation" || clean === "gemini-2.0-flash-preview-image-generation") {
+    return "Gemini 2.0 Flash Image";
+  }
+  if (clean.startsWith("imagen-4.0-fast")) return "Imagen 4.0 Fast";
+  if (clean.startsWith("imagen-4.0-ultra")) return "Imagen 4.0 Ultra";
+  if (clean.startsWith("imagen-4.0")) return "Imagen 4.0";
+  if (clean.startsWith("imagen-3.0")) return "Imagen 3.0";
 
   return clean
     .split("-")
@@ -364,7 +372,7 @@ export function markModelExhausted(model: string): void {
     current[clean] = Date.now();
     localStorage.setItem(EXHAUSTED_MODELS_KEY, JSON.stringify(current));
     window.dispatchEvent(new CustomEvent("luno_gemini_quota_changed", { detail: { model: clean } }));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 export function isModelExhausted(model: string): boolean {
@@ -382,7 +390,7 @@ export function clearExhaustedModels(): void {
   try {
     localStorage.removeItem(EXHAUSTED_MODELS_KEY);
     window.dispatchEvent(new CustomEvent("luno_gemini_quota_changed", { detail: {} }));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 export interface AvailableModelOption {
@@ -430,7 +438,7 @@ export function getStoredSpecializedModels(): string[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
-  } catch {}
+  } catch { /* ignore */ }
   return [];
 }
 
@@ -438,7 +446,7 @@ export function saveStoredSpecializedModels(models: string[]): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(SPECIALIZED_MODELS_CACHE_KEY, JSON.stringify(models));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 export function getAutoModelCandidates(preferredType?: "fast" | "smart" | "creative"): string[] {
@@ -469,8 +477,10 @@ export function getAutoModelCandidates(preferredType?: "fast" | "smart" | "creat
 
 export async function fetchSupportedModels(apiKey: string): Promise<string[]> {
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`;
-    const res = await fetch(url);
+    const url = "https://generativelanguage.googleapis.com/v1beta/models";
+    const res = await fetch(url, {
+      headers: { "x-goog-api-key": apiKey.trim() },
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.models)) {
@@ -614,11 +624,12 @@ export async function runGeminiAction(
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-goog-api-key": trimmedKey,
         },
         body: JSON.stringify({
           contents: [
@@ -716,11 +727,14 @@ export async function runGeminiPrompt(
   for (let i = 0; i < preferredModels.length; i++) {
     const model = preferredModels[i];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const temp = selectedModel === "creative" ? 0.85 : selectedModel === "smart" ? 0.3 : 0.4;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": trimmedKey,
+        },
         body: JSON.stringify({
           systemInstruction: {
             parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
@@ -858,11 +872,14 @@ export async function runGeminiChatHistory(
   for (let i = 0; i < preferredModels.length; i++) {
     const model = preferredModels[i];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const temp = selectedModel === "creative" ? 0.85 : selectedModel === "smart" ? 0.3 : 0.4;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": trimmedKey,
+        },
         body: JSON.stringify({
           systemInstruction: {
             parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
@@ -956,8 +973,6 @@ export async function transcribeAudioWithGemini(
   const cleanMimeType = rawMimeType.split(";")[0].trim() || "audio/webm";
 
   let models = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
     "gemini-2.5-flash",
     "gemini-flash-latest",
   ];
@@ -974,10 +989,13 @@ export async function transcribeAudioWithGemini(
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": trimmedKey,
+        },
         body: JSON.stringify({
           contents: [
             {
@@ -1119,5 +1137,470 @@ export function cleanVoiceTranscription(raw: string): string {
   }
 
   return cleaned;
+}
+
+export type ImageAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+
+export interface ReferenceImageInput {
+  dataUrl: string;
+  mimeType?: string;
+  name?: string;
+}
+
+export interface GeneratedImageItem {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  alt?: string;
+  aspectRatio?: ImageAspectRatio;
+}
+
+export interface GeminiImageGenerationResult {
+  images: GeneratedImageItem[];
+  text?: string;
+  modelUsed: string;
+}
+
+export const STANDARD_IMAGE_MODELS = [
+  "gemini-2.5-flash-image",
+  "gemini-2.5-flash-image-preview",
+  "gemini-2.0-flash-preview-image-generation",
+  "gemini-2.0-flash-exp-image-generation",
+  "imagen-4.0-generate-001",
+  "imagen-4.0-fast-generate-001",
+  "imagen-3.0-generate-002",
+];
+
+function isImagenModel(modelId: string): boolean {
+  return modelId.toLowerCase().includes("imagen");
+}
+
+function parseDataUrlParts(dataUrl: string, fallbackMime = "image/png"): { mimeType: string; data: string } | null {
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  const trimmed = dataUrl.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const commaIdx = trimmed.indexOf(",");
+  if (commaIdx === -1) return null;
+  const header = trimmed.slice(0, commaIdx);
+  const data = trimmed.slice(commaIdx + 1).trim();
+  if (!data) return null;
+  const mimeMatch = header.match(/^data:([^;]+);base64$/i);
+  const mimeType = mimeMatch ? mimeMatch[1].trim() : fallbackMime;
+  return { mimeType, data };
+}
+
+export async function fetchSupportedImageModels(apiKey: string): Promise<string[]> {
+  try {
+    const url = "https://generativelanguage.googleapis.com/v1beta/models";
+    const res = await fetch(url, {
+      headers: { "x-goog-api-key": apiKey.trim() },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data?.models)) {
+        const discovered = data.models
+          .filter((m: any) => {
+            const name = String(m.name || "").toLowerCase();
+            const methods: string[] = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+            const isGeminiImage = name.includes("gemini") && name.includes("image") && methods.includes("generateContent");
+            const isImagen = name.includes("imagen") && (methods.includes("predict") || methods.includes("generateImages"));
+            return isGeminiImage || isImagen;
+          })
+          .map((m: any) => String(m.name).replace(/^models\//, ""));
+
+        if (discovered.length > 0) {
+          return discovered;
+        }
+      }
+    }
+  } catch {
+    // Ignore discovery failure and fall back to standard candidates
+  }
+  return [...STANDARD_IMAGE_MODELS];
+}
+
+export function getAutoImageModelCandidates(hasReferenceImages = false): string[] {
+  const ordered = hasReferenceImages
+    ? [
+        ...STANDARD_IMAGE_MODELS.filter((m) => !isImagenModel(m)),
+        ...STANDARD_IMAGE_MODELS.filter((m) => isImagenModel(m)),
+      ]
+    : [...STANDARD_IMAGE_MODELS];
+
+  const active = ordered.filter((m) => !isModelExhausted(m));
+  const exhausted = ordered.filter((m) => isModelExhausted(m));
+  return Array.from(new Set([...active, ...exhausted]));
+}
+
+export class GeminiFreeTierImageError extends Error {
+  readonly code = "FREE_TIER_IMAGE_UNSUPPORTED" as const;
+
+  constructor(lang: "th" | "en" = "th") {
+    super(
+      lang === "en"
+        ? "Your Gemini API key is on the Free Tier, which does not include image generation. Enable billing in Google AI Studio to use this feature."
+        : "API Key ที่คุณใช้อยู่เป็นแบบฟรี (Free Tier) ซึ่งไม่รองรับการสร้างภาพ กรุณาเปิด Billing ใน Google AI Studio หรือเปลี่ยนไปใช้ Paid API Key"
+    );
+    this.name = "GeminiFreeTierImageError";
+  }
+}
+
+export function isFreeTierImageRestrictionError(
+  status: number,
+  message: string,
+  errorData?: unknown
+): boolean {
+  const msg = String(message || "");
+
+  // Explicit billing / paid-tier-only messages (e.g. Imagen "only accessible to billed users")
+  if (
+    /only accessible to billed users/i.test(msg) ||
+    /billed\s+users?\s+only/i.test(msg) ||
+    /requires?\s+(an?\s+)?(active\s+)?billing/i.test(msg) ||
+    /enable\s+billing/i.test(msg) ||
+    /paid\s+(tier|plan|account)\s+(only|required)/i.test(msg) ||
+    /not\s+available\s+(in|on)\s+(the\s+)?free\s+tier/i.test(msg) ||
+    /free\s+tier\s+(is\s+not|does\s+not|doesn't)/i.test(msg)
+  ) {
+    return true;
+  }
+
+  // Gemini API Free Tier returns HTTP 429 with `limit: 0` when the tier never had image quota
+  if (status === 429 && /\blimit\s*:\s*0\b/i.test(msg)) {
+    return true;
+  }
+
+  // Inspect structured Google RPC QuotaFailure details for zero-limit free tier entries
+  const details = (errorData as { error?: { details?: Array<Record<string, unknown>> } } | null)?.error?.details;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      const violations = detail?.violations;
+      if (!Array.isArray(violations)) continue;
+      for (const v of violations as Array<Record<string, unknown>>) {
+        const quotaId = String(v?.quotaId || "");
+        const quotaMetric = String(v?.quotaMetric || "");
+        const quotaValue = v?.quotaValue;
+        const isFreeTierMetric = /free.?tier/i.test(quotaId) || /free.?tier/i.test(quotaMetric);
+        const isZeroLimit = quotaValue === 0 || quotaValue === "0";
+        if (isFreeTierMetric && (isZeroLimit || /\blimit\s*:\s*0\b/i.test(msg))) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export async function generateImageWithGemini(
+  apiKey: string,
+  promptText: string,
+  options?: {
+    aspectRatio?: ImageAspectRatio;
+    referenceImages?: ReferenceImageInput[];
+    lang?: "th" | "en";
+  }
+): Promise<GeminiImageGenerationResult> {
+  const trimmedKey = apiKey.trim();
+  const lang = options?.lang || "th";
+  const aspectRatio: ImageAspectRatio = options?.aspectRatio || "1:1";
+
+  if (!trimmedKey) {
+    throw new Error(
+      lang === "en"
+        ? "Gemini API key is missing. Please add your API key in Settings."
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+    );
+  }
+
+  const trimmedPrompt = promptText.trim();
+  if (!trimmedPrompt) {
+    throw new Error(
+      lang === "en"
+        ? "Please enter a prompt describing the image you want to generate."
+        : "กรุณาระบุคำอธิบายภาพที่ต้องการให้สร้าง"
+    );
+  }
+
+  const parsedRefs = (options?.referenceImages || [])
+    .map((ref) => parseDataUrlParts(ref.dataUrl, ref.mimeType || "image/png"))
+    .filter((item): item is { mimeType: string; data: string } => Boolean(item));
+
+  let models = getAutoImageModelCandidates(parsedRefs.length > 0);
+  let hasDiscovered = false;
+  let geminiFamilyFreeTierBlocked = false;
+  let imagenFamilyFreeTierBlocked = false;
+  let sawRealQuotaExceeded = false;
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    const isImagen = isImagenModel(model);
+
+    // Avoid redundant failing requests across the same model family once Free Tier block is confirmed
+    if (!isImagen && geminiFamilyFreeTierBlocked) continue;
+    if (isImagen && imagenFamilyFreeTierBlocked) continue;
+
+    try {
+      if (isImagen) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": trimmedKey,
+          },
+          body: JSON.stringify({
+            instances: [{ prompt: trimmedPrompt }],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+          if (isFreeTierImageRestrictionError(response.status, message, errorData)) {
+            imagenFamilyFreeTierBlocked = true;
+            if (geminiFamilyFreeTierBlocked) {
+              throw new GeminiFreeTierImageError(lang);
+            }
+            lastError = new GeminiFreeTierImageError(lang);
+            continue;
+          }
+
+          if (response.status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("resource_exhausted")) {
+            sawRealQuotaExceeded = true;
+            markModelExhausted(model);
+          }
+
+          if ((message.toLowerCase().includes("not found") || response.status === 404) && !hasDiscovered) {
+            hasDiscovered = true;
+            const discovered = await fetchSupportedImageModels(trimmedKey);
+            const newModels = discovered.filter((m) => !models.includes(m));
+            if (newModels.length > 0) {
+              models = models.concat(newModels);
+            }
+          }
+
+          throw parseGeminiApiError(response.status, message, lang);
+        }
+
+        const data = await response.json();
+        const predictions = Array.isArray(data?.predictions) ? data.predictions : [];
+        const images: GeneratedImageItem[] = [];
+
+        for (let idx = 0; idx < predictions.length; idx++) {
+          const pred = predictions[idx];
+          const b64 = pred?.bytesBase64Encoded;
+          if (typeof b64 === "string" && b64.trim()) {
+            const mimeType = typeof pred?.mimeType === "string" && pred.mimeType ? pred.mimeType : "image/png";
+            images.push({
+              id: `luno-ai-img-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+              dataUrl: `data:${mimeType};base64,${b64}`,
+              mimeType,
+              alt: trimmedPrompt,
+              aspectRatio,
+            });
+          }
+        }
+
+        if (images.length > 0) {
+          return {
+            images,
+            modelUsed: model,
+          };
+        }
+
+        throw new Error(
+          lang === "en"
+            ? "No image was returned by Gemini API. Try adjusting your prompt."
+            : "Gemini API ไม่ได้ส่งคืนรูปภาพ กรุณาลองปรับคำอธิบายภาพใหม่อีกครั้ง"
+        );
+      } else {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+        const buildRequestBody = (includeImageConfig: boolean) => {
+          const promptWithHint =
+            !includeImageConfig && aspectRatio !== "1:1"
+              ? `${trimmedPrompt} (aspect ratio ${aspectRatio})`
+              : trimmedPrompt;
+          const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+            ...parsedRefs.map((ref) => ({
+              inlineData: {
+                mimeType: ref.mimeType,
+                data: ref.data,
+              },
+            })),
+            { text: promptWithHint },
+          ];
+          const generationConfig: Record<string, unknown> = {
+            responseModalities: ["TEXT", "IMAGE"],
+          };
+          if (includeImageConfig) {
+            generationConfig.imageConfig = { aspectRatio };
+          }
+          return {
+            contents: [{ role: "user", parts }],
+            generationConfig,
+          };
+        };
+
+        let response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": trimmedKey,
+          },
+          body: JSON.stringify(buildRequestBody(true)),
+        });
+
+        // Older preview image models may reject imageConfig; retry once without imageConfig
+        if (!response.ok && response.status === 400) {
+          const errorData = await response.json().catch(() => ({}));
+          const rawMsg = String(errorData?.error?.message || "");
+          if (isFreeTierImageRestrictionError(response.status, rawMsg, errorData)) {
+            geminiFamilyFreeTierBlocked = true;
+            if (imagenFamilyFreeTierBlocked) {
+              throw new GeminiFreeTierImageError(lang);
+            }
+            lastError = new GeminiFreeTierImageError(lang);
+            continue;
+          }
+          if (/imageconfig|image_config|aspectratio|aspect_ratio|unknown name/i.test(rawMsg)) {
+            response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": trimmedKey,
+              },
+              body: JSON.stringify(buildRequestBody(false)),
+            });
+          } else {
+            throw parseGeminiApiError(response.status, rawMsg || `HTTP ${response.status}`, lang);
+          }
+        }
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const message = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+
+          if (isFreeTierImageRestrictionError(response.status, message, errorData)) {
+            geminiFamilyFreeTierBlocked = true;
+            if (imagenFamilyFreeTierBlocked) {
+              throw new GeminiFreeTierImageError(lang);
+            }
+            lastError = new GeminiFreeTierImageError(lang);
+            continue;
+          }
+
+          if (response.status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("resource_exhausted")) {
+            sawRealQuotaExceeded = true;
+            markModelExhausted(model);
+          }
+
+          if ((message.toLowerCase().includes("not found") || response.status === 404) && !hasDiscovered) {
+            hasDiscovered = true;
+            const discovered = await fetchSupportedImageModels(trimmedKey);
+            const newModels = discovered.filter((m) => !models.includes(m));
+            if (newModels.length > 0) {
+              models = models.concat(newModels);
+            }
+          }
+
+          throw parseGeminiApiError(response.status, message, lang);
+        }
+
+        const data = await response.json();
+        const parts: any[] = data?.candidates?.[0]?.content?.parts || [];
+        const images: GeneratedImageItem[] = [];
+        const textParts: string[] = [];
+
+        for (let idx = 0; idx < parts.length; idx++) {
+          const part = parts[idx];
+          const inline = part?.inlineData || part?.inline_data;
+          if (inline?.data && typeof inline.data === "string") {
+            const mimeType = inline.mimeType || inline.mime_type || "image/png";
+            if (mimeType.startsWith("image/")) {
+              images.push({
+                id: `luno-ai-img-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+                dataUrl: `data:${mimeType};base64,${inline.data}`,
+                mimeType,
+                alt: trimmedPrompt,
+                aspectRatio,
+              });
+            }
+          } else if (typeof part?.text === "string" && part.text.trim()) {
+            textParts.push(part.text.trim());
+          }
+        }
+
+        if (images.length > 0) {
+          return {
+            images,
+            text: textParts.length > 0 ? textParts.join("\n\n") : undefined,
+            modelUsed: model,
+          };
+        }
+
+        const finishReason = data?.candidates?.[0]?.finishReason;
+        if (finishReason === "SAFETY" || finishReason === "IMAGE_SAFETY" || finishReason === "PROHIBITED_CONTENT") {
+          throw new Error(
+            lang === "en"
+              ? "Image generation was blocked by safety filters. Please try a different prompt."
+              : "ไม่สามารถสร้างภาพนี้ได้เนื่องจากติดเงื่อนไขความปลอดภัย กรุณาลองปรับคำอธิบายภาพใหม่"
+          );
+        }
+
+        throw new Error(
+          textParts[0] ||
+            (lang === "en"
+              ? "No image was returned by Gemini API. Try describing the image more clearly."
+              : "Gemini API ไม่ได้ส่งคืนรูปภาพ กรุณาลองอธิบายรายละเอียดภาพให้ชัดเจนขึ้น")
+        );
+      }
+    } catch (err) {
+      if (err instanceof GeminiFreeTierImageError) {
+        throw err;
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (
+        lastError.message.includes("Invalid Gemini API Key") ||
+        lastError.message.includes("Gemini API Key ไม่ถูกต้อง") ||
+        lastError.message.includes("Token Limit") ||
+        lastError.message.includes("safety filters") ||
+        lastError.message.includes("เงื่อนไขความปลอดภัย")
+      ) {
+        throw lastError;
+      }
+      if (
+        lastError.message.includes("โควตา Gemini API") ||
+        lastError.message.includes("quota exceeded")
+      ) {
+        sawRealQuotaExceeded = true;
+        markModelExhausted(model);
+      }
+      // Continue to next candidate model
+      if (i < models.length - 1) {
+        continue;
+      }
+    }
+  }
+
+  if ((geminiFamilyFreeTierBlocked || imagenFamilyFreeTierBlocked) && !sawRealQuotaExceeded) {
+    throw new GeminiFreeTierImageError(lang);
+  }
+
+  throw (
+    lastError ||
+    new Error(
+      lang === "en"
+        ? "Failed to generate image with Gemini API."
+        : "ไม่สามารถสร้างภาพด้วย Gemini API ได้"
+    )
+  );
 }
 

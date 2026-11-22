@@ -14,7 +14,7 @@ export function normalizeMediaKey(key: string): string {
   let clean = key.trim().split("|")[0].split("?")[0].split("#")[0];
   try {
     clean = decodeURIComponent(clean);
-  } catch {}
+  } catch { /* ignore */ }
   return clean.toLowerCase().replace(/\\/g, "/").split("/").pop() || clean.toLowerCase();
 }
 

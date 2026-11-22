@@ -12,6 +12,12 @@ import { javascript } from "@codemirror/lang-javascript";
 import { uniformIndentGuides } from "./codemirror/indentGuides";
 import { documentWidthExtension } from "./codemirror/horizontalScroll";
 import { getNoteScrollPosition, setNoteScrollPosition, closedNoteIds } from "@/components/Editor";
+import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
+import {
+  FIX_LANGUAGE_EVENT,
+  showSelectTextToFixToast,
+  type FixLanguageEventDetail,
+} from "@/lib/fixLanguageSystem";
 
 export interface HtmlCodeEditorHandle {
   findNext: (query?: string) => { total: number; current: number };
@@ -276,7 +282,7 @@ const HtmlCodeEditor = forwardRef<HtmlCodeEditorHandle, HtmlCodeEditorProps>(fun
       }
 
       const currentSel = view.state.selection.main;
-      let currentIdx = matches.findIndex((m) => m.from === currentSel.from && m.to === currentSel.to);
+      const currentIdx = matches.findIndex((m) => m.from === currentSel.from && m.to === currentSel.to);
 
       let targetIdx = 0;
       if (advance === "next") {
@@ -757,6 +763,43 @@ const HtmlCodeEditor = forwardRef<HtmlCodeEditorHandle, HtmlCodeEditorProps>(fun
 
   const handleBlur = useCallback(() => {
     onBlurRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    const onSystemFixLanguage = (event: Event) => {
+      const customEvent = event as CustomEvent<FixLanguageEventDetail>;
+      if (customEvent.detail?.handled) return;
+      const view = viewRef.current;
+      if (!view || !view.hasFocus) return;
+
+      if (customEvent.detail) {
+        customEvent.detail.handled = true;
+      }
+
+      const { from, to, empty } = view.state.selection.main;
+      if (empty) {
+        showSelectTextToFixToast();
+        return;
+      }
+
+      const selectedText = view.state.sliceDoc(from, to);
+      if (!selectedText.trim()) {
+        showSelectTextToFixToast();
+        return;
+      }
+
+      const convertedText = swapKeyboardLayout(selectedText);
+      if (convertedText === selectedText) return;
+
+      view.dispatch({
+        changes: { from, to, insert: convertedText },
+        selection: { anchor: from, head: from + convertedText.length },
+      });
+      view.focus();
+    };
+
+    window.addEventListener(FIX_LANGUAGE_EVENT, onSystemFixLanguage);
+    return () => window.removeEventListener(FIX_LANGUAGE_EVENT, onSystemFixLanguage);
   }, []);
 
   return (

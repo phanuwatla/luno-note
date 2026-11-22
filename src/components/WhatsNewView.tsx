@@ -30,6 +30,9 @@ import {
   Globe,
   Bookmark,
   CheckSquare,
+  Table,
+  Image,
+  Volume2,
 } from "lucide-react";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -71,9 +74,175 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.4.0",
+    version: "1.4.1",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "System-wide Fix Language (Thai/English mistyping converter), AI Vision Image Attachments, Interactive Table Overlay & Media Polish",
+      th: "ระบบสลับแก้ภาษาไทย-อังกฤษทั้งระบบ (System Fix Language), แนบรูปภาพถามตอบกับ Luno AI, แถบเครื่องมือตารางอินเตอร์แอคทีฟ และปรับปรุงระบบสื่อมัลติมีเดีย",
+    },
+    highlights: [
+      {
+        title: {
+          en: "System-wide Language Mistyping Fixer (System Fix Language)",
+          th: "ระบบแก้พิมพ์ผิดภาษาไทย-อังกฤษทั้งระบบ (System Fix Language)",
+        },
+        description: {
+          en: "Instantly convert mistyped text between Thai (Kedmanee) and English (QWERTY) layouts across any active application or inside Luno Note with a global shortcut. Powered by a high-efficiency native background helper and intelligent dictionary detection.",
+          th: "สลับแก้ข้อความที่พิมพ์ผิดภาษาไปมาระหว่างภาษาไทย (เกษมณี) และภาษาอังกฤษ (QWERTY) ได้ทันทีในทุกโปรแกรมบน Windows หรือภายใน Luno Note ด้วยคีย์ลัดสากล (Global Shortcut) ขับเคลื่อนด้วยระบบผู้ช่วยเบื้องหลังความเร็วสูงพร้อมพจนานุกรมตรวจจับภาษาอัจฉริยะ",
+        },
+        icon: Languages,
+        badge: { en: "System", th: "ระบบ", variant: "default" },
+      },
+      {
+        title: {
+          en: "Multimodal AI Vision & Image Attachments in Luno AI",
+          th: "แนบรูปภาพถามตอบและวิเคราะห์ภาพด้วย Luno AI (Vision)",
+        },
+        description: {
+          en: "Attach and upload images directly to the Luno AI chat panel for visual analysis, OCR translation, diagram explanations, and instant contextual assistance powered by Gemini multimodal vision models.",
+          th: "แนบไฟล์รูปภาพในหน้าต่างสนทนา Luno AI ได้โดยตรง เพื่อให้ AI ช่วยวิเคราะห์ อธิบายภาพ อ่านข้อความ แปลภาษา และตอบคำถามจากภาพอย่างชาญฉลาดผ่านเอนจิน Gemini Multimodal Vision",
+        },
+        icon: Image,
+        badge: { en: "AI Assistant", th: "ผู้ช่วย AI", variant: "default" },
+      },
+      {
+        title: {
+          en: "Interactive Table Controls & Column/Row Manager",
+          th: "แถบเครื่องมือจัดการตารางแบบอินเตอร์แอคทีฟ (Interactive Table Overlay)",
+        },
+        description: {
+          en: "Manage rich-text tables with effortless one-click controls to insert, delete, and reorder rows and columns, toggle header rows, and merge cells without navigating complex nested menus.",
+          th: "จัดการและแก้ไขตารางในโน้ตได้อย่างสะดวกรวดเร็ว ด้วยแถบควบคุมแบบอินเตอร์แอคทีฟ เพิ่ม/ลบคอลัมน์และแถว สลับแถวส่วนหัว (Header) และจัดการเซลล์ได้ในคลิกเดียว",
+        },
+        icon: Table,
+        badge: { en: "Editor", th: "เอดิเตอร์", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Enhanced Media Players with Hover Volume Control",
+          th: "ตัวเล่นสื่อมีเดียพร้อมแถบปรับระดับเสียงแบบ Hover",
+        },
+        description: {
+          en: "Embedded audio and video players now feature a sleek, intuitive hover volume slider, unified workspace media selection dialogs, and smooth playback ergonomics.",
+          th: "เครื่องเล่นเสียงและวิดีโอที่ฝังในบันทึกมาพร้อมแถบเลื่อนปรับระดับเสียงแบบ Hover ที่นุ่มนวล พร้อมปรับปรุงหน้าต่างเลือกสื่อจากใน Workspace ให้ใช้งานสะดวกและเป็นมาตรฐานเดียวกัน",
+        },
+        icon: Volume2,
+        badge: { en: "Media", th: "มัลติมีเดีย", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "System Architecture & Engineering Standards Compliance",
+          th: "ยกระดับสถาปัตยกรรมระบบตามมาตรฐานกลาง (Standards Compliance)",
+        },
+        description: {
+          en: "Comprehensive code quality overhaul adopting strict repository standards: symlink-aware Electron path confinement, safeStorage credential encryption, pruned legacy components down to 15 core Radix primitives, tree-shaken icon registries, and 100% dictionary-driven localization.",
+          th: "ปรับปรุงคุณภาพโค้ดและสถาปัตยกรรมตามมาตรฐานกลางอย่างเข้มงวด: ป้องกันการเข้าถึงไฟล์ระบบด้วย Symlink Confinement, เข้ารหัสข้อมูลลับด้วย safeStorage, ตัดทอนคอมโพเนนต์ส่วนเกินเหลือเพียง 15 Radix Primitives หลัก, ปรับระบบไอคอนเป็น Registry และรองรับภาษาแบบ 100% Dictionary-driven",
+        },
+        icon: ShieldCheck,
+        badge: { en: "Security & Standards", th: "ความปลอดภัยและมาตรฐาน", variant: "outline" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "System Fix Language", th: "ระบบแก้พิมพ์ผิดภาษา" },
+        items: [
+          {
+            en: "System-wide keyboard layout conversion (Thai Kedmanee <-> English QWERTY) accessible via global shortcut.",
+            th: "ระบบแปลงผังแป้นพิมพ์แก้ข้อความพิมพ์ผิดภาษา (ไทย เกษมณี <-> อังกฤษ QWERTY) ผ่านคีย์ลัดสากล",
+          },
+          {
+            en: "Native background helper (LunoFixLang.exe) for instant conversion across all external Windows desktop apps.",
+            th: "โปรแกรมผู้ช่วยเบื้องหลัง (LunoFixLang.exe) สำหรับสลับภาษาได้ทันทีในทุกโปรแกรมบน Windows",
+          },
+          {
+            en: "Intelligent Thai dictionary analysis and heuristic detection to avoid erroneous layout switches.",
+            th: "ระบบวิเคราะห์คำศัพท์ภาษาไทยและ Heuristic ป้องกันการสลับภาษาผิดพลาด",
+          },
+          {
+            en: "Configurable settings in Settings > General / System with system tray integration and status notifications.",
+            th: "ปรับแต่งการทำงานได้ในหน้า การตั้งค่า > ทั่วไป พร้อมไอคอน System Tray และการแจ้งเตือนสถานะ",
+          },
+        ],
+      },
+      {
+        category: { en: "Luno AI Assistant", th: "ผู้ช่วย Luno AI" },
+        items: [
+          {
+            en: "Image attachment and vision comprehension in AI chat panel via Gemini multimodal models.",
+            th: "รองรับการแนบไฟล์รูปภาพในหน้าต่างแชต AI เพื่อให้ Gemini ช่วยอ่าน วิเคราะห์ และตอบคำถามจากภาพ",
+          },
+          {
+            en: "Visual thumbnail previews with quick removal and image dimension optimization.",
+            th: "พรีวิวรูปภาพขนาดย่อพร้อมปุ่มลบออกและปรับสัดส่วนภาพอัตโนมัติก่อนส่งให้ AI",
+          },
+        ],
+      },
+      {
+        category: { en: "Note Editor & Media", th: "ตัวแก้ไขโน้ตและสื่อ" },
+        items: [
+          {
+            en: "TableInteractiveOverlay: interactive controls for rows, columns, headers, and cell actions.",
+            th: "แถบเครื่องมือตารางอินเตอร์แอคทีฟ เพิ่ม/ลบแถว คอลัมน์ และจัดการโครงสร้างตารางได้สะดวก",
+          },
+          {
+            en: "VolumeHoverSlider: sleek, accessible volume controls on embedded audio and video players.",
+            th: "แถบปรับระดับเสียงแบบ Hover สำหรับตัวเล่นเสียงและวิดีโอที่ฝังในเอกสาร",
+          },
+          {
+            en: "WorkspaceMediaPickerShell: unified media asset browsing across workspace folders.",
+            th: "หน้าต่างเลือกไฟล์สื่อจาก Workspace ที่มีหน้าตาและมาตรฐานการใช้งานเป็นหนึ่งเดียว",
+          },
+        ],
+      },
+      {
+        category: { en: "Architecture, Security & Standards", th: "สถาปัตยกรรม ความปลอดภัย และมาตรฐาน" },
+        items: [
+          {
+            en: "Strict symlink-aware Electron path confinement (isPathAllowedForIpc) blocking filesystem escapes.",
+            th: "ระบบจำกัดขอบเขตพาธไฟล์ (isPathAllowedForIpc) ป้องกันการเข้าถึงไฟล์ระบบผ่าน Symlink หรือ Junction",
+          },
+          {
+            en: "SafeStorage credential encryption for Google Drive tokens and sensitive auth tokens.",
+            th: "เข้ารหัสโทเคน Google Drive และข้อมูลลับในเครื่องด้วย Electron safeStorage",
+          },
+          {
+            en: "Pruned redundant UI components down to 15 standardized Radix primitives.",
+            th: "ตัดทอนคอมโพเนนต์ที่ไม่ได้ใช้งาน เหลือเพียง 15 Radix UI Primitives มาตรฐาน",
+          },
+          {
+            en: "Clean removal of obsolete Tauri backend remnants, streamlining repo for pure Electron.",
+            th: "ลบไฟล์ที่ไม่เกี่ยวข้องของ Tauri ออกทั้งหมดเพื่อความคลีนและโฟกัสที่สถาปัตยกรรม Electron",
+          },
+          {
+            en: "Explicit tree-shaken icon registries replacing wildcard icon pack imports.",
+            th: "เปลี่ยนระบบอิมพอร์ตไอคอนเป็นแบบ Registry เพื่อลดขนาดบันเดิลและป้องกัน Wildcard Import",
+          },
+          {
+            en: "100% dictionary-driven localization in both English and Thai with zero inline ternaries.",
+            th: "รองรับภาษาทั้งไทยและอังกฤษครบ 100% ผ่าน Dictionary โดยไม่มีข้อความ Hardcode",
+          },
+        ],
+      },
+      {
+        category: { en: "Auto-Updater & Reliability", th: "ระบบอัปเดตและความเสถียร" },
+        items: [
+          {
+            en: "Enhanced update toast notifications with progress tracking and fallback external download support.",
+            th: "ปรับปรุงการแจ้งเตือนอัปเดตพร้อมแถบแสดงความคืบหน้า และรองรับการดาวน์โหลดภายนอกอัตโนมัติหากพบข้อผิดพลาด",
+          },
+          {
+            en: "Optimized offline spell checking powered by nspell with bundled dictionaries.",
+            th: "ระบบตรวจสอบคำสะกดออฟไลน์ด้วย nspell พร้อมพจนานุกรมในตัว",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.4.0",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "Interactive Inko PDF Editor & Annotations, CodeMirror 6 Engine, Collapsible Headings, Dual View Modes & JavaScript Support",
       th: "ระบบแก้ไขและขีดเขียน PDF (Inko Editor), เอนจินโค้ด CodeMirror 6, พับเก็บเนื้อหาตามหัวข้อ (Heading Fold), มุมมองการ์ด/รายการ และรองรับไฟล์ JavaScript",
@@ -1789,7 +1958,7 @@ export default function WhatsNewView({
                 <div
                   key={idx}
                   data-whats-new-card="true"
-                  className="rounded-2xl border border-border/60 bg-card/60 p-5 space-y-2.5 shadow-2xs"
+                  className="rounded-2xl border border-border/60 bg-card/60 p-5 space-y-2.5 shadow-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">

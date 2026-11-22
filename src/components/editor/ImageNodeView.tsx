@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { MediaLightbox } from "@/components/shared/MediaLightbox";
 import { NodeViewWrapper, NodeViewProps } from "@tiptap/react";
 import { Maximize2, RotateCcw, X, ImageOff, Pencil, Copy, Scissors, Trash2, ExternalLink, FolderOpen, Download, Link as LinkIcon, FileText, Folder } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -35,16 +35,34 @@ const origImageDelete = imageLocalCache.delete.bind(imageLocalCache);
 imageLocalCache.set = function (key: string, value: string) {
   const existing = imageLocalCache.get(key);
   if (existing && existing !== value && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const [k, v] of imageLocalCache.entries()) {
+      if (k !== key && v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
   if (imageLocalCache.size >= MAX_IMAGE_CACHE && !imageLocalCache.has(key)) {
     const oldestKey = imageLocalCache.keys().next().value;
     if (oldestKey) {
       const oldVal = imageLocalCache.get(oldestKey);
-      if (oldVal && oldVal.startsWith("blob:")) {
-        try { URL.revokeObjectURL(oldVal); } catch {}
-      }
       origImageDelete(oldestKey);
+      if (oldVal && oldVal.startsWith("blob:") && oldVal !== value) {
+        let stillReferenced = false;
+        for (const v of imageLocalCache.values()) {
+          if (v === oldVal) {
+            stillReferenced = true;
+            break;
+          }
+        }
+        if (!stillReferenced) {
+          try { URL.revokeObjectURL(oldVal); } catch { /* ignore */ }
+        }
+      }
     }
   }
   return origImageSet(key, value);
@@ -52,10 +70,20 @@ imageLocalCache.set = function (key: string, value: string) {
 
 imageLocalCache.delete = function (key: string) {
   const existing = imageLocalCache.get(key);
+  const res = origImageDelete(key);
   if (existing && existing.startsWith("blob:")) {
-    try { URL.revokeObjectURL(existing); } catch {}
+    let stillReferenced = false;
+    for (const v of imageLocalCache.values()) {
+      if (v === existing) {
+        stillReferenced = true;
+        break;
+      }
+    }
+    if (!stillReferenced) {
+      try { URL.revokeObjectURL(existing); } catch { /* ignore */ }
+    }
   }
-  return origImageDelete(key);
+  return res;
 };
 
 export function dataUrlToBlobUrl(dataUrl: string): string {
@@ -288,7 +316,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
 
     const resolveLocal = async () => {
       try {
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (electronAPI?.getSavedWorkspace && electronAPI?.readImageDataUrl) {
           const saved = await electronAPI.getSavedWorkspace();
           if (saved?.folderPath) {
@@ -337,16 +365,16 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                 if (seg.toLowerCase() === "attachment") {
                   try {
                     targetDir = await targetDir.getDirectoryHandle("attachments", { create: false });
-                  } catch {}
+                  } catch { /* ignore */ }
                 } else if (seg.toLowerCase() === "attachments") {
                   try {
                     targetDir = await targetDir.getDirectoryHandle("attachment", { create: false });
-                  } catch {}
+                  } catch { /* ignore */ }
                 }
               }
             }
             try {
-              let fileHandle = await targetDir.getFileHandle(fileName, { create: false });
+              const fileHandle = await targetDir.getFileHandle(fileName, { create: false });
               const file = await fileHandle.getFile();
               const blobUrl = URL.createObjectURL(file);
               imageLocalCache.set(cleanRel, blobUrl);
@@ -356,7 +384,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                 setHasError(false);
               }
               return;
-            } catch {}
+            } catch { /* ignore */ }
           }
         }
 
@@ -371,7 +399,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
               setHasError(false);
               return;
             }
-          } catch {}
+          } catch { /* ignore */ }
         }
       } catch (err) {
         console.warn("Failed to resolve local attachment in ImageNodeView:", err);
@@ -397,18 +425,6 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       }
     }
   }, [width, isResizing]);
-
-  // Handle ESC key to close full-screen preview
-  useEffect(() => {
-    if (!isPreviewOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsPreviewOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPreviewOpen]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -490,13 +506,13 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
               onClick={() => {
                 const target = dataRelativeSrc || src;
                 if (target) {
-                  void copyTextToClipboard(target, t("editor.copiedImagePath") || "คัดลอกพาธรูปภาพแล้ว");
+                  void copyTextToClipboard(target, t("editor.copiedImagePath"));
                 }
               }}
               className="gap-2.5"
             >
               <LinkIcon className="h-4 w-4" />
-              <span>{t("editor.copyImagePath") || "คัดลอกพาธรูปภาพ"}</span>
+              <span>{t("editor.copyImagePath")}</span>
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
@@ -505,7 +521,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
               className="gap-2.5 text-destructive focus:text-destructive"
             >
               <Trash2 className="h-4 w-4" />
-              <span>{t("editor.deleteImage") || "ลบรูปภาพ"}</span>
+              <span>{t("editor.deleteImage")}</span>
               <ContextMenuShortcut>Del</ContextMenuShortcut>
             </ContextMenuItem>
           </ContextMenuContent>
@@ -594,7 +610,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                                 return;
                               }
                             }
-                          } catch {}
+                          } catch { /* ignore */ }
                           if (isQrCode && (dataQrText || (title && title !== "QR Code" && !title.startsWith("data:")))) {
                             try {
                               const qrTextToUse = dataQrText || title;
@@ -604,7 +620,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                                 setHasError(false);
                                 return;
                               }
-                            } catch {}
+                            } catch { /* ignore */ }
                           }
                           setHasError(true);
                         })();
@@ -621,7 +637,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                               setHasError(false);
                               return;
                             }
-                          } catch {}
+                          } catch { /* ignore */ }
                           setHasError(true);
                         })();
                         return;
@@ -629,7 +645,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                     }
                     setHasError(true);
                   }}
-                  className="!m-0 !p-0 block h-auto max-w-full rounded-xl border border-border/80 object-contain shadow-2xs"
+                  className="!m-0 !p-0 block h-auto max-w-full rounded-xl border border-border/80 object-contain shadow-sm"
                   style={{
                     width: currentWidth ? `${currentWidth}px` : "auto",
                     maxWidth: "100%",
@@ -654,7 +670,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
         {isResizing && currentWidth && (
           <div
             style={{ fontFamily: "var(--app-font-family, sans-serif)" }}
-            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-semibold shadow-xs backdrop-blur-sm z-30 pointer-events-none"
+            className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-background/90 text-foreground border border-border text-[11px] font-semibold shadow-sm backdrop-blur-sm z-30 pointer-events-none"
           >
             {currentWidth}px
           </div>
@@ -686,13 +702,13 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                       }
                       setIsQrDialogOpen(true);
                     }}
-                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="left">
-                  {t("editor.qrEdit") || "แก้ไขคิวอาร์โค้ด"}
+                  {t("editor.qrEdit")}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -707,7 +723,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                     e.stopPropagation();
                     setIsPreviewOpen(true);
                   }}
-                  className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                  className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
                 </button>
@@ -724,7 +740,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                   <button
                     type="button"
                     onClick={handleResetSize}
-                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-xs backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                    className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
@@ -745,7 +761,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                 <div
                   onPointerDown={handlePointerDown}
                   onDoubleClick={handleResetSize}
-                  className={`absolute bottom-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-foreground border border-border shadow-xs cursor-nwse-resize z-30 backdrop-blur-sm transition-transform ${
+                  className={`absolute bottom-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-background/90 text-muted-foreground hover:text-foreground border border-border shadow-sm cursor-nwse-resize z-30 backdrop-blur-sm transition-transform ${
                     isResizing ? "scale-110 text-primary border-primary" : "hover:scale-105"
                   }`}
                 >
@@ -765,7 +781,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {t("editor.imageResizeTooltip") || "Resize image"}
+                {t("editor.imageResizeTooltip")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -775,7 +791,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       <ContextMenuContent className="w-56 rounded-xl">
         <ContextMenuItem onClick={() => setIsPreviewOpen(true)} className="gap-2.5">
           <Maximize2 className="h-4 w-4" />
-          <span>{t("editor.imageViewFull") || "ดูรูปภาพขนาดเต็ม"}</span>
+          <span>{t("editor.imageViewFull")}</span>
         </ContextMenuItem>
 
         {isQrCode && (
@@ -798,7 +814,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
             className="gap-2.5"
           >
             <Pencil className="h-4 w-4" />
-            <span>{t("editor.qrEdit") || "แก้ไขคิวอาร์โค้ด"}</span>
+            <span>{t("editor.qrEdit")}</span>
           </ContextMenuItem>
         )}
 
@@ -809,36 +825,36 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           className="gap-2.5"
         >
           <Copy className="h-4 w-4" />
-          <span>{t("editor.copyImage") || "คัดลอกรูปภาพ"}</span>
+          <span>{t("editor.copyImage")}</span>
         </ContextMenuItem>
 
         <ContextMenuSub>
           <ContextMenuSubTrigger className="gap-2.5">
             <LinkIcon className="h-4 w-4" />
-            <span>{t("editor.copyImagePath") || "คัดลอกพาธรูปภาพ"}</span>
+            <span>{t("editor.copyImagePath")}</span>
           </ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-48 rounded-xl">
             <ContextMenuItem
               onClick={() => {
                 void copyMediaPath(displaySrc, dataRelativeSrc, "relative", {
-                  title: t("editor.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+                  title: t("editor.copiedRelativePath"),
                 });
               }}
               className="gap-2.5 cursor-pointer"
             >
               <FileText className="h-4 w-4" />
-              <span>{t("editor.copyRelativePath") || "คัดลอกพาธสัมพัทธ์"}</span>
+              <span>{t("editor.copyRelativePath")}</span>
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
                 void copyMediaPath(displaySrc, dataRelativeSrc, "full", {
-                  title: t("editor.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+                  title: t("editor.copiedAbsolutePath"),
                 });
               }}
               className="gap-2.5 cursor-pointer"
             >
               <Folder className="h-4 w-4" />
-              <span>{t("editor.copyAbsolutePath") || "คัดลอกพาธแบบเต็ม"}</span>
+              <span>{t("editor.copyAbsolutePath")}</span>
             </ContextMenuItem>
           </ContextMenuSubContent>
         </ContextMenuSub>
@@ -848,7 +864,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           className="gap-2.5"
         >
           <ExternalLink className="h-4 w-4" />
-          <span>{t("editor.openInDefaultApp") || "เปิดในโปรแกรมเริ่มต้น"}</span>
+          <span>{t("editor.openInDefaultApp")}</span>
         </ContextMenuItem>
 
         <ContextMenuItem
@@ -856,7 +872,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           className="gap-2.5"
         >
           <FolderOpen className="h-4 w-4" />
-          <span>{t("editor.revealInFolder") || "แสดงในโฟลเดอร์"}</span>
+          <span>{t("editor.revealInFolder")}</span>
         </ContextMenuItem>
 
         <ContextMenuItem
@@ -864,13 +880,13 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           className="gap-2.5"
         >
           <Download className="h-4 w-4" />
-          <span>{t("editor.saveImageAs") || "บันทึกรูปภาพเป็น..."}</span>
+          <span>{t("editor.saveImageAs")}</span>
         </ContextMenuItem>
 
         {currentWidth && (
           <ContextMenuItem onClick={handleResetSize} className="gap-2.5">
             <RotateCcw className="h-4 w-4" />
-            <span>{t("editor.imageResetSize") || "รีเซ็ตขนาดเดิม"}</span>
+            <span>{t("editor.imageResetSize")}</span>
           </ContextMenuItem>
         )}
 
@@ -880,13 +896,13 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           onClick={() => {
             const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
             const md = targetRel ? `![${alt || ""}](${targetRel})` : `![${alt || ""}](${src})`;
-            void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+            void copyTextToClipboard(md, t("editor.copiedMarkdown"));
             deleteNode?.();
           }}
           className="gap-2.5"
         >
           <Scissors className="h-4 w-4" />
-          <span>{t("editor.cut") || "ตัด"}</span>
+          <span>{t("editor.cut")}</span>
           <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
         </ContextMenuItem>
 
@@ -894,12 +910,12 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           onClick={() => {
             const targetRel = dataRelativeSrc || (!src.startsWith("http") && !src.startsWith("blob:") && !src.startsWith("data:") ? src : null);
             const md = targetRel ? `![${alt || ""}](${targetRel})` : `![${alt || ""}](${src})`;
-            void copyTextToClipboard(md, t("editor.copiedMarkdown") || "คัดลอก Markdown แล้ว");
+            void copyTextToClipboard(md, t("editor.copiedMarkdown"));
           }}
           className="gap-2.5"
         >
           <Copy className="h-4 w-4" />
-          <span>{t("editor.copyMarkdown") || "คัดลอก Markdown"}</span>
+          <span>{t("editor.copyMarkdown")}</span>
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>
 
@@ -909,7 +925,7 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
           className="gap-2.5 text-destructive focus:text-destructive"
         >
           <Trash2 className="h-4 w-4" />
-          <span>{t("editor.deleteImage") || "ลบรูปภาพ"}</span>
+          <span>{t("editor.deleteImage")}</span>
           <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
@@ -999,60 +1015,25 @@ const ImageNodeViewComponent: React.FC<NodeViewProps> = ({
       )}
 
       {/* Full-Screen Image Lightbox Preview */}
-      {isPreviewOpen &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none animate-in fade-in-0 duration-200"
-            onClick={() => setIsPreviewOpen(false)}
-          >
-            {/* Top Bar with Close Button */}
-            <div
-              className="absolute top-4 right-4 z-50 flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setIsPreviewOpen(false)}
-                      className="p-2 rounded-xl bg-background/20 hover:bg-background/40 text-white border border-white/20 shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    {t("editor.imageCloseFull")} (Esc)
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+      <MediaLightbox
+        open={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        ariaLabel={alt || title || t("editor.imageCloseFull")}
+        closeTooltip={`${t("editor.imageCloseFull")} (Esc)`}
+        footer={
+          (alt || title) ? (
+            <div className="px-3 py-1 rounded-md bg-black/60 border border-white/10 text-white/90 text-xs font-medium backdrop-blur-md">
+              {alt || title}
             </div>
-
-            {/* Image Preview */}
-            <div
-              className="relative max-w-[92vw] max-h-[88vh] flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={displaySrc}
-                alt={alt || ""}
-                className="max-w-full max-h-[88vh] object-contain rounded-lg md:rounded-xl shadow-2xl border border-white/10 select-none animate-in zoom-in-95 duration-200"
-              />
-            </div>
-
-            {/* Caption / Title if present */}
-            {(alt || title) && (
-              <div
-                className="mt-3 px-3 py-1 rounded-md bg-black/60 border border-white/10 text-white/90 text-xs font-medium backdrop-blur-md"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {alt || title}
-              </div>
-            )}
-          </div>,
-          document.body
-        )}
+          ) : undefined
+        }
+      >
+        <img
+          src={displaySrc}
+          alt={alt || ""}
+          className="max-w-full max-h-[88vh] object-contain rounded-lg md:rounded-xl shadow-2xl border border-white/10 select-none"
+        />
+      </MediaLightbox>
     </NodeViewWrapper>
   );
 };

@@ -111,4 +111,171 @@ describe("geminiApi quota tracking and model selection", () => {
     const escapedSpan = '&lt;span style="color: red"&gt;ข้อความ&lt;/span&gt;';
     expect(cleanAiOutputText(escapedSpan)).toBe('<span style="color: red">ข้อความ</span>');
   });
+
+  it("generates image via Gemini native generateContent using x-goog-api-key header", async () => {
+    const { generateImageWithGemini } = await import("@/lib/geminiApi");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: "Here is your sunset mountain illustration." },
+                {
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const res = await generateImageWithGemini("test-secret-key", "Sunset over mountains", {
+        aspectRatio: "16:9",
+        lang: "en",
+      });
+
+      expect(res.images).toHaveLength(1);
+      expect(res.images[0].dataUrl).toMatch(/^data:image\/png;base64,/);
+      expect(res.images[0].aspectRatio).toBe("16:9");
+      expect(res.text).toBe("Here is your sunset mountain illustration.");
+      expect(res.modelUsed).toBe("gemini-2.5-flash-image");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0];
+      expect(String(calledUrl)).not.toContain("test-secret-key");
+      expect(calledInit.headers["x-goog-api-key"]).toBe("test-secret-key");
+      const sentBody = JSON.parse(calledInit.body);
+      expect(sentBody.generationConfig.responseModalities).toEqual(["TEXT", "IMAGE"]);
+      expect(sentBody.generationConfig.imageConfig.aspectRatio).toBe("16:9");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("retries without imageConfig when model rejects imageConfig and falls back to Imagen predict when needed", async () => {
+    const { generateImageWithGemini, STANDARD_IMAGE_MODELS } = await import("@/lib/geminiApi");
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(":predict")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            predictions: [
+              {
+                bytesBase64Encoded: "AAAA",
+                mimeType: "image/jpeg",
+              },
+            ],
+          }),
+        };
+      }
+      return {
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: async () => ({ error: { message: "Model not found" } }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const res = await generateImageWithGemini("test-key", "Minimalist desk setup", {
+        aspectRatio: "4:3",
+        lang: "en",
+      });
+
+      expect(res.images).toHaveLength(1);
+      expect(res.images[0].dataUrl).toBe("data:image/jpeg;base64,AAAA");
+      expect(res.modelUsed).toBe(STANDARD_IMAGE_MODELS.find((m) => m.includes("imagen")));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("throws GeminiFreeTierImageError (not generic quota exceeded) when Free Tier returns limit: 0 and billed-users-only", async () => {
+    const { generateImageWithGemini, GeminiFreeTierImageError } = await import("@/lib/geminiApi");
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(":predict")) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          json: async () => ({
+            error: {
+              message: "Imagen API is only accessible to billed users at this time.",
+            },
+          }),
+        };
+      }
+      return {
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        json: async () => ({
+          error: {
+            message:
+              "You exceeded your current quota, please check your plan and billing details. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-flash-image",
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(
+        generateImageWithGemini("free-tier-key", "Cute robot", { lang: "th" })
+      ).rejects.toBeInstanceOf(GeminiFreeTierImageError);
+
+      // Should fail fast after checking 1 Gemini image model + 1 Imagen model (not all 7)
+      expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+      // Should NOT falsely mark model as temporarily exhausted
+      expect(isModelExhausted("gemini-2.5-flash-image")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("still reports real quota exceeded (not Free Tier error) when Paid Tier hits a non-zero rate limit", async () => {
+    const { generateImageWithGemini, GeminiFreeTierImageError } = await import("@/lib/geminiApi");
+
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      json: async () => ({
+        error: {
+          message:
+            "You exceeded your current quota, please check your plan and billing details. Quota exceeded for metric: requests_per_minute, limit: 10",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      let caught: unknown;
+      try {
+        await generateImageWithGemini("paid-key", "Cute robot", { lang: "en" });
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBeInstanceOf(GeminiFreeTierImageError);
+      expect((caught as Error).message).toContain("quota exceeded");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

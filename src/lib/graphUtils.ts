@@ -177,9 +177,9 @@ export function extractNoteMediaLinks(content?: string): ExtractedMediaLink[] {
     const altMatch = /\balt=["']([^"']*)["']/i.exec(tagAttrs);
     const isQr = /\bdata-qr-code=["']true["']/i.test(tagAttrs) || /\bdata-qr-text=/i.test(tagAttrs);
 
-    let chosenSrc = relMatch?.[1]?.trim() || srcMatch?.[1]?.trim();
+    const chosenSrc = relMatch?.[1]?.trim() || srcMatch?.[1]?.trim();
     if (chosenSrc) {
-      let cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
+      const cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
       if (cleanSrc && (isImageSource(cleanSrc) || isQr || !cleanSrc.startsWith("http"))) {
         addMedia(cleanSrc, altMatch?.[1]?.trim(), "image");
       }
@@ -204,7 +204,7 @@ export function extractNoteMediaLinks(content?: string): ExtractedMediaLink[] {
     }
 
     if (chosenSrc) {
-      let cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
+      const cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
       if (cleanSrc) {
         const isExplicitAudio = /\.(mp3|wav|ogg|m4a|aac|flac|wma|aiff|opus|mid|midi|weba)$/i.test(cleanSrc);
         const type = isExplicitAudio ? "audio" : "video";
@@ -231,7 +231,7 @@ export function extractNoteMediaLinks(content?: string): ExtractedMediaLink[] {
     }
 
     if (chosenSrc) {
-      let cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
+      const cleanSrc = chosenSrc.replace(/^<|>$/g, "").split(/\s+["']/)[0].trim();
       if (cleanSrc) {
         const isExplicitVideo = /\.(mp4|mkv|avi|mov|wmv|flv|m4v|3gp|ogv|m2ts|mts|mpg|mpeg)$/i.test(cleanSrc);
         const type = isExplicitVideo ? "video" : "audio";
@@ -292,7 +292,7 @@ export function resolveLinkedMediaNote(src: string, notes: Note[]): Note | null 
   let clean = src.split(/[?#]/)[0].trim();
   try {
     clean = decodeURIComponent(clean);
-  } catch {}
+  } catch { /* ignore */ }
   clean = clean.replace(/\\/g, "/");
   while (clean.startsWith("./") || clean.startsWith("../")) {
     clean = clean.replace(/^(\.\/|\.\.\/)+/, "");
@@ -305,8 +305,9 @@ export function resolveLinkedMediaNote(src: string, notes: Note[]): Note | null 
       if (isSystemOrWebTab(n.id)) return false;
       const nFileName = (n.fileName || "").toLowerCase();
       const nTitle = (n.title || "").toLowerCase();
+      const normFolder = (n.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
       const nRelPath = n.fileName
-        ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName).toLowerCase()
+        ? (normFolder ? `${normFolder}/${n.fileName}` : n.fileName).toLowerCase()
         : "";
 
       if (nFileName && nFileName === fileName) return true;
@@ -373,7 +374,7 @@ export function extractNoteLinks(content?: string): string[] {
 export function resolveLinkedNoteId(target: string, notes: Note[]): string | null {
   if (!target || !notes || notes.length === 0) return null;
 
-  const cleanTarget = target.trim().toLowerCase();
+  const cleanTarget = target.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
   const baseClean = cleanTarget.replace(/\.[^/.]+$/, "");
 
   const matched = notes.find((n) => {
@@ -382,14 +383,15 @@ export function resolveLinkedNoteId(target: string, notes: Note[]): string | nul
     const nameWithoutExt = (n.fileName || n.title || "").replace(/\.[^/.]+$/, "").toLowerCase();
     const fullFileName = (n.fileName || "").toLowerCase();
     const title = (n.title || "").toLowerCase();
-    const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName).toLowerCase() : "";
+    const normFolder = (n.folderPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const relPath = n.fileName ? (normFolder ? `${normFolder}/${n.fileName}` : n.fileName).toLowerCase() : "";
 
     return (
       nameWithoutExt === baseClean ||
       fullFileName === cleanTarget ||
       title === cleanTarget ||
       relPath === cleanTarget ||
-      (n.folderPath && `${n.folderPath.toLowerCase()}/${nameWithoutExt}` === baseClean)
+      (normFolder && `${normFolder.toLowerCase()}/${nameWithoutExt}` === baseClean)
     );
   });
 
@@ -555,7 +557,7 @@ export function buildNoteGraph(notes: Note[]): NoteGraphData {
         let cleanSrc = media.src.split(/[?#]/)[0].trim();
         try {
           cleanSrc = decodeURIComponent(cleanSrc);
-        } catch {}
+        } catch { /* ignore */ }
         cleanSrc = cleanSrc.replace(/\\/g, "/");
 
         if (!/^(https?:|data:|blob:)/i.test(cleanSrc)) {
@@ -564,7 +566,7 @@ export function buildNoteGraph(notes: Note[]): NoteGraphData {
           if (attachMatch) {
             deducedFolderPath = attachMatch[1];
           } else {
-            const parts = (note.folderPath || "").split("/").filter(Boolean);
+            const parts = (note.folderPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
             const srcParts = cleanSrc.split("/").filter(Boolean);
             srcParts.pop();
             for (const seg of srcParts) {
@@ -678,6 +680,23 @@ export function buildNoteGraph(notes: Note[]): NoteGraphData {
  * - If text is long, wraps to line 2 (up to maxLines, default 2)
  * - If text exceeds maxLines (2 lines), truncates with ellipsis "..." on the last line
  */
+let cachedWordSegmenter: { segment: (input: string) => Iterable<{ segment: string }> } | null | undefined;
+
+function getWordSegmenter() {
+  if (cachedWordSegmenter !== undefined) return cachedWordSegmenter;
+  if (typeof Intl !== "undefined" && (Intl as any).Segmenter) {
+    try {
+      cachedWordSegmenter = new (Intl as any).Segmenter(undefined, { granularity: "word" });
+      return cachedWordSegmenter;
+    } catch {
+      cachedWordSegmenter = null;
+      return null;
+    }
+  }
+  cachedWordSegmenter = null;
+  return null;
+}
+
 export function wrapNodeText(
   ctxOrMeasure: CanvasRenderingContext2D | ((str: string) => number),
   text: string,
@@ -698,12 +717,12 @@ export function wrapNodeText(
     return [trimmed];
   }
 
-  // Segment text into words/tokens: use Intl.Segmenter if available, fallback to regex
+  // Segment text into words/tokens: use cached Intl.Segmenter if available, fallback to regex
   let segments: string[] = [];
-  if (typeof Intl !== "undefined" && (Intl as any).Segmenter) {
+  const segmenter = getWordSegmenter();
+  if (segmenter) {
     try {
-      const segmenter = new (Intl as any).Segmenter(undefined, { granularity: "word" });
-      segments = Array.from(segmenter.segment(trimmed), (s: any) => s.segment);
+      segments = Array.from(segmenter.segment(trimmed), (s) => s.segment);
     } catch {
       segments = trimmed.split(/(\s+)/);
     }

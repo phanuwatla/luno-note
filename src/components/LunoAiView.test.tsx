@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import LunoAiView, {
   WorkspaceFolderTree,
   WorkspaceNoteIcon,
@@ -555,6 +555,199 @@ describe("LunoAiView Workspace Note and Folder Icons", () => {
       createdAt: 0,
       messages: [],
     })).toBe(999);
+  });
+
+  it("generates an image in Image Mode and allows inserting it into a selected note or creating a new note", async () => {
+    const tinyPngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    storageMap.set(
+      "notes-app-settings",
+      JSON.stringify({
+        geminiApiKey: "test-api-key",
+        language: "en",
+      })
+    );
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: "Generated cozy desk scene." },
+                {
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: tinyPngBase64,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const testNotes: Note[] = [
+      {
+        id: "note-target-1",
+        title: "Design Ideas",
+        fileName: "Design Ideas.md",
+        content: "# Design Ideas",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+    const onInsertToSelectedNote = vi.fn();
+    const onCreateNewNote = vi.fn();
+
+    try {
+      const { container } = render(
+        <TooltipProvider>
+          <AppSettingsProvider>
+            <LunoAiView
+              isSidebar={false}
+              notes={testNotes}
+              activeNote={testNotes[0]}
+              onInsertToSelectedNote={onInsertToSelectedNote}
+              onCreateNewNote={onCreateNewNote}
+            />
+          </AppSettingsProvider>
+        </TooltipProvider>
+      );
+
+      // Activate Image Mode via toolbar button
+      const imageModeBtn = container.querySelector('[data-luno-ai-image-mode-toggle="true"]') as HTMLButtonElement;
+      expect(imageModeBtn).not.toBeNull();
+      fireEvent.click(imageModeBtn);
+
+      // Aspect ratio selector should appear
+      expect(container.querySelector('[data-luno-ai-aspect-ratio="true"]')).not.toBeNull();
+
+      // Enter prompt and send
+      const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+      expect(textarea).not.toBeNull();
+      fireEvent.change(textarea, { target: { value: "Cozy minimalist desk at sunset" } });
+
+      const sendBtn = screen.getByRole("button", { name: /^send$/i });
+      await act(async () => {
+        fireEvent.click(sendBtn);
+      });
+
+      // Generated image should appear in chat stream
+      const generatedImg = await screen.findByAltText("Cozy minimalist desk at sunset");
+      expect(generatedImg).toBeInTheDocument();
+      expect(generatedImg.getAttribute("src")).toContain("data:image/png;base64,");
+      expect(screen.getByText("Generated cozy desk scene.")).toBeInTheDocument();
+
+      // Click image to open fullscreen MediaLightbox
+      fireEvent.click(generatedImg);
+      expect(screen.getByRole("dialog", { name: "Cozy minimalist desk at sunset" })).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      // Click Insert image into note button
+      const insertBtn = screen.getByRole("button", { name: /insert image into note/i });
+      fireEvent.click(insertBtn);
+
+      // Select target note in modal
+      const targetNoteBtn = await screen.findByText("Design Ideas.md");
+      await act(async () => {
+        fireEvent.click(targetNoteBtn);
+      });
+
+      await waitFor(() => {
+        expect(onInsertToSelectedNote).toHaveBeenCalledTimes(1);
+      });
+      const [calledNoteId, calledMarkdown, calledPayload] = onInsertToSelectedNote.mock.calls[0];
+      expect(calledNoteId).toBe("note-target-1");
+      expect(calledMarkdown).toContain("![Cozy minimalist desk at sunset](");
+      expect(calledMarkdown).toContain("Generated cozy desk scene.");
+      expect(calledPayload?.images).toHaveLength(1);
+      expect(calledPayload?.images[0]?.alt).toBe("Cozy minimalist desk at sunset");
+
+      // Click Create as new note button
+      const createNoteBtn = screen.getByRole("button", { name: /create as new note/i });
+      fireEvent.click(createNoteBtn);
+
+      const confirmCreateBtn = await screen.findByRole("button", { name: /^create$/i });
+      await act(async () => {
+        fireEvent.click(confirmCreateBtn);
+      });
+
+      await waitFor(() => {
+        expect(onCreateNewNote).toHaveBeenCalledTimes(1);
+      });
+      const [createdName, createdContent] = onCreateNewNote.mock.calls[0];
+      expect(createdName).toMatch(/\.md$/);
+      expect(createdContent).toContain("![Cozy minimalist desk at sunset](");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows a direct Free Tier unsupported notice with Settings shortcut when Gemini Free Tier blocks image generation", async () => {
+    storageMap.set(
+      "notes-app-settings",
+      JSON.stringify({
+        geminiApiKey: "free-tier-key",
+        language: "en",
+      })
+    );
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(":predict")) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          json: async () => ({
+            error: { message: "Imagen API is only accessible to billed users at this time." },
+          }),
+        };
+      }
+      return {
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        json: async () => ({
+          error: {
+            message:
+              "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0",
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onOpenSettings = vi.fn();
+
+    try {
+      const { container } = render(
+        <TooltipProvider>
+          <AppSettingsProvider>
+            <LunoAiView isSidebar={false} onOpenSettings={onOpenSettings} />
+          </AppSettingsProvider>
+        </TooltipProvider>
+      );
+
+      fireEvent.click(container.querySelector('[data-luno-ai-image-mode-toggle="true"]') as HTMLButtonElement);
+      const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: "A watercolor cat" } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+      });
+
+      expect(await screen.findByText(/Image generation requires a paid API key/i)).toBeInTheDocument();
+      const settingsBtn = screen.getByRole("button", { name: /ai settings/i });
+      fireEvent.click(settingsBtn);
+      expect(onOpenSettings).toHaveBeenCalledWith("ai");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

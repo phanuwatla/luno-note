@@ -12,9 +12,11 @@ function isExternalUrl(url: string): boolean {
 export async function rewriteCssAssets(
   cssText: string,
   resolveAssetUrl: (assetPath: string) => Promise<string | null> | string | null,
-  resolveCssContent?: (assetPath: string) => Promise<string | null> | string | null
+  resolveCssContent?: (assetPath: string) => Promise<string | null> | string | null,
+  visitedPaths: Set<string> = new Set(),
+  depth = 0
 ): Promise<string> {
-  if (!cssText) return cssText;
+  if (!cssText || depth > 10) return cssText;
 
   // 1. Resolve @import statements
   const importRegex = /@import\s+(?:url\(\s*['"]?([^'"()]+)['"]?\s*\)|['"]([^'"]+)['"])\s*;/g;
@@ -32,11 +34,18 @@ export async function rewriteCssAssets(
 
   for (const item of importMatches) {
     if (resolveCssContent) {
+      const normKey = item.path.replace(/\\/g, "/").toLowerCase();
+      if (visitedPaths.has(normKey)) {
+        processedCss = processedCss.replace(item.fullMatch, () => `/* Circular @import "${item.path}" skipped */`);
+        continue;
+      }
       try {
         const importedContent = await resolveCssContent(item.path);
         if (typeof importedContent === "string") {
-          const nested = await rewriteCssAssets(importedContent, resolveAssetUrl, resolveCssContent);
-          processedCss = processedCss.replace(item.fullMatch, `/* @import "${item.path}" */\n${nested}\n`);
+          const nextVisited = new Set(visitedPaths);
+          nextVisited.add(normKey);
+          const nested = await rewriteCssAssets(importedContent, resolveAssetUrl, resolveCssContent, nextVisited, depth + 1);
+          processedCss = processedCss.replace(item.fullMatch, () => `/* @import "${item.path}" */\n${nested}\n`);
           continue;
         }
       } catch (err) {
@@ -60,7 +69,7 @@ export async function rewriteCssAssets(
     try {
       const resolved = await resolveAssetUrl(item.path);
       if (resolved) {
-        processedCss = processedCss.replace(item.fullMatch, `url("${resolved}")`);
+        processedCss = processedCss.replace(item.fullMatch, () => `url("${resolved}")`);
       }
     } catch (err) {
       console.warn("Failed resolving CSS asset url:", item.path, err);

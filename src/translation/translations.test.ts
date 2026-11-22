@@ -183,4 +183,107 @@ describe("Translation Dictionary Integrity", () => {
       `Keys called with t(...) but missing in TH: ${JSON.stringify(missingInTh, null, 2)}`
     ).toEqual([]);
   });
+
+  it("en and th have identical {placeholder} interpolation tokens for every key", () => {
+    function flattenValues(obj: Record<string, unknown>, prefix = ""): Map<string, string> {
+      const map = new Map<string, string>();
+      for (const [k, v] of Object.entries(obj)) {
+        const fullKey = prefix ? `${prefix}.${k}` : k;
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          for (const [nk, nv] of flattenValues(v as Record<string, unknown>, fullKey)) {
+            map.set(nk, nv);
+          }
+        } else if (typeof v === "string") {
+          map.set(fullKey, v);
+        }
+      }
+      return map;
+    }
+
+    const extractPlaceholders = (text: string) =>
+      [...new Set(Array.from(text.matchAll(/\{([a-zA-Z0-9_]+)\}/g), (m) => m[1]))].sort();
+
+    const enValues = flattenValues(en);
+    const thValues = flattenValues(th);
+    const mismatches: { key: string; en: string[]; th: string[] }[] = [];
+
+    for (const [key, enText] of enValues.entries()) {
+      const thText = thValues.get(key);
+      if (typeof thText !== "string") continue;
+      const enPh = extractPlaceholders(enText);
+      const thPh = extractPlaceholders(thText);
+      if (enPh.join(",") !== thPh.join(",")) {
+        mismatches.push({ key, en: enPh, th: thPh });
+      }
+    }
+
+    expect(
+      mismatches,
+      `Placeholder mismatches between EN and TH: ${JSON.stringify(mismatches, null, 2)}`
+    ).toEqual([]);
+  });
+
+  it("UI components do not use inline isTh/language==='th' ternaries for Thai strings (LN-I18N-01)", () => {
+    const ALLOWED_DATA_FILES = new Set([
+      "translation/en.ts",
+      "translation/th.ts",
+      "lib/thaiKeyboardMapper.ts",
+      "lib/spellChecker.ts",
+      "lib/wrongLanguageDetector.ts",
+      "lib/templates.ts",
+      "lib/templateDefinitions.ts",
+      "lib/tips.ts",
+      "lib/welcomeNote.ts",
+      "lib/iconPacks.ts",
+      "lib/geminiApi.ts",
+      "lib/inkoPdfBridge.ts",
+      "components/WhatsNewView.tsx",
+      "components/editor/slashItems.tsx",
+    ]);
+
+    const srcDir = path.resolve(__dirname, "..");
+    const violations: string[] = [];
+
+    function scanDir(dir: string) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== "node_modules" && entry.name !== ".git" && entry.name !== "dist") {
+            scanDir(full);
+          }
+        } else if (
+          /\.(ts|tsx)$/.test(entry.name) &&
+          !/\.test\.(ts|tsx)$/.test(entry.name)
+        ) {
+          const rel = path.relative(srcDir, full).replace(/\\/g, "/");
+          if (ALLOWED_DATA_FILES.has(rel)) continue;
+          const code = fs.readFileSync(full, "utf-8");
+          if (!/[\u0E00-\u0E7F]/.test(code)) continue;
+          const sf = ts.createSourceFile(full, code, ts.ScriptTarget.Latest, true, full.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+
+          const visit = (node: ts.Node) => {
+            if (ts.isConditionalExpression(node)) {
+              const cond = node.condition.getText(sf);
+              if (
+                /\bisTh\b|\bisThai\b|language\s*===\s*["']th["']|lang\s*===\s*["']th["']/.test(cond) &&
+                /[\u0E00-\u0E7F]/.test(node.whenTrue.getText(sf))
+              ) {
+                const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+                violations.push(`${rel}:${line}`);
+                return;
+              }
+            }
+            ts.forEachChild(node, visit);
+          };
+          visit(sf);
+        }
+      }
+    }
+
+    scanDir(srcDir);
+    expect(
+      violations,
+      `Found inline Thai language ternaries outside translation dictionaries: ${violations.join(", ")}`
+    ).toEqual([]);
+  });
 });

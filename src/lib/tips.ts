@@ -268,8 +268,8 @@ export const TIPS: TipItem[] = [
   {
     id: "customization-themes",
     category: "customization",
-    th: "เลือกเปลี่ยนธีม Light, Dark หรือธีมพิเศษอย่าง Classic, Nord และ Tokyo Night ในเมนู Settings",
-    en: "Choose from Light, Dark, or special themes like Classic, Nord, and Tokyo Night in Settings.",
+    th: "เลือกเปลี่ยนธีม Light, Dark หรือสไตล์พิเศษอย่าง Minimal, Glassmorphism, Neumorphism, Midnight, Cyberpunk และ Catppuccin ในเมนู Settings",
+    en: "Choose from Light, Dark, or appearance styles like Minimal, Glassmorphism, Neumorphism, Midnight, Cyberpunk, and Catppuccin in Settings.",
   },
   {
     id: "customization-accents",
@@ -280,8 +280,8 @@ export const TIPS: TipItem[] = [
   {
     id: "customization-icons",
     category: "customization",
-    th: "เลือกปรับเปลี่ยนชุดไอคอน (Icon Pack) เช่น Lucide, Icons8, Flat หรือ Minimalist ได้ใน Settings",
-    en: "Switch icon packs (Lucide, Icons8, Flat, Minimalist) to match your visual taste in Settings.",
+    th: "เลือกปรับเปลี่ยนชุดไอคอน (Icon Pack) ทั้ง Lucide, Tabler และ Phosphor ได้ในเมนู Settings",
+    en: "Switch between Lucide, Tabler, and Phosphor icon packs to match your visual taste in Settings.",
   },
   {
     id: "customization-fonts",

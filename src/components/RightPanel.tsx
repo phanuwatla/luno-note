@@ -664,13 +664,13 @@ function RightPanelComponent({
                   </div>
                   {resolvedFileSize != null && (
                     <div className="flex items-center justify-between py-0.5">
-                      <span className="text-muted-foreground">{t("rightPanel.fileSize") || "File size"}</span>
+                      <span className="text-muted-foreground">{t("rightPanel.fileSize")}</span>
                       <span className="font-medium text-foreground">{formatFileSize(resolvedFileSize)}</span>
                     </div>
                   )}
                   {Boolean(currentIcon) && settings?.showFileIcons !== false && (
                     <div className="flex items-center justify-between py-0.5">
-                      <span className="text-muted-foreground">{t("sidebar.changeNoteIcon") || "Icon"}</span>
+                      <span className="text-muted-foreground">{t("sidebar.changeNoteIcon")}</span>
                       <button
                         type="button"
                         onClick={() => setIconPickerOpen(true)}
@@ -794,7 +794,7 @@ function RightPanelComponent({
                     <div className="flex items-center justify-between text-muted-foreground">
                       <span className="flex items-center gap-2">
                         <Maximize2 className="h-3.5 w-3.5 shrink-0" />
-                        <span>{t("rightPanel.imageDimensions") || "Dimensions"}</span>
+                        <span>{t("rightPanel.imageDimensions")}</span>
                       </span>
                       <span className="font-medium text-foreground/80">
                         {activeDimensions.width} × {activeDimensions.height} px
@@ -807,7 +807,7 @@ function RightPanelComponent({
                     <div className="flex items-center justify-between text-muted-foreground">
                       <span className="flex items-center gap-2">
                         <AlignJustify className="h-3.5 w-3.5 shrink-0" />
-                        <span>{t("rightPanel.lines") || "Lines"}</span>
+                        <span>{t("rightPanel.lines")}</span>
                       </span>
                       <span className="font-medium text-foreground/80">{stats.lines.toLocaleString()}</span>
                     </div>
@@ -889,11 +889,11 @@ function RightPanelComponent({
                     <DropdownMenuContent align="end" side="top" className="w-56">
                       <DropdownMenuItem disabled={!note} onClick={onExportFlattenedPdf}>
                         {renderIcon("fileText", "h-4 w-4")}
-                        <span>{t("editor.exportFlattenedPdf") || "Flattened PDF"}</span>
+                        <span>{t("editor.exportFlattenedPdf")}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem disabled={!note} onClick={onExportFormPdf}>
                         {renderIcon("fileCode", "h-4 w-4")}
-                        <span>{t("editor.exportFormPdf") || "Form Data PDF"}</span>
+                        <span>{t("editor.exportFormPdf")}</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -940,7 +940,7 @@ function RightPanelComponent({
           <IconPickerDialog
             open={iconPickerOpen}
             onOpenChange={setIconPickerOpen}
-            title={t("sidebar.changeNoteIcon") || "Change Icon"}
+            title={t("sidebar.changeNoteIcon")}
             initialIcon={currentIcon}
             initialColor={currentColor}
             onSelectIcon={(icon, color) => {

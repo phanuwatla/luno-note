@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, MenuItem, dialog, nativeImage, screen, clipboard, session, protocol, net } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, nativeImage, screen, clipboard, session, protocol, net, safeStorage, globalShortcut, Notification, webContents } = require("electron");
+const { createSystemFixLanguageManager } = require("./systemFixLanguage");
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -9,7 +10,6 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       corsEnabled: true,
       stream: true,
-      bypassCSP: true,
     },
   },
 ]);
@@ -28,9 +28,8 @@ const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
 const http = require("http");
+const https = require("https");
 const url = require("url");
-const { getSpellingSuggestions } = require("./spellDictionary");
-const { exec } = require("child_process");
 
 // Prevent multiple Electron instances from locking user data cache and freezing
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -50,11 +49,58 @@ if (!gotSingleInstanceLock) {
 const configPath = path.join(app.getPath("userData"), "workspace-config.json");
 const gdriveAuthPath = path.join(app.getPath("userData"), "gdrive-auth.json");
 
+function decryptSecretField(value) {
+  if (!value || typeof value !== "string") return value;
+  if (!value.startsWith("enc:")) return value;
+  try {
+    if (safeStorage && safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(Buffer.from(value.slice(4), "base64"));
+    }
+  } catch (err) {
+    console.warn("Failed decrypting gdrive secret field:", err);
+  }
+  return "";
+}
+
+function encryptSecretField(value) {
+  if (!value || typeof value !== "string") return value;
+  try {
+    if (safeStorage && safeStorage.isEncryptionAvailable()) {
+      return "enc:" + safeStorage.encryptString(value).toString("base64");
+    }
+  } catch (err) {
+    console.warn("Failed encrypting gdrive secret field:", err);
+  }
+  return value;
+}
+
 function getSavedGdriveAuth() {
   try {
     if (fs.existsSync(gdriveAuthPath)) {
       const raw = fs.readFileSync(gdriveAuthPath, "utf8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        if (parsed.access_token) parsed.access_token = decryptSecretField(parsed.access_token);
+        if (parsed.refresh_token) parsed.refresh_token = decryptSecretField(parsed.refresh_token);
+        if (parsed.accessToken) parsed.accessToken = decryptSecretField(parsed.accessToken);
+        if (parsed.refreshToken) parsed.refreshToken = decryptSecretField(parsed.refreshToken);
+        if (parsed.tokenInfo && typeof parsed.tokenInfo === "object") {
+          parsed.tokenInfo = { ...parsed.tokenInfo };
+          if (parsed.tokenInfo.access_token) {
+            parsed.tokenInfo.access_token = decryptSecretField(parsed.tokenInfo.access_token);
+          }
+          if (parsed.tokenInfo.refresh_token) {
+            parsed.tokenInfo.refresh_token = decryptSecretField(parsed.tokenInfo.refresh_token);
+          }
+          if (parsed.tokenInfo.accessToken) {
+            parsed.tokenInfo.accessToken = decryptSecretField(parsed.tokenInfo.accessToken);
+          }
+          if (parsed.tokenInfo.refreshToken) {
+            parsed.tokenInfo.refreshToken = decryptSecretField(parsed.tokenInfo.refreshToken);
+          }
+        }
+      }
+      return parsed;
     }
   } catch (err) {
     console.warn("Failed reading gdrive-auth.json:", err);
@@ -66,7 +112,30 @@ function saveGdriveAuthData(data) {
   try {
     const existing = getSavedGdriveAuth() || {};
     const merged = { ...existing, ...(data || {}) };
-    fs.writeFileSync(gdriveAuthPath, JSON.stringify(merged, null, 2), "utf8");
+    if (existing.tokenInfo && data?.tokenInfo && typeof data.tokenInfo === "object") {
+      merged.tokenInfo = { ...existing.tokenInfo, ...data.tokenInfo };
+    }
+    const persisted = { ...merged };
+    if (persisted.access_token) persisted.access_token = encryptSecretField(persisted.access_token);
+    if (persisted.refresh_token) persisted.refresh_token = encryptSecretField(persisted.refresh_token);
+    if (persisted.accessToken) persisted.accessToken = encryptSecretField(persisted.accessToken);
+    if (persisted.refreshToken) persisted.refreshToken = encryptSecretField(persisted.refreshToken);
+    if (persisted.tokenInfo && typeof persisted.tokenInfo === "object") {
+      persisted.tokenInfo = { ...persisted.tokenInfo };
+      if (persisted.tokenInfo.access_token) {
+        persisted.tokenInfo.access_token = encryptSecretField(persisted.tokenInfo.access_token);
+      }
+      if (persisted.tokenInfo.refresh_token) {
+        persisted.tokenInfo.refresh_token = encryptSecretField(persisted.tokenInfo.refresh_token);
+      }
+      if (persisted.tokenInfo.accessToken) {
+        persisted.tokenInfo.accessToken = encryptSecretField(persisted.tokenInfo.accessToken);
+      }
+      if (persisted.tokenInfo.refreshToken) {
+        persisted.tokenInfo.refreshToken = encryptSecretField(persisted.tokenInfo.refreshToken);
+      }
+    }
+    fs.writeFileSync(gdriveAuthPath, JSON.stringify(persisted, null, 2), "utf8");
     return merged;
   } catch (err) {
     console.warn("Failed saving gdrive-auth.json:", err);
@@ -208,8 +277,132 @@ const DANGEROUS_EXTENSIONS = new Set([
   ".exe", ".bat", ".cmd", ".com", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
   ".ps1", ".ps1xml", ".ps2", ".psc1", ".psc2", ".msh", ".msh1", ".msh2",
   ".reg", ".hta", ".cpl", ".jar", ".scr", ".pif", ".msi", ".msp", ".mst",
-  ".appx", ".appxbundle", ".msix", ".msixbundle", ".sh", ".bash"
+  ".appx", ".appxbundle", ".msix", ".msixbundle", ".sh", ".bash",
+  ".lnk", ".url", ".py", ".chm", ".iso", ".vhd", ".inf", ".scf", ".dll"
 ]);
+
+const userApprovedPaths = new Set();
+
+function registerApprovedPath(p) {
+  if (p && typeof p === "string") {
+    try {
+      userApprovedPaths.add(path.resolve(p));
+    } catch {
+      /* ignore invalid path */
+    }
+  }
+}
+
+function resolveExistingRealPath(p) {
+  const resolved = path.resolve(p);
+  if (!fs.realpathSync || typeof fs.realpathSync.native !== "function") {
+    return resolved;
+  }
+  let current = resolved;
+  const tailSegments = [];
+  for (let depth = 0; depth < 32; depth++) {
+    try {
+      if (fs.existsSync(current)) {
+        const realBase = fs.realpathSync.native(current);
+        return tailSegments.length > 0 ? path.join(realBase, ...tailSegments) : realBase;
+      }
+    } catch {
+      break;
+    }
+    const parent = path.dirname(current);
+    if (!parent || parent === current) break;
+    tailSegments.unshift(path.basename(current));
+    current = parent;
+  }
+  return resolved;
+}
+
+function isLexicalPathInsideRoot(normTarget, normRoot) {
+  if (process.platform === "win32") {
+    const t = normTarget.toLowerCase();
+    const r = normRoot.toLowerCase();
+    return t === r || t.startsWith(r.endsWith(path.sep) ? r : r + path.sep);
+  }
+  return normTarget === normRoot || normTarget.startsWith(normRoot.endsWith(path.sep) ? normRoot : normRoot + path.sep);
+}
+
+function isPathInsideRoot(targetPath, rootPath) {
+  if (!targetPath || !rootPath || typeof targetPath !== "string" || typeof rootPath !== "string") return false;
+  try {
+    const normTarget = path.resolve(targetPath);
+    const normRoot = path.resolve(rootPath);
+    if (!isLexicalPathInsideRoot(normTarget, normRoot)) {
+      return false;
+    }
+    const realTarget = resolveExistingRealPath(normTarget);
+    const realRoot = resolveExistingRealPath(normRoot);
+    return isLexicalPathInsideRoot(realTarget, realRoot);
+  } catch {
+    return false;
+  }
+}
+
+function getAllowedWorkspaceRoots() {
+  const roots = new Set();
+  for (const wsPath of windowWorkspaceMap.values()) {
+    if (wsPath) roots.add(wsPath);
+  }
+  try {
+    const saved = getSavedWorkspaceData();
+    if (saved?.folderPath) roots.add(saved.folderPath);
+    for (const item of getRecentWorkspacesList()) {
+      if (item?.folderPath) roots.add(item.folderPath);
+    }
+  } catch {
+    /* ignore */
+  }
+  for (const approved of userApprovedPaths) {
+    roots.add(approved);
+  }
+  try {
+    roots.add(path.join(app.getPath("temp"), "luno-preview"));
+  } catch {
+    /* ignore */
+  }
+  return Array.from(roots);
+}
+
+function isPathAllowedForIpc(targetPath) {
+  if (!targetPath || typeof targetPath !== "string" || isCriticalSystemPath(targetPath)) {
+    return false;
+  }
+  const roots = getAllowedWorkspaceRoots();
+  return roots.some((root) => isPathInsideRoot(targetPath, root));
+}
+
+const SENSITIVE_HOME_SUBPATHS = [
+  ".ssh",
+  ".gnupg",
+  ".aws",
+  ".azure",
+  ".kube",
+  ".docker",
+  ".npmrc",
+  ".netrc",
+  ".git-credentials",
+  path.join(".config", "gcloud"),
+];
+
+const POSIX_SYSTEM_ROOTS = [
+  "/etc",
+  "/var",
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/lib",
+  "/lib64",
+  "/boot",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/System",
+  "/Library",
+];
 
 function isCriticalSystemPath(targetPath) {
   if (!targetPath || typeof targetPath !== "string") return true;
@@ -219,20 +412,90 @@ function isCriticalSystemPath(targetPath) {
     const root = path.parse(resolved).root;
     if (resolved === root || resolved === path.dirname(root)) return true;
 
+    let lunoPreviewTempRoot = null;
+    try {
+      lunoPreviewTempRoot = path.join(app.getPath("temp"), "luno-preview");
+    } catch {
+      /* ignore */
+    }
+    if (lunoPreviewTempRoot && isLexicalPathInsideRoot(resolved, path.resolve(lunoPreviewTempRoot))) {
+      return false;
+    }
+
     const homedir = os.homedir();
-    if (resolved === path.resolve(homedir)) return true;
+    if (homedir) {
+      const resolvedHome = path.resolve(homedir);
+      if (resolved === resolvedHome || (process.platform === "win32" && resolved.toLowerCase() === resolvedHome.toLowerCase())) {
+        return true;
+      }
+      for (const rel of SENSITIVE_HOME_SUBPATHS) {
+        const sensitiveFull = path.join(resolvedHome, rel);
+        if (isLexicalPathInsideRoot(resolved, sensitiveFull)) {
+          return true;
+        }
+      }
+    }
 
     const winDir = process.env.WINDIR || process.env.SYSTEMROOT;
-    if (winDir && resolved.toLowerCase().startsWith(path.resolve(winDir).toLowerCase())) return true;
+    if (winDir && isLexicalPathInsideRoot(resolved, path.resolve(winDir))) return true;
     const progFiles = process.env.ProgramFiles;
-    if (progFiles && resolved.toLowerCase().startsWith(path.resolve(progFiles).toLowerCase())) return true;
+    if (progFiles && isLexicalPathInsideRoot(resolved, path.resolve(progFiles))) return true;
     const progFilesX86 = process.env["ProgramFiles(x86)"];
-    if (progFilesX86 && resolved.toLowerCase().startsWith(path.resolve(progFilesX86).toLowerCase())) return true;
+    if (progFilesX86 && isLexicalPathInsideRoot(resolved, path.resolve(progFilesX86))) return true;
+    const progW6432 = process.env.ProgramW6432;
+    if (progW6432 && isLexicalPathInsideRoot(resolved, path.resolve(progW6432))) return true;
+    const appData = process.env.APPDATA;
+    if (appData && isLexicalPathInsideRoot(resolved, path.resolve(appData))) return true;
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData && isLexicalPathInsideRoot(resolved, path.resolve(localAppData))) return true;
+
+    if (process.platform !== "win32") {
+      for (const sysRoot of POSIX_SYSTEM_ROOTS) {
+        if (isLexicalPathInsideRoot(resolved, sysRoot)) {
+          return true;
+        }
+      }
+    }
 
     return false;
   } catch {
     return true;
   }
+}
+
+function isStandardUserWorkspaceContainer(targetPath) {
+  if (!targetPath || typeof targetPath !== "string") return false;
+  try {
+    const docs = app.getPath("documents");
+    if (docs && isPathInsideRoot(targetPath, docs)) return true;
+  } catch {}
+  try {
+    const desktop = app.getPath("desktop");
+    if (desktop && isPathInsideRoot(targetPath, desktop)) return true;
+  } catch {}
+  return false;
+}
+
+function hasExistingLunoMetadata(folderPath) {
+  try {
+    return (
+      fs.existsSync(path.join(folderPath, ".luno", "workspace.json")) ||
+      fs.existsSync(path.join(folderPath, ".luno-settings.json"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedWorkspaceRoot(folderPath) {
+  if (!folderPath || typeof folderPath !== "string" || isCriticalSystemPath(folderPath)) {
+    return false;
+  }
+  return (
+    isPathAllowedForIpc(folderPath) ||
+    isStandardUserWorkspaceContainer(folderPath) ||
+    hasExistingLunoMetadata(folderPath)
+  );
 }
 
 function detectSystemLanguage() {
@@ -289,10 +552,8 @@ const DEFAULT_WORKSPACE_SETTINGS = {
   showCodeLineNumbers: false,
   highlightInlineCode: false,
   spellCheck: true,
-  geminiApiKey: "",
   aiModel: "auto",
   storageMode: "local",
-  googleDriveClientId: "",
 };
 
 function ensureDefaultWorkspaceFolders(folderPath) {
@@ -512,6 +773,13 @@ function scanWorkspaceTree(rootDir) {
       const fullPath = path.join(currentDir, name);
       const relFilePath = relativePath ? `${relativePath}/${name}` : name;
 
+      if (typeof file.isSymbolicLink === "function" && file.isSymbolicLink()) {
+        continue;
+      }
+      if (!isPathInsideRoot(fullPath, rootDir)) {
+        continue;
+      }
+
       if (file.isDirectory()) {
         folderPathsSet.add(relFilePath);
         recurse(fullPath, relFilePath, depth + 1);
@@ -581,8 +849,6 @@ function getAppIconPath() {
   if (fs.existsSync(distIcon)) return distIcon;
   const publicIcon = path.join(__dirname, "../public/luno-logo.png");
   if (fs.existsSync(publicIcon)) return publicIcon;
-  const tauriIco = path.join(__dirname, "../src-tauri/icons/icon.ico");
-  if (fs.existsSync(tauriIco)) return tauriIco;
   return electronIco;
 }
 
@@ -982,9 +1248,12 @@ function setupIpcHandlers() {
     return new Promise((resolve, reject) => {
       let isSettled = false;
 
-      // 1. Generate PKCE code verifier and challenge (RFC 7636)
+      // 1. Generate PKCE code verifier and challenge (RFC 7636) + OAuth 2.0 state CSRF token
       const codeVerifier = crypto.randomBytes(32).toString("base64url");
       const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+      const oauthState = crypto.randomBytes(24).toString("base64url");
+      const ALLOWED_SYNC_STATUSES = new Set(["synced", "idle", "syncing", "saving", "offline", "error"]);
+      const sanitizeDriveFolderId = (id) => (id && typeof id === "string" && /^[A-Za-z0-9_-]+$/.test(id) ? id : null);
 
       const bringAppToFront = () => {
         try {
@@ -1056,17 +1325,28 @@ function setupIpcHandlers() {
           }
 
           if (parsedUrl.pathname === "/sync-status") {
-            res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
+            const safeStatus = ALLOWED_SYNC_STATUSES.has(currentSyncState.status) ? currentSyncState.status : "synced";
+            const rawFolderId = currentSyncState.folderStructure?.workspacesId || currentSyncState.folderStructure?.projectId || currentSyncState.folderStructure?.rootId || null;
+            res.writeHead(200, {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-cache",
+              "X-Content-Type-Options": "nosniff",
+              "X-Frame-Options": "DENY",
+            });
             res.end(JSON.stringify({
-              status: currentSyncState.status || "synced",
-              lastSyncedAt: currentSyncState.lastSyncedAt || Date.now(),
-              folderId: currentSyncState.folderStructure?.workspacesId || currentSyncState.folderStructure?.projectId || currentSyncState.folderStructure?.rootId || null,
+              status: safeStatus,
+              lastSyncedAt: Number(currentSyncState.lastSyncedAt) || Date.now(),
+              folderId: sanitizeDriveFolderId(rawFolderId),
             }));
             return;
           }
 
           if (parsedUrl.pathname === "/focus" || parsedUrl.pathname === "/close-tab") {
-            res.writeHead(200, { "Content-Type": "application/json" });
+            res.writeHead(200, {
+              "Content-Type": "application/json",
+              "X-Content-Type-Options": "nosniff",
+              "X-Frame-Options": "DENY",
+            });
             res.end(JSON.stringify({ ok: true }));
             focusApp();
             return;
@@ -1075,10 +1355,30 @@ function setupIpcHandlers() {
           if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
             const queryCode = parsedUrl.query.code;
             const queryError = parsedUrl.query.error;
+            const queryState = parsedUrl.query.state;
+
+            if ((queryCode || queryError) && queryState !== oauthState) {
+              res.writeHead(400, {
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+              });
+              res.end("Invalid OAuth state parameter.");
+              if (!isSettled) {
+                isSettled = true;
+                try { server.close(); } catch {}
+                reject(new Error("OAuth state mismatch (potential CSRF blocked)"));
+              }
+              return;
+            }
 
             if (queryError) {
               bringAppToFront();
-              res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+              res.writeHead(200, {
+                "Content-Type": "text/html; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+              });
               res.end(`<!DOCTYPE html><html><head><title>Luno Note</title><script>window.open('','_self','');window.close();</script></head><body style="margin:0;background:#0f172a;"><script>window.open('','_self','');window.close();</script></body></html>`);
 
               if (!isSettled) {
@@ -1154,12 +1454,14 @@ function setupIpcHandlers() {
                       };
                     }
                   }
-                  const safeDriveUrl = targetFolderId
-                    ? `https://drive.google.com/drive/folders/${targetFolderId}`
+                  const safeFolderId = sanitizeDriveFolderId(targetFolderId);
+                  const safeDriveUrl = safeFolderId
+                    ? `https://drive.google.com/drive/folders/${safeFolderId}`
                     : "https://drive.google.com";
 
                   const logoDataUrl = getLunoLogoDataUrl();
-                  const safeEmail = (userProfile?.email || "Google User").replace(/[<>"']/g, "");
+                  const safeEmail = (userProfile?.email || "Google User").replace(/[<>"'&]/g, "");
+                  const safeSyncStatus = ALLOWED_SYNC_STATUSES.has(currentSyncState.status) ? currentSyncState.status : "synced";
                   const initialTime = currentSyncState.lastSyncedAt
                     ? new Date(currentSyncState.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
                     : (() => {
@@ -1176,11 +1478,15 @@ function setupIpcHandlers() {
                     offline: "ออฟไลน์",
                     error: "เกิดข้อผิดพลาด",
                   };
-                  const initialStatusText = initialStatusMap[currentSyncState.status] || "ซิงค์แล้ว";
-                  const initialStatusColor = currentSyncState.status === "syncing" ? "#26A295" : (currentSyncState.status === "saving" ? "#f59e0b" : "#10b981");
+                  const initialStatusText = initialStatusMap[safeSyncStatus] || "ซิงค์แล้ว";
+                  const initialStatusColor = safeSyncStatus === "syncing" ? "#26A295" : (safeSyncStatus === "saving" ? "#f59e0b" : "#10b981");
 
                   // Serve the Google Drive Sync landing page matching Settings Data & Storage UI
-                  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                  res.writeHead(200, {
+                    "Content-Type": "text/html; charset=utf-8",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                  });
                   res.end(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1502,10 +1808,10 @@ function setupIpcHandlers() {
 <body>
   <div class="card">
     <div class="card-top-bar">
-      <div id="lbl-group" class="group-title">Cloud Sync</div>
+      <div id="lbl-group" class="group-title">ซิงค์คลาวด์</div>
       <div class="status-badge">
         <span class="pulse-dot"></span>
-        <span id="lbl-status">Connected</span>
+        <span id="lbl-status">เชื่อมต่อแล้ว</span>
       </div>
     </div>
 
@@ -1616,7 +1922,7 @@ function setupIpcHandlers() {
         offline: "Offline",
         error: "Error"
       };
-      var currStatus = "${currentSyncState.status || "synced"}";
+      var currStatus = "${safeSyncStatus}";
       document.getElementById("val-sync-state").textContent = initialEnMap[currStatus] || "Synced";
       document.getElementById("btn-text").textContent = "Return to Luno Note";
     }
@@ -1643,7 +1949,7 @@ function setupIpcHandlers() {
         elState.textContent = conf.text;
         elState.style.color = conf.color;
       }
-      if (folderId) {
+      if (folderId && /^[A-Za-z0-9_-]+$/.test(String(folderId))) {
         var link = document.getElementById("link-location");
         if (link) {
           link.href = "https://drive.google.com/drive/folders/" + folderId;
@@ -1722,7 +2028,9 @@ function setupIpcHandlers() {
           clientId
         )}&redirect_uri=${encodeURIComponent(
           redirectUri
-        )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&prompt=select_account&access_type=offline`;
+        )}&response_type=code&scope=${scope}&code_challenge=${codeChallenge}&code_challenge_method=S256&state=${encodeURIComponent(
+          oauthState
+        )}&prompt=select_account&access_type=offline`;
 
         void shell.openExternal(authUrl);
 
@@ -1875,6 +2183,10 @@ function setupIpcHandlers() {
               filePath = decodeURIComponent(filePath);
             } catch {}
             const normalized = path.normalize(filePath);
+            if (!isPathAllowedForIpc(normalized)) {
+              console.warn("Blocked opening file:// URL outside allowed workspace:", normalized);
+              return false;
+            }
             if (fs.existsSync(normalized)) {
               const ext = path.extname(normalized).toLowerCase();
               if (DANGEROUS_EXTENSIONS.has(ext)) {
@@ -1891,6 +2203,10 @@ function setupIpcHandlers() {
 
         if (/^[a-zA-Z]:[/\\]/.test(clean)) {
           const normalized = path.normalize(clean);
+          if (!isPathAllowedForIpc(normalized)) {
+            console.warn("Blocked opening disk path outside allowed workspace:", normalized);
+            return false;
+          }
           if (fs.existsSync(normalized)) {
             const ext = path.extname(normalized).toLowerCase();
             if (DANGEROUS_EXTENSIONS.has(ext)) {
@@ -1936,7 +2252,7 @@ function setupIpcHandlers() {
 
   ipcMain.handle("open-path", async (_event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
         const ext = path.extname(fullPath).toLowerCase();
         if (DANGEROUS_EXTENSIONS.has(ext)) {
           shell.showItemInFolder(fullPath);
@@ -1944,6 +2260,8 @@ function setupIpcHandlers() {
         }
         await shell.openPath(fullPath);
         return true;
+      } else if (fullPath && !isPathAllowedForIpc(fullPath)) {
+        console.warn("Blocked opening path outside allowed workspace:", fullPath);
       }
     } catch (err) {
       console.warn("Failed opening path:", fullPath, err);
@@ -1953,9 +2271,11 @@ function setupIpcHandlers() {
 
   ipcMain.handle("show-item-in-folder", async (_event, fullPath) => {
     try {
-      if (fullPath && fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
         shell.showItemInFolder(fullPath);
         return true;
+      } else if (fullPath && !isPathAllowedForIpc(fullPath)) {
+        console.warn("Blocked showing item in folder outside allowed workspace:", fullPath);
       }
     } catch (err) {
       console.warn("Failed showing item in folder:", fullPath, err);
@@ -2127,6 +2447,7 @@ function setupIpcHandlers() {
             const raw = fs.readFileSync(lunoFile, "utf8");
             const parsed = JSON.parse(raw);
             if (parsed?.id) {
+              registerApprovedPath(dirPath);
               found.push({
                 folderPath: dirPath,
                 folderName: path.basename(dirPath),
@@ -2148,6 +2469,7 @@ function setupIpcHandlers() {
                 const subRaw = fs.readFileSync(subLuno, "utf8");
                 const subParsed = JSON.parse(subRaw);
                 if (subParsed?.id) {
+                  registerApprovedPath(sub);
                   found.push({
                     folderPath: sub,
                     folderName: entry.name,
@@ -2202,6 +2524,10 @@ function setupIpcHandlers() {
     const win = BrowserWindow.fromWebContents(event.sender);
     try {
       if (data?.folderPath) {
+        if (!isAllowedWorkspaceRoot(data.folderPath)) {
+          console.warn("Blocked setting unapproved or protected workspace root:", data.folderPath);
+          return false;
+        }
         saveWorkspaceData(data);
         if (win) {
           windowWorkspaceMap.set(win.id, data.folderPath);
@@ -2238,7 +2564,9 @@ function setupIpcHandlers() {
 
   ipcMain.handle("read-workspace-tree", (event, folderPath) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!folderPath || !fs.existsSync(folderPath)) return { entries: [], folderPaths: [] };
+    if (!folderPath || typeof folderPath !== "string" || !isAllowedWorkspaceRoot(folderPath) || !fs.existsSync(folderPath)) {
+      return { entries: [], folderPaths: [] };
+    }
     ensureDefaultWorkspaceFolders(folderPath);
     if (win) {
       windowWorkspaceMap.set(win.id, folderPath);
@@ -2247,13 +2575,15 @@ function setupIpcHandlers() {
     return scanWorkspaceTree(folderPath);
   });
 
-  ipcMain.handle("read-file-content", (event, fullPath) => {
+  ipcMain.handle("read-file-content", async (event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string") {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath)) {
         const normalized = path.normalize(fullPath);
         if (fs.existsSync(normalized)) {
-          return fs.readFileSync(normalized, "utf8");
+          return await fs.promises.readFile(normalized, "utf8");
         }
+      } else if (fullPath) {
+        console.warn("Blocked reading outside allowed workspace:", fullPath);
       }
     } catch (err) {
       console.warn("Failed reading file content:", fullPath, err);
@@ -2263,8 +2593,10 @@ function setupIpcHandlers() {
 
   ipcMain.handle("read-file-buffer", async (event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
         return await fs.promises.readFile(fullPath);
+      } else if (fullPath) {
+        console.warn("Blocked reading buffer outside allowed workspace:", fullPath);
       }
     } catch (err) {
       console.warn("Failed reading file buffer:", fullPath, err);
@@ -2272,10 +2604,13 @@ function setupIpcHandlers() {
     return null;
   });
 
-  ipcMain.handle("read-file-base64", (event, fullPath) => {
+  ipcMain.handle("read-file-base64", async (event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
-        return fs.readFileSync(fullPath).toString("base64");
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
+        const buf = await fs.promises.readFile(fullPath);
+        return buf.toString("base64");
+      } else if (fullPath) {
+        console.warn("Blocked reading base64 outside allowed workspace:", fullPath);
       }
     } catch (err) {
       console.warn("Failed reading file as base64:", fullPath, err);
@@ -2285,7 +2620,7 @@ function setupIpcHandlers() {
 
   ipcMain.handle("file-exists", (event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string" && fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
         return true;
       }
     } catch (err) {
@@ -2293,9 +2628,10 @@ function setupIpcHandlers() {
     }
     return false;
   });
-  ipcMain.handle("read-image-data-url", (event, fullPath) => {
+
+  ipcMain.handle("read-image-data-url", async (event, fullPath) => {
     try {
-      if (fs.existsSync(fullPath)) {
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
         const ext = path.extname(fullPath).toLowerCase();
         const mimeMap = {
           ".png": "image/png",
@@ -2330,7 +2666,7 @@ function setupIpcHandlers() {
           ".otf": "font/otf",
         };
         const mimeType = mimeMap[ext] || "application/octet-stream";
-        const buffer = fs.readFileSync(fullPath);
+        const buffer = await fs.promises.readFile(fullPath);
         return `data:${mimeType};base64,${buffer.toString("base64")}`;
       }
     } catch (err) {
@@ -2339,18 +2675,18 @@ function setupIpcHandlers() {
     return "";
   });
 
-  ipcMain.handle("write-file-content", (event, arg1, arg2) => { const fullPath = typeof arg1 === "string" ? arg1 : arg1?.fullPath; const content = typeof arg1 === "string" ? arg2 : arg1?.content;
+  ipcMain.handle("write-file-content", async (event, arg1, arg2) => { const fullPath = typeof arg1 === "string" ? arg1 : arg1?.fullPath; const content = typeof arg1 === "string" ? arg2 : arg1?.content;
     try {
-      if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
-        if (fullPath) console.warn("Blocked writing to protected or invalid path:", fullPath);
+      if (!fullPath || typeof fullPath !== "string" || !isPathAllowedForIpc(fullPath)) {
+        if (fullPath) console.warn("Blocked writing to unapproved or protected path:", fullPath);
         return false;
       }
       const normalizedPath = path.normalize(fullPath);
       const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
+        await fs.promises.mkdir(parentDir, { recursive: true });
       }
-      fs.writeFileSync(normalizedPath, content || "", "utf8");
+      await fs.promises.writeFile(normalizedPath, content || "", "utf8");
       return true;
     } catch (err) {
       console.warn("Failed writing file content:", fullPath, err);
@@ -2358,12 +2694,12 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle("write-file-base64", (event, data) => {
+  ipcMain.handle("write-file-base64", async (event, data) => {
+    const fullPath = data?.fullPath;
     try {
-      const fullPath = data?.fullPath;
       const base64 = data?.base64 || data?.contentBase64;
-      if (!fullPath || typeof fullPath !== "string" || isCriticalSystemPath(fullPath)) {
-        console.warn("Blocked writing base64 to protected or invalid path:", fullPath);
+      if (!fullPath || typeof fullPath !== "string" || !isPathAllowedForIpc(fullPath)) {
+        console.warn("Blocked writing base64 to unapproved or protected path:", fullPath);
         return false;
       }
       if (!base64 || typeof base64 !== "string") {
@@ -2373,7 +2709,7 @@ function setupIpcHandlers() {
       const normalizedPath = path.normalize(fullPath);
       const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
+        await fs.promises.mkdir(parentDir, { recursive: true });
       }
       const rawData = base64.includes(",") ? base64.split(",")[1] : base64;
       const buffer = Buffer.from(rawData, "base64");
@@ -2381,7 +2717,7 @@ function setupIpcHandlers() {
         console.warn("write-file-base64: decoded buffer is empty for:", fullPath);
         return false;
       }
-      fs.writeFileSync(normalizedPath, buffer);
+      await fs.promises.writeFile(normalizedPath, buffer);
       return true;
     } catch (err) {
       console.warn("Failed writing base64 file content:", fullPath, err);
@@ -2393,11 +2729,11 @@ function setupIpcHandlers() {
     try {
       const fullPath = data?.fullPath;
       const arrayBuffer = data?.buffer;
-      if (!fullPath || !arrayBuffer || isCriticalSystemPath(fullPath)) return false;
+      if (!fullPath || !arrayBuffer || !isPathAllowedForIpc(fullPath)) return false;
       const normalizedPath = path.normalize(fullPath);
       const parentDir = path.dirname(normalizedPath);
       if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
+        await fs.promises.mkdir(parentDir, { recursive: true });
       }
       const buffer = Buffer.from(arrayBuffer);
       await fs.promises.writeFile(normalizedPath, buffer);
@@ -2408,14 +2744,14 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle("delete-file-or-folder", (event, fullPath) => {
+  ipcMain.handle("delete-file-or-folder", async (event, fullPath) => {
     try {
-      if (fullPath && typeof fullPath === "string" && !isCriticalSystemPath(fullPath) && fs.existsSync(fullPath)) {
-        fs.rmSync(fullPath, { recursive: true, force: true });
+      if (fullPath && typeof fullPath === "string" && isPathAllowedForIpc(fullPath) && fs.existsSync(fullPath)) {
+        await fs.promises.rm(fullPath, { recursive: true, force: true });
         return true;
       }
-      if (isCriticalSystemPath(fullPath)) {
-        console.warn("Blocked deleting protected critical system path:", fullPath);
+      if (fullPath && !isPathAllowedForIpc(fullPath)) {
+        console.warn("Blocked deleting unapproved or protected path:", fullPath);
         return false;
       }
     } catch (err) {
@@ -2425,15 +2761,26 @@ function setupIpcHandlers() {
     return false;
   });
 
-  ipcMain.handle("read-directory-files", (event, folderPath) => {
+  ipcMain.handle("read-directory-files", async (event, folderPath) => {
     try {
-      if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
-        const files = fs.readdirSync(folderPath, { withFileTypes: true });
-        return files.map((f) => ({
-          name: f.name,
-          fullPath: path.join(folderPath, f.name),
-          isDirectory: f.isDirectory(),
-        }));
+      if (
+        folderPath &&
+        typeof folderPath === "string" &&
+        isPathAllowedForIpc(folderPath) &&
+        fs.existsSync(folderPath)
+      ) {
+        const stat = await fs.promises.stat(folderPath);
+        if (!stat.isDirectory()) return [];
+        const files = await fs.promises.readdir(folderPath, { withFileTypes: true });
+        return files
+          .filter((f) => !(typeof f.isSymbolicLink === "function" && f.isSymbolicLink()))
+          .map((f) => ({
+            name: f.name,
+            fullPath: path.join(folderPath, f.name),
+            isDirectory: f.isDirectory(),
+          }));
+      } else if (folderPath && !isPathAllowedForIpc(folderPath)) {
+        console.warn("Blocked reading directory files outside allowed workspace:", folderPath);
       }
     } catch (err) {
       console.warn("Failed reading directory files:", folderPath, err);
@@ -2444,7 +2791,11 @@ function setupIpcHandlers() {
   ipcMain.handle("create-workspace-folder", (event, { workspacePath, folderPath, folderName }) => {
     try {
       const cleanPath = (folderPath === "__opened_root__" ? "" : folderPath) || "";
-      const targetDir = path.join(workspacePath, cleanPath, folderName || "Untitled");
+      const targetDir = path.resolve(workspacePath, cleanPath, folderName || "Untitled");
+      if (!isPathInsideRoot(targetDir, workspacePath) || !isPathAllowedForIpc(targetDir)) {
+        console.warn("Blocked creating folder outside workspace:", targetDir);
+        return false;
+      }
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
@@ -2455,16 +2806,16 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle("rename-file-or-folder", (event, data) => {
+  ipcMain.handle("rename-file-or-folder", async (event, data) => {
     try {
       const src = data?.oldFullPath || data?.oldPath;
       const dst = data?.newFullPath || data?.newPath;
-      if (src && dst && fs.existsSync(src)) {
+      if (src && dst && isPathAllowedForIpc(src) && isPathAllowedForIpc(dst) && fs.existsSync(src)) {
         const parentDir = path.dirname(dst);
         if (!fs.existsSync(parentDir)) {
-          fs.mkdirSync(parentDir, { recursive: true });
+          await fs.promises.mkdir(parentDir, { recursive: true });
         }
-        fs.renameSync(src, dst);
+        await fs.promises.rename(src, dst);
         return true;
       }
     } catch (err) {
@@ -2474,13 +2825,14 @@ function setupIpcHandlers() {
     return false;
   });
 
-  ipcMain.handle("copy-file-or-folder", (event, { sourceFullPath, targetFullPath }) => {
+  ipcMain.handle("copy-file-or-folder", async (event, { sourceFullPath, targetFullPath }) => {
     try {
-      if (fs.existsSync(sourceFullPath)) {
+      if (isPathAllowedForIpc(sourceFullPath) && isPathAllowedForIpc(targetFullPath) && fs.existsSync(sourceFullPath)) {
         let finalTarget = targetFullPath;
         if (fs.existsSync(finalTarget)) {
           const parentDir = path.dirname(finalTarget);
-          const isDir = fs.statSync(sourceFullPath).isDirectory();
+          const stat = await fs.promises.stat(sourceFullPath);
+          const isDir = stat.isDirectory();
           if (isDir) {
             const rawBase = path.basename(finalTarget);
             const rootBase = rawBase.replace(/-copy(-\d+)?$/, "");
@@ -2504,9 +2856,9 @@ function setupIpcHandlers() {
         }
         const parentDir = path.dirname(finalTarget);
         if (!fs.existsSync(parentDir)) {
-          fs.mkdirSync(parentDir, { recursive: true });
+          await fs.promises.mkdir(parentDir, { recursive: true });
         }
-        fs.cpSync(sourceFullPath, finalTarget, { recursive: true });
+        await fs.promises.cp(sourceFullPath, finalTarget, { recursive: true });
         return true;
       }
     } catch (err) {
@@ -2525,6 +2877,7 @@ function setupIpcHandlers() {
 
     if (!result.canceled && result.filePaths.length > 0) {
       const folderPath = result.filePaths[0];
+      registerApprovedPath(folderPath);
       const folderName = path.basename(folderPath);
       ensureDefaultWorkspaceFolders(folderPath);
 
@@ -2579,6 +2932,7 @@ function setupIpcHandlers() {
       defaultPath: startPath || undefined,
     });
     if (!result.canceled && result.filePaths.length > 0) {
+      registerApprovedPath(result.filePaths[0]);
       return result.filePaths[0];
     }
     return null;
@@ -2597,6 +2951,7 @@ function setupIpcHandlers() {
       ],
     });
     if (!result.canceled && result.filePath) {
+      registerApprovedPath(result.filePath);
       return result.filePath;
     }
     return null;
@@ -2616,7 +2971,12 @@ function setupIpcHandlers() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
       },
+    });
+    printWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    printWin.webContents.on("will-navigate", (navEvent) => {
+      navEvent.preventDefault();
     });
 
     try {
@@ -2681,7 +3041,12 @@ function setupIpcHandlers() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
       },
+    });
+    printWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    printWin.webContents.on("will-navigate", (navEvent) => {
+      navEvent.preventDefault();
     });
 
     try {
@@ -2749,11 +3114,22 @@ function setupIpcHandlers() {
   ipcMain.handle("create-new-workspace", async (event, { parentPath, workspaceName, welcomeContent }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     try {
-      if (!parentPath || !workspaceName) return null;
-      const targetPath = path.join(parentPath, workspaceName.trim());
+      if (!parentPath || !workspaceName || typeof parentPath !== "string" || typeof workspaceName !== "string") return null;
+      const cleanName = path.basename(workspaceName.trim());
+      if (!cleanName || cleanName === "." || cleanName === "..") return null;
+      if (!isAllowedWorkspaceRoot(parentPath)) {
+        console.warn("Blocked creating workspace in unapproved parent directory:", parentPath);
+        return null;
+      }
+      const targetPath = path.join(parentPath, cleanName);
+      if (!isPathInsideRoot(targetPath, parentPath) || isCriticalSystemPath(targetPath)) {
+        console.warn("Blocked creating workspace at invalid target path:", targetPath);
+        return null;
+      }
       if (!fs.existsSync(targetPath)) {
         fs.mkdirSync(targetPath, { recursive: true });
       }
+      registerApprovedPath(targetPath);
       ensureDefaultWorkspaceFolders(targetPath);
 
       if (welcomeContent && typeof welcomeContent === "string") {
@@ -2763,7 +3139,7 @@ function setupIpcHandlers() {
         }
       }
 
-      const folderName = workspaceName.trim();
+      const folderName = cleanName;
       const currentWs = win ? windowWorkspaceMap.get(win.id) : null;
 
       if (currentWs) {
@@ -2787,7 +3163,7 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle("open-workspace-in-new-window", async (_event, folderPath) => {
-    if (!folderPath || !fs.existsSync(folderPath)) return false;
+    if (!folderPath || typeof folderPath !== "string" || !isAllowedWorkspaceRoot(folderPath) || !fs.existsSync(folderPath)) return false;
     ensureDefaultWorkspaceFolders(folderPath);
     const existingWin = findWindowWithWorkspace(folderPath);
     if (existingWin) {
@@ -2802,6 +3178,33 @@ function setupIpcHandlers() {
 
   ipcMain.handle("get-native-keyboard-language", async () => {
     return currentNativeKeyboardLang;
+  });
+
+  const defaultFixLanguageStatus = () => ({
+    enabled: false,
+    registered: false,
+    shortcut: "CommandOrControl+Shift+L",
+    platform: process.platform,
+    backgroundHelperSupported: false,
+    backgroundHelperEnabled: false,
+    backgroundHelperRunning: false,
+    backgroundHelperAutoStart: false,
+    mode: "disabled",
+  });
+
+  ipcMain.handle("configure-global-fix-language", async (_event, config) => {
+    if (!systemFixLanguageManager) return defaultFixLanguageStatus();
+    return await systemFixLanguageManager.configure(config);
+  });
+
+  ipcMain.handle("get-global-fix-language-status", async () => {
+    if (!systemFixLanguageManager) return defaultFixLanguageStatus();
+    return await systemFixLanguageManager.getStatus();
+  });
+
+  ipcMain.handle("restart-global-fix-language-helper", async () => {
+    if (!systemFixLanguageManager) return defaultFixLanguageStatus();
+    return await systemFixLanguageManager.restartBackgroundHelper();
   });
 
   try { ipcMain.removeHandler("read-clipboard-text"); } catch {}
@@ -2837,12 +3240,17 @@ function setupIpcHandlers() {
   try { ipcMain.removeHandler("write-clipboard-image"); } catch {}
   ipcMain.handle("write-clipboard-image", async (_event, dataUrl) => {
     try {
-      if (!dataUrl) return false;
-      const img = nativeImage.createFromDataURL(dataUrl);
+      if (!dataUrl || typeof dataUrl !== "string") return false;
+      const trimmedDataUrl = dataUrl.trim();
+      if (!/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i.test(trimmedDataUrl)) {
+        console.warn("write-clipboard-image: rejected invalid image dataUrl format");
+        return false;
+      }
+      const img = nativeImage.createFromDataURL(trimmedDataUrl);
       if (!img.isEmpty()) {
         clipboard.write({
           image: img,
-          html: `<img src="${dataUrl}" alt="QR Code" />`,
+          html: `<img src="${trimmedDataUrl}" alt="QR Code" />`,
         });
         return true;
       }
@@ -2856,6 +3264,338 @@ function setupIpcHandlers() {
   ipcMain.handle("get-app-version", () => {
     return app.getVersion();
   });
+
+  ipcMain.handle("check-for-updates", async () => {
+    if (activeUpdateCheckPromise) {
+      return activeUpdateCheckPromise;
+    }
+
+    activeUpdateCheckPromise = (async () => {
+      const curVersion = app.getVersion();
+      if (!app.isPackaged) {
+        if (process.env.NODE_ENV === "development" && autoUpdater) {
+          isCheckingForUpdatesInIpc = true;
+          try {
+            const result = await autoUpdater.checkForUpdates();
+            const remoteVersion = result?.updateInfo?.version;
+            const isNewer = isNewerVersion(remoteVersion, curVersion);
+            return {
+              success: true,
+              isDev: true,
+              isUpdateAvailable: isNewer,
+              updateInfo: isNewer ? result?.updateInfo : null,
+              currentVersion: curVersion,
+            };
+          } catch {
+            return {
+              success: true,
+              isDev: true,
+              isUpdateAvailable: false,
+              message: "Running in development mode",
+              currentVersion: curVersion,
+            };
+          } finally {
+            isCheckingForUpdatesInIpc = false;
+          }
+        }
+        return {
+          success: true,
+          isDev: true,
+          isUpdateAvailable: false,
+          message: "Running in development mode",
+          currentVersion: curVersion,
+        };
+      }
+
+      isCheckingForUpdatesInIpc = true;
+      fallbackUpdateInfo = null;
+      let primaryErr = null;
+
+      try {
+        if (autoUpdater) {
+          ensureAutoUpdaterFeedConfigured();
+          const result = await autoUpdater.checkForUpdates();
+          const remoteVersion = result?.updateInfo?.version;
+          if (remoteVersion) {
+            const isNewer = isNewerVersion(remoteVersion, curVersion);
+            return {
+              success: true,
+              isUpdateAvailable: isNewer,
+              updateInfo: isNewer ? result.updateInfo : null,
+              currentVersion: curVersion,
+            };
+          }
+        } else {
+          primaryErr = new Error("Auto-updater module not available");
+        }
+      } catch (err) {
+        primaryErr = err;
+        console.warn("autoUpdater.checkForUpdates failed, trying GitHub fallback:", err?.message || err);
+      } finally {
+        isCheckingForUpdatesInIpc = false;
+      }
+
+      // Fallback: check GitHub latest.yml / Releases API directly so transient
+      // electron-updater GitHubProvider failures (e.g. releases.atom/HTML redirect/net.request)
+      // never break update detection.
+      try {
+        const fallback = await fetchLatestGitHubReleaseFallback(curVersion);
+        if (fallback && fallback.version) {
+          const isNewer = isNewerVersion(fallback.version, curVersion);
+          if (isNewer) {
+            fallbackUpdateInfo = fallback;
+          }
+          return {
+            success: true,
+            isUpdateAvailable: isNewer,
+            updateInfo: isNewer ? fallback : null,
+            currentVersion: curVersion,
+          };
+        }
+      } catch (fallbackErr) {
+        console.warn("GitHub release fallback check failed:", fallbackErr?.message || fallbackErr);
+        const errMsg = primaryErr?.message || fallbackErr?.message || String(primaryErr || fallbackErr);
+        return { success: false, error: errMsg, currentVersion: curVersion };
+      }
+
+      return {
+        success: false,
+        error: primaryErr?.message || "Failed to check for updates",
+        currentVersion: curVersion,
+      };
+    })();
+
+    try {
+      return await activeUpdateCheckPromise;
+    } finally {
+      activeUpdateCheckPromise = null;
+    }
+  });
+
+  ipcMain.handle("download-update", async () => {
+    const openFallbackDownload = () => {
+      const targetUrl = fallbackUpdateInfo?.downloadUrl || fallbackUpdateInfo?.releaseUrl;
+      if (isAllowedGitHubUpdateUrl(targetUrl)) {
+        shell.openExternal(targetUrl);
+        return { success: true, openedExternally: true };
+      }
+      return null;
+    };
+
+    if (!autoUpdater) {
+      const opened = openFallbackDownload();
+      if (opened) return opened;
+      return { success: false, error: "Auto-updater module not available" };
+    }
+    try {
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      // If update was discovered via fallback, prime autoUpdater once and retry download
+      if (msg.includes("Please check update first") || fallbackUpdateInfo) {
+        try {
+          ensureAutoUpdaterFeedConfigured();
+          isCheckingForUpdatesInIpc = true;
+          try {
+            await autoUpdater.checkForUpdates();
+          } finally {
+            isCheckingForUpdatesInIpc = false;
+          }
+          await autoUpdater.downloadUpdate();
+          return { success: true };
+        } catch (retryErr) {
+          console.warn("downloadUpdate retry failed:", retryErr?.message || retryErr);
+          const opened = openFallbackDownload();
+          if (opened) return opened;
+          return { success: false, error: retryErr?.message || String(retryErr) };
+        }
+      }
+      console.warn("downloadUpdate error:", err);
+      return { success: false, error: msg };
+    }
+  });
+
+  ipcMain.handle("quit-and-install-update", () => {
+    if (!autoUpdater) return false;
+    try {
+      autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (err) {
+      console.warn("quitAndInstall error:", err);
+      return false;
+    }
+  });
+}
+
+const GITHUB_UPDATE_OWNER = "phanuwatla";
+const GITHUB_UPDATE_REPO = "luno-note";
+const ALLOWED_GITHUB_UPDATE_HOSTS = new Set([
+  "github.com",
+  "api.github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+  "github-releases.githubusercontent.com",
+]);
+
+let isCheckingForUpdatesInIpc = false;
+let activeUpdateCheckPromise = null;
+let fallbackUpdateInfo = null;
+let feedUrlConfigured = false;
+
+function isAllowedGitHubUpdateUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") return false;
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === "https:" && ALLOWED_GITHUB_UPDATE_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function ensureAutoUpdaterFeedConfigured() {
+  if (!autoUpdater || feedUrlConfigured) return;
+  try {
+    const curVer = app.getVersion ? app.getVersion() : "1.0.0";
+    autoUpdater.requestHeaders = {
+      ...(autoUpdater.requestHeaders || {}),
+      "User-Agent": `Luno-Note/${curVer}`,
+    };
+    if (app.isPackaged) {
+      const appUpdateYmlPath = path.join(process.resourcesPath || "", "app-update.yml");
+      if (!fs.existsSync(appUpdateYmlPath)) {
+        autoUpdater.setFeedURL({
+          provider: "github",
+          owner: GITHUB_UPDATE_OWNER,
+          repo: GITHUB_UPDATE_REPO,
+          releaseType: "release",
+        });
+      }
+    }
+    feedUrlConfigured = true;
+  } catch (err) {
+    console.warn("ensureAutoUpdaterFeedConfigured warning:", err);
+  }
+}
+
+function fetchHttpsText(targetUrl, headers = {}, maxRedirects = 5, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    if (!isAllowedGitHubUpdateUrl(targetUrl)) {
+      reject(new Error(`Blocked non-GitHub update URL: ${targetUrl}`));
+      return;
+    }
+    const req = https.get(targetUrl, { headers, timeout: timeoutMs }, (res) => {
+      const status = res.statusCode || 0;
+      if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
+        res.resume();
+        if (maxRedirects <= 0) {
+          reject(new Error("Too many redirects while checking for updates"));
+          return;
+        }
+        const nextUrl = new URL(res.headers.location, targetUrl).toString();
+        fetchHttpsText(nextUrl, headers, maxRedirects - 1, timeoutMs).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.resume();
+        reject(new Error(`HTTP ${status} from ${targetUrl}`));
+        return;
+      }
+      const chunks = [];
+      let totalBytes = 0;
+      const MAX_BYTES = 1024 * 1024;
+      res.on("data", (chunk) => {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_BYTES) {
+          req.destroy(new Error("Update metadata response too large"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on("end", () => {
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("ETIMEDOUT: Update check timed out"));
+    });
+    req.on("error", reject);
+  });
+}
+
+function parseLatestYml(yamlText) {
+  if (!yamlText || typeof yamlText !== "string") return null;
+  const versionMatch = yamlText.match(/^version:\s*['"]?([^'"\r\n]+)['"]?/m);
+  const pathMatch = yamlText.match(/^path:\s*['"]?([^'"\r\n]+)['"]?/m);
+  const releaseDateMatch = yamlText.match(/^releaseDate:\s*['"]?([^'"\r\n]+)['"]?/m);
+  const version = versionMatch?.[1]?.trim();
+  if (!version) return null;
+  return {
+    version,
+    path: pathMatch?.[1]?.trim() || "",
+    releaseDate: releaseDateMatch?.[1]?.trim() || undefined,
+  };
+}
+
+async function fetchLatestGitHubReleaseFallback(curVersion) {
+  const userAgent = `Luno-Note/${curVersion || "1.0.0"}`;
+  const latestYmlUrl = `https://github.com/${GITHUB_UPDATE_OWNER}/${GITHUB_UPDATE_REPO}/releases/latest/download/latest.yml`;
+  let lastError = null;
+
+  // Strategy 1: Direct latest.yml download (not subject to GitHub REST API rate limits)
+  try {
+    const yamlText = await fetchHttpsText(latestYmlUrl, {
+      "User-Agent": userAgent,
+      Accept: "text/yaml, text/plain, */*",
+    });
+    const parsed = parseLatestYml(yamlText);
+    if (parsed && parsed.version) {
+      const tag = parsed.version.startsWith("v") ? parsed.version : `v${parsed.version}`;
+      const releaseUrl = `https://github.com/${GITHUB_UPDATE_OWNER}/${GITHUB_UPDATE_REPO}/releases/tag/${tag}`;
+      const downloadUrl = parsed.path
+        ? `https://github.com/${GITHUB_UPDATE_OWNER}/${GITHUB_UPDATE_REPO}/releases/download/${tag}/${encodeURIComponent(parsed.path)}`
+        : releaseUrl;
+      return {
+        version: parsed.version,
+        releaseDate: parsed.releaseDate,
+        releaseUrl,
+        downloadUrl,
+        isFallback: true,
+      };
+    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  // Strategy 2: Official GitHub Releases REST API
+  const apiUrl = `https://api.github.com/repos/${GITHUB_UPDATE_OWNER}/${GITHUB_UPDATE_REPO}/releases/latest`;
+  try {
+    const jsonText = await fetchHttpsText(apiUrl, {
+      "User-Agent": userAgent,
+      Accept: "application/vnd.github+json",
+    });
+    const data = JSON.parse(jsonText);
+    const rawTag = data?.tag_name || data?.name;
+    if (rawTag) {
+      const cleanVersion = String(rawTag).replace(/^v/i, "").trim();
+      const exeAsset = Array.isArray(data?.assets)
+        ? data.assets.find((a) => typeof a?.name === "string" && a.name.toLowerCase().endsWith(".exe"))
+        : null;
+      return {
+        version: cleanVersion,
+        releaseDate: data?.published_at || data?.created_at,
+        releaseNotes: typeof data?.body === "string" ? data.body : undefined,
+        releaseUrl: data?.html_url || `https://github.com/${GITHUB_UPDATE_OWNER}/${GITHUB_UPDATE_REPO}/releases/latest`,
+        downloadUrl: exeAsset?.browser_download_url || data?.html_url,
+        isFallback: true,
+      };
+    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  throw lastError || new Error("Unable to fetch latest release metadata from GitHub");
+}
 
 function isNewerVersion(remoteVersion, currentVersion) {
   if (!remoteVersion || !currentVersion) return false;
@@ -2877,74 +3617,6 @@ function isNewerVersion(remoteVersion, currentVersion) {
   return false;
 }
 
-  ipcMain.handle("check-for-updates", async () => {
-    if (!autoUpdater) {
-      return { success: false, error: "Auto-updater module not available", currentVersion: app.getVersion() };
-    }
-    try {
-      const curVersion = app.getVersion();
-      if (!app.isPackaged && process.env.NODE_ENV === "development") {
-        try {
-          const result = await autoUpdater.checkForUpdates();
-          const remoteVersion = result?.updateInfo?.version;
-          const isNewer = isNewerVersion(remoteVersion, curVersion);
-          return {
-            success: true,
-            isDev: true,
-            isUpdateAvailable: isNewer,
-            updateInfo: isNewer ? result?.updateInfo : null,
-            currentVersion: curVersion,
-          };
-        } catch (devErr) {
-          return {
-            success: true,
-            isDev: true,
-            isUpdateAvailable: false,
-            message: "Running in development mode",
-            currentVersion: curVersion,
-          };
-        }
-      }
-      const result = await autoUpdater.checkForUpdates();
-      const remoteVersion = result?.updateInfo?.version;
-      const isNewer = isNewerVersion(remoteVersion, curVersion);
-      return {
-        success: true,
-        isUpdateAvailable: isNewer,
-        updateInfo: isNewer ? result?.updateInfo : null,
-        currentVersion: curVersion,
-      };
-    } catch (err) {
-      console.warn("checkForUpdates error:", err);
-      return { success: false, error: err?.message || String(err), currentVersion: app.getVersion() };
-    }
-  });
-
-  ipcMain.handle("download-update", async () => {
-    if (!autoUpdater) {
-      return { success: false, error: "Auto-updater module not available" };
-    }
-    try {
-      await autoUpdater.downloadUpdate();
-      return { success: true };
-    } catch (err) {
-      console.warn("downloadUpdate error:", err);
-      return { success: false, error: err?.message || String(err) };
-    }
-  });
-
-  ipcMain.handle("quit-and-install-update", () => {
-    if (!autoUpdater) return false;
-    try {
-      autoUpdater.quitAndInstall(false, true);
-      return true;
-    } catch (err) {
-      console.warn("quitAndInstall error:", err);
-      return false;
-    }
-  });
-}
-
 function sendUpdateStatusToWindows(channel, payload) {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win && !win.isDestroyed()) {
@@ -2964,6 +3636,7 @@ if (autoUpdater) {
     });
 
     autoUpdater.on("update-available", (info) => {
+      if (isCheckingForUpdatesInIpc) return;
       const curVersion = app.getVersion();
       if (!isNewerVersion(info?.version, curVersion)) {
         sendUpdateStatusToWindows("update-not-available", {
@@ -2981,6 +3654,7 @@ if (autoUpdater) {
     });
 
     autoUpdater.on("update-not-available", (info) => {
+      if (isCheckingForUpdatesInIpc) return;
       sendUpdateStatusToWindows("update-not-available", {
         version: info?.version,
         currentVersion: app.getVersion(),
@@ -2989,6 +3663,7 @@ if (autoUpdater) {
 
     autoUpdater.on("error", (err) => {
       console.warn("autoUpdater error event:", err);
+      if (isCheckingForUpdatesInIpc) return;
       sendUpdateStatusToWindows("update-error", {
         message: err?.message || String(err),
       });
@@ -3021,8 +3696,33 @@ try {
   }
 } catch {}
 let isAppQuitting = false;
+let systemFixLanguageManager = null;
 
 app.whenReady().then(() => {
+  if (process.platform === "win32" && typeof app.setAppUserModelId === "function") {
+    try {
+      app.setAppUserModelId("com.luno.note");
+    } catch {
+      /* ignore app user model id errors */
+    }
+  }
+
+  const sourceHelperExe = app.isPackaged
+    ? path.join(process.resourcesPath, "LunoFixLang.exe")
+    : path.join(__dirname, "bin", "LunoFixLang.exe");
+
+  systemFixLanguageManager = createSystemFixLanguageManager({
+    BrowserWindow,
+    webContents,
+    globalShortcut,
+    clipboard,
+    Notification,
+    getAppIcon: getNativeAppIcon,
+    userDataPath: app.getPath("userData"),
+    sourceExePath: sourceHelperExe,
+    lunoAppPath: app.isPackaged ? process.execPath : "",
+    lunoPid: process.pid,
+  });
   try {
     protocol.handle("luno-asset", (request) => {
       try {
@@ -3030,6 +3730,10 @@ app.whenReady().then(() => {
         let decodedPath = decodeURIComponent(rawPath);
         if (/^\/[a-zA-Z]:[\\/]/.test(decodedPath)) {
           decodedPath = decodedPath.slice(1);
+        }
+        if (!isPathAllowedForIpc(decodedPath)) {
+          console.warn("Blocked luno-asset access outside workspace:", decodedPath);
+          return new Response("Forbidden", { status: 403 });
         }
         const fileUrl = url.pathToFileURL(decodedPath).toString();
         return net.fetch(fileUrl);
@@ -3046,7 +3750,7 @@ app.whenReady().then(() => {
     try {
       app.setAboutPanelOptions({
         applicationName: "Luno Note",
-        applicationVersion: app.getVersion ? app.getVersion() : "1.2.2",
+        applicationVersion: app.getVersion ? app.getVersion() : "1.4.1",
         copyright: "Copyright © 2026 phanuwatla",
         authors: ["phanuwatla"],
         website: "https://github.com/phanuwatla",
@@ -3062,6 +3766,7 @@ app.whenReady().then(() => {
     } catch {
       /* ignore */
     }
+    systemFixLanguageManager?.attachWindowMessageHook(window);
   });
 
   app.on("web-contents-created", (event, contents) => {
@@ -3090,6 +3795,7 @@ app.whenReady().then(() => {
       try {
         contents.setZoomFactor(0.9);
       } catch {}
+      systemFixLanguageManager?.attachWebViewShortcut(contents);
 
       const isSensitiveWebUrl = (rawUrl) => {
         if (!rawUrl || typeof rawUrl !== "string") return false;
@@ -3119,6 +3825,28 @@ app.whenReady().then(() => {
 
       contents.on("will-navigate", (event, targetUrl) => {
         try {
+          if (!targetUrl || typeof targetUrl !== "string") {
+            event.preventDefault();
+            return;
+          }
+          const lowerUrl = targetUrl.trim().toLowerCase();
+          if (lowerUrl.startsWith("javascript:") || lowerUrl.startsWith("vbscript:")) {
+            event.preventDefault();
+            return;
+          }
+          if (lowerUrl.startsWith("file:")) {
+            let localPath = "";
+            try {
+              localPath = url.fileURLToPath(targetUrl);
+            } catch {
+              localPath = decodeURIComponent(targetUrl.replace(/^file:\/\/\/?/i, ""));
+            }
+            if (!localPath || !isPathAllowedForIpc(localPath)) {
+              console.warn("Blocked webview navigation to unauthorized local file:", targetUrl);
+              event.preventDefault();
+              return;
+            }
+          }
           if (isSensitiveWebUrl(targetUrl)) {
             event.preventDefault();
             shell.openExternal(targetUrl);
@@ -3186,6 +3914,7 @@ app.on("before-quit", () => {
 
 app.on("will-quit", () => {
   isAppQuitting = true;
+  systemFixLanguageManager?.dispose();
 });
 
 app.on("window-all-closed", () => {

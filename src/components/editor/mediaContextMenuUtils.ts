@@ -1,5 +1,6 @@
 import { toast } from "@/hooks/use-toast";
 import { copyToClipboard } from "@/lib/clipboardUtils";
+import { translate, getActiveAppLanguage } from "@/translation/translate";
 
 export function getCleanRelPath(rawCandidate: string): string {
   if (!rawCandidate) return "";
@@ -61,15 +62,16 @@ export async function copyImageToClipboard(src: string, dataRelativeSrc?: string
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(blob);
           });
-        } catch {}
+        } catch { /* ignore */ }
       }
 
       if (dataUrl) {
         const success = await electronAPI.writeClipboardImage(dataUrl);
         if (success !== false) {
+          const lang = getActiveAppLanguage();
           toast({
-            title: "คัดลอกรูปภาพแล้ว",
-            description: "รูปภาพพร้อมสำหรับวางในแอปอื่นแล้ว",
+            title: translate(lang, "mediaClipboard.imageCopiedTitle"),
+            description: translate(lang, "mediaClipboard.imageCopiedAppDesc"),
           });
           return true;
         }
@@ -108,9 +110,10 @@ export async function copyImageToClipboard(src: string, dataRelativeSrc?: string
         }),
       ]);
 
+      const lang = getActiveAppLanguage();
       toast({
-        title: "คัดลอกรูปภาพแล้ว",
-        description: "รูปภาพพร้อมสำหรับวางแล้ว",
+        title: translate(lang, "mediaClipboard.imageCopiedTitle"),
+        description: translate(lang, "mediaClipboard.imageCopiedDesc"),
       });
       return true;
     } catch (webErr) {
@@ -121,12 +124,13 @@ export async function copyImageToClipboard(src: string, dataRelativeSrc?: string
   return false;
 }
 
-export async function copyTextToClipboard(text: string, title = "คัดลอกแล้ว", description?: string): Promise<boolean> {
+export async function copyTextToClipboard(text: string, title?: string, description?: string): Promise<boolean> {
+  const resolvedTitle = title ?? translate(getActiveAppLanguage(), "mediaClipboard.copiedDefault");
   try {
     const success = await copyToClipboard(text);
     if (success) {
       toast({
-        title,
+        title: resolvedTitle,
         description: description || text,
       });
       return true;
@@ -161,7 +165,7 @@ export async function copyMediaPath(
 
   return copyTextToClipboard(
     target,
-    labels?.title || (type === "full" ? "คัดลอกพาธแบบเต็มแล้ว" : "คัดลอกพาธสัมพัทธ์แล้ว"),
+    labels?.title || translate(getActiveAppLanguage(), type === "full" ? "mediaClipboard.fullPathCopied" : "mediaClipboard.relativePathCopied"),
     labels?.description || target
   );
 }

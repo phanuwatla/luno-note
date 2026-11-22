@@ -14,7 +14,7 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col sm:max-w-[420px] md:max-w-[440px]",
+      "fixed top-0 z-[80] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col sm:max-w-[420px] md:max-w-[440px]",
       className,
     )}
     {...props}
@@ -52,7 +52,7 @@ const ToastAction = React.forwardRef<
   <ToastPrimitives.Action
     ref={ref}
     className={cn(
-      "inline-flex h-8 shrink-0 items-center justify-center rounded-xl border border-border/80 bg-background/80 px-3 text-xs font-semibold ring-offset-background transition-all hover:bg-accent hover:text-white focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 shadow-2xs cursor-pointer whitespace-nowrap",
+      "inline-flex h-8 shrink-0 items-center justify-center rounded-xl border border-border/80 bg-background/80 px-3 text-xs font-semibold ring-offset-background transition-all hover:bg-accent hover:text-white focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 shadow-sm cursor-pointer whitespace-nowrap",
       className,
     )}
     {...props}

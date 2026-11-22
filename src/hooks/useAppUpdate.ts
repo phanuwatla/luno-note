@@ -87,24 +87,37 @@ export function isNewerVersion(
   return false;
 }
 
-function formatUpdateError(rawMsg: string | undefined | null, t?: ((key: string) => string) | null): string {
+export function formatUpdateError(rawMsg: string | undefined | null, t?: ((key: string) => string) | null): string {
   const tr = t || tTranslator || ((k: string) => k);
-  if (!rawMsg) return tr("settings.updateError") || "Update Check Failed";
+  if (!rawMsg) return tr("settings.updateError");
   const str = String(rawMsg);
-  if (str.includes("404") || str.includes("latest.yml") || str.includes("releases/latest")) {
-    return tr("settings.updateNotFoundDesc") || "No published release found on GitHub (404). Please ensure a Release is published and the repository is public.";
-  }
+  const lower = str.toLowerCase();
   if (
     str.includes("ERR_INTERNET_DISCONNECTED") ||
     str.includes("ENOTFOUND") ||
     str.includes("ECONNREFUSED") ||
+    str.includes("ECONNRESET") ||
     str.includes("ETIMEDOUT") ||
-    str.includes("fetch failed")
+    str.includes("ERR_TIMED_OUT") ||
+    str.includes("ERR_CONNECTION_") ||
+    str.includes("ERR_NAME_NOT_RESOLVED") ||
+    str.includes("ERR_NETWORK_") ||
+    lower.includes("fetch failed") ||
+    lower.includes("network error") ||
+    lower.includes("socket hang up")
   ) {
-    return tr("settings.updateNetworkErrorDesc") || "Could not connect to the update server. Please check your internet connection.";
+    return tr("settings.updateNetworkErrorDesc");
   }
-  if (str.includes("403") || str.includes("rate limit")) {
-    return "GitHub API rate limit exceeded or access forbidden.";
+  if (str.includes("403") || str.includes("429") || lower.includes("rate limit")) {
+    return tr("appUpdateErrors.rateLimit");
+  }
+  if (
+    str.includes("404") ||
+    str.includes("ERR_UPDATER_CHANNEL_FILE_NOT_FOUND") ||
+    str.includes("ERR_UPDATER_NO_PUBLISHED_VERSIONS") ||
+    str.includes("Cannot find latest.yml")
+  ) {
+    return tr("settings.updateNotFoundDesc");
   }
   if (str.length > 120) {
     return str.slice(0, 120) + "...";
@@ -113,9 +126,11 @@ function formatUpdateError(rawMsg: string | undefined | null, t?: ((key: string)
 }
 
 let ipcInitialized = false;
+let checkInFlight = false;
 
 export function resetUpdateStoreForTesting() {
   ipcInitialized = false;
+  checkInFlight = false;
   storeState = {
     status: "idle",
     updateInfo: null,
@@ -166,13 +181,14 @@ function ensureIpcInitialized() {
 
   if (window.electronAPI.onUpdateNotAvailable) {
     window.electronAPI.onUpdateNotAvailable(() => {
+      if (checkInFlight) return;
       const wasManual = storeState.manualCheck;
       updateStore({ status: "not-available", updateInfo: null, showToast: false, errorMessage: null });
       if (wasManual) {
         const tr = tTranslator || ((k: string) => k);
         toast({
-          title: tr("settings.updateNotAvailable") || "Up to Date",
-          description: tr("settings.latestVersionInstalled") || "You are using the latest version of Luno Note.",
+          title: tr("settings.updateNotAvailable"),
+          description: tr("settings.latestVersionInstalled"),
         });
       }
     });
@@ -199,6 +215,7 @@ function ensureIpcInitialized() {
 
   if (window.electronAPI.onUpdateError) {
     window.electronAPI.onUpdateError((err) => {
+      if (checkInFlight) return;
       const friendlyMsg = formatUpdateError(err?.message, tTranslator);
       const wasManual = storeState.manualCheck;
       updateStore({
@@ -210,7 +227,7 @@ function ensureIpcInitialized() {
         const tr = tTranslator || ((k: string) => k);
         toast({
           variant: "destructive",
-          title: tr("settings.updateError") || "Update Error",
+          title: tr("settings.updateError"),
           description: friendlyMsg,
         });
       }
@@ -226,13 +243,14 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
   if (typeof window === "undefined" || !window.electronAPI?.checkForUpdates) {
     if (isManual) {
       toast({
-        title: tr("settings.updateNotSupported") || "Desktop Only",
-        description: tr("settings.updateDesktopOnlyDesc") || "Update checking is only available in the desktop application.",
+        title: tr("settings.updateNotSupported"),
+        description: tr("settings.updateDesktopOnlyDesc"),
       });
     }
     return;
   }
 
+  checkInFlight = true;
   updateStore({
     status: "checking",
     errorMessage: null,
@@ -244,6 +262,9 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
   try {
     const res = await window.electronAPI.checkForUpdates();
     const curVer = res?.currentVersion || storeState.currentAppVersion || APP_VERSION;
+    if (res?.currentVersion && res.currentVersion !== storeState.currentAppVersion) {
+      updateStore({ currentAppVersion: res.currentVersion });
+    }
     const remoteVer = res?.updateInfo?.version;
     const isNewer = (res?.isUpdateAvailable ?? true) && isNewerVersion(remoteVer, curVer);
 
@@ -257,7 +278,7 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
       if (isManual) {
         toast({
           variant: "destructive",
-          title: tr("settings.updateError") || "Update Error",
+          title: tr("settings.updateError"),
           description: friendlyMsg,
         });
       }
@@ -272,8 +293,8 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
         updateStore({ status: "not-available", updateInfo: null, showToast: false });
         if (isManual) {
           toast({
-            title: tr("settings.devModeTitle") || "Development Mode",
-            description: tr("settings.devModeDesc") || "You are running in development mode. Updates are active in packaged releases.",
+            title: tr("settings.devModeTitle"),
+            description: tr("settings.devModeDesc"),
           });
         }
       }
@@ -291,13 +312,14 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
       });
       if (isManual) {
         toast({
-          title: tr("settings.updateNotAvailable") || "Up to Date",
-          description: tr("settings.latestVersionInstalled") || "You are using the latest version of Luno Note.",
+          title: tr("settings.updateNotAvailable"),
+          description: tr("settings.latestVersionInstalled"),
         });
       }
     }
-  } catch (err: any) {
-    const friendlyMsg = formatUpdateError(err?.message, tr);
+  } catch (err: unknown) {
+    const rawMsg = err instanceof Error ? err.message : String(err ?? "");
+    const friendlyMsg = formatUpdateError(rawMsg, tr);
     updateStore({
       status: "error",
       errorMessage: friendlyMsg,
@@ -306,10 +328,12 @@ async function performCheckForUpdates(isManual = true, t?: (key: string) => stri
     if (isManual) {
       toast({
         variant: "destructive",
-        title: tr("settings.updateError") || "Update Error",
+        title: tr("settings.updateError"),
         description: friendlyMsg,
       });
     }
+  } finally {
+    checkInFlight = false;
   }
 }
 
@@ -327,8 +351,16 @@ async function performDownloadUpdate(fromToast = false, t?: (key: string) => str
   });
   try {
     const res = await window.electronAPI.downloadUpdate();
+    if (res.success && res.openedExternally) {
+      updateStore({
+        status: "available",
+        showToast: false,
+        errorMessage: null,
+      });
+      return;
+    }
     if (!res.success) {
-      const err = res.error || "Failed to download update";
+      const err = res.error || tr("settings.downloadFailed");
       updateStore({
         status: "error",
         errorMessage: err,
@@ -337,13 +369,13 @@ async function performDownloadUpdate(fromToast = false, t?: (key: string) => str
       if (!fromToast) {
         toast({
           variant: "destructive",
-          title: tr("settings.downloadFailed") || "Download Failed",
+          title: tr("settings.downloadFailed"),
           description: err,
         });
       }
     }
-  } catch (err: any) {
-    const errMsg = err?.message || "Download error";
+  } catch (err: unknown) {
+    const errMsg = (err instanceof Error ? err.message : String(err ?? "")) || tr("settings.downloadFailed");
     updateStore({
       status: "error",
       errorMessage: errMsg,
@@ -352,7 +384,7 @@ async function performDownloadUpdate(fromToast = false, t?: (key: string) => str
     if (!fromToast) {
       toast({
         variant: "destructive",
-        title: tr("settings.downloadFailed") || "Download Failed",
+        title: tr("settings.downloadFailed"),
         description: errMsg,
       });
     }

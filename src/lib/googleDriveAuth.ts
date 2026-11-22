@@ -65,19 +65,19 @@ export async function hydrateGoogleDriveAuthFromElectron(): Promise<void> {
         try {
           localStorage.setItem(TOKEN_KEY, JSON.stringify(auth.tokenInfo));
           localStorage.setItem(CONNECTED_KEY, "true");
-        } catch {}
+        } catch { /* ignore */ }
       }
       if (auth.profile) {
         cachedProfile = auth.profile;
         try {
           localStorage.setItem(PROFILE_KEY, JSON.stringify(auth.profile));
-        } catch {}
+        } catch { /* ignore */ }
         notifyAuthProfileChanged(auth.profile);
       }
       if (auth.clientId) {
         try {
           localStorage.setItem(CLIENT_ID_KEY, auth.clientId);
-        } catch {}
+        } catch { /* ignore */ }
       }
     }
   } catch (err) {
@@ -557,10 +557,8 @@ export async function disconnectGoogleDrive(): Promise<void> {
     } catch {
       // ignore
     }
-  }
-
-  // 2. Web: Revoke token via GIS or fetch
-  if (tokenInfo?.access_token) {
+  } else if (tokenInfo?.access_token) {
+    // 2. Web: Revoke token via GIS or fetch
     try {
       if (typeof window !== "undefined" && (window as any).google?.accounts?.oauth2) {
         (window as any).google.accounts.oauth2.revoke(tokenInfo.access_token, () => {});

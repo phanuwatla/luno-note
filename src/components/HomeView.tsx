@@ -32,8 +32,9 @@ import { TIPS, getRandomTipIndex, getNextTipIndex } from "@/lib/tips";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Note } from "@/hooks/useNotes";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
-import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
 import { NOTE_TEMPLATE_METADATA, getTemplateIcon, type NoteTemplateType } from "@/lib/templates";
+import { isVirtualTab } from "@/lib/systemTabs";
 
 interface HomeViewProps {
   notes: Note[];
@@ -103,18 +104,18 @@ export default function HomeView({
     const nameSuffix = effectiveUsername ? `, ${effectiveUsername}` : "";
     if (hour >= 5 && hour < 12) {
       return {
-        text: isTh ? `สวัสดีตอนเช้า${nameSuffix}` : `Good morning${nameSuffix}`,
+        text: t("home.goodMorning", { nameSuffix }),
         icon: renderIcon("sun", "h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0"),
       };
     }
     if (hour >= 12 && hour < 17) {
       return {
-        text: isTh ? `สวัสดีตอนบ่าย${nameSuffix}` : `Good afternoon${nameSuffix}`,
+        text: t("home.goodAfternoon", { nameSuffix }),
         icon: renderIcon("sun", "h-3.5 w-3.5 text-amber-500 fill-amber-500 shrink-0"),
       };
     }
     return {
-      text: isTh ? `สวัสดีตอนเย็น${nameSuffix}` : `Good evening${nameSuffix}`,
+      text: t("home.goodEvening", { nameSuffix }),
       icon: renderIcon("moon", "h-3.5 w-3.5 text-amber-400 fill-amber-400 shrink-0"),
     };
   }, [isTh, pack, osUsername, settings.userName]);
@@ -129,7 +130,7 @@ export default function HomeView({
       try {
         const parsed = parseFrontmatterAndTags(note.content);
         (parsed.allTags || []).forEach((t) => tagsSet.add(t));
-      } catch {}
+      } catch { /* ignore */ }
     }
     return Array.from(tagsSet);
   };
@@ -138,8 +139,7 @@ export default function HomeView({
 
   // Recent notes (sorted by updatedAt descending)
   const recentNotes = useMemo(() => {
-    const all = [...notes]
-      .filter((n) => !n.id.startsWith("web:") && n.id !== "settings" && n.id !== "luno-ai" && n.id !== "home");
+    const all = [...notes].filter((n) => !isVirtualTab(n));
 
     if (!normalizedQuery) {
       return all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 6);
@@ -159,8 +159,17 @@ export default function HomeView({
 
   // Favorite notes
   const favoriteNotes = useMemo(() => {
-    const allFav = [...notes]
-      .filter((n) => n.isFavorite && !n.id.startsWith("web:") && n.id !== "settings" && n.id !== "luno-ai" && n.id !== "home");
+    const allFav = [...notes].filter((n) => {
+      if (isVirtualTab(n)) return false;
+      if (n.isFavorite) return true;
+      if (isMarkdownNote(n) && n.content) {
+        const parsed = parseFrontmatterAndTags(n.content);
+        if (parsed.frontmatterData?.favorite !== undefined) {
+          return Boolean(parsed.frontmatterData.favorite);
+        }
+      }
+      return false;
+    });
 
     if (!normalizedQuery) {
       return allFav.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 6);
@@ -178,28 +187,30 @@ export default function HomeView({
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }, [notes, normalizedQuery]);
 
-  const getNoteIcon = (note: Note) => {
-    if (settings?.showFileIcons === false) return null;
-    const cls = "h-4 w-4 text-muted-foreground shrink-0";
-    const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-    const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-    const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-    if (customIcon) {
-      const custom = renderCustomIcon(customIcon, cls, { color: customColor });
-      if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-    }
-    const defaultKey = getNoteDefaultIconKey(note);
-    const IconComp = getToolbarIcon(defaultKey, pack);
-    return <IconComp className={cls} />;
-  };
+  const getNoteIcon = (note: Note) => <SharedNoteIcon note={note} className="h-4 w-4" iconPack={pack} />;
 
-  // Global Ctrl+F / Ctrl+K handler to focus search input
+  // Global Ctrl+F / Ctrl+K handler to focus search input when not typing in an editor or modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "f" || e.key.toLowerCase() === "k" || e.code === "KeyF" || e.code === "KeyK" || e.key === "า" || e.key === "ด")) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === "f" || e.key.toLowerCase() === "k" || e.code === "KeyF" || e.code === "KeyK" || e.key === "า" || e.key === "ด")
+      ) {
+        const target = e.target as HTMLElement | null;
+        if (
+          target !== searchInputRef.current &&
+          (target?.isContentEditable ||
+            target?.tagName === "INPUT" ||
+            target?.tagName === "TEXTAREA" ||
+            target?.closest?.('[role="dialog"], [role="alertdialog"], .ProseMirror, .cm-editor'))
+        ) {
+          return;
+        }
+        if (searchInputRef.current && searchInputRef.current.offsetParent !== null) {
+          e.preventDefault();
+          searchInputRef.current.focus();
+          searchInputRef.current.select();
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -218,10 +229,10 @@ export default function HomeView({
               {greeting.icon}
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              {isTh ? "ยินดีต้อนรับสู่ Luno" : "Welcome to Luno"}
+              {t("home.welcomeToLuno")}
             </h1>
             <p className="text-xs text-muted-foreground">
-              {isTh ? "ความคิดและบันทึกของคุณ ถูกจัดเก็บอย่างสมบูรณ์แบบ" : "Your thoughts, perfectly organized."}
+              {t("home.yourThoughtsPerfectlyOrganized")}
             </p>
           </div>
 
@@ -232,7 +243,7 @@ export default function HomeView({
               ref={searchInputRef}
               data-home-search="true"
               type="text"
-              placeholder={t("sidebar.searchPlaceholder") || (isTh ? "ค้นหาโน้ต..." : "Search notes...")}
+              placeholder={t("sidebar.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -256,7 +267,7 @@ export default function HomeView({
                   searchInputRef.current?.focus();
                 }}
                 className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                aria-label={t("home.clearSearch")}
               >
                 {renderIcon("x", "h-3 w-3")}
               </button>
@@ -268,7 +279,7 @@ export default function HomeView({
         <div className="space-y-3 shrink-0 pt-1.5">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold text-foreground">
-              {isTh ? "เริ่มต้นด้วยเทมเพลต" : "Start with a Template"}
+              {t("home.startWithATemplate")}
             </h2>
             {onViewAllTemplates && (
               <button
@@ -276,7 +287,7 @@ export default function HomeView({
                 onClick={onViewAllTemplates}
                 className="text-xs font-medium text-primary hover:underline cursor-pointer"
               >
-                {isTh ? "ดูทั้งหมด" : "View all"}
+                {t("home.viewAll")}
               </button>
             )}
           </div>
@@ -297,42 +308,42 @@ export default function HomeView({
                 {
                   type: "basic-website",
                   title: "Basic Website",
-                  description: isTh ? "เว็บไซต์ทั่วไป มี Header / Main / Footer" : "General website with header, main, footer",
+                  description: t("home.generalWebsiteWithHeaderMain"),
                   icon: "lucide:Globe",
                   color: "#3b82f6",
                 },
                 {
                   type: "landing-page",
                   title: "Landing Page",
-                  description: isTh ? "หน้าโปรโมตสินค้า แอป หรือบริการ" : "Promote products, apps or services",
+                  description: t("home.promoteProductsAppsOrServices"),
                   icon: "lucide:Rocket",
                   color: "#f43f5e",
                 },
                 {
                   type: "portfolio",
                   title: "Portfolio",
-                  description: isTh ? "Portfolio / ผลงานส่วนตัว" : "Personal portfolio and showcase",
+                  description: t("home.personalPortfolioAndShowcase"),
                   icon: "lucide:User",
                   color: "#10b981",
                 },
                 {
                   type: "blog",
                   title: "Blog",
-                  description: isTh ? "เว็บบทความ / ข่าว / บล็อก" : "Article and blog post layout",
+                  description: t("home.articleAndBlogPostLayout"),
                   icon: "lucide:BookOpen",
                   color: "#8b5cf6",
                 },
                 {
                   type: "dashboard",
                   title: "Dashboard",
-                  description: isTh ? "Admin panel / ระบบจัดการข้อมูล" : "Admin panel and data management",
+                  description: t("home.adminPanelAndDataManagement"),
                   icon: "lucide:LayoutDashboard",
                   color: "#06b6d4",
                 },
                 {
                   type: "blank",
-                  title: isTh ? "สร้างไฟล์ HTML" : "New HTML",
-                  description: isTh ? "เริ่มต้นจากหน้าเปล่า" : "Start from blank",
+                  title: t("home.newHtml"),
+                  description: t("home.startFromBlank"),
                   icon: "lucide:Plus",
                   isBlank: true,
                 },
@@ -342,42 +353,42 @@ export default function HomeView({
                 {
                   type: "notes",
                   title: "Notes",
-                  description: isTh ? "จดบันทึกสั้น ๆ" : "Quick short notes",
+                  description: t("home.quickShortNotes"),
                   icon: "lucide:FileText",
                   color: "#64748b",
                 },
                 {
                   type: "todo",
                   title: isTh ? "To-Do List" : "To-Do List",
-                  description: isTh ? "รายการงาน / เช็กลิสต์" : "Tasks & checklist",
+                  description: t("home.tasksChecklist"),
                   icon: "lucide:CheckSquare",
                   color: "#3b82f6",
                 },
                 {
                   type: "meeting",
                   title: isTh ? "Meeting Notes" : "Meeting Notes",
-                  description: isTh ? "บันทึกการประชุม" : "Meeting minutes and agenda",
+                  description: t("home.meetingMinutesAndAgenda"),
                   icon: "lucide:Users",
                   color: "#8b5cf6",
                 },
                 {
                   type: "journal",
                   title: "Journal",
-                  description: isTh ? "บันทึกประจำวัน" : "Daily journal and thoughts",
+                  description: t("home.dailyJournalAndThoughts"),
                   icon: "lucide:Calendar",
                   color: "#10b981",
                 },
                 {
                   type: "readme",
                   title: "README",
-                  description: isTh ? "อธิบายโปรเจกต์ / ไฟล์ / วิธีใช้งาน" : "Project overview, setup & usage",
+                  description: t("home.projectOverviewSetupUsage"),
                   icon: "lucide:BookOpen",
                   color: "#6366f1",
                 },
                 {
                   type: "blank",
-                  title: isTh ? "สร้างไฟล์ข้อความ" : "New Text",
-                  description: isTh ? "เริ่มต้นจากหน้าเปล่า" : "Start from blank",
+                  title: t("home.newText"),
+                  description: t("home.startFromBlank"),
                   icon: "lucide:Plus",
                   isBlank: true,
                 },
@@ -386,43 +397,43 @@ export default function HomeView({
               const mdTemplates: HomeTemplateItem[] = [
                 {
                   type: "daily",
-                  title: isTh ? "บันทึกประจำวัน" : "Daily Note",
-                  description: isTh ? "บันทึกสิ่งที่คิดและสรุปวันของคุณ" : "Capture your thoughts and reflect on your day",
+                  title: t("settings.optDailyNote"),
+                  description: t("home.captureYourThoughtsAndReflect"),
                   icon: "lucide:Calendar",
                   color: "#10b981",
                 },
                 {
                   type: "todo",
-                  title: isTh ? "รายการสิ่งที่ต้องทำ" : "To-Do List",
-                  description: isTh ? "จัดระเบียบงานและทำสิ่งต่างๆ ให้สำเร็จ" : "Stay organized and get things done",
+                  title: t("settings.optTodoList"),
+                  description: t("home.stayOrganizedAndGetThings"),
                   icon: "lucide:CheckSquare",
                   color: "#3b82f6",
                 },
                 {
                   type: "meeting",
-                  title: isTh ? "บันทึกการประชุม" : "Meeting Notes",
-                  description: isTh ? "จดบันทึกวาระและข้อสรุปการประชุม" : "Structure your meetings and take better notes",
+                  title: t("settings.optMeetingNotes"),
+                  description: t("home.structureYourMeetingsAndTake"),
                   icon: "lucide:Users",
                   color: "#8b5cf6",
                 },
                 {
                   type: "project",
-                  title: isTh ? "แผนงานโครงการ" : "Project Plan",
-                  description: isTh ? "วางแผนโครงการและติดตามความคืบหน้า" : "Plan projects and track progress",
+                  title: t("settings.optProjectPlan"),
+                  description: t("home.planProjectsAndTrackProgress"),
                   icon: "lucide:Briefcase",
                   color: "#f59e0b",
                 },
                 {
                   type: "study",
-                  title: isTh ? "ระดมความคิด" : "Idea Brainstorm",
-                  description: isTh ? "บันทึกและต่อยอดไอเดียใหม่ๆ" : "Capture and develop your ideas",
+                  title: t("settings.optIdeaBrainstorm"),
+                  description: t("home.captureAndDevelopYourIdeas"),
                   icon: "lucide:Lightbulb",
                   color: "#f43f5e",
                 },
                 {
                   type: "blank",
-                  title: isTh ? "สร้างโน้ตใหม่" : "New Note",
-                  description: isTh ? "เริ่มต้นจากหน้าเปล่า" : "Start from blank",
+                  title: t("editor.newNote"),
+                  description: t("home.startFromBlank"),
                   icon: "lucide:Plus",
                   isBlank: true,
                 },
@@ -463,7 +474,7 @@ export default function HomeView({
                       isBlank
                         ? "border-dashed border-border/80 hover:border-primary/60 hover:bg-muted/50 items-center justify-center text-center"
                         : "border-border/70 hover:border-primary/60 hover:bg-muted/50"
-                    } transition-all group shadow-2xs cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none`}
+                    } transition-all group shadow-sm cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none`}
                   >
                     {renderCustomIcon(
                       iconStr,
@@ -488,7 +499,7 @@ export default function HomeView({
         {/* 3. Two-Column Section (Recent Notes & Favorite Notes) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
           {/* Recent Notes Card */}
-          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-2xs flex flex-col h-full min-h-0 overflow-hidden">
+          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-sm flex flex-col h-full min-h-0 overflow-hidden">
             <div className="flex items-center justify-between pb-2 border-b border-border/30 shrink-0">
               <h3 className="text-xs font-semibold text-foreground flex items-center gap-2">
                 {query ? (
@@ -496,7 +507,7 @@ export default function HomeView({
                 ) : (
                   renderIcon("clock", "h-3.5 w-3.5 text-muted-foreground")
                 )}
-                {query ? (isTh ? "ผลการค้นหา" : "Search Results") : (isTh ? "ไฟล์ล่าสุด" : "Recent Files")}
+                {query ? (t("home.searchResults")) : (t("home.recentFiles"))}
               </h3>
             </div>
 
@@ -509,12 +520,8 @@ export default function HomeView({
                 )}
                 <p>
                   {query
-                    ? isTh
-                      ? `ไม่พบไฟล์ที่ตรงกับ "${query}"`
-                      : `No files found matching "${query}"`
-                    : isTh
-                    ? "ยังไม่มีไฟล์ล่าสุด"
-                    : "No recent files yet"}
+                    ? t("home.noFilesFoundMatching", { query })
+                    : t("home.noRecentFilesYet")}
                 </p>
               </div>
             ) : (
@@ -544,12 +551,12 @@ export default function HomeView({
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getNoteIcon(note)}
                         <span className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                          {note.title?.trim() || note.fileName || (isTh ? "ไม่มีชื่อ" : "Untitled")}
+                          {note.title?.trim() || note.fileName || (t("editor.untitled"))}
                         </span>
                         {tags.map((tag) => (
                           <span
                             key={tag}
-                            className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
+                            className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium border ${getTagColorClass(
                               tag,
                               settings.theme,
                               undefined,
@@ -572,18 +579,18 @@ export default function HomeView({
           </div>
 
           {/* Favorite Notes Card (User requested change from Pinned to Favorite) */}
-          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-2xs flex flex-col h-full min-h-0 overflow-hidden">
+          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-sm flex flex-col h-full min-h-0 overflow-hidden">
             <div className="flex items-center justify-between pb-2 border-b border-border/30 shrink-0">
               <h3 className="text-xs font-semibold text-foreground flex items-center gap-2">
-                {renderIcon("star", "h-3.5 w-3.5 text-muted-foreground")}
-                {isTh ? "รายการโปรด" : "Favorite Files"}
+                {renderIcon("star", "h-3.5 w-3.5 text-amber-500 shrink-0")}
+                {t("home.favoriteFiles")}
               </h3>
               <button
                 type="button"
                 onClick={onViewAllFavorites}
                 className="text-xs font-medium text-primary hover:underline cursor-pointer"
               >
-                {isTh ? "ดูทั้งหมด" : "View all"}
+                {t("home.viewAll")}
               </button>
             </div>
 
@@ -596,12 +603,8 @@ export default function HomeView({
                 )}
                 <p>
                   {query
-                    ? isTh
-                      ? `ไม่พบไฟล์ที่ถูกใจที่ตรงกับ "${query}"`
-                      : `No favorite files found matching "${query}"`
-                    : isTh
-                    ? "ยังไม่มีรายการโปรด"
-                    : "No favorite files yet"}
+                    ? t("home.noFavoriteFilesFoundMatching", { query })
+                    : t("home.noFavoriteFilesYet")}
                 </p>
               </div>
             ) : (
@@ -625,12 +628,12 @@ export default function HomeView({
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getNoteIcon(note)}
                         <span className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                          {note.title?.trim() || note.fileName || (isTh ? "ไม่มีชื่อ" : "Untitled")}
+                          {note.title?.trim() || note.fileName || (t("editor.untitled"))}
                         </span>
                         {tags.map((tag) => (
                           <span
                             key={tag}
-                            className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
+                            className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium border ${getTagColorClass(
                               tag,
                               settings.theme,
                               undefined,
@@ -649,7 +652,7 @@ export default function HomeView({
                           onToggleFavorite?.(note.id);
                         }}
                         className="p-1 text-amber-500 hover:scale-110 transition-transform cursor-pointer"
-                        aria-label={isTh ? "ยกเลิกติดดาว" : "Unstar note"}
+                        aria-label={t("home.unstarNote")}
                       >
                         {renderIcon("star", "h-3.5 w-3.5 fill-amber-500 text-amber-500")}
                       </button>
@@ -674,7 +677,7 @@ export default function HomeView({
                 {renderIcon("lightbulb", "h-4 w-4 text-primary shrink-0")}
                 <div className="space-y-0.5 min-w-0">
                   <h4 className="text-[11.5px] font-bold text-foreground">
-                    {isTh ? "เคล็ดลับประจำวัน" : "Tip of the day"}
+                    {t("home.tipOfTheDay")}
                   </h4>
                   <p className="text-[11px] text-muted-foreground leading-relaxed truncate sm:whitespace-normal">
                     {isTh ? (TIPS[tipIndex] || TIPS[0]).th : (TIPS[tipIndex] || TIPS[0]).en}
@@ -689,13 +692,13 @@ export default function HomeView({
                       type="button"
                       onClick={() => setTipIndex((prev) => getNextTipIndex(prev))}
                       className="p-1 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
-                      aria-label={isTh ? "ดูคำแนะนำถัดไป" : "Next tip"}
+                      aria-label={t("home.nextTip")}
                     >
                       {renderIcon("arrowRight", "h-3.5 w-3.5")}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={6}>
-                    {isTh ? "ดูคำแนะนำถัดไป" : "Next tip"}
+                    {t("home.nextTip")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -705,13 +708,13 @@ export default function HomeView({
                       type="button"
                       onClick={() => setIsTipDismissed(true)}
                       className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer shrink-0"
-                      aria-label={isTh ? "ปิด" : "Dismiss"}
+                      aria-label={t("home.dismiss")}
                     >
                       {renderIcon("x", "h-3.5 w-3.5")}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={6}>
-                    {isTh ? "ปิด" : "Dismiss"}
+                    {t("home.dismiss")}
                   </TooltipContent>
                 </Tooltip>
               </div>

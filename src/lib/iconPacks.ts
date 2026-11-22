@@ -1,10 +1,5 @@
 import React from "react";
-// Lucide icons
-import * as LucideIcons from "lucide-react";
-// Tabler icons
-import * as TablerIcons from "@tabler/icons-react";
-// Phosphor icons
-import * as PhosphorIcons from "@phosphor-icons/react";
+import { LucideIcons, TablerIcons, PhosphorIcons } from "./iconRegistries";
 import { FootnoteIcon } from "@/components/icons/FootnoteIcon";
 
 export type IconPackId = "lucide" | "tabler" | "phosphor";
@@ -1914,7 +1909,7 @@ export function getAutoFolderIconAndColor(
   if (!folderName || typeof folderName !== "string") return null;
 
   // Extract base folder name from path if full path is passed
-  const baseName = folderName.split("/").pop() || folderName;
+  const baseName = folderName.split(/[\\/]/).filter(Boolean).pop() || folderName;
   const normalized = baseName.trim().toLowerCase();
   // Strip leading numbers like '01. Images' -> 'images' or '[Images]' -> 'images'
   const cleanName = normalized

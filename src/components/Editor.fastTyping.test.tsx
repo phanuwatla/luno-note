@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Editor as TiptapEditor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { CustomParagraph, noteEditorStateMap, closedNoteIds, SpellCheckDecoration, spellCheckPluginKey, expandThaiAnomalyCluster } from "@/components/Editor";
+import { CustomParagraph, noteEditorStateMap, closedNoteIds, SpellCheckDecoration, spellCheckPluginKey, setGlobalSpellCheckEnabled, expandThaiAnomalyCluster } from "@/components/Editor";
 
 describe("Editor Fast Typing & Rapid Input Stability", () => {
   it("processes rapid successive typing transactions without dropping characters", () => {
@@ -287,6 +287,67 @@ describe("Editor Fast Typing & Rapid Input Stability", () => {
     }
 
     editor.destroy();
+  });
+
+  it("removes all red underline spellcheck decorations when spellcheck is disabled even on restored noteEditorStateMap state", () => {
+    setGlobalSpellCheckEnabled(true);
+
+    // 1. Original editor creates state with misspelled words and saves to noteEditorStateMap
+    const editorA = new TiptapEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+        SpellCheckDecoration.configure({ enabled: true }),
+      ],
+      content: "<p>ขออนุญาติทดสอบ speling ผิด</p>",
+    });
+
+    const initialDecos = spellCheckPluginKey.getState(editorA.state).find();
+    expect(initialDecos.length).toBeGreaterThanOrEqual(2);
+    expect(editorA.view.dom.querySelectorAll(".luno-spell-error").length).toBeGreaterThanOrEqual(2);
+
+    noteEditorStateMap.set("note-spell-toggle-test", editorA.state);
+
+    // 2. Second editor instance restores savedState from noteEditorStateMap (just like tab switch / remount)
+    const editorB = new TiptapEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+        SpellCheckDecoration.configure({ enabled: true }),
+      ],
+      content: "<p></p>",
+    });
+    editorB.view.updateState(noteEditorStateMap.get("note-spell-toggle-test")!);
+    expect(editorB.view.dom.querySelectorAll(".luno-spell-error").length).toBeGreaterThanOrEqual(2);
+
+    // 3. Disable spellcheck globally and dispatch recompute transaction
+    setGlobalSpellCheckEnabled(false);
+    editorB.view.dispatch(
+      editorB.state.tr
+        .setMeta("addToHistory", false)
+        .setMeta(spellCheckPluginKey, { recompute: true, enabled: false })
+    );
+
+    const disabledDecos = spellCheckPluginKey.getState(editorB.state).find();
+    expect(disabledDecos.length).toBe(0);
+    expect(editorB.view.dom.querySelectorAll(".luno-spell-error").length).toBe(0);
+
+    // 4. Re-enable spellcheck and verify red underline decorations return
+    setGlobalSpellCheckEnabled(true);
+    editorB.view.dispatch(
+      editorB.state.tr
+        .setMeta("addToHistory", false)
+        .setMeta(spellCheckPluginKey, { recompute: true, enabled: true })
+    );
+
+    const reEnabledDecos = spellCheckPluginKey.getState(editorB.state).find();
+    expect(reEnabledDecos.length).toBeGreaterThanOrEqual(2);
+    expect(editorB.view.dom.querySelectorAll(".luno-spell-error").length).toBeGreaterThanOrEqual(2);
+
+    setGlobalSpellCheckEnabled(null);
+    noteEditorStateMap.delete("note-spell-toggle-test");
+    editorA.destroy();
+    editorB.destroy();
   });
 });
 

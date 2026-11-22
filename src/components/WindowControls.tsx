@@ -180,7 +180,7 @@ function WindowControls() {
   return (
     <TooltipProvider delayDuration={300}>
       <div
-        className="relative flex items-center gap-1 shrink-0 select-none border-l border-border/40 px-1.5 z-50"
+        className="relative flex items-center gap-1 shrink-0 select-none border-l border-border/40 px-1.5 z-30"
         style={noDragStyle}
       >
         {/* Minimize Button */}
@@ -239,7 +239,7 @@ function WindowControls() {
             onMouseEnter={handleSnapContainerMouseEnter}
             onMouseLeave={handleSnapContainerMouseLeave}
             style={noDragStyle}
-            className="z-[99999] !w-auto !p-2 rounded-xl bg-popover/95 backdrop-blur-2xl border border-border/80 shadow-2xl select-none animate-in fade-in zoom-in-95 duration-150 outline-none"
+            className="z-[60] !w-auto !p-2 rounded-xl bg-popover/95 backdrop-blur-2xl border border-border/80 shadow-2xl select-none animate-in fade-in zoom-in-95 duration-150 outline-none"
           >
             <div className="grid grid-cols-2 gap-2">
               {/* 1. Equal 50 / 50 */}
@@ -248,13 +248,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapLeft") || "Snap Left"}
+                      aria-label={t("window.snapLeft")}
                       onClick={() => handleSnap(0, 0, 0.5, 1)}
                       className="flex-1 h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapLeft") || "Snap Left"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapLeft")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -262,13 +262,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapRight") || "Snap Right"}
+                      aria-label={t("window.snapRight")}
                       onClick={() => handleSnap(0.5, 0, 0.5, 1)}
                       className="flex-1 h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapRight") || "Snap Right"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapRight")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -279,13 +279,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapLeftWide") || "Snap Left (2/3)"}
+                      aria-label={t("window.snapLeftWide")}
                       onClick={() => handleSnap(0, 0, 0.67, 1)}
                       className="w-[62%] h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapLeftWide") || "Snap Left (2/3)"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapLeftWide")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -293,13 +293,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapRightNarrow") || "Snap Right (1/3)"}
+                      aria-label={t("window.snapRightNarrow")}
                       onClick={() => handleSnap(0.67, 0, 0.33, 1)}
                       className="w-[38%] h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapRightNarrow") || "Snap Right (1/3)"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapRightNarrow")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -310,13 +310,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapLeft") || "Snap Left"}
+                      aria-label={t("window.snapLeft")}
                       onClick={() => handleSnap(0, 0, 0.5, 1)}
                       className="flex-1 h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapLeft") || "Snap Left"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapLeft")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -325,13 +325,13 @@ function WindowControls() {
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        aria-label={t("window.snapTopRight") || "Snap Top Right"}
+                        aria-label={t("window.snapTopRight")}
                         onClick={() => handleSnap(0.5, 0, 0.5, 0.5)}
                         className="w-full flex-1 rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                       />
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                      {t("window.snapTopRight") || "Snap Top Right"}
+                    <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                      {t("window.snapTopRight")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -339,13 +339,13 @@ function WindowControls() {
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        aria-label={t("window.snapBottomRight") || "Snap Bottom Right"}
+                        aria-label={t("window.snapBottomRight")}
                         onClick={() => handleSnap(0.5, 0.5, 0.5, 0.5)}
                         className="w-full flex-1 rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                       />
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                      {t("window.snapBottomRight") || "Snap Bottom Right"}
+                    <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                      {t("window.snapBottomRight")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -357,13 +357,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapTopLeft") || "Snap Top Left"}
+                      aria-label={t("window.snapTopLeft")}
                       onClick={() => handleSnap(0, 0, 0.5, 0.5)}
                       className="w-full h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapTopLeft") || "Snap Top Left"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapTopLeft")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -371,13 +371,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapTopRight") || "Snap Top Right"}
+                      aria-label={t("window.snapTopRight")}
                       onClick={() => handleSnap(0.5, 0, 0.5, 0.5)}
                       className="w-full h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapTopRight") || "Snap Top Right"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapTopRight")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -385,13 +385,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapBottomLeft") || "Snap Bottom Left"}
+                      aria-label={t("window.snapBottomLeft")}
                       onClick={() => handleSnap(0, 0.5, 0.5, 0.5)}
                       className="w-full h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapBottomLeft") || "Snap Bottom Left"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapBottomLeft")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -399,13 +399,13 @@ function WindowControls() {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t("window.snapBottomRight") || "Snap Bottom Right"}
+                      aria-label={t("window.snapBottomRight")}
                       onClick={() => handleSnap(0.5, 0.5, 0.5, 0.5)}
                       className="w-full h-full rounded-[4px] border border-muted-foreground/30 bg-muted-foreground/15 hover:bg-primary hover:border-primary transition-all duration-150 cursor-pointer"
                     />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[100000]">
-                    {t("window.snapBottomRight") || "Snap Bottom Right"}
+                  <TooltipContent side="bottom" className="text-[11px] px-2 py-0.5 z-[70]">
+                    {t("window.snapBottomRight")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -434,18 +434,18 @@ function WindowControls() {
         <AlertDialog open={showExitConfirm} onOpenChange={setShowExitConfirm}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>{t("settings.confirmExitTitle") || "Exit Luno Note?"}</AlertDialogTitle>
+              <AlertDialogTitle>{t("settings.confirmExitTitle")}</AlertDialogTitle>
               <AlertDialogDescription>
-                {t("settings.confirmExitDesc") || "Are you sure you want to close the application?"}
+                {t("settings.confirmExitDesc")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
               <AlertDialogAction
-                className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={handleConfirmExit}
               >
-                {t("settings.confirmExitBtn") || "Exit"}
+                {t("settings.confirmExitBtn")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

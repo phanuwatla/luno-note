@@ -31,32 +31,13 @@ import { toast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { copyToClipboard } from "@/lib/clipboardUtils";
 import type { Note } from "@/hooks/useNotes";
-import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { isSensitiveWebUrl, openExternalUrl } from "@/lib/urlUtils";
 
 function NoteFileIcon({ note, className = "h-4 w-4" }: { note: Note; className?: string }) {
-  const { settings } = useAppSettings();
-  const pack = (settings?.iconPack as any) || "lucide";
-  const cls = `${className} shrink-0 text-muted-foreground`;
-
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, cls, customColor ? { color: customColor } : undefined);
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
-
-  if (note.isLocked) {
-    const LockIcon = getToolbarIcon("lock", pack);
-    return <LockIcon className={cls} />;
-  }
-
-  const defaultKey = getNoteDefaultIconKey(note);
-  const IconComp = getToolbarIcon(defaultKey, pack);
-  return <IconComp className={cls} />;
+  return <SharedNoteIcon note={note} className={className} alwaysShow />;
 }
 
 export function getFriendlyDisplayUrl(rawUrl: string, title?: string, customDisplayUrl?: string): string {
@@ -233,8 +214,16 @@ export default function WebViewerView({
     const trimmed = raw.trim();
     if (!trimmed) return "https://www.google.com";
 
-    // If it's already http://, https://, data:, blob:, or file:
-    if (/^(https?|data|blob|file):/i.test(trimmed)) {
+    // Block script schemes
+    if (/^(javascript|vbscript):/i.test(trimmed)) {
+      return "about:blank";
+    }
+
+    // Allow http(s), or data:/blob:/file: only for local preview tabs
+    if (/^https?:/i.test(trimmed)) {
+      return trimmed;
+    }
+    if (/^(data|blob|file):/i.test(trimmed) && isLocalPreview) {
       return trimmed;
     }
 
@@ -252,10 +241,8 @@ export default function WebViewerView({
     if (isSensitiveWebUrl(validUrl)) {
       openExternalUrl(validUrl);
       toast({
-        title: isTh ? "เปิดในเบราว์เซอร์ภายนอกเพื่อความปลอดภัย" : "Opened in External Browser",
-        description: isTh
-          ? "บริการนี้ต้องการการยืนยันตัวตนระดับสูงของระบบ จึงเปิดด้วยเบราว์เซอร์หลักของเครื่องเพื่อความปลอดภัย"
-          : "This service requires system-level authentication and has been opened in your default browser.",
+        title: t("webViewer.openedInExternalBrowser"),
+        description: t("webViewer.thisServiceRequiresSystemLevel"),
       });
       return;
     }
@@ -349,7 +336,7 @@ export default function WebViewerView({
     if (isElectron && webviewRef.current) {
       try {
         webviewRef.current.setZoomFactor(factor);
-      } catch {}
+      } catch { /* ignore */ }
     } else if (iframeRef.current) {
       iframeRef.current.style.zoom = String(factor);
     }
@@ -398,13 +385,13 @@ export default function WebViewerView({
       setHasCopied(true);
       setTimeout(() => setHasCopied(false), 2000);
       toast({
-        title: t("webViewer.copyUrl") || "Copy URL",
-        description: t("webViewer.urlCopied") || "URL copied to clipboard",
+        title: t("webViewer.copyUrl"),
+        description: t("webViewer.urlCopied"),
       });
     } catch (err) {
       console.warn("Failed to copy URL:", err);
       toast({
-        title: t("webViewer.copyUrl") || "Copy URL",
+        title: t("webViewer.copyUrl"),
         description: urlToCopy,
       });
     }
@@ -432,8 +419,8 @@ export default function WebViewerView({
       window.open(webTarget, "_blank", "noopener,noreferrer");
     }
     toast({
-      title: t("webViewer.openExternal") || "Open in Default Browser",
-      description: t("webViewer.openedInBrowser") || "Opening in default browser...",
+      title: t("webViewer.openExternal"),
+      description: t("webViewer.openedInBrowser"),
     });
   };
 
@@ -444,8 +431,8 @@ export default function WebViewerView({
   const handleInsertToNote = (targetNoteId?: string) => {
     if (hasNoNotes) {
       toast({
-        title: t("webViewer.insertToNote") || "Insert link to active note",
-        description: t("webViewer.noActiveNotes") || (isTh ? "ไม่มีโน้ตที่เปิดอยู่เพื่อแทรกลิงก์" : "No open notes found to insert link into"),
+        title: t("webViewer.insertToNote"),
+        description: t("webViewer.noActiveNotes"),
         variant: "destructive",
       });
       return;
@@ -600,13 +587,11 @@ export default function WebViewerView({
       if (e.url && isSensitiveWebUrl(e.url)) {
         try {
           webview.stop();
-        } catch {}
+        } catch { /* ignore */ }
         openExternalUrl(e.url);
         toast({
-          title: isTh ? "เปิดในเบราว์เซอร์ภายนอกเพื่อความปลอดภัย" : "Opened in External Browser",
-          description: isTh
-            ? "บริการนี้ต้องการการยืนยันตัวตนระดับสูงของระบบ จึงเปิดด้วยเบราว์เซอร์หลักของเครื่องเพื่อความปลอดภัย"
-            : "This service requires system-level authentication and has been opened in your default browser.",
+          title: t("webViewer.openedInExternalBrowser"),
+          description: t("webViewer.thisServiceRequiresSystemLevel"),
         });
       }
     };
@@ -675,11 +660,11 @@ export default function WebViewerView({
                 onFaviconChangeRef.current?.("");
                 return undefined;
               }
-            } catch {}
+            } catch { /* ignore */ }
           }
           return prev;
         });
-      } catch {}
+      } catch { /* ignore */ }
     }
   }, [currentUrl]);
 
@@ -725,7 +710,7 @@ export default function WebViewerView({
                   <ArrowLeft className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("webViewer.back") || "Back"}</TooltipContent>
+              <TooltipContent>{t("webViewer.back")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -739,7 +724,7 @@ export default function WebViewerView({
                   <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("webViewer.forward") || "Forward"}</TooltipContent>
+              <TooltipContent>{t("webViewer.forward")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -757,7 +742,7 @@ export default function WebViewerView({
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                {isLoading ? (t("webViewer.stop") || "Stop Loading") : (t("webViewer.reload") || "Reload")}
+                {isLoading ? (t("webViewer.stop")) : (t("webViewer.reload"))}
               </TooltipContent>
             </Tooltip>
 
@@ -771,7 +756,7 @@ export default function WebViewerView({
                   <Home className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("webViewer.home") || "Home"}</TooltipContent>
+              <TooltipContent>{t("webViewer.home")}</TooltipContent>
             </Tooltip>
           </div>
 
@@ -795,10 +780,10 @@ export default function WebViewerView({
               </TooltipTrigger>
               <TooltipContent>
                 {isLocalPreview
-                  ? (t("webViewer.localPreview") || "Local Preview (HTML)")
+                  ? (t("webViewer.localPreview"))
                   : isHttps
-                  ? (t("webViewer.secure") || "Secure Connection (HTTPS)")
-                  : (t("webViewer.notSecure") || "Not Secure (HTTP)")}
+                  ? (t("webViewer.secure"))
+                  : (t("webViewer.notSecure"))}
               </TooltipContent>
             </Tooltip>
 
@@ -813,7 +798,7 @@ export default function WebViewerView({
                   setInputUrl(getFriendlyDisplayUrl(currentUrl, title || pageTitle, displayUrl));
                 }
               }}
-              placeholder={t("webViewer.searchOrUrl") || "Search Google or enter web address..."}
+              placeholder={t("webViewer.searchOrUrl")}
               className="flex-1 min-w-0 bg-transparent border-0 outline-none text-foreground text-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0"
             />
 
@@ -824,12 +809,12 @@ export default function WebViewerView({
                     type="button"
                     onClick={handleClearInput}
                     className="p-0.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground shrink-0 ml-1 transition-colors cursor-pointer"
-                    aria-label={t("webViewer.clear") || "Clear"}
+                    aria-label={t("webViewer.clear")}
                   >
                     <X className="h-3 w-3" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t("webViewer.clear") || "Clear"}</TooltipContent>
+                <TooltipContent>{t("webViewer.clear")}</TooltipContent>
               </Tooltip>
             )}
           </form>
@@ -845,7 +830,7 @@ export default function WebViewerView({
                         <button
                           type="button"
                           className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                          aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
+                          aria-label={t("webViewer.insertToNote")}
                         >
                           {hasInserted ? (
                             <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
@@ -855,7 +840,7 @@ export default function WebViewerView({
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
+                    <TooltipContent>{t("webViewer.insertToNote")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent
                     align="end"
@@ -864,7 +849,7 @@ export default function WebViewerView({
                     className="w-56 max-h-72 overflow-y-auto no-scrollbar"
                   >
                     {activeNotes.map((note) => {
-                      const displayName = note.fileName || note.title || (isTh ? "ไม่มีชื่อ" : "Untitled");
+                      const displayName = note.fileName || note.title || (t("editor.untitled"));
                       return (
                         <DropdownMenuItem
                           key={note.id}
@@ -887,7 +872,7 @@ export default function WebViewerView({
                       type="button"
                       onClick={() => handleInsertToNote()}
                       className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                      aria-label={t("webViewer.insertToNote") || "Insert link to active note"}
+                      aria-label={t("webViewer.insertToNote")}
                     >
                       {hasInserted ? (
                         <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
@@ -896,7 +881,7 @@ export default function WebViewerView({
                       )}
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("webViewer.insertToNote") || "Insert link to active note"}</TooltipContent>
+                  <TooltipContent>{t("webViewer.insertToNote")}</TooltipContent>
                 </Tooltip>
               )
             )}
@@ -907,7 +892,7 @@ export default function WebViewerView({
                   type="button"
                   onClick={handleCopyUrl}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                  aria-label={t("webViewer.copyUrl") || "Copy URL"}
+                  aria-label={t("webViewer.copyUrl")}
                 >
                   {hasCopied ? (
                     <Check className="h-3.5 w-3.5 text-emerald-500 animate-in fade-in zoom-in-75 duration-150" />
@@ -916,7 +901,7 @@ export default function WebViewerView({
                   )}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("webViewer.copyUrl") || "Copy URL"}</TooltipContent>
+              <TooltipContent>{t("webViewer.copyUrl")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -925,12 +910,12 @@ export default function WebViewerView({
                   type="button"
                   onClick={handleOpenExternal}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                  aria-label={t("webViewer.openExternal") || "Open in Default Browser"}
+                  aria-label={t("webViewer.openExternal")}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("webViewer.openExternal") || "Open in Default Browser"}</TooltipContent>
+              <TooltipContent>{t("webViewer.openExternal")}</TooltipContent>
             </Tooltip>
 
             {/* Browser Right Panel Toggle (Three dots button) */}
@@ -944,12 +929,12 @@ export default function WebViewerView({
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   }`}
-                  aria-label={t("rightPanel.togglePanel") || (isTh ? "เพิ่มเติม" : "More")}
+                  aria-label={t("rightPanel.togglePanel")}
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("rightPanel.togglePanel") || (isTh ? "เพิ่มเติม" : "More")}</TooltipContent>
+              <TooltipContent>{t("rightPanel.togglePanel")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -980,21 +965,16 @@ export default function WebViewerView({
 
                   {/* Title */}
                   <h1 className="text-lg font-semibold tracking-tight text-foreground">
-                    {t("webViewer.siteCantBeReached") || "This site can’t be reached"}
+                    {t("webViewer.siteCantBeReached")}
                   </h1>
 
                   {/* Suggestions / Typo in URL */}
                   <div className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
                     <p>
-                      {t("webViewer.checkTypoInUrl", { host: getHostFromUrl(currentUrl) }) || (
-                        <>
-                          Check if there is a typo in <span className="font-semibold text-foreground">{getHostFromUrl(currentUrl)}</span>
-                        </>
-                      )}
+                      {t("webViewer.checkTypoInUrl", { host: getHostFromUrl(currentUrl) })}
                     </p>
                     <p>
-                      {t("webViewer.checkConnectionSuggestion") ||
-                        "If spelling is correct, try checking your network connection or opening in default browser."}
+                      {t("webViewer.checkConnectionSuggestion")}
                     </p>
                   </div>
 
@@ -1010,7 +990,7 @@ export default function WebViewerView({
                       onClick={() => handleNavigate(currentUrl)}
                       className="px-4 py-2 text-xs font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-sm active:scale-95 cursor-pointer"
                     >
-                      {t("webViewer.retry") || "Reload"}
+                      {t("webViewer.retry")}
                     </button>
                     <button
                       type="button"
@@ -1018,7 +998,7 @@ export default function WebViewerView({
                       className="px-3.5 py-2 text-xs font-medium rounded-xl border border-border/70 hover:bg-muted text-foreground transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
-                      <span>{t("webViewer.openInExternalBrowserBtn") || "Open in External Browser"}</span>
+                      <span>{t("webViewer.openInExternalBrowserBtn")}</span>
                     </button>
                   </div>
                 </div>
@@ -1035,12 +1015,17 @@ export default function WebViewerView({
                 style={{ width: "100%", height: "100%" }}
               />
             ) : (
-              // Standard Web Fallback Iframe
+              // Standard Web Fallback Iframe (omit allow-same-origin for data:/blob:/file: to prevent sandbox escape)
               <iframe
                 ref={iframeRef}
                 src={currentUrl}
                 title={pageTitle || "Web Viewer"}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                sandbox={
+                  /^(data|blob|file):/i.test(currentUrl)
+                    ? "allow-scripts allow-forms allow-popups allow-downloads"
+                    : "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                }
+                referrerPolicy="no-referrer"
                 className="w-full h-full flex-1 border-0 bg-white"
                 style={{ width: "100%", height: "100%", zoom: zoomFactor }}
               />

@@ -67,7 +67,7 @@ function createLunoAiMarked(options?: LunoAiMarkdownOptions): Marked {
           : "";
 
         return (
-          `<div class="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-2xs transition-all">` +
+          `<div class="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-sm transition-all">` +
           `<div class="code-block-header flex items-center justify-between px-3.5 pt-2 pb-1 text-[11px] select-none border-b border-border/30">` +
           `<span class="font-semibold text-muted-foreground/90">${escapeHtml(displayLabel)}</span>` +
           `<button type="button" class="luno-code-copy-btn flex items-center justify-center p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-background/40 transition-all cursor-pointer outline-none" data-copy-code="true" data-code="${encodedCode}" data-tooltip="${escapeHtml(copyLabel)}" aria-label="${escapeHtml(copyLabel)}">` +

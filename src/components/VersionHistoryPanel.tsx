@@ -125,7 +125,7 @@ function VersionHistoryPanelComponent({
                     if (note.id) storage.setItem(getStorageKey(note.id), JSON.stringify(validList));
                     storage.setItem(getPathStorageKey(relPath), JSON.stringify(validList));
                   }
-                } catch {}
+                } catch { /* ignore */ }
                 setHistory(validList);
               } else if (isUntitled && diskList.length > 0) {
                 void deleteWorkspaceHistoryFromDisk(null, relPath);
@@ -163,12 +163,12 @@ function VersionHistoryPanelComponent({
       const timeLabel = formatSnapshotTime(snap.timestamp);
       toast({
         title: t("versionHistoryPanel.snapshotSaved"),
-        description: `${t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")} • ${timeLabel}`,
+        description: `${t("versionHistoryPanel.manualSnapshot")} • ${timeLabel}`,
       });
     } else {
       toast({
         title: t("versionHistoryPanel.snapshotSaved"),
-        description: t("saveStatus.saved") || (isTh ? "บันทึกสถานะปัจจุบันเรียบร้อยแล้ว" : "Current state is already recorded."),
+        description: t("saveStatus.saved"),
       });
     }
   };
@@ -191,10 +191,10 @@ function VersionHistoryPanelComponent({
     const triggerLabel =
       target.label ||
       (target.trigger === "manual"
-        ? t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกแบบแมนนวล" : "Manual save")
+        ? t("versionHistoryPanel.manualSnapshot")
         : target.trigger === "pre-restore"
-        ? t("versionHistoryPanel.preRestoreBackup") || (isTh ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
-        : t("versionHistoryPanel.autoSnapshot") || (isTh ? "บันทึกอัตโนมัติ" : "Auto-save"));
+        ? t("versionHistoryPanel.preRestoreBackup")
+        : t("versionHistoryPanel.autoSnapshot"));
 
     toast({
       title: t("versionHistoryPanel.deleteSuccess"),
@@ -211,10 +211,10 @@ function VersionHistoryPanelComponent({
       const triggerLabel =
         ver.label ||
         (ver.trigger === "manual"
-          ? t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")
+          ? t("versionHistoryPanel.manualSnapshot")
           : ver.trigger === "pre-restore"
-          ? t("versionHistoryPanel.preRestoreBackup") || (isTh ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
-          : t("versionHistoryPanel.autoSnapshot") || (isTh ? "บันทึกอัตโนมัติ" : "Auto-save"));
+          ? t("versionHistoryPanel.preRestoreBackup")
+          : t("versionHistoryPanel.autoSnapshot"));
       toast({
         title: t("versionHistoryPanel.contentCopied"),
         description: `${triggerLabel} • ${timeLabel}`,
@@ -231,11 +231,11 @@ function VersionHistoryPanelComponent({
       settings.dateFormat,
       settings.language,
       {
-        today: t("versionHistoryPanel.today") || (isTh ? "วันนี้" : "Today"),
-        yesterday: t("versionHistoryPanel.yesterday") || (isTh ? "เมื่อวาน" : "Yesterday"),
-        lastWeek: t("versionHistoryPanel.lastWeek") || (isTh ? "สัปดาห์ที่แล้ว" : "Last week"),
-        lastMonth: t("versionHistoryPanel.lastMonth") || (isTh ? "เดือนที่แล้ว" : "Last month"),
-        older: t("versionHistoryPanel.older") || (isTh ? "เก่ากว่านี้" : "Older"),
+        today: t("versionHistoryPanel.today"),
+        yesterday: t("versionHistoryPanel.yesterday"),
+        lastWeek: t("versionHistoryPanel.lastWeek"),
+        lastMonth: t("versionHistoryPanel.lastMonth"),
+        older: t("versionHistoryPanel.older"),
       }
     );
   }, [history, settings.dateFormat, settings.language, isTh, t]);
@@ -286,12 +286,12 @@ function VersionHistoryPanelComponent({
                 type="button"
                 onClick={onClose}
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors cursor-pointer outline-none focus:outline-none focus-visible:ring-0 [&_svg]:size-3.5"
-                aria-label={t("common.close") || "Close"}
+                aria-label={t("common.close")}
               >
                 <CloseIcon className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={4}>{t("common.close") || "Close"}</TooltipContent>
+            <TooltipContent side="bottom" sideOffset={4}>{t("common.close")}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -306,7 +306,7 @@ function VersionHistoryPanelComponent({
               {t("versionHistoryPanel.currentVersion")}
             </span>
             <span className="text-[10px] text-muted-foreground font-medium">
-              {currentWordCount !== undefined ? currentWordCount : countWords(note.content || "")} {isTh ? "คำ" : "words"}
+              {currentWordCount !== undefined ? currentWordCount : countWords(note.content || "")} {t("versionHistory.words")}
             </span>
           </div>
           <p className="text-[11px] text-muted-foreground">
@@ -318,9 +318,9 @@ function VersionHistoryPanelComponent({
         {groupedHistory.length > 0 ? (
           <div className="space-y-3 pt-1">
             <div className="px-1 text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
-              <span>{t("versionHistoryPanel.savedVersions") || (isTh ? "เวอร์ชันที่บันทึกไว้" : "Saved Versions")}</span>
+              <span>{t("versionHistoryPanel.savedVersions")}</span>
               <span className="text-[10px] text-muted-foreground/70 font-medium">
-                {history.length} {isTh ? "เวอร์ชัน" : history.length === 1 ? "version" : "versions"}
+                {history.length} {t(history.length === 1 ? "versionHistory.versionSingular" : "versionHistory.versionPlural")}
               </span>
             </div>
 
@@ -357,7 +357,7 @@ function VersionHistoryPanelComponent({
                         }
                       }}
                       onClick={() => onCompareVersion(ver)}
-                      className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 p-2.5 transition-all cursor-pointer hover:shadow-2xs outline-none"
+                      className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 p-2.5 transition-all cursor-pointer hover:shadow-sm outline-none"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -374,7 +374,7 @@ function VersionHistoryPanelComponent({
                           </Tooltip>
                         </div>
                         <span className="text-[10px] text-muted-foreground shrink-0">
-                          {ver.wordCount || 0} {isTh ? "คำ" : "words"}
+                          {ver.wordCount || 0} {t("versionHistory.words")}
                         </span>
                       </div>
 
@@ -495,11 +495,11 @@ function VersionHistoryPanelComponent({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("versionHistoryPanel.confirmDelete")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("common.deleteConfirm") || "Are you sure you want to delete this version snapshot?"}</AlertDialogDescription>
+            <AlertDialogDescription>{t("common.deleteConfirm")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete} className="bg-rose-600 text-white hover:bg-rose-700">
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>

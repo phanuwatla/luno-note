@@ -143,8 +143,8 @@ export default function BrowserRightPanel({
     setBookmarks(res.bookmarks);
     toast({
       title: res.bookmarked
-        ? t("webViewer.bookmarkAdded") || "Bookmark added"
-        : t("webViewer.bookmarkRemoved") || "Bookmark removed",
+        ? t("webViewer.bookmarkAdded")
+        : t("webViewer.bookmarkRemoved"),
       description: currentUrl,
     });
   };
@@ -153,7 +153,7 @@ export default function BrowserRightPanel({
     const updated = removeBrowserBookmark(url);
     setBookmarks(updated);
     toast({
-      title: t("webViewer.bookmarkRemoved") || "Bookmark removed",
+      title: t("webViewer.bookmarkRemoved"),
       description: url,
     });
   };
@@ -169,8 +169,8 @@ export default function BrowserRightPanel({
     setHistoryItems([]);
     setClearHistoryDialogOpen(false);
     toast({
-      title: t("webViewer.clearHistory") || "Clear History",
-      description: t("webViewer.historyCleared") || "Browsing history cleared",
+      title: t("webViewer.clearHistory"),
+      description: t("webViewer.historyCleared"),
     });
   };
 
@@ -182,8 +182,8 @@ export default function BrowserRightPanel({
         await electronAPI.clearBrowserData({ cookies: true });
       }
       toast({
-        title: t("webViewer.clearCookies") || "Clear Cookies & Site Data",
-        description: t("webViewer.cookiesCleared") || "Cookies cleared successfully",
+        title: t("webViewer.clearCookies"),
+        description: t("webViewer.cookiesCleared"),
       });
     } catch (err) {
       console.warn("Failed clearing cookies:", err);
@@ -200,8 +200,8 @@ export default function BrowserRightPanel({
         await electronAPI.clearBrowserData({ cache: true });
       }
       toast({
-        title: t("webViewer.clearCache") || "Clear Cache",
-        description: t("webViewer.cacheCleared") || "Cache cleared successfully",
+        title: t("webViewer.clearCache"),
+        description: t("webViewer.cacheCleared"),
       });
     } catch (err) {
       console.warn("Failed clearing cache:", err);
@@ -224,11 +224,11 @@ export default function BrowserRightPanel({
       if (webviewRef?.current?.clearHistory) {
         try {
           webviewRef.current.clearHistory();
-        } catch {}
+        } catch { /* ignore */ }
       }
       toast({
-        title: t("webViewer.clearAllData") || "Clear All Browsing Data",
-        description: t("webViewer.allDataCleared") || "All browsing data cleared successfully",
+        title: t("webViewer.clearAllData"),
+        description: t("webViewer.allDataCleared"),
       });
     } catch (err) {
       console.warn("Failed clearing all data:", err);
@@ -244,8 +244,8 @@ export default function BrowserRightPanel({
       setCopiedUrl(url);
       setTimeout(() => setCopiedUrl(null), 2000);
       toast({
-        title: t("webViewer.copyUrl") || "Copy URL",
-        description: t("webViewer.urlCopied") || "URL copied to clipboard",
+        title: t("webViewer.copyUrl"),
+        description: t("webViewer.urlCopied"),
       });
     } catch {
       /* ignore */
@@ -259,8 +259,8 @@ export default function BrowserRightPanel({
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 2000);
       toast({
-        title: t("webViewer.copyMarkdownLink") || "Copy as Markdown Link",
-        description: t("webViewer.markdownLinkCopied") || "Markdown link copied to clipboard",
+        title: t("webViewer.copyMarkdownLink"),
+        description: t("webViewer.markdownLinkCopied"),
       });
     } catch {
       /* ignore */
@@ -335,7 +335,7 @@ export default function BrowserRightPanel({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t("webViewer.history") || (isTh ? "ประวัติ" : "History")}
+            {t("webViewer.history")}
             {activeTab === "history" && (
               <motion.div
                 layoutId="browserRightPanelTab"
@@ -353,7 +353,7 @@ export default function BrowserRightPanel({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t("webViewer.bookmarks") || (isTh ? "บุ๊กมาร์ก" : "Bookmarks")}
+            {t("webViewer.bookmarks")}
             {activeTab === "bookmarks" && (
               <motion.div
                 layoutId="browserRightPanelTab"
@@ -371,7 +371,7 @@ export default function BrowserRightPanel({
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t("webViewer.privacy") || (isTh ? "ความเป็นส่วนตัว" : "Privacy")}
+            {t("webViewer.privacy")}
             {activeTab === "privacy" && (
               <motion.div
                 layoutId="browserRightPanelTab"
@@ -386,13 +386,13 @@ export default function BrowserRightPanel({
             <button
               type="button"
               onClick={onClose}
-              aria-label={t("rightPanel.closePanel") || "Close panel"}
+              aria-label={t("rightPanel.closePanel")}
               className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
             >
               {renderToolbarIcon("x", "h-3.5 w-3.5")}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("rightPanel.closePanel") || "Close panel"}</TooltipContent>
+          <TooltipContent>{t("rightPanel.closePanel")}</TooltipContent>
         </Tooltip>
       </div>
 
@@ -409,7 +409,7 @@ export default function BrowserRightPanel({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t("webViewer.searchHistory") || (isTh ? "ค้นหาประวัติการเข้าชม..." : "Search history...")}
+                  placeholder={t("webViewer.searchHistory")}
                   className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
                 />
                 {searchQuery && (
@@ -419,12 +419,12 @@ export default function BrowserRightPanel({
                         type="button"
                         onClick={() => setSearchQuery("")}
                         className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-muted/80 cursor-pointer"
-                        aria-label={t("webViewer.clear") || "Clear"}
+                        aria-label={t("webViewer.clear")}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("webViewer.clear") || "Clear"}</TooltipContent>
+                    <TooltipContent>{t("webViewer.clear")}</TooltipContent>
                   </Tooltip>
                 )}
               </div>
@@ -432,7 +432,7 @@ export default function BrowserRightPanel({
               {historyItems.length > 0 && (
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5 px-0.5">
                   <span className="font-semibold uppercase tracking-wider text-[10px]">
-                    {t("webViewer.history") || (isTh ? "ประวัติ" : "History")} ({filteredHistory.length})
+                    {t("webViewer.history")} ({filteredHistory.length})
                   </span>
                 </div>
               )}
@@ -444,8 +444,8 @@ export default function BrowserRightPanel({
                 <Clock className="h-7 w-7 opacity-40 text-muted-foreground" />
                 <span>
                   {searchQuery
-                    ? t("webViewer.noMatchingHistory") || (isTh ? "ไม่พบประวัติการเข้าชมที่ค้นหา" : "No matching history found")
-                    : t("webViewer.noHistory") || (isTh ? "ไม่มีประวัติการเข้าชม" : "No browsing history yet")}
+                    ? t("webViewer.noMatchingHistory")
+                    : t("webViewer.noHistory")}
                 </span>
               </div>
             ) : (
@@ -454,7 +454,7 @@ export default function BrowserRightPanel({
                 {groupedHistory.today.length > 0 && (
                   <div className="space-y-1.5">
                     <h5 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 px-1">
-                      {t("webViewer.today") || (isTh ? "วันนี้" : "Today")}
+                      {t("webViewer.today")}
                     </h5>
                     <div className="space-y-1">
                       {groupedHistory.today.map((item) => (
@@ -475,7 +475,7 @@ export default function BrowserRightPanel({
                 {groupedHistory.yesterday.length > 0 && (
                   <div className="space-y-1.5">
                     <h5 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 px-1">
-                      {t("webViewer.yesterday") || (isTh ? "เมื่อวาน" : "Yesterday")}
+                      {t("webViewer.yesterday")}
                     </h5>
                     <div className="space-y-1">
                       {groupedHistory.yesterday.map((item) => (
@@ -496,7 +496,7 @@ export default function BrowserRightPanel({
                 {groupedHistory.earlier.length > 0 && (
                   <div className="space-y-1.5">
                     <h5 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 px-1">
-                      {t("webViewer.earlier") || (isTh ? "ก่อนหน้านี้" : "Earlier")}
+                      {t("webViewer.earlier")}
                     </h5>
                     <div className="space-y-1">
                       {groupedHistory.earlier.map((item) => (
@@ -539,8 +539,8 @@ export default function BrowserRightPanel({
                 <div className="text-left min-w-0">
                   <div className="font-semibold text-xs truncate">
                     {isCurrentBookmarked
-                      ? t("webViewer.removeBookmark") || (isTh ? "ลบบุ๊กมาร์กหน้านี้" : "Remove Bookmark")
-                      : t("webViewer.addBookmark") || (isTh ? "บุ๊กมาร์กหน้านี้" : "Bookmark This Page")}
+                      ? t("webViewer.removeBookmark")
+                      : t("webViewer.addBookmark")}
                   </div>
                   <div className="text-[10px] text-muted-foreground truncate max-w-[180px]">
                     {getHostName(currentUrl)}
@@ -554,19 +554,16 @@ export default function BrowserRightPanel({
               <div className="py-16 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
                 <Star className="h-7 w-7 opacity-40 text-muted-foreground" />
                 <span className="font-medium text-foreground/80">
-                  {t("webViewer.noBookmarks") || (isTh ? "ยังไม่มีบุ๊กมาร์ก" : "No bookmarks yet")}
+                  {t("webViewer.noBookmarks")}
                 </span>
                 <p className="text-[11px] leading-relaxed max-w-[200px] opacity-70">
-                  {t("webViewer.noBookmarksDesc") ||
-                    (isTh
-                      ? "คลิก 'บุ๊กมาร์กหน้านี้' เพื่อบันทึกหน้าเว็บโปรดสำหรับเปิดอย่างรวดเร็ว"
-                      : "Click 'Bookmark This Page' to save your favorite pages for quick access.")}
+                  {t("webViewer.noBookmarksDesc")}
                 </p>
               </div>
             ) : (
               <div className="space-y-1.5">
                 <h5 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 px-1">
-                  {t("webViewer.bookmarks") || (isTh ? "บุ๊กมาร์ก" : "Bookmarks")} ({bookmarks.length})
+                  {t("webViewer.bookmarks")} ({bookmarks.length})
                 </h5>
                 <div className="space-y-1">
                   {bookmarks.map((bm) => (
@@ -594,7 +591,7 @@ export default function BrowserRightPanel({
                               type="button"
                               onClick={(e) => handleCopy(bm.url, e)}
                               className="p-1 rounded-md hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                              aria-label={t("webViewer.copyUrl") || "Copy URL"}
+                              aria-label={t("webViewer.copyUrl")}
                             >
                               {copiedUrl === bm.url ? (
                                 <Check className="h-3 w-3 text-emerald-500" />
@@ -603,7 +600,7 @@ export default function BrowserRightPanel({
                               )}
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t("webViewer.copyUrl") || "Copy URL"}</TooltipContent>
+                          <TooltipContent>{t("webViewer.copyUrl")}</TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
@@ -615,12 +612,12 @@ export default function BrowserRightPanel({
                                 handleDeleteBookmark(bm.url);
                               }}
                               className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-                              aria-label={t("webViewer.removeBookmark") || (isTh ? "ลบบุ๊กมาร์ก" : "Remove")}
+                              aria-label={t("webViewer.removeBookmark")}
                             >
                               <Trash2 className="h-3 w-3" />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t("webViewer.removeBookmark") || (isTh ? "ลบบุ๊กมาร์ก" : "Remove")}</TooltipContent>
+                          <TooltipContent>{t("webViewer.removeBookmark")}</TooltipContent>
                         </Tooltip>
                       </div>
                     </div>
@@ -637,7 +634,7 @@ export default function BrowserRightPanel({
             {/* SECTION 1: CLEAR BROWSING DATA */}
             <div className="space-y-3">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                {t("webViewer.privacy") || (isTh ? "การล้างข้อมูลและการท่องเว็บ" : "Browsing Data & Privacy")}
+                {t("webViewer.privacy")}
               </h4>
 
               <div className="space-y-2">
@@ -647,13 +644,10 @@ export default function BrowserRightPanel({
                     <Cookie className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                     <div>
                       <div className="font-semibold text-foreground">
-                        {t("webViewer.clearCookies") || (isTh ? "ล้างคุกกี้และข้อมูลไซต์" : "Clear Cookies")}
+                        {t("webViewer.clearCookies")}
                       </div>
                       <div className="text-[11px] text-muted-foreground leading-relaxed">
-                        {t("webViewer.clearCookiesDesc") ||
-                          (isTh
-                            ? "ลบคุกกี้และเซสชันที่เว็บไซต์บันทึกไว้ในเบราว์เซอร์"
-                            : "Removes cookies stored by visited sites.")}
+                        {t("webViewer.clearCookiesDesc")}
                       </div>
                     </div>
                   </div>
@@ -663,7 +657,7 @@ export default function BrowserRightPanel({
                     onClick={handleClearCookies}
                     className="w-full py-1.5 px-3 text-xs font-medium rounded-xl border border-border/70 hover:bg-muted text-foreground transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                   >
-                    {t("webViewer.clearCookies") || (isTh ? "ล้างคุกกี้" : "Clear Cookies")}
+                    {t("webViewer.clearCookies")}
                   </button>
                 </div>
 
@@ -673,13 +667,10 @@ export default function BrowserRightPanel({
                     <Database className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                     <div>
                       <div className="font-semibold text-foreground">
-                        {t("webViewer.clearCache") || (isTh ? "ล้างแคชเว็บ" : "Clear Cache")}
+                        {t("webViewer.clearCache")}
                       </div>
                       <div className="text-[11px] text-muted-foreground leading-relaxed">
-                        {t("webViewer.clearCacheDesc") ||
-                          (isTh
-                            ? "ลบไฟล์รูปภาพและข้อมูลชั่วคราวเพื่อประหยัดพื้นที่"
-                            : "Frees up temporary cached files and images.")}
+                        {t("webViewer.clearCacheDesc")}
                       </div>
                     </div>
                   </div>
@@ -689,7 +680,7 @@ export default function BrowserRightPanel({
                     onClick={handleClearCache}
                     className="w-full py-1.5 px-3 text-xs font-medium rounded-xl border border-border/70 hover:bg-muted text-foreground transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                   >
-                    {t("webViewer.clearCache") || (isTh ? "ล้างแคช" : "Clear Cache")}
+                    {t("webViewer.clearCache")}
                   </button>
                 </div>
 
@@ -702,7 +693,7 @@ export default function BrowserRightPanel({
                     className="flex w-full items-center justify-center gap-2 py-2 px-3 text-xs font-medium rounded-xl border border-border/70 bg-muted/30 text-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    <span>{t("webViewer.clearAllData") || (isTh ? "ล้างข้อมูลทั้งหมด" : "Clear All Browsing Data")}</span>
+                    <span>{t("webViewer.clearAllData")}</span>
                   </button>
                 </div>
               </div>
@@ -713,7 +704,7 @@ export default function BrowserRightPanel({
             {/* SECTION 2: ZOOM & DISPLAY */}
             <div className="space-y-3">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                {t("webViewer.zoom") || (isTh ? "การซูมและการแสดงผล" : "Display & Zoom")}
+                {t("webViewer.zoom")}
               </h4>
 
               <div className="flex items-center justify-between p-2 rounded-xl border border-border/60 bg-muted/20">
@@ -731,12 +722,12 @@ export default function BrowserRightPanel({
                           onZoomChange?.(Math.round(newScale * 0.9 * 100) / 100);
                         }}
                         className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                        aria-label={t("webViewer.zoomOut") || "Zoom Out"}
+                        aria-label={t("webViewer.zoomOut")}
                       >
                         <ZoomOut className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("webViewer.zoomOut") || "Zoom Out"}</TooltipContent>
+                    <TooltipContent>{t("webViewer.zoomOut")}</TooltipContent>
                   </Tooltip>
 
                   <Tooltip>
@@ -745,12 +736,12 @@ export default function BrowserRightPanel({
                         type="button"
                         onClick={() => onZoomChange?.(0.9)}
                         className="px-2 py-1 text-[11px] rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-medium"
-                        aria-label={t("webViewer.zoomReset") || "Reset Zoom (100%)"}
+                        aria-label={t("webViewer.zoomReset")}
                       >
                         100%
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("webViewer.zoomReset") || "Reset Zoom (100%)"}</TooltipContent>
+                    <TooltipContent>{t("webViewer.zoomReset")}</TooltipContent>
                   </Tooltip>
 
                   <Tooltip>
@@ -763,12 +754,12 @@ export default function BrowserRightPanel({
                           onZoomChange?.(Math.round(newScale * 0.9 * 100) / 100);
                         }}
                         className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                        aria-label={t("webViewer.zoomIn") || "Zoom In"}
+                        aria-label={t("webViewer.zoomIn")}
                       >
                         <ZoomIn className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("webViewer.zoomIn") || "Zoom In"}</TooltipContent>
+                    <TooltipContent>{t("webViewer.zoomIn")}</TooltipContent>
                   </Tooltip>
                 </div>
               </div>
@@ -780,7 +771,7 @@ export default function BrowserRightPanel({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer"
                 >
                   <RotateCw className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>{t("webViewer.hardReload") || (isTh ? "โหลดใหม่แบบล้างแคช" : "Hard Reload")}</span>
+                  <span>{t("webViewer.hardReload")}</span>
                 </button>
               )}
             </div>
@@ -790,28 +781,28 @@ export default function BrowserRightPanel({
             {/* SECTION 3: PAGE INFO & SECURITY */}
             <div className="space-y-3">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                {t("webViewer.pageInfo") || (isTh ? "ข้อมูลความปลอดภัย" : "Page Security")}
+                {t("webViewer.pageInfo")}
               </h4>
 
               <div className="space-y-2 text-xs">
                 {/* Security status */}
                 <div className="flex items-center justify-between py-0.5">
-                  <span className="text-muted-foreground">{isTh ? "สถานะการเชื่อมต่อ" : "Security"}</span>
+                  <span className="text-muted-foreground">{t("browser.security")}</span>
                   <div className="flex items-center gap-1.5 font-medium">
                     {isLocal ? (
                       <span className="flex items-center gap-1 text-blue-500">
                         <FileCode className="h-3.5 w-3.5" />
-                        <span>{t("webViewer.localPreview") || "Local"}</span>
+                        <span>{t("webViewer.localPreview")}</span>
                       </span>
                     ) : isHttps ? (
                       <span className="flex items-center gap-1 text-emerald-500">
                         <Lock className="h-3.5 w-3.5" />
-                        <span>{t("webViewer.secure") || "HTTPS"}</span>
+                        <span>{t("webViewer.secure")}</span>
                       </span>
                     ) : (
                       <span className="flex items-center gap-1 text-destructive">
                         <ShieldAlert className="h-3.5 w-3.5" />
-                        <span>{t("webViewer.notSecure") || "HTTP"}</span>
+                        <span>{t("webViewer.notSecure")}</span>
                       </span>
                     )}
                   </div>
@@ -819,7 +810,7 @@ export default function BrowserRightPanel({
 
                 {/* Host */}
                 <div className="flex items-center justify-between py-0.5">
-                  <span className="text-muted-foreground">{isTh ? "โฮสต์" : "Host"}</span>
+                  <span className="text-muted-foreground">{t("browser.host")}</span>
                   <span className="font-medium text-foreground truncate max-w-[170px]">
                     {getHostName(currentUrl)}
                   </span>
@@ -827,7 +818,7 @@ export default function BrowserRightPanel({
 
                 {/* URL with quick copy */}
                 <div className="flex flex-col gap-1 py-1">
-                  <span className="text-muted-foreground">{isTh ? "ที่อยู่เว็บ" : "Full Address"}</span>
+                  <span className="text-muted-foreground">{t("browser.fullAddress")}</span>
                   <div className="flex items-center gap-1.5 p-2 rounded-xl bg-muted/40 border border-border/50 text-[11px] text-foreground break-all">
                     <span className="truncate flex-1 select-all">{currentUrl}</span>
                     <Tooltip>
@@ -836,7 +827,7 @@ export default function BrowserRightPanel({
                           type="button"
                           onClick={() => handleCopy(currentUrl)}
                           className="p-1 rounded-md hover:bg-background text-muted-foreground hover:text-foreground shrink-0 transition-colors cursor-pointer"
-                          aria-label={t("webViewer.copyUrl") || "Copy URL"}
+                          aria-label={t("webViewer.copyUrl")}
                         >
                           {copiedUrl === currentUrl ? (
                             <Check className="h-3 w-3 text-emerald-500" />
@@ -845,7 +836,7 @@ export default function BrowserRightPanel({
                           )}
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{t("webViewer.copyUrl") || "Copy URL"}</TooltipContent>
+                      <TooltipContent>{t("webViewer.copyUrl")}</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -857,7 +848,7 @@ export default function BrowserRightPanel({
             {/* SECTION 4: ACTIONS */}
             <div className="space-y-1 pb-2">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                {t("rightPanel.actionsSection") || "Actions"}
+                {t("rightPanel.actionsSection")}
               </h4>
 
               <button
@@ -870,7 +861,7 @@ export default function BrowserRightPanel({
                 ) : (
                   <Copy className="h-4 w-4 text-muted-foreground shrink-0" />
                 )}
-                <span>{t("webViewer.copyMarkdownLink") || (isTh ? "คัดลอกเป็นลิงก์ Markdown" : "Copy as Markdown Link")}</span>
+                <span>{t("webViewer.copyMarkdownLink")}</span>
               </button>
 
               {onInsertToNote && hasActiveNotes && (
@@ -880,7 +871,7 @@ export default function BrowserRightPanel({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer"
                 >
                   <FilePlus2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span>{t("webViewer.insertToNote") || "Insert link into note"}</span>
+                  <span>{t("webViewer.insertToNote")}</span>
                 </button>
               )}
 
@@ -891,7 +882,7 @@ export default function BrowserRightPanel({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer"
                 >
                   <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span>{t("webViewer.openExternal") || "Open in External Browser"}</span>
+                  <span>{t("webViewer.openExternal")}</span>
                 </button>
               )}
             </div>
@@ -909,7 +900,7 @@ export default function BrowserRightPanel({
             className="flex w-full items-center justify-center gap-2 py-2 px-3 text-xs font-medium rounded-xl border border-border/70 bg-muted/30 text-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive transition-all cursor-pointer active:scale-95 disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            <span>{t("webViewer.clearHistory") || (isTh ? "ล้างประวัติการเข้าชม" : "Clear Browsing History")}</span>
+            <span>{t("webViewer.clearHistory")}</span>
           </button>
         </div>
       )}
@@ -919,19 +910,19 @@ export default function BrowserRightPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("webViewer.clearHistory") || (isTh ? "ล้างประวัติการเข้าชมหรือไม่?" : "Clear Browsing History?")}
+              {t("webViewer.clearHistory")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("webViewer.clearHistoryConfirm") || (isTh ? "คุณแน่ใจหรือไม่ว่าต้องการล้างประวัติการเข้าชมทั้งหมด?" : "Are you sure you want to clear your entire browsing history?")}
+              {t("webViewer.clearHistoryConfirm")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleConfirmClearHistory}
             >
-              {t("webViewer.clearHistory") || (isTh ? "ล้างประวัติ" : "Clear History")}
+              {t("webViewer.clearHistory")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -942,19 +933,19 @@ export default function BrowserRightPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("webViewer.clearAllData") || (isTh ? "ล้างข้อมูลการท่องเว็บทั้งหมดหรือไม่?" : "Clear All Browsing Data?")}
+              {t("webViewer.clearAllData")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("webViewer.clearAllDataConfirm") || (isTh ? "คุณแน่ใจหรือไม่ว่าต้องการล้างข้อมูลการท่องเว็บทั้งหมด (ประวัติ, คุกกี้, และแคช)?" : "Are you sure you want to clear all browsing data (history, cookies, and cache)?")}
+              {t("webViewer.clearAllDataConfirm")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleConfirmClearAllData}
             >
-              {t("webViewer.clearAllData") || (isTh ? "ล้างข้อมูลทั้งหมด" : "Clear All Data")}
+              {t("webViewer.clearAllData")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1008,6 +999,7 @@ function BrowserItemFavicon({ url, favicon }: { url: string; favicon?: string })
 
 function HistoryRow({ item, copiedUrl, onNavigate, onCopy, onDelete }: HistoryRowProps) {
   const { t, language } = useTranslation();
+  const { settings } = useAppSettings();
 
   return (
     <div
@@ -1023,7 +1015,7 @@ function HistoryRow({ item, copiedUrl, onNavigate, onCopy, onDelete }: HistoryRo
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <span className="truncate">{getHostName(item.url)}</span>
             <span className="shrink-0 opacity-70">
-              {formatTime(item.timestamp, "24h", "en")}
+              {formatTime(item.timestamp, settings.timeFormat, language)}
             </span>
           </div>
         </div>
@@ -1036,7 +1028,7 @@ function HistoryRow({ item, copiedUrl, onNavigate, onCopy, onDelete }: HistoryRo
               type="button"
               onClick={(e) => onCopy(item.url, e)}
               className="p-1 rounded-md hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              aria-label={t("webViewer.copyUrl") || "Copy URL"}
+              aria-label={t("webViewer.copyUrl")}
             >
               {copiedUrl === item.url ? (
                 <Check className="h-3 w-3 text-emerald-500" />
@@ -1045,7 +1037,7 @@ function HistoryRow({ item, copiedUrl, onNavigate, onCopy, onDelete }: HistoryRo
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("webViewer.copyUrl") || "Copy URL"}</TooltipContent>
+          <TooltipContent>{t("webViewer.copyUrl")}</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -1054,12 +1046,12 @@ function HistoryRow({ item, copiedUrl, onNavigate, onCopy, onDelete }: HistoryRo
               type="button"
               onClick={(e) => onDelete(item.id, e)}
               className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-              aria-label={t("webViewer.deleteHistoryItem") || (language === "th" ? "ลบออกจากประวัติ" : "Remove")}
+              aria-label={t("webViewer.deleteHistoryItem")}
             >
               <X className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("webViewer.deleteHistoryItem") || (language === "th" ? "ลบออกจากประวัติ" : "Remove")}</TooltipContent>
+          <TooltipContent>{t("webViewer.deleteHistoryItem")}</TooltipContent>
         </Tooltip>
       </div>
     </div>

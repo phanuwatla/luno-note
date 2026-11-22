@@ -558,7 +558,8 @@ export async function uploadDriveNoteFile(
     // If no valid driveFileId is provided, check if a file with cleanName already exists on Drive in targetFolderId
     if (!targetDriveId) {
       try {
-        const q = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
+        const escapedName = cleanName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const q = `'${targetFolderId}' in parents and name = '${escapedName}' and trashed = false`;
         const searchUrl = `${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=10`;
         const res = await fetchWithRetry(searchUrl, {
           headers: { Authorization: `Bearer ${token}` },
@@ -674,7 +675,8 @@ export async function uploadDriveNoteFile(
 
     // Proactively clean any duplicate copies with the same name in targetFolderId
     try {
-      const qDupes = `'${targetFolderId}' in parents and name = '${cleanName.replace(/'/g, "\\'")}' and trashed = false`;
+      const escapedName = cleanName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const qDupes = `'${targetFolderId}' in parents and name = '${escapedName}' and trashed = false`;
       const resDupes = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(qDupes)}&fields=files(id,name,modifiedTime)&pageSize=10`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -895,29 +897,22 @@ export async function uploadDriveAttachmentFile(
 
   const uploadedFile = (await res.json()) as DriveFileItem;
 
-  // Make attachment readable via link for embedding in markdown
-  try {
-    await fetch(`${BASE_URL}/files/${uploadedFile.id}/permissions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        role: "reader",
-        type: "anyone",
-      }),
-    });
-  } catch {
-    // ignore permission warning
-  }
-
+  // Keep workspace attachments private by default. Public sharing permissions
+  // should only be granted explicitly when the user invokes the Share Link flow.
   return uploadedFile;
+}
+
+const PRIVATE_LUNO_META_FILES = new Set(["settings.json", "session.json"]);
+
+function shouldSkipLunoMetaSync(fileName: string): boolean {
+  const lower = (fileName || "").trim().toLowerCase();
+  return PRIVATE_LUNO_META_FILES.has(lower) || lower.endsWith(".local");
 }
 
 // Upload all local files in attachments/ directory to Google Drive attachments/ folder
 /**
- * Syncs all files inside local .luno/ folder (workspace.json, settings.json, etc.) to Google Drive's .luno folder.
+ * Syncs portable metadata files inside local .luno/ folder (e.g. workspace.json, favorites.json)
+ * to Google Drive's .luno folder, excluding machine-local secrets/session files.
  */
 export async function syncLocalLunoMetaToDrive(
   token: string,
@@ -926,7 +921,7 @@ export async function syncLocalLunoMetaToDrive(
   rootDirHandle?: FileSystemDirectoryHandle | null
 ): Promise<void> {
   try {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     // 1. Electron Desktop
     if (electronAPI?.readDirectoryFiles && electronAPI?.readFileContent && targetElectronPath) {
@@ -935,7 +930,7 @@ export async function syncLocalLunoMetaToDrive(
         await electronAPI.readDirectoryFiles(metaDir);
 
       for (const f of files) {
-        if (!f.isDirectory) {
+        if (!f.isDirectory && !shouldSkipLunoMetaSync(f.name)) {
           try {
             const content = await electronAPI.readFileContent(f.fullPath);
             if (content !== null && content !== undefined) {
@@ -959,7 +954,7 @@ export async function syncLocalLunoMetaToDrive(
             : (metaDir as unknown as AsyncIterable<[string, FileSystemHandle]>);
 
         for await (const [name, handle] of iterator) {
-          if (handle.kind === "file") {
+          if (handle.kind === "file" && !shouldSkipLunoMetaSync(name)) {
             try {
               const fileHandle = handle as FileSystemFileHandle;
               const file = await fileHandle.getFile();
@@ -993,7 +988,7 @@ export async function syncLocalAttachmentsToDrive(
   targetElectronPath?: string | null
 ): Promise<void> {
   try {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     const q = `'${attachmentsFolderId}' in parents and trashed = false`;
     const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
@@ -1068,7 +1063,7 @@ export async function syncWorkspaceMediaAndFoldersToDrive(
   rootDirHandle?: FileSystemDirectoryHandle | null
 ): Promise<void> {
   try {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     const BINARY_IMAGE_EXTS = new Set([
       ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".avif",
@@ -1269,10 +1264,15 @@ export async function syncWorkspaceMediaAndFoldersToDrive(
 export async function syncDriveAttachmentsToLocal(
   token: string,
   attachmentsFolderId: string,
-  rootDirHandle: FileSystemDirectoryHandle
+  rootDirHandle?: FileSystemDirectoryHandle | null,
+  targetElectronPath?: string | null
 ): Promise<void> {
   try {
-    const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+    const electronAPI = typeof window !== "undefined" ? window.electronAPI : undefined;
+    const electronWsPath = targetElectronPath || null;
+
+    if (!rootDirHandle && !electronWsPath) return;
+
     const q = `'${attachmentsFolderId}' in parents and trashed = false`;
     const res = await fetch(`${BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1000`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1281,23 +1281,59 @@ export async function syncDriveAttachmentsToLocal(
     const data = await res.json();
     const driveFiles = (data.files || []) as DriveFileItem[];
 
-    for (const item of driveFiles) {
-      try {
-        await attachmentsDir.getFileHandle(item.name, { create: false });
-      } catch {
+    // 1. Electron Desktop mode
+    if (electronWsPath && electronAPI?.readDirectoryFiles && electronAPI?.writeFileBase64) {
+      const attachmentsPath = `${electronWsPath}/attachments`;
+      const existingEntries = (await electronAPI.readDirectoryFiles(attachmentsPath)) || [];
+      const existingNames = new Set(existingEntries.map((e) => e.name.toLowerCase()));
+
+      for (const item of driveFiles) {
+        if (existingNames.has(item.name.toLowerCase())) continue;
         try {
           const fileRes = await fetch(`${BASE_URL}/files/${item.id}?alt=media`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (fileRes.ok) {
-            const blob = await fileRes.blob();
-            const localHandle = await attachmentsDir.getFileHandle(item.name, { create: true });
-            const writable = await localHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
+            const arrayBuffer = await fileRes.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            let binaryStr = "";
+            const CHUNK = 8192;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+              binaryStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+            }
+            const b64 = btoa(binaryStr);
+            await electronAPI.writeFileBase64({
+              fullPath: `${attachmentsPath}/${item.name}`,
+              base64: b64,
+            });
           }
         } catch (err) {
-          console.warn(`Failed to download attachment ${item.name} from Drive:`, err);
+          console.warn(`Failed to download attachment ${item.name} from Drive (Electron):`, err);
+        }
+      }
+    }
+
+    // 2. Web File System Access API mode
+    if (rootDirHandle) {
+      const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: true });
+      for (const item of driveFiles) {
+        try {
+          await attachmentsDir.getFileHandle(item.name, { create: false });
+        } catch {
+          try {
+            const fileRes = await fetch(`${BASE_URL}/files/${item.id}?alt=media`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (fileRes.ok) {
+              const blob = await fileRes.blob();
+              const localHandle = await attachmentsDir.getFileHandle(item.name, { create: true });
+              const writable = await localHandle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+            }
+          } catch (err) {
+            console.warn(`Failed to download attachment ${item.name} from Drive:`, err);
+          }
         }
       }
     }
@@ -1308,7 +1344,9 @@ export async function syncDriveAttachmentsToLocal(
 
 // Rename file on Google Drive without changing ID
 export async function renameDriveFile(token: string, driveFileId: string, newFileName: string): Promise<DriveFileItem> {
-  const cleanName = newFileName.endsWith(".md") || newFileName.endsWith(".txt") || newFileName.endsWith(".html") ? newFileName : `${newFileName}.md`;
+  const trimmed = newFileName.trim();
+  const hasExtension = /\.[a-zA-Z0-9]{1,10}$/.test(trimmed);
+  const cleanName = hasExtension ? trimmed : `${trimmed}.md`;
 
   const res = await fetch(`${BASE_URL}/files/${driveFileId}?fields=id,name,modifiedTime`, {
     method: "PATCH",

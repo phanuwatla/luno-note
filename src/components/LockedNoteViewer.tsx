@@ -38,9 +38,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
     if (remaining > 0) {
       const isTh = settings?.language === "th";
       setError(
-        isTh
-          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
-          : `Too many failed attempts. Please wait ${remaining}s.`
+        t("pinLock.tooManyFailedAttemptsPlease", { remaining })
       );
     } else {
       setError(null);
@@ -63,9 +61,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
       } else {
         const isTh = settings?.language === "th";
         setError(
-          isTh
-            ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
-            : `Too many failed attempts. Please wait ${remaining}s.`
+          t("pinLock.tooManyFailedAttemptsPlease", { remaining })
         );
       }
     }, 1000);
@@ -140,14 +136,12 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
       setLockoutSeconds(remaining);
       const isTh = settings?.language === "th";
       setError(
-        isTh
-          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${remaining} วินาที`
-          : `Too many failed attempts. Please wait ${remaining}s.`
+        t("pinLock.tooManyFailedAttemptsPlease", { remaining })
       );
       return;
     }
     if (pin.length !== 6) {
-      setError(t("pinLock.pinLengthError") || "PIN must be exactly 6 digits.");
+      setError(t("pinLock.pinLengthError"));
       return;
     }
 
@@ -176,12 +170,10 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
     const isTh = settings?.language === "th";
     if (lockout > 0) {
       setError(
-        isTh
-          ? `กรอก PIN ผิดหลายครั้ง กรุณารอ ${lockout} วินาที`
-          : `Too many failed attempts. Please wait ${lockout}s.`
+        t("pinLock.tooManyFailedAttemptsPlease2", { lockout })
       );
     } else {
-      setError(t("pinLock.incorrectPin") || "Incorrect PIN. Please try again.");
+      setError(t("pinLock.incorrectPin"));
     }
 
     setShake(true);
@@ -201,7 +193,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   return (
     <div className="h-full w-full flex flex-col items-center justify-center p-6 bg-background select-none animate-in fade-in duration-200">
       <div
-        className="w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-xs flex flex-col items-center text-center transition-transform duration-200"
+        className="w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col items-center text-center transition-transform duration-200"
         style={{
           animation: shake ? "shake 0.4s cubic-bezier(.36,.07,.19,.97) both" : undefined,
         }}
@@ -220,7 +212,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
           {note.title || note.fileName || t("pinLock.unlockTitle") || "Protected Note"}
         </h2>
         <p className="text-xs text-muted-foreground max-w-xs mb-5">
-          {t("pinLock.unlockDesc") || "Enter your 6-digit PIN to decrypt and read this note."}
+          {t("pinLock.unlockDesc")}
         </p>
 
         {/* 6 Digit Input Boxes */}
@@ -251,7 +243,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 cursor-pointer transition-colors"
             >
               {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{showPin ? (t("pinLock.hidePin") || "Hide PIN") : (t("pinLock.showPin") || "Show PIN")}</span>
+              <span>{showPin ? (t("pinLock.hidePin")) : (t("pinLock.showPin"))}</span>
             </button>
 
             <span className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
@@ -274,13 +266,9 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
             {loading ? (
               <span>...</span>
             ) : lockoutSeconds > 0 ? (
-              settings?.language === "th" ? (
-                `กรุณารอ (${lockoutSeconds}s)`
-              ) : (
-                `Please wait (${lockoutSeconds}s)`
-              )
+              t("pinLock.pleaseWaitSeconds", { seconds: lockoutSeconds })
             ) : (
-              t("pinLock.unlockBtn") || "Unlock Note"
+              t("pinLock.unlockBtn")
             )}
           </Button>
         </form>

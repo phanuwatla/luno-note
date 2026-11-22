@@ -89,6 +89,7 @@ describe("useAppSettings - Workspace Settings Isolation", () => {
 
     delete (window as any).electronAPI;
   });
+
   it("resetSettings preserves userName and personal credentials while restoring general settings to default", () => {
     localStorage.setItem("notes-app-settings", JSON.stringify({
       theme: "amber",
@@ -118,5 +119,72 @@ describe("useAppSettings - Workspace Settings Isolation", () => {
     expect(result.current.settings.userName).toBe("Alice In Wonderland");
     expect(result.current.settings.geminiApiKey).toBe("custom-gemini-key");
     expect(result.current.settings.googleDriveClientId).toBe("custom-gdrive-client");
+  });
+
+  it("copyFolderIcons copies custom folder icons, subfolder icons, and nested file icons to the duplicated folder while keeping the source intact", () => {
+    localStorage.setItem(
+      "notes-app-settings",
+      JSON.stringify({
+        folderIcons: {
+          Projects: { icon: "lucide:rocket", color: "#ff5500" },
+          "Projects/Sub": { icon: "lucide:folder-code", color: "#00aa88" },
+          Other: { icon: "lucide:star", color: "#ffcc00" },
+        },
+        fileIcons: {
+          "Projects/diagram.png": { icon: "lucide:image", color: "#3366ff" },
+          "Projects/Sub/data.pdf": { icon: "lucide:file-text", color: "#dd2255" },
+          "Other/readme.txt": { icon: "lucide:book" },
+        },
+      })
+    );
+
+    const { result } = renderHook(() => useAppSettings(), {
+      wrapper: AppSettingsProvider,
+    });
+
+    act(() => {
+      result.current.copyFolderIcons("Projects", "Projects-copy");
+    });
+
+    // Source icons remain intact
+    expect(result.current.settings.folderIcons?.["Projects"]).toEqual({
+      icon: "lucide:rocket",
+      color: "#ff5500",
+    });
+    expect(result.current.settings.folderIcons?.["Projects/Sub"]).toEqual({
+      icon: "lucide:folder-code",
+      color: "#00aa88",
+    });
+    expect(result.current.settings.fileIcons?.["Projects/diagram.png"]).toEqual({
+      icon: "lucide:image",
+      color: "#3366ff",
+    });
+
+    // Duplicated folder, subfolders, and files receive copied custom icons
+    expect(result.current.settings.folderIcons?.["Projects-copy"]).toEqual({
+      icon: "lucide:rocket",
+      color: "#ff5500",
+    });
+    expect(result.current.settings.folderIcons?.["Projects-copy/Sub"]).toEqual({
+      icon: "lucide:folder-code",
+      color: "#00aa88",
+    });
+    expect(result.current.settings.fileIcons?.["Projects-copy/diagram.png"]).toEqual({
+      icon: "lucide:image",
+      color: "#3366ff",
+    });
+    expect(result.current.settings.fileIcons?.["Projects-copy/Sub/data.pdf"]).toEqual({
+      icon: "lucide:file-text",
+      color: "#dd2255",
+    });
+
+    // Unrelated folders/files are untouched
+    expect(result.current.settings.folderIcons?.["Other"]).toEqual({
+      icon: "lucide:star",
+      color: "#ffcc00",
+    });
+    expect(result.current.settings.fileIcons?.["Other/readme.txt"]).toEqual({
+      icon: "lucide:book",
+    });
   });
 });

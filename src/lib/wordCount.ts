@@ -1,3 +1,4 @@
+import { translate } from "@/translation/translate";
 /**
  * Standard Word and Character Count implementation.
  * Supports Thai (dictionary word breaking via Unicode UAX #29 / Intl.Segmenter),
@@ -92,5 +93,5 @@ export function countCharacters(rawText: string): number {
 export function calculateReadingTime(words: number, chars: number, lang: "th" | "en" = "en"): string {
   const effectiveUnits = Math.max(words, Math.round(chars / 4));
   const readTimeMinutes = Math.max(1, Math.ceil(effectiveUnits / 200));
-  return lang === "th" ? `${readTimeMinutes} นาที` : `${readTimeMinutes} min read`;
+  return translate(lang, "wordCount.minRead", { readTimeMinutes });
 }

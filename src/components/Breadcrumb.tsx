@@ -6,6 +6,7 @@ import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getToolbarIcon, renderCustomIcon, IconPack } from "@/lib/iconPacks";
 import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
 import lunoLogo from "@/assets/luno-logo.png";
 import {
   DropdownMenu,
@@ -38,30 +39,7 @@ interface TreeNode {
 }
 
 function NoteIcon({ note, active = false }: { note: Note; active?: boolean }) {
-  const { settings } = useAppSettings();
-  const pack = settings?.iconPack || "lucide";
-  const cls = `h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`;
-  if (note.fileType === "web-viewer") return <Globe className={cls} />;
-  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
-    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
-  }
-  if (settings?.showFileIcons === false) {
-    return null;
-  }
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
-  if (note.isLocked) {
-    const LockIcon = getToolbarIcon("lock", pack);
-    return <LockIcon className={cls} />;
-  }
-  const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
-  const IconComp = getToolbarIcon(defaultKey, pack);
-  return <IconComp className={cls} />;
+  return <SharedNoteIcon note={note} className="h-3.5 w-3.5" active={active} />;
 }
 
 function MarkdownIndicator({ active, className = "" }: { active: boolean; className?: string }) {
@@ -372,7 +350,7 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                   </TooltipTrigger>
                   <TooltipContent>{rootFolderName || "Root Folder"}</TooltipContent>
                 </Tooltip>
-                <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-[60] bg-sidebar text-sidebar-foreground border border-sidebar-border">
                   <BreadcrumbTreeView notes={notes} baseFolderPath="" activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -391,7 +369,7 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                           <span className="truncate">{seg.label}</span>
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-50 bg-sidebar text-sidebar-foreground border border-sidebar-border">
+                      <DropdownMenuContent align="start" className="w-64 rounded-xl p-1.5 shadow-xl max-h-[28rem] overflow-y-auto z-[60] bg-sidebar text-sidebar-foreground border border-sidebar-border">
                         <BreadcrumbTreeView notes={notes} baseFolderPath={seg.path} activeNoteId={note?.id ?? null} onSelectNote={onSelectNote} />
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -429,10 +407,10 @@ function BreadcrumbComponent({ note, rootFolderName, notes = [], onSelectNote, o
                   const MoreIcon = getToolbarIcon("moreHorizontal", settings.iconPack);
                   return <MoreIcon className="h-3.5 w-3.5" />;
                 })()}
-                <span className="sr-only">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</span>
+                <span className="sr-only">{t("rightPanel.togglePanel")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent align="end">{t("rightPanel.togglePanel") || "Toggle Right Panel"}</TooltipContent>
+            <TooltipContent align="end">{t("rightPanel.togglePanel")}</TooltipContent>
           </Tooltip>
         )}
       </div>

@@ -1,17 +1,45 @@
 /**
- * Real Thai & English Spell Checker & Suggestion Engine
- * Built-in Lexicon + Levenshtein Distance & Phonotactic Anomaly Engine
- * Massive Comprehensive Thai Misspelling & Typo Database (500+ Words)
+ * Thai & English Spell Checker & Suggestion Engine
+ * Powered by Hunspell (`nspell`), dictionary-en (SCOWL/Hunspell US English),
+ * Royal Society of Thailand (ORST / พจนานุกรมฉบับราชบัณฑิตยสภา),
+ * LibreOffice th_TH Hunspell Dictionary, and Thai National/Textbook Corpus (TNC/TTC) frequencies.
  */
+
+import nspell, { type NSpellInstance } from "nspell";
+import enAffRaw from "./dictionaries/en_US.aff?raw";
+import enDicRaw from "./dictionaries/en_US.dic?raw";
+import thAffRaw from "./dictionaries/th_TH.aff?raw";
+import thDicRaw from "./dictionaries/th_TH.dic?raw";
+
+const CUSTOM_DICT_STORAGE_KEY = "luno-custom-spell-dictionary";
 
 export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   // --- Common Thai Typo & Keyboard Slips ---
   "ดดน": ["โดน"],
+  "ดดย": ["โดย"],
+  "ดดยเฉพาะ": ["โดยเฉพาะ"],
+  "เป็ฯ": ["เป็น"],
   "รรก": ["รัก"],
   "มมก": ["มาก"],
   "กกบ": ["กบ"],
   "บบท": ["บท"],
   "คคน": ["คน"],
+  "สวัดดี": ["สวัสดี"],
+  "มหาวิยาลัย": ["มหาวิทยาลัย"],
+  "ปันหา": ["ปัญหา"],
+  "สำคัน": ["สำคัญ"],
+  "โทรศัพ": ["โทรศัพท์"],
+  "พรุ่งนี": ["พรุ่งนี้"],
+  "เรียบร้อบ": ["เรียบร้อย"],
+  "ประสบการ": ["ประสบการณ์"],
+  "สถาณการณ์": ["สถานการณ์"],
+  "กฏหมาย": ["กฎหมาย"],
+  "กฏเกณฑ์": ["กฎเกณฑ์"],
+  "ปรากฎการณ์": ["ปรากฏการณ์"],
+  "คอมพิวเตอณ์": ["คอมพิวเตอร์"],
+  "คอมพิวเตอร": ["คอมพิวเตอร์"],
+  "คอนเน็คชั่น": ["คอนเนกชัน"],
+  "คอนเนคชั่น": ["คอนเนกชัน"],
 
   // --- Common Grammar & Tone Errors ---
   "นะค่ะ": ["นะคะ"],
@@ -26,15 +54,17 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "กระทันหัน": ["กะทันหัน"],
   "กระเพรา": ["กะเพรา"],
   "ผัดกระเพรา": ["ผัดกะเพรา"],
+  "ผัดกระเพราไก่": ["ผัดกะเพราไก่"],
+  "กระเพราไก่": ["กะเพราไก่"],
   "ใบกระเพรา": ["ใบกะเพรา"],
-  "กะเพราไก่": ["กะเพราไก่"],
   "กระทิ": ["กะทิ"],
   "กระเทย": ["กะเทย"],
   "กระละแม": ["กะละแม"],
   "กระโหลก": ["กะโหลก"],
   "กระบังลม": ["กะบังลม"],
   "กระพริบ": ["กะพริบ"],
-  "กระเพาะ": ["กะเพาะ"],
+  "กะเพาะ": ["กระเพาะ"],
+  "กะเพาะอาหาร": ["กระเพาะอาหาร"],
   "กระหล่ำปลี": ["กะหล่ำปลี"],
   "กังวาล": ["กังวาน"],
   "กัญชาร์": ["กัญชา"],
@@ -42,8 +72,8 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "การันตรี": ["การันตี"],
   "กุละสตรี": ["กุลสตรี"],
   "เกมส์": ["เกม"],
-  "เกษียร": ["เกษียณ"],
-  "เกษียน": ["เกษียณ"],
+  "เกษียรอายุ": ["เกษียณอายุ"],
+  "เกษียนอายุ": ["เกษียณอายุ"],
   "ไก่ย่างวิเชียร": ["ไก่ย่างวิเชียรบุรี"],
 
   // --- หมวด ข ---
@@ -58,7 +88,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "คุรุภัณฑ์": ["ครุภัณฑ์"],
   "คำนวน": ["คำนวณ"],
   "คำสาบ": ["คำสาป"],
-  "คุกกี้": ["คุกกี้"],
   "คุ๊กกี้": ["คุกกี้"],
   "เค๊ก": ["เค้ก"],
   "คลีนิค": ["คลินิก"],
@@ -71,7 +100,7 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "จรเข้": ["จระเข้"],
   "จาระเม็ด": ["จะละเม็ด"],
   "เจียรไน": ["เจียระไน"],
-  "จงกลนี": ["จงกลนี"],
+  "จงกลณี": ["จงกลนี"],
 
   // --- หมวด ช, ซ ---
   "ชลอ": ["ชะลอ"],
@@ -87,7 +116,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
 
   // --- หมวด ด, ต ---
   "ดอกจันทร์": ["ดอกจัน"],
-  "ดาลดาล": ["ดาลดาล"],
   "ตักบาตรย์": ["ตักบาตร"],
   "บาทพระ": ["บาตรพระ"],
   "ตาลขโมย": ["ตานขโมย"],
@@ -98,7 +126,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "แถลงการ": ["แถลงการณ์"],
   "ทะนายความ": ["ทนายความ"],
   "ทนุถนอม": ["ทะนุถนอม"],
-  "ทะลาย": ["ทลาย"],
   "ทัศนะคติ": ["ทัศนคติ"],
   "ทะเลสาป": ["ทะเลสาบ"],
   "ทวยราษฎร": ["ทวยราษฎร์"],
@@ -107,7 +134,7 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
 
   // --- หมวด น, บ ---
   "นานาพันธ์": ["นานาพันธุ์"],
-  "นพปฎล": ["นพปฎล"],
+  "นพปฏล": ["นพปฎล"],
   "นิมิตร": ["นิมิต"],
   "เนรมิตร": ["เนรมิต"],
   "โน๊ต": ["โน้ต"],
@@ -123,7 +150,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
 
   // --- หมวด ป ---
   "ปรากฎ": ["ปรากฏ"],
-  "ปราโมช": ["ปราโมทย์"],
   "ประการัง": ["ปะการัง"],
   "ผัดซีอิ้ว": ["ผัดซีอิ๊ว"],
   "ผัดไท": ["ผัดไทย"],
@@ -132,7 +158,7 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "เผ่าพันธ์": ["เผ่าพันธุ์"],
   "พรมหมลิขิต": ["พรหมลิขิต"],
   "พระรุงพระรัง": ["พะรุงพะรัง"],
-  "พิธีรีตอง": ["พิธีรีตอง"],
+  "พิธีรีตรอง": ["พิธีรีตอง"],
   "พินัยกำ": ["พินัยกรรม"],
   "พิทิพิถัน": ["พิถีพิถัน"],
   "ปราณีต": ["ประณีต"],
@@ -169,6 +195,7 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   // --- หมวด ว, ศ, ส ---
   "วิ่งเปรี้ยว": ["วิ่งเปี้ยว"],
   "วัยเกษียน": ["วัยเกษียณ"],
+  "วัยเกษียร": ["วัยเกษียณ"],
   "ศรีษะ": ["ศีรษะ"],
   "สินธรรม": ["ศีลธรรม"],
   "สิลปีน": ["ศิลปิน"],
@@ -222,7 +249,7 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "ฮาดแวร์": ["ฮาร์ดแวร์"],
   "ฮาร์ดแวร": ["ฮาร์ดแวร์"],
 
-  // --- หมวดคำทับศัพท์เทคโนโลยี & แอพพลิเคชัน ---
+  // --- หมวดคำทับศัพท์เทคโนโลยี & แอปพลิเคชัน ---
   "แอปพลิเคชั่น": ["แอปพลิเคชัน"],
   "แอพพลิเคชัน": ["แอปพลิเคชัน"],
   "แอพพลิเคชั่น": ["แอปพลิเคชัน"],
@@ -274,9 +301,10 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "อะรัย": ["อะไร"],
   "ทำมัย": ["ทำไม"],
   "รึป่าว": ["หรือเปล่า"],
+  "หรือป่าว": ["หรือเปล่า"],
+  "ใช่ป่าว": ["ใช่เปล่า", "ใช่ไหม"],
   "ชั่ย": ["ใช่"],
   "ก้อ": ["ก็"],
-  "ก้": ["ก็"],
   "หลอ": ["หรอ", "เหรอ"],
   "เด่ว": ["เดี๋ยว"],
   "แปป": ["แป๊บ"],
@@ -284,7 +312,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "เปน": ["เป็น"],
   "เหน": ["เห็น"],
   "ป่ะ": ["ไหม", "หรือเปล่า"],
-  "ป่าว": ["เปล่า"],
   "งัย": ["ไง"],
   "คร้าบ": ["ครับ"],
   "มั่ก": ["มาก"],
@@ -292,7 +319,6 @@ export const THAI_SPELL_CORRECTIONS: Record<string, string[]> = {
   "มากก": ["มาก"],
   "มว๊าก": ["มาก"],
   "มว้าก": ["มาก"],
-  "ม่าย": ["ไม่"],
   "น่าร๊าก": ["น่ารัก"],
   "น่ารักก": ["น่ารัก"],
   "ก๊อป": ["ก๊อบ", "คัดลอก"],
@@ -327,6 +353,7 @@ export const ENGLISH_SPELL_CORRECTIONS: Record<string, string[]> = {
   alright: ["all right"],
   arguement: ["argument"],
   basicly: ["basically"],
+  becuase: ["because"],
   comming: ["coming"],
   dissapear: ["disappear"],
   embarass: ["embarrass"],
@@ -341,7 +368,6 @@ export const ENGLISH_SPELL_CORRECTIONS: Record<string, string[]> = {
   neccessary: ["necessary"],
   noticable: ["noticeable"],
   peice: ["piece"],
-  possession: ["possession"],
   prefered: ["preferred"],
   refered: ["referred"],
   relevent: ["relevant"],
@@ -451,7 +477,8 @@ export const COMMON_THAI_WORDS: string[] = [
   "ฮาร์ดแวร์", "เฟซบุ๊ก", "ยูทูบ", "บล็อก", "อัปเดต", "เช็ก", "สตาร์ต", "สเปก", "แกลเลอรี", "เซนเซอร์",
   "ศีรษะ", "รสชาติ", "บันดาล", "สังเกต", "อนุญาต", "สัมมนา", "ผูกพัน", "โควตา", "สร้างสรรค์", "ปรากฏ",
   "คำนวณ", "ประณีต", "พิถีพิถัน", "ลายเซ็น", "วิ่งเปี้ยว", "สัมภาษณ์", "สุญญากาศ", "หยากไย่", "หลงใหล", "ย่อมเยา",
-  "ราดหน้า", "โลกาภิวัตน์", "กะทันหัน", "สมรรถนะ", "สัญชาตญาณ", "กาลเทศะ", "การันตี", "เกม", "ทะนุถนอม", "ทะลวง"
+  "ราดหน้า", "โลกาภิวัตน์", "กะทันหัน", "สมรรถนะ", "สัญชาตญาณ", "กาลเทศะ", "การันตี", "เกม", "ทะนุถนอม", "ทะลวง",
+  "โดยเฉพาะ", "เป็น", "ปัญหา", "เรียบร้อย", "ประสบการณ์", "สถานการณ์", "กฎหมาย", "กฎเกณฑ์", "กระเพาะ"
 ];
 
 export const COMMON_ENGLISH_WORDS: string[] = [
@@ -489,168 +516,142 @@ export const COMMON_ENGLISH_WORDS: string[] = [
   "cool", "fine", "sure", "maybe", "please", "thanks", "thank", "you", "yes", "no", "ok", "okay"
 ];
 
-function levenshteinDistance(a: string, b: string): number {
-  const an = a ? a.length : 0;
-  const bn = b ? b.length : 0;
-  if (an === 0) return bn;
-  if (bn === 0) return an;
-  const matrix: number[][] = [];
-  for (let i = 0; i <= bn; ++i) matrix[i] = [i];
-  for (let i = 0; i <= an; ++i) matrix[0][i] = i;
-  for (let i = 1; i <= bn; ++i) {
-    for (let j = 1; j <= an; ++j) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  return matrix[bn][an];
-}
-
-function findThaiSuggestions(word: string, maxSuggestions = 5): string[] {
-  // 1. Exact match from known corrections
-  if (THAI_SPELL_CORRECTIONS[word]) {
-    const list = THAI_SPELL_CORRECTIONS[word].filter((s) => s !== word);
-    if (list.length > 0) return list.slice(0, maxSuggestions);
-  }
-
-  // 2. Structural anomalies fixes
-  if (word.includes("เเ")) {
-    return [word.replace(/เเ/g, "แ")];
-  }
-  if (/[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}/.test(word)) {
-    const cleaned = word
-      .replace(/[่้๊๋]{2,}/g, (m) => m[m.length - 1])
-      .replace(/[ิีึื]{2,}/g, (m) => m[m.length - 1])
-      .replace(/[ุู]{2,}/g, (m) => m[m.length - 1])
-      .replace(/[ั]{2,}/g, (m) => m[m.length - 1])
-      .replace(/[์]{2,}/g, (m) => m[m.length - 1])
-      .replace(/[ำ]{2,}/g, "ำ");
-    if (cleaned !== word) {
-      return [cleaned];
-    }
-  }
-
-  // 3. Algorithmic Levenshtein distance on Common Thai Words
-  const results: { word: string; dist: number; score: number }[] = [];
-  for (const dictWord of COMMON_THAI_WORDS) {
-    if (dictWord === word) continue;
-    if (Math.abs(dictWord.length - word.length) > 2) continue;
-
-    const dist = levenshteinDistance(word, dictWord);
-    if (dist <= 2) {
-      let score = dist * 10;
-      if (dictWord.startsWith(word.slice(0, 2))) score -= 5;
-      if (Math.abs(dictWord.length - word.length) === 0) score -= 3;
-      results.push({ word: dictWord, dist, score });
-    }
-  }
-
-  // 4. Partial / Substring replacement from known corrections
-  for (const [misspelled, corrects] of Object.entries(THAI_SPELL_CORRECTIONS)) {
-    if (word.includes(misspelled)) {
-      for (const c of corrects) {
-        const replaced = word.replace(misspelled, c);
-        if (replaced !== word && !results.some((r) => r.word === replaced)) {
-          results.push({ word: replaced, dist: 1, score: 0 });
-        }
-      }
-    }
-  }
-
-  results.sort((a, b) => a.score - b.score);
-  const unique = Array.from(new Set(results.map((r) => r.word)));
-  return unique.slice(0, maxSuggestions);
-}
-
-function findEnglishSuggestions(word: string, maxSuggestions = 5): string[] {
-  const lower = word.toLowerCase();
-  const results: { word: string; dist: number; score: number }[] = [];
-
-  // 1. Repeated letters check: e.g. "bluee" -> "blue", "heeeey" -> "hey"
-  const collapsed = lower.replace(/(.)\1+/g, "$1");
-  const doubleCollapsed = lower.replace(/(.)\1{2,}/g, "$1$1");
-  if (COMMON_ENGLISH_WORDS.includes(collapsed) && collapsed !== lower) {
-    results.push({ word: collapsed, dist: 1, score: 0 });
-  }
-  if (COMMON_ENGLISH_WORDS.includes(doubleCollapsed) && doubleCollapsed !== lower) {
-    results.push({ word: doubleCollapsed, dist: 1, score: 0 });
-  }
-
-  // 2. Scan dictionary for distance <= 2
-  for (const dictWord of COMMON_ENGLISH_WORDS) {
-    if (dictWord === lower) continue;
-    if (Math.abs(dictWord.length - lower.length) > 2) continue;
-    if (dictWord[0] !== lower[0] && Math.abs(dictWord.length - lower.length) > 1) continue;
-
-    const dist = levenshteinDistance(lower, dictWord);
-    if (dist <= 2) {
-      let score = dist * 10;
-      if (dictWord.startsWith(lower.slice(0, 3))) score -= 5;
-      else if (dictWord.startsWith(lower.slice(0, 2))) score -= 3;
-      if (Math.abs(dictWord.length - lower.length) <= 1) score -= 2;
-      results.push({ word: dictWord, dist, score });
-    }
-  }
-
-  results.sort((a, b) => a.score - b.score);
-  const unique = Array.from(new Set(results.map((r) => r.word)));
-  return unique.slice(0, maxSuggestions);
-}
-
 export const IGNORED_SPELL_WORDS = new Set([
   "luno",
   "luno-ai",
   "lunoai",
+  "markdown",
+  "frontmatter",
+  "wikilink",
+  "wikilinks",
+  "backlink",
+  "backlinks",
+  "callout",
+  "callouts",
+  "subtask",
+  "subtasks",
+  "checkbox",
+  "checkboxes",
+  "popover",
+  "popovers",
+  "tooltip",
+  "tooltips",
+  "sidebar",
+  "sidebars",
+  "toolbar",
+  "toolbars",
+  "breadcrumb",
+  "breadcrumbs",
+  "lightbox",
+  "spellcheck",
+  "spellchecker",
+  "autosave",
+  "autocomplete",
+  "darkmode",
+  "lightmode",
+  "multicolor",
+  "cyberpunk",
+  "tiptap",
+  "prosemirror",
+  "codemirror",
+  "turndown",
+  "lowlight",
+  "dompurify",
+  "tailwind",
+  "vite",
+  "vitest",
+  "electron",
+  "typescript",
+  "javascript",
+  "reactjs",
+  "nodejs",
+  "github",
+  "gitlab",
+  "oauth",
+  "gemini",
+  "openai",
+  "chatgpt",
+  "claude",
+  "supabase",
+  "firebase",
+  "firestore",
+  "postgres",
+  "postgresql",
+  "sqlite",
+  "indexeddb",
+  "localstorage",
+  "sessionstorage",
+  "webview",
+  "iframe",
+  "async",
+  "await",
+  "config",
+  "configs",
+  "repo",
+  "repos",
+  "codebase",
+  "frontend",
+  "backend",
+  "fullstack",
+  "hotkey",
+  "hotkeys",
+  "keybinding",
+  "keybindings",
+  "kanban",
+  "todo",
+  "todos",
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "svg",
+  "gif",
+  "mp3",
+  "mp4",
+  "webm",
+  "wav",
+  "ogg",
+  "html",
+  "css",
+  "json",
+  "yaml",
+  "yml",
+  "xml",
+  "sql",
+  "api",
+  "apis",
+  "url",
+  "urls",
+  "uri",
+  "utf",
+  "rgb",
+  "rgba",
+  "hsl",
+  "hsla",
+  "Noto",
+  "noto",
+  "Sarabun",
+  "sarabun",
+  "Kanit",
+  "kanit",
+  "Inter",
+  "JetBrains",
+  "jetbrains",
+  "Consolas",
+  "consolas",
+  "Calibri",
+  "calibri",
+  "Roboto",
+  "roboto",
+  "Arial",
+  "arial",
+  "Lucida",
+  "lucida",
 ]);
-
-export function getSpellingSuggestions(word: string, maxSuggestions = 5): string[] {
-  if (!word) return [];
-  const cleanWord = word.trim();
-  if (!cleanWord) return [];
-
-  // Ignore brand names / custom valid words like "Luno"
-  if (IGNORED_SPELL_WORDS.has(cleanWord.toLowerCase())) {
-    return [];
-  }
-
-  // Check Thai suggestions with algorithmic ranking
-  if (/[\u0E00-\u0E7F]/.test(cleanWord)) {
-    const thaiSuggestions = findThaiSuggestions(cleanWord, maxSuggestions);
-    if (thaiSuggestions.length > 0) return thaiSuggestions;
-  }
-
-  // Check case-insensitive English correction map
-  const lower = cleanWord.toLowerCase();
-  if (ENGLISH_SPELL_CORRECTIONS[lower]) {
-    const suggestions = ENGLISH_SPELL_CORRECTIONS[lower].filter((s) => s.toLowerCase() !== lower);
-    if (suggestions.length > 0) {
-      if (cleanWord[0] === cleanWord[0].toUpperCase() && cleanWord[0] !== cleanWord[0].toLowerCase()) {
-        return suggestions.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).slice(0, maxSuggestions);
-      }
-      return suggestions.slice(0, maxSuggestions);
-    }
-  }
-
-  // Check English algorithmic suggestions (e.g. bluee -> blue, aple -> apple)
-  if (/^[A-Za-z]+$/.test(cleanWord)) {
-    const suggestions = findEnglishSuggestions(cleanWord, maxSuggestions);
-    if (suggestions.length > 0) {
-      if (cleanWord[0] === cleanWord[0].toUpperCase() && cleanWord[0] !== cleanWord[0].toLowerCase()) {
-        return suggestions.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
-      }
-      return suggestions;
-    }
-  }
-
-  return [];
-}
 
 export const THAI_SPELL_SET = new Set(Object.keys(THAI_SPELL_CORRECTIONS));
 export const ENGLISH_SPELL_SET = new Set(Object.keys(ENGLISH_SPELL_CORRECTIONS));
@@ -664,7 +665,8 @@ export const THAI_SPELL_PATTERN = Object.keys(THAI_SPELL_CORRECTIONS)
   .map(escapeRegex)
   .join("|");
 
-export const THAI_STRUCTURAL_ANOMALY_PATTERN = "เเ|[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}|[ำ][่้๊๋]";
+export const THAI_STRUCTURAL_ANOMALY_PATTERN =
+  "เเ|[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}|[ำ][่้๊๋]|[^\u0E01]\u0E47(?![\u0E01-\u0E2E\u0E48-\u0E4B])";
 
 export function getThaiSpellRegex(): RegExp {
   return new RegExp(THAI_SPELL_PATTERN, "g");
@@ -677,26 +679,913 @@ export function getThaiAnomalyRegex(): RegExp {
 export const THAI_SPELL_REGEX = getThaiSpellRegex();
 export const THAI_STRUCTURAL_ANOMALY_REGEX = getThaiAnomalyRegex();
 
+// --- Custom User Dictionary Management ---
+
+let customSpellWordsSet: Set<string> | null = null;
+
+function ensureCustomSpellWordsLoaded(): Set<string> {
+  if (customSpellWordsSet) return customSpellWordsSet;
+  customSpellWordsSet = new Set<string>();
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(CUSTOM_DICT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (typeof item === "string" && item.trim()) {
+              customSpellWordsSet.add(item.trim());
+              customSpellWordsSet.add(item.trim().toLowerCase());
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return customSpellWordsSet;
+}
+
+export function getCustomSpellWords(): string[] {
+  const set = ensureCustomSpellWordsLoaded();
+  return Array.from(set);
+}
+
+export function isCustomSpellWord(word: string): boolean {
+  if (!word) return false;
+  const clean = word.trim();
+  const set = ensureCustomSpellWordsLoaded();
+  return set.has(clean) || set.has(clean.toLowerCase());
+}
+
+export function addCustomSpellWord(word: string): void {
+  if (!word) return;
+  const clean = word.trim();
+  if (!clean) return;
+  const set = ensureCustomSpellWordsLoaded();
+  set.add(clean);
+  set.add(clean.toLowerCase());
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(CUSTOM_DICT_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    }
+  } catch {
+    // ignore storage errors
+  }
+  if (englishSpellInstance && /^[A-Za-z]+$/.test(clean)) {
+    englishSpellInstance.add(clean);
+    englishSpellInstance.add(clean.toLowerCase());
+  }
+  if (thaiDictState && /[\u0E00-\u0E7F]/.test(clean)) {
+    thaiDictState.validDict.add(clean);
+  }
+  if (thaiSpellInstance && /[\u0E00-\u0E7F]/.test(clean)) {
+    thaiSpellInstance.add(clean);
+  }
+  clearSpellCaches();
+}
+
+export function removeCustomSpellWord(word: string): void {
+  if (!word) return;
+  const clean = word.trim();
+  const set = ensureCustomSpellWordsLoaded();
+  set.delete(clean);
+  set.delete(clean.toLowerCase());
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(CUSTOM_DICT_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    }
+  } catch {
+    // ignore
+  }
+  if (englishSpellInstance && /^[A-Za-z]+$/.test(clean)) {
+    englishSpellInstance.remove(clean);
+    englishSpellInstance.remove(clean.toLowerCase());
+  }
+  if (thaiDictState && /[\u0E00-\u0E7F]/.test(clean)) {
+    thaiDictState.validDict.delete(clean);
+  }
+  if (thaiSpellInstance && /[\u0E00-\u0E7F]/.test(clean)) {
+    thaiSpellInstance.remove(clean);
+  }
+  clearSpellCaches();
+}
+
+// --- Lazy Hunspell & Thai Dictionary Engines ---
+
+let englishSpellInstance: NSpellInstance | null = null;
+let thaiSpellInstance: NSpellInstance | null = null;
+
+interface ThaiDictionaryState {
+  validDict: Set<string>;
+  logFreqMap: Map<string, number>;
+  wordsByLen: Map<number, string[]>;
+}
+
+let thaiDictState: ThaiDictionaryState | null = null;
+
+const englishCorrectCache = new Map<string, boolean>();
+const englishSuggestCache = new Map<string, string[]>();
+const thaiMisspelledCache = new Map<string, boolean>();
+const thaiSuggestCache = new Map<string, string[]>();
+const thaiRunErrorsCache = new Map<string, Array<{ start: number; end: number; word: string }>>();
+
+function clearSpellCaches(): void {
+  englishCorrectCache.clear();
+  englishSuggestCache.clear();
+  thaiMisspelledCache.clear();
+  thaiSuggestCache.clear();
+  thaiRunErrorsCache.clear();
+}
+
+function getEnglishSpellChecker(): NSpellInstance {
+  if (englishSpellInstance) return englishSpellInstance;
+  const instance = nspell(enAffRaw, enDicRaw);
+  for (const w of IGNORED_SPELL_WORDS) {
+    if (/^[A-Za-z]+$/.test(w)) {
+      instance.add(w);
+    }
+  }
+  for (const w of COMMON_ENGLISH_WORDS) {
+    instance.add(w);
+  }
+  for (const w of ensureCustomSpellWordsLoaded()) {
+    if (/^[A-Za-z]+$/.test(w)) {
+      instance.add(w);
+    }
+  }
+  englishSpellInstance = instance;
+  return instance;
+}
+
+function getThaiDictionaryState(): ThaiDictionaryState {
+  if (thaiDictState) return thaiDictState;
+
+  const validDict = new Set<string>();
+  const logFreqMap = new Map<string, number>();
+  const wordsByLen = new Map<number, string[]>();
+
+  const lines = thDicRaw.split(/\r?\n/);
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const hashIdx = line.indexOf("#");
+    let word: string;
+    let logFreq = 0;
+    if (hashIdx !== -1) {
+      word = line.slice(0, hashIdx).trim();
+      logFreq = Number(line.slice(hashIdx + 1)) || 0;
+    } else {
+      word = line.trim();
+    }
+    if (!word) continue;
+    if (!THAI_SPELL_SET.has(word)) {
+      validDict.add(word);
+      if (logFreq > 0) {
+        logFreqMap.set(word, logFreq);
+      }
+      if (logFreq >= 13 && word.length >= 2) {
+        let bucket = wordsByLen.get(word.length);
+        if (!bucket) {
+          bucket = [];
+          wordsByLen.set(word.length, bucket);
+        }
+        bucket.push(word);
+      }
+    }
+  }
+
+  for (const w of COMMON_THAI_WORDS) {
+    if (!THAI_SPELL_SET.has(w)) {
+      validDict.add(w);
+      if ((logFreqMap.get(w) || 0) < 25) {
+        logFreqMap.set(w, 25);
+      }
+      let bucket = wordsByLen.get(w.length);
+      if (!bucket) {
+        bucket = [];
+        wordsByLen.set(w.length, bucket);
+      }
+      if (!bucket.includes(w)) bucket.push(w);
+    }
+  }
+
+  for (const corrects of Object.values(THAI_SPELL_CORRECTIONS)) {
+    for (const c of corrects) {
+      if (!THAI_SPELL_SET.has(c)) {
+        validDict.add(c);
+        if ((logFreqMap.get(c) || 0) < 25) {
+          logFreqMap.set(c, 25);
+        }
+        let bucket = wordsByLen.get(c.length);
+        if (!bucket) {
+          bucket = [];
+          wordsByLen.set(c.length, bucket);
+        }
+        if (!bucket.includes(c)) bucket.push(c);
+      }
+    }
+  }
+
+  for (const w of ensureCustomSpellWordsLoaded()) {
+    if (/[\u0E00-\u0E7F]/.test(w)) {
+      validDict.add(w);
+    }
+  }
+
+  thaiDictState = { validDict, logFreqMap, wordsByLen };
+  return thaiDictState;
+}
+
+function getThaiSpellChecker(): NSpellInstance {
+  if (thaiSpellInstance) return thaiSpellInstance;
+  const instance = nspell(thAffRaw, thDicRaw);
+  for (const w of COMMON_THAI_WORDS) {
+    if (!THAI_SPELL_SET.has(w)) instance.add(w);
+  }
+  for (const w of ensureCustomSpellWordsLoaded()) {
+    if (/[\u0E00-\u0E7F]/.test(w)) instance.add(w);
+  }
+  thaiSpellInstance = instance;
+  return instance;
+}
+
+// --- Edit Distance & Thai Suggestion Lookup ---
+
+function damerauLevenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 3;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+function findBestThaiDictMatches(
+  word: string,
+  maxDist = 2,
+  maxResults = 5
+): Array<{ word: string; dist: number; logFreq: number; score: number }> {
+  const { wordsByLen, logFreqMap } = getThaiDictionaryState();
+  const candidates: Array<{ word: string; dist: number; logFreq: number; score: number }> = [];
+
+  const minLen = Math.max(2, word.length - maxDist);
+  const maxLen = word.length + maxDist;
+
+  for (let len = minLen; len <= maxLen; len++) {
+    const list = wordsByLen.get(len);
+    if (!list) continue;
+    for (let i = 0; i < list.length; i++) {
+      const cand = list[i];
+      if (cand === word) continue;
+      if (
+        cand[0] !== word[0] &&
+        cand[cand.length - 1] !== word[word.length - 1] &&
+        (word.length < 2 || cand[1] !== word[1])
+      ) {
+        continue;
+      }
+      const d = damerauLevenshteinDistance(word, cand);
+      if (d <= maxDist) {
+        const logFreq = logFreqMap.get(cand) || 10;
+        let score = (3 - d) * 1000 + logFreq * 12;
+        if (cand[0] === word[0]) score += 150;
+        if (cand[cand.length - 1] === word[word.length - 1]) score += 80;
+        if (cand.length === word.length) score += 60;
+        candidates.push({ word: cand, dist: d, logFreq, score });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, maxResults);
+}
+
+// --- Thai Character Cluster (TCC) & Dictionary DAG Word Segmentation ---
+
+const THAI_DEPENDENT_OR_COMBINING = /[\u0E30-\u0E3A\u0E45\u0E47-\u0E4E]/;
+const THAI_LEADING_VOWEL = /[\u0E40-\u0E44]/;
+const THAI_TONE_MARK = /[\u0E48-\u0E4B]/;
+const THAI_BASE_CONSONANT_CHAR = /[\u0E01-\u0E2E]/;
+const THAI_DIGITS_ONLY = /^[\u0E50-\u0E59]+$/;
+
+export function computeValidThaiBoundaries(s: string): Uint8Array {
+  const n = s.length;
+  const valid = new Uint8Array(n + 1);
+  valid[0] = 1;
+  valid[n] = 1;
+
+  for (let i = 1; i < n; i++) {
+    const ch = s[i];
+    const prev = s[i - 1];
+
+    // Never split before a dependent vowel or combining mark
+    if (THAI_DEPENDENT_OR_COMBINING.test(ch)) continue;
+    // Never split right after a leading vowel (เ แ โ ไ ใ)
+    if (THAI_LEADING_VOWEL.test(prev)) continue;
+    // Never split before a leading vowel that has an illegal combining mark attached directly to it
+    if (THAI_LEADING_VOWEL.test(ch) && THAI_DEPENDENT_OR_COMBINING.test(s[i + 1] || "")) {
+      continue;
+    }
+    // Never split immediately after medial vowel marks ั (\u0E31) or ็ (\u0E47, except ก็)
+    if (prev === "\u0E31") continue;
+    if (prev === "\u0E47" && !(i >= 2 && s[i - 2] === "ก")) continue;
+    if (THAI_TONE_MARK.test(prev) && i >= 2) {
+      const beforeTone = s[i - 2];
+      if (beforeTone === "\u0E31") continue;
+      if (beforeTone === "\u0E47" && !(i >= 3 && s[i - 3] === "ก")) continue;
+    }
+    // Paiyannoi ฯ stays attached to the preceding syllable unless starting ฯลฯ
+    if (ch === "ฯ" && s.slice(i, i + 3) !== "ฯลฯ") {
+      continue;
+    }
+
+    valid[i] = 1;
+  }
+
+  return valid;
+}
+
+export interface ThaiSegmentToken {
+  start: number;
+  end: number;
+  text: string;
+  type: "valid" | "misspelled" | "unknown";
+}
+
+export function segmentThaiText(s: string): ThaiSegmentToken[] {
+  const n = s.length;
+  if (n === 0) return [];
+  const { validDict, logFreqMap } = getThaiDictionaryState();
+  const customSet = ensureCustomSpellWordsLoaded();
+  const validBounds = computeValidThaiBoundaries(s);
+  const maxWordLen = 28;
+
+  const dpCost = new Float64Array(n + 1).fill(Infinity);
+  const dpNext = new Int32Array(n + 1).fill(-1);
+  const dpType: Array<"valid" | "misspelled" | "unknown"> = new Array(n + 1).fill("valid");
+  dpCost[n] = 0;
+
+  for (let i = n - 1; i >= 0; i--) {
+    if (!validBounds[i]) continue;
+
+    const limit = Math.min(n, i + maxWordLen);
+    for (let j = i + 1; j <= limit; j++) {
+      if (!validBounds[j]) continue;
+      const sub = s.slice(i, j);
+
+      if (customSet.has(sub)) {
+        const c = 9 + dpCost[j];
+        if (c < dpCost[i]) {
+          dpCost[i] = c;
+          dpNext[i] = j;
+          dpType[i] = "valid";
+        }
+        continue;
+      }
+
+      const hasAnomaly = getThaiAnomalyRegex().test(sub);
+      if (!hasAnomaly && (validDict.has(sub) || THAI_DIGITS_ONLY.test(sub))) {
+        const lf = logFreqMap.get(sub) || 0;
+        const baseCost =
+          sub.length <= 3 && lf < 10 && sub !== "ก็" && sub !== "ๆ" && sub !== "ณ"
+            ? 13
+            : 10;
+        const c = baseCost + dpCost[j];
+        if (c < dpCost[i]) {
+          dpCost[i] = c;
+          dpNext[i] = j;
+          dpType[i] = "valid";
+        }
+      } else if (THAI_SPELL_SET.has(sub)) {
+        // Multi-syllable compound misspellings (e.g. อนุญาติ, สังเกตุ, รสชาด, ปันหา, นะค่ะ) get 9.5
+        // so [compound_misspelling + 1_valid_word = 19.5] beats splitting into [2_valid_words = 20.0],
+        // while a single valid dictionary word covering the span (10.0) always wins.
+        const edgeCost = sub.length >= 4 || sub === "นะค่ะ" ? 9.5 : 18;
+        const c = edgeCost + dpCost[j];
+        if (c < dpCost[i]) {
+          dpCost[i] = c;
+          dpNext[i] = j;
+          dpType[i] = "misspelled";
+        }
+      }
+    }
+
+    // Fallback step to next valid TCC boundary
+    let nextB = i + 1;
+    while (nextB < n && !validBounds[nextB]) nextB++;
+    const sub = s.slice(i, nextB);
+    const isSingleValidWord = sub.length === 1 && validDict.has(sub);
+    const stepCost = isSingleValidWord ? 28 : 45 + (nextB - i);
+    const c = stepCost + dpCost[nextB];
+    if (c < dpCost[i]) {
+      dpCost[i] = c;
+      dpNext[i] = nextB;
+      dpType[i] = isSingleValidWord ? "valid" : "unknown";
+    }
+  }
+
+  const rawTokens: ThaiSegmentToken[] = [];
+  let cur = 0;
+  while (cur < n && dpNext[cur] !== -1) {
+    const next = dpNext[cur];
+    const type = dpType[cur];
+    if (
+      type === "unknown" &&
+      rawTokens.length > 0 &&
+      rawTokens[rawTokens.length - 1].type === "unknown"
+    ) {
+      rawTokens[rawTokens.length - 1].end = next;
+      rawTokens[rawTokens.length - 1].text = s.slice(rawTokens[rawTokens.length - 1].start, next);
+    } else {
+      rawTokens.push({ start: cur, end: next, text: s.slice(cur, next), type });
+    }
+    cur = next;
+  }
+
+  // Bridge short valid islands (<= 4 chars total) sandwiched between two unknown tokens
+  let bridged = true;
+  while (bridged) {
+    bridged = false;
+    for (let i = 0; i < rawTokens.length - 2; i++) {
+      if (rawTokens[i].type === "unknown") {
+        let j = i + 1;
+        let islandLen = 0;
+        while (
+          j < rawTokens.length &&
+          rawTokens[j].type === "valid" &&
+          islandLen + rawTokens[j].text.length <= 4
+        ) {
+          islandLen += rawTokens[j].text.length;
+          j++;
+        }
+        if (j > i + 1 && j < rawTokens.length && rawTokens[j].type === "unknown") {
+          const newEnd = rawTokens[j].end;
+          rawTokens.splice(i, j - i + 1, {
+            start: rawTokens[i].start,
+            end: newEnd,
+            text: s.slice(rawTokens[i].start, newEnd),
+            type: "unknown",
+          });
+          bridged = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Coalesce unknown tokens with 1-2 adjacent short valid tokens when the combined span
+  // is within edit distance 1-2 of a single common dictionary word (e.g. ส+วัด+ดี -> สวัดดี, โทร+ศัพ -> โทรศัพ, พรุ่ง+นี -> พรุ่งนี, เรียบ+ร้+อบ -> เรียบร้อบ)
+  let idx = 0;
+  while (idx < rawTokens.length) {
+    if (rawTokens[idx].type === "unknown") {
+      const windowPasses = [
+        {
+          windows: [
+            [idx - 1, idx + 1],
+            [idx, idx + 2],
+          ],
+          maxDist: 1,
+          maxLenDiff: 0,
+        },
+        {
+          windows: [
+            [idx - 1, idx],
+            [idx, idx + 1],
+          ],
+          maxDist: 1,
+          maxLenDiff: 1,
+        },
+        {
+          windows: [
+            [idx - 1, idx],
+            [idx, idx + 1],
+            [idx - 1, idx + 1],
+            [idx, idx + 2],
+          ],
+          maxDist: 2,
+          maxLenDiff: 2,
+        },
+      ];
+
+      let merged = false;
+      for (const pass of windowPasses) {
+        for (const [wStart, wEnd] of pass.windows) {
+          if (wStart < 0 || wEnd >= rawTokens.length) continue;
+          let neighborsShort = true;
+          for (let k = wStart; k <= wEnd; k++) {
+            if (k !== idx && rawTokens[k].text.length > 6) {
+              neighborsShort = false;
+              break;
+            }
+          }
+          if (!neighborsShort) continue;
+          const startOff = rawTokens[wStart].start;
+          const endOff = rawTokens[wEnd].end;
+          const spanText = s.slice(startOff, endOff);
+          if (spanText.length > 14 || getThaiAnomalyRegex().test(spanText)) continue;
+
+          const matches = findBestThaiDictMatches(spanText, pass.maxDist, 1);
+          if (
+            matches.length > 0 &&
+            matches[0].logFreq >= 20 &&
+            Math.abs(matches[0].word.length - spanText.length) <= pass.maxLenDiff
+          ) {
+            rawTokens.splice(wStart, wEnd - wStart + 1, {
+              start: startOff,
+              end: endOff,
+              text: spanText,
+              type: "unknown",
+            });
+            idx = wStart;
+            merged = true;
+            break;
+          }
+        }
+        if (merged) break;
+      }
+      if (merged) {
+        idx++;
+        continue;
+      }
+    }
+    idx++;
+  }
+
+  return rawTokens;
+}
+
+export function findThaiMisspellingsInText(
+  text: string
+): Array<{ start: number; end: number; word: string }> {
+  if (!text || !/[\u0E00-\u0E7F]/.test(text)) return [];
+
+  const results: Array<{ start: number; end: number; word: string }> = [];
+  const thaiRunRegex = /[\u0E00-\u0E7F]+/g;
+  let runMatch: RegExpExecArray | null;
+
+  while ((runMatch = thaiRunRegex.exec(text)) !== null) {
+    const run = runMatch[0];
+    const runStart = runMatch.index;
+    const runEnd = runStart + run.length;
+
+    if (run.length <= 1) continue;
+
+    // Skip short Thai abbreviations attached to a period (e.g. พ.ย., เม.ย., มิ.ย., กทม., ดร., ผศ., รพ.)
+    const isAbbrev =
+      run.length <= 5 &&
+      (text[runEnd] === "." || (runStart > 0 && text[runStart - 1] === "."));
+    if (isAbbrev && !getThaiAnomalyRegex().test(run)) {
+      continue;
+    }
+
+    let runErrors = thaiRunErrorsCache.get(run);
+    if (!runErrors) {
+      runErrors = [];
+      const tokens = segmentThaiText(run);
+
+      for (const tok of tokens) {
+        if (tok.type === "valid") continue;
+        let errStart = tok.start;
+        let errEnd = tok.end;
+
+        // Never start a decoration on a floating combining mark
+        while (errStart > 0 && THAI_DEPENDENT_OR_COMBINING.test(run[errStart])) {
+          errStart--;
+        }
+        if (THAI_DEPENDENT_OR_COMBINING.test(run[errStart])) {
+          continue;
+        }
+
+        // If an unknown gibberish cluster in the middle of a run starts with a leading vowel
+        // and has no valid dictionary suggestion starting with that leading vowel, anchor to preceding consonant
+        const sliceText = run.slice(errStart, errEnd);
+        if (
+          tok.type === "unknown" &&
+          errStart > 0 &&
+          THAI_LEADING_VOWEL.test(run[errStart]) &&
+          !THAI_SPELL_SET.has(sliceText) &&
+          findBestThaiDictMatches(sliceText, 2, 1).length === 0
+        ) {
+          while (errStart > 0 && !THAI_BASE_CONSONANT_CHAR.test(run[errStart])) {
+            errStart--;
+          }
+        }
+
+        while (errEnd < run.length && THAI_DEPENDENT_OR_COMBINING.test(run[errEnd])) {
+          errEnd++;
+        }
+
+        const errWord = run.slice(errStart, errEnd);
+        if (errWord.length <= 1 && !getThaiAnomalyRegex().test(errWord)) {
+          continue;
+        }
+        if (
+          runErrors.length > 0 &&
+          errStart <= runErrors[runErrors.length - 1].end
+        ) {
+          const prev = runErrors[runErrors.length - 1];
+          prev.end = Math.max(prev.end, errEnd);
+          prev.word = run.slice(prev.start, prev.end);
+        } else {
+          runErrors.push({ start: errStart, end: errEnd, word: errWord });
+        }
+      }
+
+      if (thaiRunErrorsCache.size > 2000) {
+        thaiRunErrorsCache.clear();
+      }
+      thaiRunErrorsCache.set(run, runErrors);
+    }
+
+    for (const err of runErrors) {
+      results.push({
+        start: runStart + err.start,
+        end: runStart + err.end,
+        word: err.word,
+      });
+    }
+  }
+
+  return results;
+}
+
+// --- Suggestion Generation (Thai & English) ---
+
+function findThaiSuggestions(word: string, maxSuggestions = 5): string[] {
+  const cached = thaiSuggestCache.get(word);
+  if (cached) return cached.slice(0, maxSuggestions);
+
+  const suggestions: string[] = [];
+  const addUnique = (cand: string) => {
+    if (cand && cand !== word && !THAI_SPELL_SET.has(cand) && !suggestions.includes(cand)) {
+      suggestions.push(cand);
+    }
+  };
+
+  // 1. Exact match from curated Thai corrections
+  if (THAI_SPELL_CORRECTIONS[word]) {
+    for (const s of THAI_SPELL_CORRECTIONS[word]) {
+      addUnique(s);
+    }
+    if (suggestions.length > 0) {
+      thaiSuggestCache.set(word, suggestions);
+      return suggestions.slice(0, maxSuggestions);
+    }
+  }
+
+  // 2. Structural anomalies (e.g. เเละ -> และ, repeated tone/vowel marks, ペ็ฯ -> เป็น)
+  if (word.includes("เเ")) {
+    addUnique(word.replace(/เเ/g, "แ"));
+  }
+  if (/[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}|[ำ][่้๊๋]/.test(word)) {
+    const cleaned = word
+      .replace(/([ำ])([่้๊๋])/g, "$2$1")
+      .replace(/[่้๊๋]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ิีึื]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ุู]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ั]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[์]{2,}/g, (m) => m[m.length - 1])
+      .replace(/[ำ]{2,}/g, "ำ");
+    addUnique(cleaned);
+  }
+  if (suggestions.length > 0 && (word.includes("เเ") || /[่้๊๋]{2,}|[ิีึื]{2,}|[ุู]{2,}|[ั]{2,}|[์]{2,}|[ำ]{2,}/.test(word))) {
+    thaiSuggestCache.set(word, suggestions);
+    return suggestions.slice(0, maxSuggestions);
+  }
+
+  // 3. Substring replacement from known corrections when resulting word is valid
+  const { validDict, logFreqMap } = getThaiDictionaryState();
+  for (const [misspelled, corrects] of Object.entries(THAI_SPELL_CORRECTIONS)) {
+    if (misspelled.length >= 3 && word.includes(misspelled)) {
+      for (const c of corrects) {
+        const replaced = word.replace(misspelled, c);
+        if (replaced !== word && (validDict.has(replaced) || segmentThaiText(replaced).every((t) => t.type === "valid"))) {
+          addUnique(replaced);
+        }
+      }
+    }
+  }
+
+  // 4. Corpus-Frequency-Ranked Damerau-Levenshtein matches
+  const dictMatches = findBestThaiDictMatches(word, 2, maxSuggestions * 2);
+  for (const m of dictMatches) {
+    addUnique(m.word);
+  }
+
+  // 5. Hunspell (nspell) Thai suggestions with REP/KEY/MAP rules, ranked by corpus frequency
+  if (suggestions.length < maxSuggestions && word.length <= 18) {
+    try {
+      const hunspellSuggs = getThaiSpellChecker().suggest(word);
+      hunspellSuggs
+        .filter((s) => !THAI_SPELL_SET.has(s))
+        .sort((a, b) => (logFreqMap.get(b) || 0) - (logFreqMap.get(a) || 0))
+        .forEach((s) => addUnique(s));
+    } catch {
+      // ignore nspell errors
+    }
+  }
+
+  if (thaiSuggestCache.size > 1000) thaiSuggestCache.clear();
+  thaiSuggestCache.set(word, suggestions);
+  return suggestions.slice(0, maxSuggestions);
+}
+
+function findEnglishSuggestions(word: string, maxSuggestions = 5): string[] {
+  const normalized = word.replace(/\u2019/g, "'");
+  const lower = normalized.toLowerCase();
+
+  const cached = englishSuggestCache.get(lower);
+  if (cached) {
+    return applyEnglishCasing(normalized, cached).slice(0, maxSuggestions);
+  }
+
+  const suggestions: string[] = [];
+  const addUnique = (cand: string) => {
+    const cl = cand.toLowerCase();
+    if (cand && cl !== lower && !suggestions.some((s) => s.toLowerCase() === cl)) {
+      suggestions.push(cand);
+    }
+  };
+
+  // 1. Curated instant English corrections
+  if (ENGLISH_SPELL_CORRECTIONS[lower]) {
+    for (const s of ENGLISH_SPELL_CORRECTIONS[lower]) {
+      addUnique(s);
+    }
+  }
+
+  // 2. Repeated letters collapse (e.g. blueee -> blue, helllo -> hello)
+  const spellEn = getEnglishSpellChecker();
+  const collapsed = lower.replace(/(.)\1+/g, "$1");
+  const doubleCollapsed = lower.replace(/(.)\1{2,}/g, "$1$1");
+  if (doubleCollapsed !== lower && spellEn.correct(doubleCollapsed)) {
+    addUnique(doubleCollapsed);
+  }
+  if (collapsed !== lower && spellEn.correct(collapsed)) {
+    addUnique(collapsed);
+  }
+
+  // 3. Hunspell (nspell + dictionary-en) suggestions
+  if (suggestions.length < maxSuggestions) {
+    try {
+      const hunspellSuggs = spellEn.suggest(lower);
+      for (const s of hunspellSuggs) {
+        addUnique(s);
+        if (suggestions.length >= maxSuggestions) break;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (englishSuggestCache.size > 1000) englishSuggestCache.clear();
+  englishSuggestCache.set(lower, suggestions);
+  return applyEnglishCasing(normalized, suggestions).slice(0, maxSuggestions);
+}
+
+function applyEnglishCasing(original: string, suggestions: string[]): string[] {
+  if (!original || suggestions.length === 0) return suggestions;
+  if (original.length > 1 && original === original.toUpperCase() && original !== original.toLowerCase()) {
+    return suggestions.map((s) => s.toUpperCase());
+  }
+  if (original[0] === original[0].toUpperCase() && original[0] !== original[0].toLowerCase()) {
+    return suggestions.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+  }
+  return suggestions;
+}
+
+export function getSpellingSuggestions(word: string, maxSuggestions = 5): string[] {
+  if (!word) return [];
+  const cleanWord = word.trim();
+  if (!cleanWord) return [];
+
+  const normalized = cleanWord.replace(/\u2019/g, "'");
+  const lower = normalized.toLowerCase();
+
+  if (IGNORED_SPELL_WORDS.has(lower) || isCustomSpellWord(normalized)) {
+    return [];
+  }
+
+  if (/[\u0E00-\u0E7F]/.test(cleanWord)) {
+    return findThaiSuggestions(cleanWord, maxSuggestions);
+  }
+
+  if (/^[A-Za-z]+(?:'[A-Za-z]+)*$/.test(normalized)) {
+    return findEnglishSuggestions(normalized, maxSuggestions);
+  }
+
+  return [];
+}
+
+function isEnglishWordValid(normalized: string): boolean {
+  const lower = normalized.toLowerCase();
+  if (IGNORED_SPELL_WORDS.has(lower) || isCustomSpellWord(normalized)) return true;
+  if (ENGLISH_SPELL_SET.has(lower)) return false;
+  if (/([a-z])\1{2,}/.test(lower)) return false;
+
+  // Allow all-caps acronyms of 2-6 letters (e.g. PDF, API, HTML, JSON, DOM, WCAG)
+  if (/^[A-Z]{2,6}$/.test(normalized)) return true;
+
+  const cached = englishCorrectCache.get(normalized);
+  if (cached !== undefined) return cached;
+
+  const spellEn = getEnglishSpellChecker();
+  let isValid =
+    spellEn.correct(normalized) ||
+    spellEn.correct(lower) ||
+    spellEn.correct(lower.charAt(0).toUpperCase() + lower.slice(1));
+
+  // Possessive form (e.g. user's, Luno's)
+  if (!isValid && /'s$/i.test(normalized)) {
+    const base = normalized.slice(0, -2);
+    if (base.length >= 2) {
+      isValid =
+        IGNORED_SPELL_WORDS.has(base.toLowerCase()) ||
+        isCustomSpellWord(base) ||
+        spellEn.correct(base) ||
+        spellEn.correct(base.toLowerCase());
+    }
+  }
+
+  // CamelCase / PascalCase compound identifier (e.g. useState, JavaScript, TypeScript, GitHub, YouTube)
+  if (!isValid && /[a-z][A-Z]/.test(normalized)) {
+    const parts = normalized.split(/(?=[A-Z])/);
+    if (
+      parts.length >= 2 &&
+      parts.every((p) => {
+        if (p.length <= 1) return true;
+        const pl = p.toLowerCase();
+        return IGNORED_SPELL_WORDS.has(pl) || spellEn.correct(p) || spellEn.correct(pl);
+      })
+    ) {
+      isValid = true;
+    }
+  }
+
+  if (englishCorrectCache.size > 4000) englishCorrectCache.clear();
+  englishCorrectCache.set(normalized, isValid);
+  return isValid;
+}
+
 export function isWordMisspelled(word: string): boolean {
   if (!word) return false;
   const clean = word.trim();
   if (!clean || clean.length <= 1) return false;
-  const lower = clean.toLowerCase();
 
-  if (IGNORED_SPELL_WORDS.has(lower)) return false;
+  const normalized = clean.replace(/\u2019/g, "'");
+  const lower = normalized.toLowerCase();
 
-  // Thai check: ONLY real misspellings and structural anomalies
-  if (/[\u0E00-\u0E7F]/.test(clean)) {
-    if (THAI_SPELL_SET.has(clean)) return true;
-    if (getThaiAnomalyRegex().test(clean)) return true;
+  if (IGNORED_SPELL_WORDS.has(lower) || isCustomSpellWord(normalized)) {
     return false;
   }
 
-  // English check
-  if (/^[A-Za-z]+$/.test(clean)) {
-    if (ENGLISH_SPELL_SET.has(lower)) return true;
-    if (/([a-z])\1{2,}/.test(lower)) return true;
-    return false;
+  // Thai check: curated misspellings + structural anomalies + dictionary & DAG segmentation check
+  if (/[\u0E00-\u0E7F]/.test(clean)) {
+    const cached = thaiMisspelledCache.get(clean);
+    if (cached !== undefined) return cached;
+
+    let misspelled = false;
+    if (THAI_SPELL_SET.has(clean)) {
+      misspelled = true;
+    } else if (getThaiAnomalyRegex().test(clean)) {
+      misspelled = true;
+    } else {
+      const { validDict } = getThaiDictionaryState();
+      if (validDict.has(clean)) {
+        misspelled = false;
+      } else {
+        misspelled = findThaiMisspellingsInText(clean).length > 0;
+      }
+    }
+
+    if (thaiMisspelledCache.size > 4000) thaiMisspelledCache.clear();
+    thaiMisspelledCache.set(clean, misspelled);
+    return misspelled;
+  }
+
+  // English check: Hunspell (nspell + dictionary-en) + curated typo rules
+  if (/^[A-Za-z]+(?:'[A-Za-z]+)*$/.test(normalized)) {
+    return !isEnglishWordValid(normalized);
   }
 
   return false;

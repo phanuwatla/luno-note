@@ -29,14 +29,16 @@ button[role="combobox"]:focus-visible {
   border-color: hsl(var(--primary)) !important;
 }
 
-/* Remove default focus outline on sidebar items and buttons */
-aside button,
-aside button:focus,
-aside button:focus-visible,
-aside [role="button"]:focus,
-aside [role="button"]:focus-visible {
+/* Keep mouse focus clean on sidebar items while preserving keyboard :focus-visible accessibility */
+aside button:focus:not(:focus-visible),
+aside [role="button"]:focus:not(:focus-visible) {
   outline: none !important;
   box-shadow: none !important;
+}
+aside button:focus-visible,
+aside [role="button"]:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 0.65) !important;
+  outline-offset: -2px !important;
 }
 
 .show-code-line-numbers pre code {
@@ -90,6 +92,15 @@ aside [role="button"]:focus-visible {
     --ring: 174 62% 39%;
 
     --radius: 0.375rem;
+
+    /* Standardized Z-Index Scale (LN-UI-04) */
+    --z-sticky: 20;
+    --z-floating: 40;
+    --z-modal: 50;
+    --z-popover: 60;
+    --z-tooltip: 70;
+    --z-toast: 80;
+    --z-fullscreen: 90;
 
     --sidebar-background: 210 20% 98%;
     --sidebar-foreground: 220 26% 14%;
@@ -1221,7 +1232,7 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='midnight'] .rounded-2xl,
 :root[data-app-style='midnight'] .rounded-xl,
 :root[data-app-style='midnight'] .rounded-lg,
-:root[data-app-style='midnight'] button,
+:root[data-app-style='midnight'] button:not(.rounded-full):not([role="switch"]),
 :root[data-app-style='midnight'] input,
 :root[data-app-style='midnight'] select {
   border-radius: 0.25rem;
@@ -1308,7 +1319,7 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='cyberpunk'] .rounded-2xl,
 :root[data-app-style='cyberpunk'] .rounded-xl,
 :root[data-app-style='cyberpunk'] .rounded-lg,
-:root[data-app-style='cyberpunk'] button,
+:root[data-app-style='cyberpunk'] button:not(.rounded-full):not([role="switch"]),
 :root[data-app-style='cyberpunk'] input,
 :root[data-app-style='cyberpunk'] select {
   border-radius: 0.1875rem;
@@ -1385,7 +1396,7 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='catppuccin'] .rounded-lg {
   border-radius: 0.875rem;
 }
-:root[data-app-style='catppuccin'] button,
+:root[data-app-style='catppuccin'] button:not(.rounded-full):not([role="switch"]),
 :root[data-app-style='catppuccin'] input,
 :root[data-app-style='catppuccin'] select {
   border-radius: 0.75rem;
@@ -1424,8 +1435,9 @@ aside [role="button"]:focus-visible {
 /* Light Neumorphic Cards, Settings Cards, Dialogs & Popovers */
 :root[data-app-style='neumorphism']:not(.dark) .bg-card,
 :root[data-app-style='neumorphism']:not(.dark) [role="dialog"],
+:root[data-app-style='neumorphism']:not(.dark) [role="alertdialog"],
 :root[data-app-style='neumorphism']:not(.dark) [role="menu"],
-:root[data-app-style='neumorphism']:not(.dark) [role="popover"] {
+:root[data-app-style='neumorphism']:not(.dark) [data-radix-popper-content-wrapper] > div {
   background-color: #e5e9ef !important;
   box-shadow:
     6px 6px 16px rgba(163, 170, 181, 0.45),
@@ -1472,8 +1484,9 @@ aside [role="button"]:focus-visible {
 /* Dark Neumorphic Cards, Settings Cards, Dialogs & Popovers */
 .dark:root[data-app-style='neumorphism'] .bg-card,
 .dark:root[data-app-style='neumorphism'] [role="dialog"],
+.dark:root[data-app-style='neumorphism'] [role="alertdialog"],
 .dark:root[data-app-style='neumorphism'] [role="menu"],
-.dark:root[data-app-style='neumorphism'] [role="popover"] {
+.dark:root[data-app-style='neumorphism'] [data-radix-popper-content-wrapper] > div {
   background-color: #242831 !important;
   box-shadow:
     6px 6px 16px rgba(0, 0, 0, 0.55),
@@ -1538,9 +1551,7 @@ aside [role="button"]:focus-visible {
   color: hsl(var(--primary)) !important;
 }
 
-[data-editor-toolbar="true"] button:focus,
-[data-editor-toolbar="true"] button:focus-visible,
-[data-editor-toolbar="true"] button:focus-within {
+[data-editor-toolbar="true"] button:focus:not(:focus-visible) {
   outline: none !important;
   box-shadow: none !important;
   --tw-ring-offset-width: 0px !important;
@@ -1548,6 +1559,10 @@ aside [role="button"]:focus-visible {
   --tw-ring-color: transparent !important;
   --tw-ring-shadow: none !important;
   --tw-ring-offset-shadow: none !important;
+}
+[data-editor-toolbar="true"] button:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 0.65) !important;
+  outline-offset: -2px !important;
 }
 
 /* Paper / Warm Sepia: Classic stationery wooden desk box */
@@ -1561,14 +1576,17 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='paper'] [data-editor-toolbar="true"] button {
   border-radius: 0.25rem !important;
 }
-
 /* Midnight OLED: Sharp precision rectangular command bar */
 :root[data-app-style='midnight'] [data-editor-toolbar="true"],
 .dark:root[data-app-style='midnight'] [data-editor-toolbar="true"] {
   border-radius: 0.125rem !important;
+  box-shadow: none !important;
+}
+/* Midnight OLED: Sharp precision rectangular command bar */
+:root[data-app-style='midnight'] [data-editor-toolbar="true"],
+.dark:root[data-app-style='midnight'] [data-editor-toolbar="true"] {
   border-color: #27272a !important;
   background-color: #050505 !important;
-  box-shadow: none !important;
 }
 :root[data-app-style='midnight'] [data-editor-toolbar="true"] button,
 .dark:root[data-app-style='midnight'] [data-editor-toolbar="true"] button {
@@ -1614,12 +1632,14 @@ aside [role="button"]:focus-visible {
   border-radius: 0.125rem !important;
 }
 .dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] {
-  background-color: #0b0514 !important;
   border: 1px solid hsl(var(--primary) / 0.7) !important;
   box-shadow:
     0 0 0 1px hsl(var(--primary) / 0.4),
     0 0 16px 2px hsl(var(--primary) / 0.3),
     inset 0 0 8px hsl(var(--primary) / 0.15) !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-editor-toolbar="true"] {
+  background-color: #0b0514 !important;
 }
 :root[data-app-style='cyberpunk']:not(.dark) [data-editor-toolbar="true"] {
   border: 1px solid hsl(var(--primary) / 0.6) !important;
@@ -1718,14 +1738,17 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='paper'] [data-slash-menu="true"] [role="menuitem"] {
   border-radius: 0.25rem !important;
 }
-
 /* Midnight OLED: Sharp rectangular obsidian box */
 :root[data-app-style='midnight'] [data-slash-menu="true"],
 .dark:root[data-app-style='midnight'] [data-slash-menu="true"] {
   border-radius: 0.125rem !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
+}
+/* Midnight OLED: Sharp rectangular obsidian box */
+:root[data-app-style='midnight'] [data-slash-menu="true"],
+.dark:root[data-app-style='midnight'] [data-slash-menu="true"] {
   background-color: #050505 !important;
   border: 1px solid #27272a !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
 }
 :root[data-app-style='midnight'] [data-slash-menu="true"] [role="menuitem"],
 .dark:root[data-app-style='midnight'] [data-slash-menu="true"] [role="menuitem"] {
@@ -1780,12 +1803,14 @@ aside [role="button"]:focus-visible {
   border-radius: 0.1875rem !important;
 }
 .dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] {
-  background-color: #0b0514 !important;
   border: 1px solid hsl(var(--primary) / 0.7) !important;
   box-shadow:
     0 0 0 1px hsl(var(--primary) / 0.4),
     0 0 16px 2px hsl(var(--primary) / 0.3),
     inset 0 0 8px hsl(var(--primary) / 0.15) !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-slash-menu="true"] {
+  background-color: #0b0514 !important;
 }
 :root[data-app-style='cyberpunk']:not(.dark) [data-slash-menu="true"] {
   background-color: #fdf4ff !important;
@@ -1892,20 +1917,26 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='paper'] [data-luno-ai-view="true"] .grid > button {
   border-radius: 0.375rem !important;
 }
-
 /* Midnight OLED: Pure True Black high-contrast obsidian aesthetic */
 :root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
 .dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
 :root[data-app-style='midnight'] [data-ai-panel="true"],
 .dark:root[data-app-style='midnight'] [data-ai-panel="true"] {
   border-radius: 0.125rem !important;
+  box-shadow: none !important;
+}
+/* Midnight OLED: Pure True Black high-contrast obsidian aesthetic */
+:root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='midnight'] [data-ai-panel="true"] {
   background-color: #050505 !important;
   border-color: #27272a !important;
-  box-shadow: none !important;
 }
 :root[data-app-style='midnight'] [data-luno-ai-view="true"] .grid > button,
 .dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .grid > button {
   border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='midnight'] [data-luno-ai-view="true"] .grid > button {
   background-color: #09090b !important;
   border-color: #27272a !important;
 }
@@ -1967,12 +1998,15 @@ aside [role="button"]:focus-visible {
 }
 .dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .bg-card,
 .dark:root[data-app-style='cyberpunk'] [data-ai-panel="true"] {
-  background-color: #0b0514 !important;
   border: 1px solid hsl(var(--primary) / 0.6) !important;
   box-shadow:
     0 0 0 1px hsl(var(--primary) / 0.35),
     0 0 14px 1px hsl(var(--primary) / 0.22),
     inset 0 0 10px hsl(var(--primary) / 0.08) !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-luno-ai-view="true"] .bg-card,
+.dark:root[data-app-style='cyberpunk'] [data-ai-panel="true"] {
+  background-color: #0b0514 !important;
 }
 :root[data-app-style='cyberpunk']:not(.dark) [data-luno-ai-view="true"] .bg-card,
 :root[data-app-style='cyberpunk']:not(.dark) [data-ai-panel="true"] {
@@ -2104,11 +2138,13 @@ aside [role="button"]:focus-visible {
 }
 :root[data-app-style='midnight'] [data-tab-item="true"][data-active="true"],
 .dark:root[data-app-style='midnight'] [data-tab-item="true"][data-active="true"] {
-  background-color: #09090b !important;
   border-top: 1px solid #3f3f46 !important;
   border-left: 1px solid #27272a !important;
   border-right: 1px solid #27272a !important;
   box-shadow: none !important;
+}
+.dark:root[data-app-style='midnight'] [data-tab-item="true"][data-active="true"] {
+  background-color: #09090b !important;
 }
 
 /* Nord / Arctic */
@@ -2162,12 +2198,15 @@ aside [role="button"]:focus-visible {
   border-bottom-color: transparent !important;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
 }
-
+/* Cyberpunk / Terminal */
+:root[data-app-style='cyberpunk'] [data-tabbar="true"],
+.dark:root[data-app-style='cyberpunk'] [data-tabbar="true"] {
+  border-bottom: 1px solid hsl(var(--primary) / 0.4) !important;
+}
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-tabbar="true"],
 .dark:root[data-app-style='cyberpunk'] [data-tabbar="true"] {
   background-color: #06020a !important;
-  border-bottom: 1px solid hsl(var(--primary) / 0.4) !important;
 }
 :root[data-app-style='cyberpunk'] [data-tab-item="true"],
 .dark:root[data-app-style='cyberpunk'] [data-tab-item="true"] {
@@ -2182,12 +2221,14 @@ aside [role="button"]:focus-visible {
   box-shadow: 0 -2px 8px hsl(var(--primary) / 0.25) !important;
 }
 .dark:root[data-app-style='cyberpunk'] [data-tab-item="true"][data-active="true"] {
-  background-color: #0b0514 !important;
   border-top: 2px solid hsl(var(--primary)) !important;
   border-left: 1px solid hsl(var(--primary) / 0.5) !important;
   border-right: 1px solid hsl(var(--primary) / 0.5) !important;
   border-bottom-color: transparent !important;
   box-shadow: 0 -2px 10px hsl(var(--primary) / 0.3) !important;
+}
+.dark:root[data-app-style='cyberpunk'] [data-tab-item="true"][data-active="true"] {
+  background-color: #0b0514 !important;
 }
 
 /* Catppuccin */
@@ -2304,13 +2345,16 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='glass'] [data-activity-bar="true"] button {
   border-radius: 9999px !important;
 }
-
+/* Cyberpunk / Terminal */
+:root[data-app-style='cyberpunk'] [data-activity-bar="true"],
+.dark:root[data-app-style='cyberpunk'] [data-activity-bar="true"] {
+  border-right: 1px solid hsl(var(--primary) / 0.4) !important;
+  box-shadow: 2px 0 12px -2px hsl(var(--primary) / 0.25) !important;
+}
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-activity-bar="true"],
 .dark:root[data-app-style='cyberpunk'] [data-activity-bar="true"] {
   background-color: #06020a !important;
-  border-right: 1px solid hsl(var(--primary) / 0.4) !important;
-  box-shadow: 2px 0 12px -2px hsl(var(--primary) / 0.25) !important;
 }
 :root[data-app-style='cyberpunk'] [data-activity-bar="true"] button,
 .dark:root[data-app-style='cyberpunk'] [data-activity-bar="true"] button {
@@ -2375,11 +2419,9 @@ aside [role="button"]:focus-visible {
   border-radius: 0.375rem !important;
   border-color: rgba(180, 83, 9, 0.25) !important;
 }
-
 /* Midnight OLED */
 :root[data-app-style='midnight'] [data-relations-header="true"],
 .dark:root[data-app-style='midnight'] [data-relations-header="true"],
-:root[data-app-style='midnight'] [data-relations-statusbar="true"],
 .dark:root[data-app-style='midnight'] [data-relations-statusbar="true"] {
   background-color: #050505 !important;
   border-color: #27272a !important;
@@ -2387,6 +2429,8 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='midnight'] [data-relations-search-popover="true"],
 .dark:root[data-app-style='midnight'] [data-relations-search-popover="true"] {
   border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='midnight'] [data-relations-search-popover="true"] {
   background-color: #09090b !important;
   border-color: #27272a !important;
 }
@@ -2428,14 +2472,18 @@ aside [role="button"]:focus-visible {
   backdrop-filter: blur(24px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
 }
-
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-relations-header="true"],
 .dark:root[data-app-style='cyberpunk'] [data-relations-header="true"],
 :root[data-app-style='cyberpunk'] [data-relations-statusbar="true"],
 .dark:root[data-app-style='cyberpunk'] [data-relations-statusbar="true"] {
-  background-color: #0b0514 !important;
   border-color: hsl(var(--primary) / 0.5) !important;
+}
+/* Cyberpunk / Terminal */
+:root[data-app-style='cyberpunk'] [data-relations-header="true"],
+.dark:root[data-app-style='cyberpunk'] [data-relations-header="true"],
+.dark:root[data-app-style='cyberpunk'] [data-relations-statusbar="true"] {
+  background-color: #0b0514 !important;
 }
 :root[data-app-style='cyberpunk'] [data-relations-search-popover="true"],
 .dark:root[data-app-style='cyberpunk'] [data-relations-search-popover="true"] {
@@ -2498,11 +2546,9 @@ aside [role="button"]:focus-visible {
   border-radius: 0.375rem !important;
   border-color: rgba(180, 83, 9, 0.25) !important;
 }
-
 /* Midnight OLED */
 :root[data-app-style='midnight'] [data-web-viewer-nav="true"],
 .dark:root[data-app-style='midnight'] [data-web-viewer-nav="true"],
-:root[data-app-style='midnight'] [data-browser-right-panel="true"],
 .dark:root[data-app-style='midnight'] [data-browser-right-panel="true"] {
   background-color: #050505 !important;
   border-color: #27272a !important;
@@ -2561,14 +2607,18 @@ aside [role="button"]:focus-visible {
   background-color: rgba(255, 255, 255, 0.1) !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
 }
-
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-web-viewer-nav="true"],
 .dark:root[data-app-style='cyberpunk'] [data-web-viewer-nav="true"],
 :root[data-app-style='cyberpunk'] [data-browser-right-panel="true"],
 .dark:root[data-app-style='cyberpunk'] [data-browser-right-panel="true"] {
-  background-color: #0b0514 !important;
   border-color: hsl(var(--primary) / 0.5) !important;
+}
+/* Cyberpunk / Terminal */
+:root[data-app-style='cyberpunk'] [data-web-viewer-nav="true"],
+.dark:root[data-app-style='cyberpunk'] [data-web-viewer-nav="true"],
+.dark:root[data-app-style='cyberpunk'] [data-browser-right-panel="true"] {
+  background-color: #0b0514 !important;
 }
 :root[data-app-style='cyberpunk'] [data-web-viewer-omnibox="true"],
 .dark:root[data-app-style='cyberpunk'] [data-web-viewer-omnibox="true"] {
@@ -2639,7 +2689,6 @@ aside [role="button"]:focus-visible {
   border-radius: 0.375rem !important;
   border-color: rgba(180, 83, 9, 0.2) !important;
 }
-
 /* Midnight OLED */
 :root[data-app-style='midnight'] [data-version-history-panel="true"],
 .dark:root[data-app-style='midnight'] [data-version-history-panel="true"] {
@@ -2649,6 +2698,8 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='midnight'] [data-version-card="true"],
 .dark:root[data-app-style='midnight'] [data-version-card="true"] {
   border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='midnight'] [data-version-card="true"] {
   border-color: #27272a !important;
   background-color: #09090b !important;
 }
@@ -2684,12 +2735,15 @@ aside [role="button"]:focus-visible {
 .dark:root[data-app-style='glass'] [data-version-card="true"] {
   border-radius: 0.875rem !important;
 }
-
+/* Cyberpunk / Terminal */
+:root[data-app-style='cyberpunk'] [data-version-history-panel="true"],
+.dark:root[data-app-style='cyberpunk'] [data-version-history-panel="true"] {
+  border-color: hsl(var(--primary) / 0.5) !important;
+}
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-version-history-panel="true"],
 .dark:root[data-app-style='cyberpunk'] [data-version-history-panel="true"] {
   background-color: #0b0514 !important;
-  border-color: hsl(var(--primary) / 0.5) !important;
 }
 :root[data-app-style='cyberpunk'] [data-version-card="true"],
 .dark:root[data-app-style='cyberpunk'] [data-version-card="true"] {
@@ -2769,6 +2823,8 @@ aside [role="button"]:focus-visible {
 :root[data-app-style='midnight'] [data-launcher-card="true"],
 .dark:root[data-app-style='midnight'] [data-launcher-card="true"] {
   border-radius: 0.125rem !important;
+}
+.dark:root[data-app-style='midnight'] [data-launcher-card="true"] {
   background-color: #09090b !important;
   border-color: #27272a !important;
 }
@@ -2792,7 +2848,6 @@ aside [role="button"]:focus-visible {
   backdrop-filter: blur(24px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
 }
-
 /* Cyberpunk / Terminal */
 :root[data-app-style='cyberpunk'] [data-workspace-launcher="true"],
 .dark:root[data-app-style='cyberpunk'] [data-workspace-launcher="true"] {
@@ -2935,11 +2990,14 @@ aside [role="button"]:focus-visible {
   border-radius: 0.375rem !important;
   border-color: rgba(180, 83, 9, 0.25) !important;
 }
-
 /* Midnight OLED */
 :root[data-app-style='midnight'] [data-whats-new-card="true"],
 .dark:root[data-app-style='midnight'] [data-whats-new-card="true"] {
   border-radius: 0.125rem !important;
+}
+/* Midnight OLED */
+:root[data-app-style='midnight'] [data-whats-new-card="true"],
+.dark:root[data-app-style='midnight'] [data-whats-new-card="true"] {
   background-color: #09090b !important;
   border-color: #27272a !important;
 }
@@ -3828,12 +3886,14 @@ ul[data-type="taskList"] li label input[type="checkbox"]:checked {
 }
 
 .hljs-punctuation,
-.hljs-operator {
+.hljs-operator,
+.hljs-tag {
   color: var(--hl-punct, #64748b);
 }
 
 .dark .hljs-punctuation,
-.dark .hljs-operator {
+.dark .hljs-operator,
+.dark .hljs-tag {
   color: var(--hl-punct, #94a3b8);
 }
 
@@ -3856,6 +3916,10 @@ mark,
   text-decoration-thickness: 1.15px !important;
   text-underline-offset: 2.2px !important;
   text-decoration-skip-ink: none !important;
+}
+
+[data-spellcheck-enabled="false"] .luno-spell-error {
+  text-decoration: none !important;
 }
 
 /* Reading Mode (โหมดอ่านแบบกระชับพิเศษ Ultra-Compact) */
@@ -3939,6 +4003,86 @@ mark,
   cursor: pointer !important;
 }
 
+/* Obsidian-Style Edit Mode Live Preview Syntax Markers (Muted Gray) & Code Highlighting */
+.luno-live-syntax-marker {
+  color: hsl(var(--muted-foreground) / 0.52) !important;
+  font-weight: 400;
+}
+
+.dark .luno-live-syntax-marker {
+  color: hsl(var(--muted-foreground) / 0.58) !important;
+}
+
+.luno-live-hl-tag {
+  color: var(--hl-tag, #2563eb) !important;
+  font-weight: 500;
+}
+
+.dark .luno-live-hl-tag {
+  color: var(--hl-tag, #60a5fa) !important;
+}
+
+.luno-live-hl-keyword {
+  color: var(--hl-keyword, #9333ea) !important;
+  font-weight: 500;
+}
+
+.dark .luno-live-hl-keyword {
+  color: var(--hl-keyword, #c084fc) !important;
+}
+
+.luno-live-hl-attr {
+  color: var(--hl-attr, #0284c7) !important;
+}
+
+.dark .luno-live-hl-attr {
+  color: var(--hl-attr, #7dd3fc) !important;
+}
+
+.luno-live-hl-string {
+  color: var(--hl-string, #059669) !important;
+}
+
+.dark .luno-live-hl-string {
+  color: var(--hl-string, #34d399) !important;
+}
+
+.luno-live-hl-number {
+  color: var(--hl-number, var(--hl-string, #f59e0b)) !important;
+}
+
+.dark .luno-live-hl-number {
+  color: var(--hl-number, var(--hl-string, #fbbf24)) !important;
+}
+
+.luno-live-hl-punct {
+  color: var(--hl-punct, #64748b) !important;
+  font-weight: 400;
+}
+
+.dark .luno-live-hl-punct {
+  color: var(--hl-punct, #94a3b8) !important;
+}
+
+.luno-live-hl-comment {
+  color: var(--hl-comment, #94a3b8) !important;
+  font-style: italic;
+}
+
+.dark .luno-live-hl-comment {
+  color: var(--hl-comment, #64748b) !important;
+}
+
+.luno-live-inline-code {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background-color: hsl(var(--muted) / 0.75);
+  border: 1px solid hsl(var(--border) / 0.5);
+  padding: 0.1em 0.35em;
+  border-radius: 0.375rem;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
 /* ==========================================================================
    Animation & Reduced Motion Settings Control
    ========================================================================== */
@@ -3987,6 +4131,7 @@ html:not([data-animations="false"]) .animate-in {
 /* Floating tools and dialogs GPU acceleration on active animation states */
 [data-floating-window="true"],
 [role="dialog"][data-state="open"],
+[role="alertdialog"][data-state="open"],
 [role="menu"][data-state="open"],
 [role="tooltip"][data-state="delayed-open"],
 [role="tooltip"][data-state="instant-open"] {
@@ -4236,9 +4381,46 @@ button[class*="text-danger"] > svg:not([class*="text-"]) {
 }
 
 /* When folded: always visible normally */
-.luno-heading-fold-btn[data-folded="true"] {
+.luno-heading-fold-btn[data-folded="true"],
+.luno-toggle-fold-btn[data-folded="true"] {
   opacity: 1 !important;
   color: hsl(var(--primary)) !important;
+}
+
+/* Toggle block (<details>) fold button matching Header Toggle style */
+.luno-toggle-fold-btn {
+  position: absolute;
+  left: -1.35em;
+  top: 0.875rem;
+  transform: translateY(-50%);
+  width: 1.1em;
+  height: 1.1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.45;
+  pointer-events: auto;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+  color: hsl(var(--muted-foreground));
+  border-radius: 4px;
+  background-color: transparent;
+  z-index: 2;
+}
+
+.ProseMirror details > summary:hover > .luno-toggle-fold-btn,
+.ProseMirror details > summary:focus-within > .luno-toggle-fold-btn,
+.editor-markdown-content details > summary:hover > .luno-toggle-fold-btn,
+.editor-markdown-content details > summary:focus-within > .luno-toggle-fold-btn,
+.luno-toggle-fold-btn:hover {
+  opacity: 0.85;
+}
+
+.luno-toggle-fold-btn:hover {
+  opacity: 1;
+  background-color: hsl(var(--muted) / 0.8);
+  color: hsl(var(--foreground));
 }
 
 .luno-heading-fold-icon {

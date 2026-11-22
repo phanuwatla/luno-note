@@ -1,3 +1,42 @@
+## Release Notes - Luno Note v1.4.1
+
+### Overview
+Luno Note version 1.4.1 delivers a major system capability with the new **System Fix Language** (system-wide Thai/English mistyping converter), multimodal **AI Vision image attachments** in Luno AI, an interactive **Table Management Overlay**, enhanced **Media Players with Hover Volume Control**, and repository-wide **Architecture & Engineering Standards Hardening** ensuring high performance, security, and full localization.
+
+### Key Improvements & New Features
+
+#### 1. System-wide Thai/English Mistyping Fixer (System Fix Language)
+- **Universal Layout Conversion**: Instantly convert mistyped text between Thai (Kedmanee) and English (QWERTY) layouts across any active application or inside Luno Note with a global shortcut.
+- **Native Background Helper (`LunoFixLang.exe`)**: High-performance, lightweight native Windows helper running in the background for zero-latency cross-application text conversion.
+- **Intelligent Dictionary Heuristics**: Bundled Thai dictionary verification and heuristic scoring preventing accidental conversion of intended words.
+- **Desktop System Tray & Settings Integration**: Dedicated settings under Settings > General with auto-start configuration, status indicators, and conflict notifications.
+
+#### 2. Multimodal AI Vision & Image Attachments in Luno AI
+- **Image Input in AI Chat**: Attach and upload images directly to the Luno AI assistant chat panel for instant visual question answering, diagram explanation, math formulas, and OCR reading.
+- **Gemini Multimodal Processing**: Powered by Google Gemini multimodal models with automatic image compression, base64 payload preparation, and thumbnail preview controls.
+
+#### 3. Interactive Table Controls & Column/Row Manager
+- **TableInteractiveOverlay**: Intuitive overlay controls attached to TipTap tables in the editor surface.
+- **Effortless Row & Column Operations**: Insert, delete, and reorder rows and columns, toggle header rows, and merge cells in a single click without menu diving.
+
+#### 4. Media Player Polish & Sleek Hover Volume Slider
+- **VolumeHoverSlider**: Smooth, accessible hover volume control for embedded audio and video players.
+- **WorkspaceMediaPickerShell**: Standardized modal shell for browsing and selecting workspace media files.
+
+#### 5. System Architecture, Security & Standards Hardening
+- **Strict Path Confinement (`LN-SEC-01`)**: Symlink-aware and junction-safe IPC path confinement (`isPathAllowedForIpc`) preventing directory traversal and access to sensitive OS locations.
+- **Credential Encryption**: Google Drive OAuth tokens and sensitive credentials stored with Electron `safeStorage`.
+- **Pure Radix UI Foundation**: Pruned obsolete UI components down to 15 standard Radix UI primitives.
+- **Tree-Shaken Icon Registries**: Migrated all icon packs (Lucide, Tabler, Phosphor) to explicit registries, eliminating wildcard bundle bloat.
+- **Pure Electron Streamlining**: Safely purged legacy Tauri build remnants and dependencies, standardizing on a clean Electron desktop runtime.
+- **100% Dictionary-Driven Localization (`LN-I18N-01`)**: Completely verified translation keys across English and Thai with zero inline UI ternaries.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.4.1.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.4.0
 
 ### Overview

@@ -13,7 +13,17 @@ import {
   DialogTitle,
   DialogFooter,
   DialogDescription,
-} from "./ui/dialog";
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./ui/tooltip";
 import { isGoogleDriveConnected, requestGoogleDriveAuth, getStoredTokenInfo, getValidAccessToken } from "@/lib/googleDriveAuth";
 import { listCloudWorkspaces, createCloudWorkspace, ensureWorkspacesRootOnly } from "@/lib/googleDriveApi";
@@ -87,7 +97,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
 
   // Load default Documents directory path for local workspaces
   useEffect(() => {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getDocumentsPath) {
       void electronAPI.getDocumentsPath().then((docsPath: string) => {
         if (docsPath) {
@@ -211,7 +221,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   const handleConfirmCreateCloudWorkspace = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!cloudWorkspaceName.trim()) {
-      setCloudNameError(t("launcher.nameRequired") || "Please enter a workspace name");
+      setCloudNameError(t("launcher.nameRequired"));
       return;
     }
     setCloudNameError("");
@@ -224,10 +234,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   // Local Browse Location Handler
   const handleBrowseLocation = async () => {
     try {
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
       if (electronAPI?.selectDirectoryDialog) {
         const selected = await electronAPI.selectDirectoryDialog(
-          t("launcher.selectLocationTitle") || "Select Location for Workspace",
+          t("launcher.selectLocationTitle"),
           parentPath || defaultDocsPath
         );
         if (selected) {
@@ -251,11 +261,11 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
   const handleConfirmCreate = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!workspaceName.trim()) {
-      setPathError(t("launcher.nameRequired") || "Please enter a workspace name");
+      setPathError(t("launcher.nameRequired"));
       return;
     }
     if (!parentPath.trim()) {
-      setPathError(t("launcher.locationRequired") || "Please select a storage location");
+      setPathError(t("launcher.locationRequired"));
       return;
     }
     setPathError("");
@@ -298,18 +308,18 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                       className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer shrink-0"
                     >
                       <ArrowLeft className="h-4 w-4" />
-                      <span className="sr-only">{t("launcher.back") || t("launcher.backToLocal") || "Back"}</span>
+                      <span className="sr-only">{t("launcher.back")}</span>
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">{t("launcher.back") || t("launcher.backToLocal") || "Back"}</TooltipContent>
+                  <TooltipContent side="bottom">{t("launcher.back")}</TooltipContent>
                 </Tooltip>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-foreground flex items-center gap-1.5 truncate">
                     <GoogleDriveIcon className="h-4 w-4 shrink-0" />
-                    <span>{t("launcher.cloudWorkspacesTitle") || "Your Workspaces"}</span>
+                    <span>{t("launcher.cloudWorkspacesTitle")}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate">
-                    {t("launcher.cloudWorkspacesDesc") || "Select a cloud workspace on Google Drive or create a new one."}
+                    {t("launcher.cloudWorkspacesDesc")}
                   </p>
                 </div>
               </div>
@@ -329,15 +339,15 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                       )}
                       <span className="sr-only">
                         {layoutMode === "list"
-                          ? t("launcher.gridView") || "Grid view"
-                          : t("launcher.listView") || "List view"}
+                          ? t("launcher.gridView")
+                          : t("launcher.listView")}
                       </span>
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     {layoutMode === "list"
-                      ? t("launcher.gridView") || "Grid view"
-                      : t("launcher.listView") || "List view"}
+                      ? t("launcher.gridView")
+                      : t("launcher.listView")}
                   </TooltipContent>
                 </Tooltip>
 
@@ -350,10 +360,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                       className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${isLoadingCloudWorkspaces ? "animate-spin" : ""}`} />
-                      <span className="sr-only">{t("launcher.refresh") || "Refresh"}</span>
+                      <span className="sr-only">{t("launcher.refresh")}</span>
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">{t("launcher.refresh") || "Refresh"}</TooltipContent>
+                  <TooltipContent side="bottom">{t("launcher.refresh")}</TooltipContent>
                 </Tooltip>
 
                 <Tooltip>
@@ -369,7 +379,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                               targetFolderId = await ensureWorkspacesRootOnly(accessToken);
                               setWorkspacesFolderId(targetFolderId);
                             }
-                          } catch {}
+                          } catch { /* ignore */ }
                         }
                         const driveUrl = targetFolderId
                           ? `https://drive.google.com/drive/folders/${targetFolderId}`
@@ -383,10 +393,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                       className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer shrink-0"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
-                      <span className="sr-only">{t("settings.openFolder") || "Open Folder"}</span>
+                      <span className="sr-only">{t("settings.openFolder")}</span>
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">{t("settings.openFolder") || "Open Folder in Google Drive"}</TooltipContent>
+                  <TooltipContent side="bottom">{t("settings.openFolder")}</TooltipContent>
                 </Tooltip>
               </div>
             </div>
@@ -396,11 +406,11 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
               {isLoadingCloudWorkspaces ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <span>{t("launcher.loadingCloudWorkspaces") || "Loading cloud workspaces..."}</span>
+                  <span>{t("launcher.loadingCloudWorkspaces")}</span>
                 </div>
               ) : cloudWorkspaces.length === 0 ? (
                 <div className="py-6 px-4 text-center text-xs text-muted-foreground">
-                  {t("launcher.noCloudWorkspaces") || "No workspaces found on Google Drive. Create your first workspace below."}
+                  {t("launcher.noCloudWorkspaces")}
                 </div>
               ) : layoutMode === "grid" ? (
                 <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 gap-2 p-2.5">
@@ -408,7 +418,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                     <div
                       key={cw.id}
                       onClick={() => handleSelectCloudWorkspace(cw)}
-                      className="group relative flex flex-col items-center text-center p-2 rounded-xl border border-border/60 bg-muted/10 hover:bg-muted/40 hover:border-primary hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer"
+                      className="group relative flex flex-col items-center text-center p-2 rounded-xl border border-border/60 bg-muted/10 hover:bg-muted/40 hover:border-primary hover:shadow-sm active:scale-[0.98] transition-all duration-150 cursor-pointer"
                     >
                       {/* Top Preview / Folder Icon */}
                       <div className="w-full h-12 sm:h-14 flex items-center justify-center p-1 mb-0.5 group-hover:scale-105 transition-transform duration-150">
@@ -423,21 +433,21 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                       {/* Subtitle / Metadata (No ID) */}
                       <div className="flex flex-col items-center gap-0.5 w-full text-[8px] sm:text-[8.5px] text-muted-foreground uppercase font-medium tracking-wider">
                         {cw.status === "connected" && (
-                          <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
+                          <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
                             <Link2 className="h-2 w-2" />
-                            <span>{t("launcher.statusConnected") || "Connected"}</span>
+                            <span>{t("launcher.statusConnected")}</span>
                           </span>
                         )}
                         {cw.status === "cloud_only" && (
-                          <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
+                          <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
                             <Cloud className="h-2 w-2" />
-                            <span>{t("launcher.statusCloudOnly") || "Cloud only"}</span>
+                            <span>{t("launcher.statusCloudOnly")}</span>
                           </span>
                         )}
                         {cw.status === "differs" && (
-                          <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
+                          <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[7.5px] sm:text-[8px] bg-muted text-muted-foreground border border-border/60 group-hover:border-primary/30 transition-colors">
                             <Unlink2 className="h-2 w-2" />
-                            <span>{t("launcher.statusDiffers") || "Differs"}</span>
+                            <span>{t("launcher.statusDiffers")}</span>
                           </span>
                         )}
 
@@ -468,21 +478,21 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                             </span>
                             {/* Status Badges */}
                             {cw.status === "connected" && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
                                 <Link2 className="h-2 w-2" />
-                                <span>{t("launcher.statusConnected") || "Connected"}</span>
+                                <span>{t("launcher.statusConnected")}</span>
                               </span>
                             )}
                             {cw.status === "cloud_only" && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
                                 <Cloud className="h-2 w-2" />
-                                <span>{t("launcher.statusCloudOnly") || "Cloud only"}</span>
+                                <span>{t("launcher.statusCloudOnly")}</span>
                               </span>
                             )}
                             {cw.status === "differs" && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] sm:text-[8.5px] font-medium bg-muted text-muted-foreground border border-border/60 shrink-0">
                                 <Unlink2 className="h-2 w-2" />
-                                <span>{t("launcher.statusDiffers") || "Differs"}</span>
+                                <span>{t("launcher.statusDiffers")}</span>
                               </span>
                             )}
                           </div>
@@ -502,7 +512,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                         }}
                         className="w-[64px] py-1 rounded-lg border border-border/80 bg-background hover:bg-muted hover:text-foreground text-foreground text-[11px] font-semibold flex items-center justify-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0"
                       >
-                        {t("launcher.openCloudBtn") || "Open"}
+                        {t("launcher.openCloudBtn")}
                       </button>
                     </div>
                   ))}
@@ -515,10 +525,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
               <div className="space-y-1 min-w-0 pr-2">
                 <div className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <FolderPlusIcon className="h-4 w-4 text-primary shrink-0" />
-                  <span>{t("launcher.createNewCloudWorkspace") || "Create new workspace"}</span>
+                  <span>{t("launcher.createNewCloudWorkspace")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  {t("launcher.createCloudDialogSubtitle") || "The workspace will be created in Luno/Workspaces/ on your Google Drive."}
+                  {t("launcher.createCloudDialogSubtitle")}
                 </p>
               </div>
               <button
@@ -529,9 +539,9 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   setIncludeCloudWelcomeNote(true);
                   setCreateCloudDialogOpen(true);
                 }}
-                className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
+                className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all disabled:opacity-50 shrink-0"
               >
-                {t("launcher.createBtn") || "Create"}
+                {t("launcher.createBtn")}
               </button>
             </div>
           </div>
@@ -563,7 +573,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   }
                   setCreateDialogOpen(true);
                 }}
-                className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
+                className="w-[84px] py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all disabled:opacity-50 shrink-0"
               >
                 {t("launcher.createBtn")}
               </button>
@@ -692,7 +702,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                 className="luno-editor-checkbox cursor-pointer"
               />
               <label htmlFor="include-welcome-note" className="text-xs text-muted-foreground select-none cursor-pointer">
-                {t("launcher.includeWelcomeNote") || "Create starter note (Welcome.md)"}
+                {t("launcher.includeWelcomeNote")}
               </label>
             </div>
 
@@ -729,16 +739,16 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       <Dialog open={createCloudDialogOpen} onOpenChange={setCreateCloudDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>{t("launcher.createCloudDialogTitle") || "Create new workspace on Google Drive"}</DialogTitle>
+            <DialogTitle>{t("launcher.createCloudDialogTitle")}</DialogTitle>
             <DialogDescription>
-              {t("launcher.createCloudDialogSubtitle") || "The workspace will be created in Luno/Workspaces/ on your Google Drive."}
+              {t("launcher.createCloudDialogSubtitle")}
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleConfirmCreateCloudWorkspace} className="space-y-4 py-2">
             <div>
               <label htmlFor="cloud-workspace-name" className="mb-2 block text-sm font-medium text-foreground">
-                {t("launcher.workspaceNameLabel") || "Workspace name"}
+                {t("launcher.workspaceNameLabel")}
               </label>
               <input
                 id="cloud-workspace-name"
@@ -771,7 +781,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                 className="luno-editor-checkbox cursor-pointer"
               />
               <label htmlFor="include-cloud-welcome-note" className="text-xs text-muted-foreground select-none cursor-pointer">
-                {t("launcher.includeWelcomeNote") || "Create starter note (Welcome.md)"}
+                {t("launcher.includeWelcomeNote")}
               </label>
             </div>
 
@@ -792,10 +802,10 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                 {isCreating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    <span>{t("launcher.creating") || "Creating..."}</span>
+                    <span>{t("launcher.creating")}</span>
                   </>
                 ) : (
-                  <span>{t("launcher.createCloudConfirm") || "Create Cloud Workspace"}</span>
+                  <span>{t("launcher.createCloudConfirm")}</span>
                 )}
               </Button>
             </DialogFooter>
@@ -804,80 +814,69 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
       </Dialog>
 
       {/* Connected Workspace Confirmation Dialog */}
-      <Dialog open={confirmConnectedOpen} onOpenChange={setConfirmConnectedOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <div className="flex items-center gap-2 text-primary mb-1">
-              <ShieldAlert className="h-5 w-5" />
-              <DialogTitle className="text-base font-semibold">
-                {t("launcher.connectedDialogTitle") || "Workspace is connected to this device"}
-              </DialogTitle>
+      <AlertDialog open={confirmConnectedOpen} onOpenChange={setConfirmConnectedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-primary mb-0.5">
+              <ShieldAlert className="h-5 w-5 shrink-0" />
+              <AlertDialogTitle>
+                {t("launcher.connectedDialogTitle")}
+              </AlertDialogTitle>
             </div>
-            <DialogDescription className="text-xs leading-relaxed text-muted-foreground pt-1">
-              {t("launcher.connectedDialogDesc") ||
-                "You're about to edit the cloud version of this workspace. Changes made here will not be applied to the local files and may cause the two versions to become different."}
-            </DialogDescription>
-          </DialogHeader>
+            <AlertDialogDescription>
+              {t("launcher.connectedDialogDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-          <DialogFooter className="pt-3 gap-2">
-            <Button
-              type="button"
-              variant="outline"
+          <AlertDialogFooter>
+            <AlertDialogCancel
               onClick={() => {
                 setConfirmConnectedOpen(false);
                 setPendingCloudWs(null);
               }}
             >
-              {t("common.cancel") || "Cancel"}
-            </Button>
-            <Button
-              type="button"
-              onClick={handleConfirmEditConnected}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {t("launcher.editCloudVersionBtn") || "Edit Cloud Version"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmEditConnected}>
+              {t("launcher.editCloudVersionBtn")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Cloud version differs Warning Dialog */}
-      <Dialog open={confirmDiffersOpen} onOpenChange={setConfirmDiffersOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-1">
-              <AlertTriangle className="h-5 w-5" />
-              <DialogTitle className="text-base font-semibold">
-                {t("launcher.differsDialogTitle") || "Cloud version differs from local workspace"}
-              </DialogTitle>
+      <AlertDialog open={confirmDiffersOpen} onOpenChange={setConfirmDiffersOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-0.5">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              <AlertDialogTitle>
+                {t("launcher.differsDialogTitle")}
+              </AlertDialogTitle>
             </div>
-            <DialogDescription className="text-xs leading-relaxed text-muted-foreground pt-1">
-              {t("launcher.differsDialogDesc") ||
-                "This workspace has a local copy on your device, but the cloud version has differences. Editing the cloud version directly will not update your local files. If you want to synchronize both sides, please use the Sync feature."}
-            </DialogDescription>
-          </DialogHeader>
+            <AlertDialogDescription>
+              {t("launcher.differsDialogDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-          <DialogFooter className="pt-3 gap-2">
-            <Button
-              type="button"
-              variant="outline"
+          <AlertDialogFooter>
+            <AlertDialogCancel
               onClick={() => {
                 setConfirmDiffersOpen(false);
                 setPendingCloudWs(null);
               }}
             >
-              {t("common.cancel") || "Cancel"}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
               onClick={handleConfirmEditDiffers}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t("launcher.editCloudVersionBtn") || "Edit Cloud Version"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {t("launcher.editCloudVersionBtn")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
     </TooltipProvider>
   );

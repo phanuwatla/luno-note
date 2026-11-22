@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { motion } from "framer-motion";
+import { FloatingWindow } from "@/components/shared/FloatingWindow";
 import {
   X,
   GripHorizontal,
@@ -39,20 +39,20 @@ interface FloatingTranslatorProps {
 }
 
 const SUPPORTED_LANGUAGES = [
-  { code: "auto", nameEn: "Auto Detect", nameTh: "ตรวจจับอัตโนมัติ" },
-  { code: "th", nameEn: "Thai", nameTh: "ไทย" },
-  { code: "en", nameEn: "English", nameTh: "อังกฤษ" },
-  { code: "zh-CN", nameEn: "Chinese", nameTh: "จีน" },
-  { code: "ja", nameEn: "Japanese", nameTh: "ญี่ปุ่น" },
-  { code: "ko", nameEn: "Korean", nameTh: "เกาหลี" },
-  { code: "fr", nameEn: "French", nameTh: "ฝรั่งเศส" },
-  { code: "de", nameEn: "German", nameTh: "เยอรมัน" },
-  { code: "es", nameEn: "Spanish", nameTh: "สเปน" },
-  { code: "vi", nameEn: "Vietnamese", nameTh: "เวียดนาม" },
-  { code: "ru", nameEn: "Russian", nameTh: "รัสเซีย" },
-  { code: "it", nameEn: "Italian", nameTh: "อิตาลี" },
-  { code: "id", nameEn: "Indonesian", nameTh: "อินโดนีเซีย" },
-  { code: "ar", nameEn: "Arabic", nameTh: "อาหรับ" },
+  { code: "auto", nameKey: "translator.langAuto" },
+  { code: "th", nameKey: "translator.langTh" },
+  { code: "en", nameKey: "translator.langEn" },
+  { code: "zh-CN", nameKey: "translator.langZhCn" },
+  { code: "ja", nameKey: "translator.langJa" },
+  { code: "ko", nameKey: "translator.langKo" },
+  { code: "fr", nameKey: "translator.langFr" },
+  { code: "de", nameKey: "translator.langDe" },
+  { code: "es", nameKey: "translator.langEs" },
+  { code: "vi", nameKey: "translator.langVi" },
+  { code: "ru", nameKey: "translator.langRu" },
+  { code: "it", nameKey: "translator.langIt" },
+  { code: "id", nameKey: "translator.langId" },
+  { code: "ar", nameKey: "translator.langAr" },
 ];
 
 export default function FloatingTranslator({
@@ -60,7 +60,7 @@ export default function FloatingTranslator({
   onClose,
   initialText = "",
   onInsertTranslation,
-  zIndex = 50,
+  zIndex = 40,
   onFocusWindow,
 }: FloatingTranslatorProps) {
   const { t, language } = useTranslation();
@@ -80,12 +80,14 @@ export default function FloatingTranslator({
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const translationReqIdRef = useRef<number>(0);
 
   // Sync initialText when opened
   useEffect(() => {
     if (isOpen && initialText) {
+      setIsMinimized(false);
       setInputText(initialText);
-      handleTranslate(initialText, sourceLang, targetLang);
+      void handleTranslate(initialText, sourceLang, targetLang);
     }
   }, [isOpen, initialText]);
 
@@ -146,13 +148,15 @@ export default function FloatingTranslator({
         return;
       }
 
+      const reqId = ++translationReqIdRef.current;
       setIsLoading(true);
       try {
         const { result, detected } = await performTranslation(clean, from, to);
+        if (translationReqIdRef.current !== reqId) return;
         setTranslatedText(result);
         if (detected) {
           const match = SUPPORTED_LANGUAGES.find((l) => l.code === detected);
-          setDetectedLang(match ? (isTh ? match.nameTh : match.nameEn) : detected);
+          setDetectedLang(match ? t(match.nameKey) : detected);
         } else {
           setDetectedLang("");
         }
@@ -161,10 +165,12 @@ export default function FloatingTranslator({
           console.error("Translation failed:", err);
         }
       } finally {
-        setIsLoading(false);
+        if (translationReqIdRef.current === reqId) {
+          setIsLoading(false);
+        }
       }
     },
-    [isTh],
+    [t],
   );
 
   // Trigger translation when typing with debouncing
@@ -333,7 +339,7 @@ export default function FloatingTranslator({
 
       let currentIdx = 0;
 
-      const electronAPI = (window as unknown as { electronAPI?: { fetchTtsAudio?: (data: { text: string; lang: string }) => Promise<string | null> } }).electronAPI;
+      const electronAPI = window.electronAPI;
 
       const playNextChunk = async () => {
         // Guard: check if speaking was cancelled or switched to another target mid-flight
@@ -457,131 +463,27 @@ export default function FloatingTranslator({
     playWithAudioFallback();
   };
 
-  if (!isOpen) return null;
-
-  // ----------------------------------------------------
-  // MINIMIZED FLOATING PILL
-  // ----------------------------------------------------
-  if (isMinimized) {
-    return (
-      <TooltipProvider delayDuration={150}>
-        <motion.div
-          drag
-          dragMomentum={false}
-          dragElastic={0}
-          onPointerDown={onFocusWindow}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.15 }}
-          className="fixed rounded-full border border-border/60 bg-card/95 px-3 py-1.5 shadow-md backdrop-blur-md select-none text-foreground flex items-center gap-2"
-          data-floating-pill="true"
-          style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-        >
-          <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground opacity-60 cursor-grab active:cursor-grabbing shrink-0" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setIsMinimized(false)}
-                className="flex items-center gap-1.5 text-xs font-semibold text-foreground hover:text-primary transition-colors cursor-pointer max-w-[130px] truncate"
-              >
-                <Languages className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="truncate">{inputText || t("editor.translator") || (isTh ? "แปลภาษา" : "Translator")}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.expand") || (isTh ? "ขยาย" : "Expand")}</TooltipContent>
-          </Tooltip>
-
-          <div className="h-3 w-px bg-border/60 mx-0.5" />
-
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(false)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.expand") || (isTh ? "ขยาย" : "Expand")}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || (isTh ? "ปิด" : "Close")}</TooltipContent>
-            </Tooltip>
-          </div>
-        </motion.div>
-      </TooltipProvider>
-    );
-  }
-
-  // ----------------------------------------------------
-  // FULL EXPANDED FLOATING WINDOW (Matches Calculator & Clock)
-  // ----------------------------------------------------
   return (
-    <TooltipProvider delayDuration={150}>
-      <motion.div
-        drag
-        dragMomentum={false}
-        dragElastic={0}
-        onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 16 }}
-        transition={{ type: "spring", damping: 25, stiffness: 350 }}
-        className="fixed w-[320px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
-        data-floating-window="true"
-        style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-      >
-        {/* Window Header */}
-        <div className="flex items-center justify-between pb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <GripHorizontal className="h-4 w-4 opacity-60" />
-            <span>{t("editor.translator") || (isTh ? "แปลภาษา" : "Translator")}</span>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(true)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{isTh ? "ย่อหน้าต่าง" : "Minimize"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || (isTh ? "ปิด" : "Close")}</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
+    <FloatingWindow
+      isOpen={isOpen}
+      isMinimized={isMinimized}
+      onToggleMinimize={() => setIsMinimized((prev) => !prev)}
+      onClose={onClose}
+      zIndex={zIndex}
+      onFocusWindow={onFocusWindow}
+      title={t("editor.translator")}
+      defaultPosition={{ top: "20%", right: "18%" }}
+      widthClassName="w-[320px]"
+      minimizeTooltip={t("editor.minimize")}
+      expandTooltip={t("editor.expand")}
+      closeTooltip={t("editor.close")}
+      minimizedContent={
+        <>
+          <Languages className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="truncate max-w-[130px]">{inputText || t("editor.translator")}</span>
+        </>
+      }
+    >
         {/* Content Area */}
         <div className="space-y-3 pt-3 text-xs">
           {/* Language Selection Row */}
@@ -594,13 +496,13 @@ export default function FloatingTranslator({
                   if (inputText) handleTranslate(inputText, val, targetLang);
                 }}
               >
-                <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-2xs transition-colors">
-                  <SelectValue placeholder={t("editor.sourceLanguage") || (isTh ? "ภาษาต้นทาง" : "Source")} />
+                <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-sm transition-colors">
+                  <SelectValue placeholder={t("editor.sourceLanguage")} />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   {SUPPORTED_LANGUAGES.map((lang) => (
                     <SelectItem key={lang.code} value={lang.code} className="text-xs cursor-pointer">
-                      {isTh ? lang.nameTh : lang.nameEn}
+                      {t(lang.nameKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -618,7 +520,7 @@ export default function FloatingTranslator({
                   <ArrowLeftRight className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("editor.swapLanguages") || (isTh ? "สลับภาษา" : "Swap")}</TooltipContent>
+              <TooltipContent>{t("editor.swapLanguages")}</TooltipContent>
             </Tooltip>
 
             <div className="flex-1">
@@ -629,13 +531,13 @@ export default function FloatingTranslator({
                   if (inputText) handleTranslate(inputText, sourceLang, val);
                 }}
               >
-                <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-2xs transition-colors">
-                  <SelectValue placeholder={t("editor.targetLanguage") || (isTh ? "ภาษาปลายทาง" : "Target")} />
+                <SelectTrigger className="h-8 text-xs font-medium bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl px-2.5 shadow-sm transition-colors">
+                  <SelectValue placeholder={t("editor.targetLanguage")} />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   {SUPPORTED_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
                     <SelectItem key={lang.code} value={lang.code} className="text-xs cursor-pointer">
-                      {isTh ? lang.nameTh : lang.nameEn}
+                      {t(lang.nameKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -648,7 +550,7 @@ export default function FloatingTranslator({
             <textarea
               value={inputText}
               onChange={(e) => handleInputChange(e.target.value)}
-              placeholder={isTh ? "พิมพ์หรือวางข้อความที่ต้องการแปล..." : "Type or paste text to translate..."}
+              placeholder={t("translator.typeOrPasteTextTo")}
               rows={2}
               className="w-full resize-none bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/60 outline-none leading-relaxed min-h-[50px]"
             />
@@ -656,7 +558,7 @@ export default function FloatingTranslator({
               <span>
                 {detectedLang && sourceLang === "auto"
                   ? `${detectedLang}`
-                  : `${inputText.length} ${isTh ? "ตัวอักษร" : "chars"}`}
+                  : `${inputText.length} ${t("translator.chars")}`}
               </span>
               <div className="flex items-center gap-1">
                 {inputText && (
@@ -670,13 +572,13 @@ export default function FloatingTranslator({
                             ? "text-primary bg-primary/15 animate-pulse"
                             : "hover:text-foreground hover:bg-foreground/10"
                         }`}
-                        aria-label={speakingTarget === "source" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                        aria-label={speakingTarget === "source" ? (t("translator.stop")) : (t("translator.listen"))}
                       >
                         <Volume2 className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" sideOffset={4}>
-                      {speakingTarget === "source" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                      {speakingTarget === "source" ? (t("translator.stop")) : (t("translator.listen"))}
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -691,13 +593,13 @@ export default function FloatingTranslator({
                           setTranslatedText("");
                         }}
                         className="p-1 hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
-                        aria-label={isTh ? "ล้างข้อความ" : "Clear"}
+                        aria-label={t("translator.clear")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" sideOffset={4}>
-                      {isTh ? "ล้างข้อความ" : "Clear"}
+                      {t("translator.clear")}
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -707,11 +609,11 @@ export default function FloatingTranslator({
 
           {/* Translation Result Output (Only shown when translating or result available) */}
           {(isLoading || translatedText) && (
-            <div className="rounded-xl border border-border/50 bg-foreground/[0.04] p-2.5 min-h-[64px] flex flex-col justify-between shadow-2xs">
+            <div className="rounded-xl border border-border/50 bg-foreground/[0.04] p-2.5 min-h-[64px] flex flex-col justify-between shadow-sm">
               {isLoading ? (
                 <div className="flex items-center justify-center py-4 text-muted-foreground gap-2 text-xs">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span>{isTh ? "กำลังแปลภาษา..." : "Translating..."}</span>
+                  <span>{t("translator.translating")}</span>
                 </div>
               ) : (
                 <>
@@ -730,14 +632,14 @@ export default function FloatingTranslator({
                               ? "text-primary bg-primary/15 font-medium animate-pulse"
                               : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08]"
                           }`}
-                          aria-label={speakingTarget === "target" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                          aria-label={speakingTarget === "target" ? (t("translator.stop")) : (t("translator.listen"))}
                         >
                           <Volume2 className="h-3.5 w-3.5" />
-                          <span>{speakingTarget === "target" ? (isTh ? "กำลังอ่าน..." : "Playing...") : (isTh ? "ฟังเสียง" : "Listen")}</span>
+                          <span>{speakingTarget === "target" ? (t("translator.playing")) : (t("translator.listen"))}</span>
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="top" sideOffset={4}>
-                        {speakingTarget === "target" ? (isTh ? "หยุดอ่าน" : "Stop") : (isTh ? "ฟังเสียง" : "Listen")}
+                        {speakingTarget === "target" ? (t("translator.stop")) : (t("translator.listen"))}
                       </TooltipContent>
                     </Tooltip>
 
@@ -749,7 +651,7 @@ export default function FloatingTranslator({
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08] transition-colors cursor-pointer"
                         >
                           {inserted ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
-                          <span>{inserted ? (isTh ? "แทรกแล้ว" : "Inserted") : (isTh ? "แทรกลงโน้ต" : "Insert")}</span>
+                          <span>{inserted ? (t("translator.inserted")) : (t("translator.insert"))}</span>
                         </button>
                       )}
 
@@ -759,7 +661,7 @@ export default function FloatingTranslator({
                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08] transition-colors cursor-pointer"
                       >
                         {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                        <span>{copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอก" : "Copy")}</span>
+                        <span>{copied ? (t("common.copied")) : (t("common.copy"))}</span>
                       </button>
                     </div>
                   </div>
@@ -768,7 +670,6 @@ export default function FloatingTranslator({
             </div>
           )}
         </div>
-      </motion.div>
-    </TooltipProvider>
+    </FloatingWindow>
   );
 }

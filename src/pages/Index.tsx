@@ -26,6 +26,8 @@ const FavoritesTabView = lazy(() => import("@/components/FavoritesTabView"));
 const TagsTabView = lazy(() => import("@/components/TagsTabView"));
 import { WorkspaceLauncher } from "@/components/WorkspaceLauncher";
 import GlobalVideoPip from "@/components/editor/GlobalVideoPip";
+import { FloatingWidgetsHost } from "@/components/shared/FloatingWidgetsHost";
+import { PageLoader } from "@/components/shared/PageLoader";
 import type { Note } from "@/hooks/useNotes";
 import { useNotes, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
 import { useAppSettings, saveWorkspaceSettings, loadWorkspaceSettings, type AppSettings } from "@/hooks/useAppSettings";
@@ -35,7 +37,7 @@ import { useTabs, isSystemOrWebTab, isTabAllowedInCompactLayout, isFirstLaunchOn
 import { APP_VERSION } from "@/lib/appVersion";
 import type { CreateNoteOptions } from "@/lib/fileHandles";
 import { clearAllStoredFileHandles, getStoredFileHandle, setStoredFileHandle, getStoredDirectoryHandle, setStoredDirectoryHandle, removeStoredDirectoryHandle, requestPermissionIfAvailable, unmarkNoteAsDeleted, trackDeletedRelativePath, clearDeletedRelativePath, isRelativePathDeleted, globalDeletedRelativePaths } from "@/lib/fileHandles";
-import { updateFrontmatterIcon, updateFrontmatterTags, updateFrontmatterFavorite, isMarkdownNote, isMarkdownFileName, isTiptapJson, parseFrontmatterAndTags } from "@/lib/frontmatter";
+import { updateFrontmatterIcon, updateFrontmatterTags, updateFrontmatterFavorite, isMarkdownNote, isMarkdownFileName, isTiptapJson, parseFrontmatterAndTags, renameTagInMarkdown, removeTagFromMarkdown } from "@/lib/frontmatter";
 import { saveWorkspaceFavorites, loadWorkspaceFavorites } from "@/lib/workspaceFavorites";
 import { marked } from "marked";
 import { toast } from "@/hooks/use-toast";
@@ -56,6 +58,11 @@ import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { setCustomFontWorkspaceHandle, loadCustomFonts } from "@/lib/customFontStore";
 import { isSensitiveWebUrl, openExternalUrl } from "@/lib/urlUtils";
 import { getLocalWorkspaceManifest, type CloudWorkspaceInfo } from "@/lib/workspaceIdentity";
+import {
+  isFixLanguageShortcutEvent,
+  showSelectTextToFixToast,
+  triggerInAppFixLanguage,
+} from "@/lib/fixLanguageSystem";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,7 +92,7 @@ type PendingPdfCloseAction =
 export default function Index() {
   const { t, language } = useTranslation();
   const isTh = language === "th";
-  const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon } = useAppSettings();
+  const { settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, copyFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon } = useAppSettings();
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true);
   // ความกว้างฝั่งซ้าย (px) ถ้า split, ค่า default 50%
   const [splitLeftWidth, setSplitLeftWidth] = useState<number | null>(null);
@@ -94,6 +101,7 @@ export default function Index() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+  const openedRootDirHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const {
     openTabIds,
     activeTabId,
@@ -108,7 +116,7 @@ export default function Index() {
     sanitizeTabsForLayout,
     restoreTabsFromSession,
     setActiveTabId,
-  } = useTabs(notesRef);
+  } = useTabs(notesRef, openedRootDirHandleRef);
   const isFirstTimeOnVersionRef = useRef(isFirstLaunchOnVersion());
   const newlyCreatedNoteIdRef = useRef<string | null>(null);
   const workspaceFavoritesRef = useRef<Set<string>>(new Set());
@@ -124,8 +132,9 @@ export default function Index() {
     if (checkedUpdatesOnLaunchRef.current) return;
     if (typeof window === "undefined" || !window.electronAPI?.checkForUpdates) return;
 
-    checkedUpdatesOnLaunchRef.current = true;
     const timer = setTimeout(() => {
+      if (checkedUpdatesOnLaunchRef.current) return;
+      checkedUpdatesOnLaunchRef.current = true;
       checkForUpdatesRef.current(false).catch((err) => {
         console.warn("Auto check for updates failed on launch:", err);
       });
@@ -149,11 +158,11 @@ export default function Index() {
   const HOME_NOTE: Note = useMemo(
     () => ({
       id: "home",
-      title: t("sidebar.home") || "Home",
+      title: t("sidebar.home"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("sidebar.home") || "Home",
+      fileName: t("sidebar.home"),
       fileType: "home" as any,
     }),
     [t]
@@ -162,11 +171,11 @@ export default function Index() {
   const SETTINGS_NOTE: Note = useMemo(
     () => ({
       id: "settings",
-      title: t("settings.title") || "Settings",
+      title: t("settings.title"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("settings.title") || "Settings",
+      fileName: t("settings.title"),
       fileType: "settings",
     }),
     [t]
@@ -175,11 +184,11 @@ export default function Index() {
   const HELP_NOTE: Note = useMemo(
     () => ({
       id: "help",
-      title: t("sidebar.help") || (settings.language === "th" ? "ความช่วยเหลือ" : "Help"),
+      title: t("sidebar.help"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("sidebar.help") || (settings.language === "th" ? "ความช่วยเหลือ" : "Help"),
+      fileName: t("sidebar.help"),
       fileType: "help",
     }),
     [t, settings.language]
@@ -201,11 +210,11 @@ export default function Index() {
   const TRASH_NOTE: Note = useMemo(
     () => ({
       id: "trash",
-      title: t("trash.title") || "Trash",
+      title: t("trash.title"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("trash.title") || "Trash",
+      fileName: t("trash.title"),
       fileType: "trash" as any,
     }),
     [t]
@@ -214,11 +223,11 @@ export default function Index() {
   const TEMPLATES_NOTE: Note = useMemo(
     () => ({
       id: "templates",
-      title: t("sidebar.templates") || (settings.language === "th" ? "เทมเพลต" : "Templates"),
+      title: t("sidebar.templates"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("sidebar.templates") || (settings.language === "th" ? "เทมเพลต" : "Templates"),
+      fileName: t("sidebar.templates"),
       fileType: "templates" as any,
     }),
     [t, settings.language]
@@ -227,11 +236,11 @@ export default function Index() {
   const RELATIONS_NOTE: Note = useMemo(
     () => ({
       id: "relations",
-      title: t("relations.title") || (settings.language === "th" ? "ความสัมพันธ์" : "Relations"),
+      title: t("relations.title"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("relations.title") || (settings.language === "th" ? "ความสัมพันธ์" : "Relations"),
+      fileName: t("relations.title"),
       fileType: "relations" as any,
     }),
     [t, settings.language]
@@ -240,11 +249,11 @@ export default function Index() {
   const FAVORITES_NOTE: Note = useMemo(
     () => ({
       id: "favorites",
-      title: t("sidebar.favorites") || (settings.language === "th" ? "ที่ติดดาว" : "Favorites"),
+      title: t("sidebar.favorites"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("sidebar.favorites") || (settings.language === "th" ? "ที่ติดดาว" : "Favorites"),
+      fileName: t("sidebar.favorites"),
       fileType: "favorites" as any,
     }),
     [t, settings.language]
@@ -253,11 +262,11 @@ export default function Index() {
   const TAGS_NOTE: Note = useMemo(
     () => ({
       id: "tags",
-      title: t("sidebar.tags") || (settings.language === "th" ? "แท็ก" : "Tags"),
+      title: t("sidebar.tags"),
       content: "",
       createdAt: 0,
       updatedAt: 0,
-      fileName: t("sidebar.tags") || (settings.language === "th" ? "แท็ก" : "Tags"),
+      fileName: t("sidebar.tags"),
       fileType: "tags" as any,
     }),
     [t, settings.language]
@@ -295,14 +304,14 @@ export default function Index() {
     try {
       const raw = localStorage.getItem("luno-web-tabs-state");
       if (raw) return JSON.parse(raw);
-    } catch {}
+    } catch { /* ignore */ }
     return {};
   });
 
   useEffect(() => {
     try {
       localStorage.setItem("luno-web-tabs-state", JSON.stringify(webTabs));
-    } catch {}
+    } catch { /* ignore */ }
   }, [webTabs]);
 
   const getWebTabNote = useCallback(
@@ -310,7 +319,7 @@ export default function Index() {
       const info = webTabs[id];
       const url = info?.url || (id.startsWith("web:http") ? id.replace(/^web:/, "") : "https://www.google.com");
       let displayTitle = info?.title;
-      let faviconUrl = info?.faviconUrl;
+      const faviconUrl = info?.faviconUrl;
       try {
         const u = new URL(url.startsWith("http") ? url : `https://${url}`);
         if (!displayTitle) {
@@ -321,11 +330,11 @@ export default function Index() {
       }
       return {
         id,
-        title: displayTitle || t("webViewer.title") || "Web Viewer",
+        title: displayTitle || t("webViewer.title"),
         content: url,
         createdAt: 0,
         updatedAt: 0,
-        fileName: displayTitle || t("webViewer.title") || "Web Viewer",
+        fileName: displayTitle || t("webViewer.title"),
         fileType: "web-viewer",
         url,
         faviconUrl,
@@ -392,6 +401,9 @@ export default function Index() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openedFolderName, setOpenedFolderName] = useState<string | null>(null);
   const [openedRootDirHandle, setOpenedRootDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  useEffect(() => {
+    openedRootDirHandleRef.current = openedRootDirHandle;
+  }, [openedRootDirHandle]);
   const [pendingReconnectDirHandle, setPendingReconnectDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [openedFolderPaths, setOpenedFolderPaths] = useState<string[]>([]);
   const [clipboardItem, setClipboardItem] = useState<{ kind: "file" | "file-batch" | "folder"; noteId?: string; noteIds?: string[]; folderPath: string; fileName?: string } | null>(null);
@@ -467,7 +479,7 @@ export default function Index() {
     try {
       const saved = localStorage.getItem("luno_last_settings_category");
       if (isValidSettingsCategory(saved)) return saved;
-    } catch {}
+    } catch { /* ignore */ }
     return "general";
   });
   // Tracks the current Electron workspace path (for Electron desktop mode only)
@@ -487,7 +499,7 @@ export default function Index() {
       setSettingsCategory(category);
       try {
         localStorage.setItem("luno_last_settings_category", category);
-      } catch {}
+      } catch { /* ignore */ }
     } else {
       try {
         const saved = localStorage.getItem("luno_last_settings_category");
@@ -507,7 +519,7 @@ export default function Index() {
     try {
       const saved = localStorage.getItem("luno_last_help_category");
       if (isValidHelpCategory(saved)) return saved;
-    } catch {}
+    } catch { /* ignore */ }
     return "features";
   });
 
@@ -516,7 +528,7 @@ export default function Index() {
       setHelpCategory(category);
       try {
         localStorage.setItem("luno_last_help_category", category);
-      } catch {}
+      } catch { /* ignore */ }
     } else {
       try {
         const saved = localStorage.getItem("luno_last_help_category");
@@ -627,7 +639,7 @@ export default function Index() {
             }
             await pDir.getFileHandle(targetFileName, { create: false });
             foundInPrimary = true;
-          } catch {}
+          } catch { /* ignore */ }
 
           if (!foundInPrimary) {
             try {
@@ -637,11 +649,11 @@ export default function Index() {
               }
               await aDir.getFileHandle(targetFileName, { create: false });
               targetFolder = altFolder;
-            } catch {}
+            } catch { /* ignore */ }
           }
-        } catch {}
+        } catch { /* ignore */ }
       } else {
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles) {
           try {
             const saved = await electronAPI.getSavedWorkspace();
@@ -663,7 +675,7 @@ export default function Index() {
                 }
               }
             }
-          } catch {}
+          } catch { /* ignore */ }
         }
       }
 
@@ -718,7 +730,7 @@ export default function Index() {
               const relPath = `${targetFolder}/${targetFileName}`;
               await setStoredFileHandle(relPath, fileHandle);
             }
-          } catch {}
+          } catch { /* ignore */ }
         }
 
         // Create the media note in memory pointing directly to its folder (e.g. /attachment), never root!
@@ -786,7 +798,7 @@ export default function Index() {
               const relPath = `${targetFolder}/${targetFileName}`;
               await setStoredFileHandle(relPath, fileHandle);
             }
-          } catch {}
+          } catch { /* ignore */ }
         }
 
         const fileType = node.nodeType === "image" ? "image" : "binary";
@@ -965,8 +977,8 @@ export default function Index() {
 
       if (!targetNote) {
         toast({
-          title: t("webViewer.insertToNote") || "Insert link to active note",
-          description: t("webViewer.noActiveNotes") || (isTh ? "ไม่มีโน้ตที่เปิดอยู่เพื่อแทรกลิงก์" : "No open notes found to insert link into"),
+          title: t("webViewer.insertToNote"),
+          description: t("webViewer.noActiveNotes"),
           variant: "destructive",
         });
         return;
@@ -998,7 +1010,7 @@ export default function Index() {
         noteEditorStateMap.delete(targetNote.id);
 
         // Persist to disk if running in Electron with workspace opened
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && targetNote.fileName && isMarkdownNote(targetNote)) {
           void (async () => {
             try {
@@ -1018,8 +1030,8 @@ export default function Index() {
 
       const noteDisplayName = targetNote.fileName || targetNote.title || "Note";
       toast({
-        title: t("webViewer.insertToNote") || "Insert link to active note",
-        description: `${t("webViewer.linkInserted") || "Link inserted into note"} (${noteDisplayName})`,
+        title: t("webViewer.insertToNote"),
+        description: `${t("webViewer.linkInserted")} (${noteDisplayName})`,
       });
     },
     [notes, splitTabId, activeTabId, lastActiveNoteId, openTabIds, updateNote, isTh, t]
@@ -1062,87 +1074,115 @@ export default function Index() {
         }
 
         // Only update file content and frontmatter if it is a Markdown note!
-        // DO NOT overwrite image or binary files!
+        // DO NOT overwrite image, binary, or ununlocked encrypted files!
         if (isMarkdownNote(currentNote) && currentNote.fileType !== "image" && currentNote.fileType !== "binary" && currentNote.fileName) {
-          const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
-          const nextIconColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
-          const nextTags = "tags" in patch ? patch.tags : currentNote.tags;
-          const nextFavorite = "isFavorite" in patch ? patch.isFavorite : currentNote.isFavorite;
-
-          const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-          if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && electronAPI?.readFileContent) {
-            try {
-              const saved = await electronAPI.getSavedWorkspace();
-              if (saved?.folderPath) {
-                const fullPath = currentNote.folderPath
-                  ? `${saved.folderPath}/${currentNote.folderPath}/${currentNote.fileName}`
-                  : `${saved.folderPath}/${currentNote.fileName}`;
-
-                let diskContent = "";
-                try {
-                  const readText = await electronAPI.readFileContent(fullPath);
-                  if (typeof readText === "string") diskContent = readText;
-                } catch {}
-
-                if (!diskContent) {
-                  diskContent = currentNote.content || "";
-                }
-
-                let newContent = patch.content !== undefined ? patch.content : diskContent;
-                if ("icon" in patch || "iconColor" in patch) {
-                  newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
-                }
-                if ("tags" in patch && patch.content === undefined) {
-                  const parsed = parseFrontmatterAndTags(newContent);
-                  const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
-                  const frontmatterOnlyTags = (patch.tags || []).filter((t) => !inlineSet.has(t.toLowerCase()));
-                  newContent = updateFrontmatterTags(newContent, frontmatterOnlyTags);
-                }
-                if ("isFavorite" in patch) {
-                  newContent = updateFrontmatterFavorite(newContent, patch.isFavorite);
-                }
-
-                await electronAPI.writeFileContent({ fullPath, content: newContent });
-              }
-            } catch (err) {
-              console.warn("Failed to persist updated note icon to disk:", err);
+          const activePin = currentNote.isLocked ? unlockedSessionPinsRef.current.get(id) : undefined;
+          if (currentNote.isLocked && !activePin) {
+            // Note is PIN-locked and not unlocked in session: store metadata in .luno/favorites.json & settings.fileIcons instead of mutating ciphertext
+            const relPath = currentNote.folderPath ? `${currentNote.folderPath}/${currentNote.fileName}` : currentNote.fileName;
+            if ("isFavorite" in patch && patch.isFavorite !== undefined) {
+              if (patch.isFavorite) workspaceFavoritesRef.current.add(relPath);
+              else workspaceFavoritesRef.current.delete(relPath);
+              void saveWorkspaceFavorites(openedRootDirHandle, Array.from(workspaceFavoritesRef.current));
+            }
+            if ("icon" in patch || "iconColor" in patch) {
+              const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
+              const nextColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
+              if (nextIcon) setFileIcon(relPath, nextIcon, nextColor);
+              else removeFileIcon(relPath);
             }
           } else {
-            try {
-              const handle = await getStoredFileHandle(id);
-              if (handle) {
-                let diskContent = "";
-                try {
-                  const file = await handle.getFile();
-                  diskContent = await file.text();
-                } catch {}
+            const nextIcon = "icon" in patch ? patch.icon : currentNote.icon;
+            const nextIconColor = "iconColor" in patch ? patch.iconColor : currentNote.iconColor;
 
-                if (!diskContent) {
-                  diskContent = currentNote.content || "";
-                }
-
-                let newContent = patch.content !== undefined ? patch.content : diskContent;
-                if ("icon" in patch || "iconColor" in patch) {
-                  newContent = updateFrontmatterIcon(newContent, nextIcon, nextIconColor);
-                }
-                if ("tags" in patch && patch.content === undefined) {
-                  const parsed = parseFrontmatterAndTags(newContent);
-                  const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
-                  const frontmatterOnlyTags = (patch.tags || []).filter((t) => !inlineSet.has(t.toLowerCase()));
-                  newContent = updateFrontmatterTags(newContent, frontmatterOnlyTags);
-                }
-                if ("isFavorite" in patch) {
-                  newContent = updateFrontmatterFavorite(newContent, patch.isFavorite);
-                }
-
-                if (handle.createWritable) {
-                  const writable = await handle.createWritable();
-                  await writable.write(newContent);
-                  await writable.close();
-                }
+            const applyFrontmatterMutations = (sourceContent: string): string => {
+              let next = sourceContent;
+              if ("icon" in patch || "iconColor" in patch) {
+                next = updateFrontmatterIcon(next, nextIcon, nextIconColor);
               }
-            } catch (err) {
-              console.warn("Failed saving note icon to file handle:", err);
+              if ("tags" in patch && patch.content === undefined) {
+                const parsed = parseFrontmatterAndTags(next);
+                const inlineSet = new Set(parsed.inlineTags.map((t) => t.toLowerCase()));
+                const frontmatterOnlyTags = (patch.tags || []).filter((t) => !inlineSet.has(t.toLowerCase()));
+                next = updateFrontmatterTags(next, frontmatterOnlyTags);
+              }
+              if ("isFavorite" in patch) {
+                next = updateFrontmatterFavorite(next, patch.isFavorite);
+              }
+              return next;
+            };
+
+            const electronAPI = window.electronAPI;
+            if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && electronAPI?.readFileContent) {
+              try {
+                const saved = await electronAPI.getSavedWorkspace();
+                if (saved?.folderPath) {
+                  const fullPath = currentNote.folderPath
+                    ? `${saved.folderPath}/${currentNote.folderPath}/${currentNote.fileName}`
+                    : `${saved.folderPath}/${currentNote.fileName}`;
+
+                  let diskContent = "";
+                  if (!currentNote.isLocked) {
+                    try {
+                      const readText = await electronAPI.readFileContent(fullPath);
+                      if (typeof readText === "string" && !isEncryptedNote(readText)) diskContent = readText;
+                    } catch { /* ignore */ }
+                  }
+
+                  if (!diskContent) {
+                    diskContent = currentNote.content || "";
+                  }
+
+                  const basePlain = patch.content !== undefined ? patch.content : diskContent;
+                  if (!isEncryptedNote(basePlain)) {
+                    const newPlainContent = applyFrontmatterMutations(basePlain);
+                    if (currentNote.isLocked && activePin) {
+                      const reEncrypted = await encryptNoteContent(newPlainContent, activePin);
+                      updateNote(id, { content: newPlainContent, encryptedContent: reEncrypted });
+                      await electronAPI.writeFileContent({ fullPath, content: reEncrypted });
+                    } else {
+                      await electronAPI.writeFileContent({ fullPath, content: newPlainContent });
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn("Failed to persist updated note metadata to disk:", err);
+              }
+            } else {
+              try {
+                const handle = await getStoredFileHandle(id);
+                if (handle) {
+                  let diskContent = "";
+                  if (!currentNote.isLocked) {
+                    try {
+                      const file = await handle.getFile();
+                      const text = await file.text();
+                      if (!isEncryptedNote(text)) diskContent = text;
+                    } catch { /* ignore */ }
+                  }
+
+                  if (!diskContent) {
+                    diskContent = currentNote.content || "";
+                  }
+
+                  const basePlain = patch.content !== undefined ? patch.content : diskContent;
+                  if (!isEncryptedNote(basePlain)) {
+                    const newPlainContent = applyFrontmatterMutations(basePlain);
+                    let payloadToWrite = newPlainContent;
+                    if (currentNote.isLocked && activePin) {
+                      payloadToWrite = await encryptNoteContent(newPlainContent, activePin);
+                      updateNote(id, { content: newPlainContent, encryptedContent: payloadToWrite });
+                    }
+                    if (handle.createWritable) {
+                      const writable = await handle.createWritable();
+                      await writable.write(payloadToWrite);
+                      await writable.close();
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn("Failed saving note metadata to file handle:", err);
+              }
             }
           }
         }
@@ -1199,6 +1239,9 @@ export default function Index() {
   }, []);
 
   const handleConfirmSetPin = useCallback(async (noteId: string, pin: string) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId } }));
+    }
     const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return;
 
@@ -1221,7 +1264,7 @@ export default function Index() {
     clearNoteEditorState(noteId);
 
     // Persist encrypted content to disk immediately
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && target.fileName) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
@@ -1244,12 +1287,15 @@ export default function Index() {
     }
 
     toast({
-      title: t("pinLock.lockSuccess") || "Note locked successfully",
-      description: target.fileName || target.title || (settings.language === "th" ? "ตั้งรหัส PIN และล็อคโน้ตเรียบร้อยแล้ว" : "Note locked with PIN"),
+      title: t("pinLock.lockSuccess"),
+      description: target.fileName || target.title || (t("workspace.noteLockedWithPin")),
     });
   }, [t, updateNote]);
 
   const handleConfirmRemovePin = useCallback(async (noteId: string, pin: string) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId } }));
+    }
     const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return;
 
@@ -1275,7 +1321,7 @@ export default function Index() {
     });
 
     // Persist decrypted content to disk
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && target.fileName) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
@@ -1298,12 +1344,15 @@ export default function Index() {
     }
 
     toast({
-      title: t("pinLock.removeLockSuccess") || "PIN lock removed",
-      description: target.fileName || target.title || (settings.language === "th" ? "ปลดล็อคและถอดรหัส PIN เรียบร้อยแล้ว" : "PIN protection removed from note"),
+      title: t("pinLock.removeLockSuccess"),
+      description: target.fileName || target.title || (t("workspace.pinProtectionRemovedFromNote")),
     });
   }, [t, updateNote]);
 
   const handleConfirmChangePin = useCallback(async (noteId: string, currentPin: string, newPin: string) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId } }));
+    }
     const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return;
 
@@ -1334,7 +1383,7 @@ export default function Index() {
     clearNoteEditorState(noteId);
 
     // Write to disk
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && target.fileName) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
@@ -1357,8 +1406,8 @@ export default function Index() {
     }
 
     toast({
-      title: t("pinLock.changePinSuccess") || "PIN updated successfully",
-      description: target.fileName || target.title || (settings.language === "th" ? "เปลี่ยนรหัส PIN เรียบร้อยแล้ว" : "PIN updated successfully"),
+      title: t("pinLock.changePinSuccess"),
+      description: target.fileName || target.title || (t("workspace.pinUpdatedSuccessfully")),
     });
   }, [t, updateNote]);
 
@@ -1398,6 +1447,9 @@ export default function Index() {
   }, [updateNote]);
 
   const handleRelockNote = useCallback(async (noteId: string) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId } }));
+    }
     const target = notesRef.current.find((n) => n.id === noteId);
     const pin = unlockedSessionPinsRef.current.get(noteId);
     unlockedSessionPinsRef.current.delete(noteId);
@@ -1407,7 +1459,7 @@ export default function Index() {
       if (pin && !isEncryptedNote(target.content)) {
         try {
           encrypted = await encryptNoteContent(target.content, pin);
-        } catch {}
+        } catch { /* ignore */ }
       } else if (target.encryptedContent && isEncryptedNote(target.encryptedContent)) {
         encrypted = target.encryptedContent;
       }
@@ -1419,7 +1471,7 @@ export default function Index() {
       });
 
       // Write encrypted content directly to disk immediately upon relocking!
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
       if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && target.fileName) {
         try {
           const saved = await electronAPI.getSavedWorkspace();
@@ -1450,8 +1502,8 @@ export default function Index() {
     clearNoteEditorState(noteId);
 
     toast({
-      title: t("pinLock.noteRelocked") || "Note locked",
-      description: target?.fileName || target?.title || (settings.language === "th" ? "ล็อคโน้ตอีกครั้งเรียบร้อยแล้ว" : "Note relocked"),
+      title: t("pinLock.noteRelocked"),
+      description: target?.fileName || target?.title || (t("workspace.noteRelocked")),
     });
   }, [t, updateNote]);
 
@@ -1702,7 +1754,7 @@ export default function Index() {
         if (typeof colorVal === "string") {
           fmIconColor = colorVal;
         }
-      } catch {}
+      } catch { /* ignore */ }
     }
     const mergedTags = isMd
       ? (typeof e.content === "string" && !isDiskEncrypted && !isTiptapJson(e.content)
@@ -1716,8 +1768,7 @@ export default function Index() {
 
     const isEditingThisNote = Boolean(
       existing?.id &&
-      activeTabId &&
-      existing.id === activeTabId &&
+      ((activeTabId && existing.id === activeTabId) || (splitTabId && existing.id === splitTabId)) &&
       typeof existing.content === "string" &&
       !isDiskEncrypted
     );
@@ -1882,7 +1933,10 @@ export default function Index() {
 
       const filteredEntries = scannedEntries;
       const currentNotes = notesRef.current;
-      const activeRelativePath = activeTabNote?.fileName ? getRelativePath(activeTabNote.folderPath || "", activeTabNote.fileName) : "";
+      const currentActiveNote = activeTabId ? currentNotes.find((n) => n.id === activeTabId) : null;
+      const activeRelativePath = currentActiveNote?.fileName
+        ? getRelativePath(currentActiveNote.folderPath || "", currentActiveNote.fileName)
+        : "";
 
       const nextItems: Array<{
         id?: string;
@@ -1989,13 +2043,18 @@ export default function Index() {
         return nextNotes;
       }
 
-      const targetPathToOpen = typeof selectRelativePath === "string" ? selectRelativePath : activeRelativePath;
+      const targetPathToOpen = typeof selectRelativePath === "string" ? selectRelativePath : "";
       if (targetPathToOpen) {
         const nextActive = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === targetPathToOpen);
         if (nextActive) {
           openTab(nextActive.id);
           removeTabsForDeletedNotes(new Set(nextNotes.map((n) => n.id)));
           return nextNotes;
+        }
+      } else if (activeRelativePath) {
+        const stillExists = nextNotes.find((n) => n.fileName && getRelativePath(n.folderPath || "", n.fileName) === activeRelativePath);
+        if (stillExists && stillExists.id !== activeTabId) {
+          setActiveTabId(stillExists.id);
         }
       }
 
@@ -2041,7 +2100,7 @@ export default function Index() {
     }
 
     // 1. Electron Desktop Native File Creation
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && electronAPI?.readWorkspaceTree) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
@@ -2207,7 +2266,7 @@ export default function Index() {
       ? rawFolderName
       : getUniqueFolderNameInPaths(normalizedPath, rawFolderName, openedFolderPaths);
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.createWorkspaceFolder && electronAPI?.readWorkspaceTree) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath) {
@@ -2291,7 +2350,7 @@ export default function Index() {
     const oldRelPath = getRelativePath(note.folderPath || "", note.fileName);
     trackDeletedRelativePath(oldRelPath);
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2408,7 +2467,7 @@ export default function Index() {
       }
     });
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2501,7 +2560,7 @@ export default function Index() {
   const duplicateFileInFolder = async (note: Note) => {
     if (!note.fileName) return;
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.copyFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2560,7 +2619,7 @@ export default function Index() {
   const duplicateFilesInFolder = async (targetNotes: Note[]) => {
     if (targetNotes.length === 0) return;
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.copyFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2622,19 +2681,61 @@ export default function Index() {
     }
   };
 
+  const resolveCopiedFolderRelativePath = (
+    parentFolderPath: string,
+    rawBaseName: string,
+    previousFolderPaths: string[],
+    nextFolderPaths: string[]
+  ): string => {
+    const prevSet = new Set(previousFolderPaths);
+    const parentPrefix = parentFolderPath ? `${parentFolderPath}/` : "";
+    const newlyAddedTopLevel = nextFolderPaths.find((p) => {
+      if (prevSet.has(p)) return false;
+      if (parentPrefix) {
+        if (!p.startsWith(parentPrefix)) return false;
+        return !p.slice(parentPrefix.length).includes("/");
+      }
+      return !p.includes("/");
+    });
+    if (newlyAddedTopLevel) return newlyAddedTopLevel;
+
+    const rootBase = rawBaseName.replace(/-copy(-\d+)?$/, "");
+    let candidate = parentFolderPath ? `${parentFolderPath}/${rootBase}-copy` : `${rootBase}-copy`;
+    let counter = 2;
+    while (prevSet.has(candidate)) {
+      candidate = parentFolderPath
+        ? `${parentFolderPath}/${rootBase}-copy-${counter}`
+        : `${rootBase}-copy-${counter}`;
+      counter++;
+    }
+    return candidate;
+  };
+
   const duplicateFolderInFolder = async (rawFolderPath: string) => {
     const folderPath = (rawFolderPath === "__opened_root__" ? "" : rawFolderPath) || "";
     if (!folderPath) return;
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const segments = folderPath.split("/").filter(Boolean);
+    const currentName = segments[segments.length - 1] || "folder";
+    const parentPath = segments.slice(0, -1).join("/");
+
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.copyFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
+          const prevFolderPaths = openedFolderPaths;
           const sourceFullPath = `${saved.folderPath}/${folderPath}`;
           const ok = await electronAPI.copyFileOrFolder({ sourceFullPath, targetFullPath: sourceFullPath });
           if (ok) {
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
+            const duplicatedFolderPath = resolveCopiedFolderRelativePath(
+              parentPath,
+              currentName,
+              prevFolderPaths,
+              folderPaths
+            );
+            copyFolderIcons(folderPath, duplicatedFolderPath);
             setOpenedFolderPaths(folderPaths);
 
             const currentNotes = notesRef.current;
@@ -2662,14 +2763,14 @@ export default function Index() {
     if (!openedRootDirHandle) return;
 
     try {
-      const segments = folderPath.split("/").filter(Boolean);
-      const currentName = segments[segments.length - 1] || "folder";
       let parentDir = openedRootDirHandle;
       for (const segment of segments.slice(0, -1)) {
         parentDir = await parentDir.getDirectoryHandle(segment);
       }
       const sourceDir = await parentDir.getDirectoryHandle(currentName);
-      await copyDirectoryRecursive(sourceDir, parentDir, `${currentName}-copy`);
+      const duplicatedFolderName = await copyDirectoryRecursive(sourceDir, parentDir, `${currentName}-copy`);
+      const duplicatedFolderPath = parentPath ? `${parentPath}/${duplicatedFolderName}` : duplicatedFolderName;
+      copyFolderIcons(folderPath, duplicatedFolderPath);
       await syncFolderFromDisk(openedRootDirHandle);
     } catch (error) {
       console.error("Duplicate folder failed", error);
@@ -2679,7 +2780,7 @@ export default function Index() {
   const copyFile = (note: Note) => {
     setClipboardItem({ kind: "file", noteId: note.id, folderPath: note.folderPath || "", fileName: note.fileName });
     toast({
-      title: t("sidebar.copyAction") || "Copied",
+      title: t("sidebar.copyAction"),
       description: note.fileName || "File copied to clipboard",
     });
   };
@@ -2689,7 +2790,7 @@ export default function Index() {
     if (noteIds.length === 0) return;
     setClipboardItem({ kind: "file-batch", noteIds, folderPath: "" });
     toast({
-      title: t("sidebar.copyAction") || "Copied",
+      title: t("sidebar.copyAction"),
       description: `${noteIds.length} files copied to clipboard`,
     });
   };
@@ -2699,7 +2800,7 @@ export default function Index() {
     const segments = folderPath.split("/").filter(Boolean);
     const folderName = segments[segments.length - 1] || folderPath;
     toast({
-      title: t("sidebar.copyAction") || "Copied",
+      title: t("sidebar.copyAction"),
       description: `Folder '${folderName}' copied to clipboard`,
     });
   };
@@ -2709,7 +2810,7 @@ export default function Index() {
 
     const targetFolderPath = (rawTargetFolderPath === "__opened_root__" ? "" : rawTargetFolderPath) || "";
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.copyFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2748,6 +2849,9 @@ export default function Index() {
             }
           }
 
+          const prevFolderPaths = openedFolderPaths;
+          let pastedSourceFolder = "";
+          let pastedFolderName = "";
           if (clipboardItem.kind === "folder" && clipboardItem.folderPath) {
             const sourceFolder = (clipboardItem.folderPath === "__opened_root__" ? "" : clipboardItem.folderPath) || "";
             const folderName = sourceFolder.split("/").filter(Boolean).pop() || sourceFolder;
@@ -2756,10 +2860,23 @@ export default function Index() {
               ? `${saved.folderPath}/${targetFolderPath}/${folderName}`
               : `${saved.folderPath}/${folderName}`;
 
-            await electronAPI.copyFileOrFolder({ sourceFullPath, targetFullPath });
+            const ok = await electronAPI.copyFileOrFolder({ sourceFullPath, targetFullPath });
+            if (ok) {
+              pastedSourceFolder = sourceFolder;
+              pastedFolderName = folderName;
+            }
           }
 
           const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
+          if (pastedSourceFolder && pastedFolderName) {
+            const pastedTargetFolderPath = resolveCopiedFolderRelativePath(
+              targetFolderPath,
+              pastedFolderName,
+              prevFolderPaths,
+              folderPaths
+            );
+            copyFolderIcons(pastedSourceFolder, pastedTargetFolderPath);
+          }
           setOpenedFolderPaths(folderPaths);
 
           const currentNotes = notesRef.current;
@@ -2777,7 +2894,7 @@ export default function Index() {
 
           replaceNotes(nextItems);
           toast({
-            title: t("sidebar.pasteAction") || "Pasted",
+            title: t("sidebar.pasteAction"),
             description: targetFolderPath ? `Pasted into '${targetFolderPath}'` : "Pasted into workspace",
           });
           return;
@@ -2855,7 +2972,9 @@ export default function Index() {
 
         const sourceDir = await getDirectoryHandleByPath(clipboardItem.folderPath);
         if (!sourceDir) return;
-        await copyDirectoryRecursive(sourceDir, targetDir, sourceName);
+        const pastedFolderName = await copyDirectoryRecursive(sourceDir, targetDir, sourceName);
+        const pastedFolderPath = normalizedTarget ? `${normalizedTarget}/${pastedFolderName}` : pastedFolderName;
+        copyFolderIcons(clipboardItem.folderPath, pastedFolderPath);
       }
 
       await syncFolderFromDisk(openedRootDirHandle);
@@ -2872,7 +2991,7 @@ export default function Index() {
     const oldRelPath = getRelativePath(sourcePath, note.fileName);
     trackDeletedRelativePath(oldRelPath);
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -2954,7 +3073,7 @@ export default function Index() {
       return;
     }
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -3004,8 +3123,8 @@ export default function Index() {
 
             replaceNotes(nextItems);
             toast({
-              title: t("sidebar.filesMovedTitle") || "Files Moved",
-              description: t("sidebar.filesMoved", { count: movedIds.size }) || `Moved ${movedIds.size} files`,
+              title: t("sidebar.filesMovedTitle"),
+              description: t("sidebar.filesMoved", { count: movedIds.size }),
               duration: 2500,
             });
             return;
@@ -3051,8 +3170,8 @@ export default function Index() {
         if (movedCount > 0) {
           await syncFolderFromDisk(openedRootDirHandle);
           toast({
-            title: t("sidebar.filesMovedTitle") || "Files Moved",
-            description: t("sidebar.filesMoved", { count: movedCount }) || `Moved ${movedCount} files`,
+            title: t("sidebar.filesMovedTitle"),
+            description: t("sidebar.filesMoved", { count: movedCount }),
             duration: 2500,
           });
         }
@@ -3070,8 +3189,8 @@ export default function Index() {
     }
     if (count > 0) {
       toast({
-        title: t("sidebar.filesMovedTitle") || "Files Moved",
-        description: t("sidebar.filesMoved", { count }) || `Moved ${count} files`,
+        title: t("sidebar.filesMovedTitle"),
+        description: t("sidebar.filesMoved", { count }),
         duration: 2500,
       });
     }
@@ -3097,7 +3216,7 @@ export default function Index() {
       }
     });
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -3162,7 +3281,7 @@ export default function Index() {
 
   const deleteFileInFolder = async (note: { id: string; folderPath?: string; fileName?: string; title?: string }) => {
     const targetNote = notesRef.current.find((n) => n.id === note.id) || (note as Note);
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -3264,7 +3383,7 @@ export default function Index() {
     if (targetNotes.length === 0) return;
 
     const count = targetNotes.length;
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -3386,7 +3505,7 @@ export default function Index() {
                 } else if (!contentToTrash) {
                   contentToTrash = await f.text();
                 }
-              } catch {}
+              } catch { /* ignore */ }
               notesToTrash.push({
                 ...n,
                 content: contentToTrash || "",
@@ -3457,7 +3576,7 @@ export default function Index() {
     );
 
     const relPaths = new Set<string>();
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     const saved = electronAPI?.getSavedWorkspace ? await electronAPI.getSavedWorkspace() : null;
 
     const notesToTrash: Note[] = [];
@@ -3545,7 +3664,7 @@ export default function Index() {
             title: t("trash.title"),
             description: notesToTrash.length > 0
               ? t("trash.movedBatchToTrash", { count: notesToTrash.length })
-              : (isTh ? `ลบโฟลเดอร์ "${folderName}" เรียบร้อยแล้ว` : `Deleted folder "${folderName}"`),
+              : (t("workspace.deletedFolder", { folderName })),
             action: notesToTrash.length > 0 ? (
               <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(notesToTrash.map((n) => n.id))}>
                 {t("trash.undo")}
@@ -3587,7 +3706,7 @@ export default function Index() {
       title: t("trash.title"),
       description: notesToTrash.length > 0
         ? t("trash.movedBatchToTrash", { count: notesToTrash.length })
-        : (isTh ? `ลบโฟลเดอร์ "${folderName}" เรียบร้อยแล้ว` : `Deleted folder "${folderName}"`),
+        : (t("workspace.deletedFolder", { folderName })),
       action: notesToTrash.length > 0 ? (
         <ToastAction altText={t("trash.undo")} onClick={() => handleRestoreFromTrash(notesToTrash.map((n) => n.id))}>
           {t("trash.undo")}
@@ -3689,7 +3808,7 @@ export default function Index() {
   };
 
   const handleOpenFolder = async (pending?: { kind: "file" | "folder"; fileName?: string; contentFormat?: "plain" | "markdown" | "html" | "css" | "javascript" | "js"; folderName?: string }) => {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     // 1. Electron Desktop Native Dialog & Tree Read
     if (electronAPI?.selectWorkspaceDialog && electronAPI?.readWorkspaceTree) {
@@ -3709,7 +3828,7 @@ export default function Index() {
           const folderName = data.folderName || data.folderPath.split(/[\\/]/).pop() || "Untitled Workspace";
           try {
             localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
-          } catch {}
+          } catch { /* ignore */ }
           setOpenedFolderName(folderName);
           setRootFolderName(folderName);
           setElectronWorkspacePath(data.folderPath);
@@ -3764,7 +3883,7 @@ export default function Index() {
       if (folderName) {
         try {
           localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
-        } catch {}
+        } catch { /* ignore */ }
       }
       setOpenedFolderName(folderName);
       setOpenedRootDirHandle(dirHandle);
@@ -3804,7 +3923,7 @@ export default function Index() {
     async (parentPath: string, workspaceName: string, includeWelcomeNote: boolean = true) => {
       setIsCreatingWorkspace(true);
       try {
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
         if (electronAPI?.createNewWorkspace) {
           const welcomeContent = includeWelcomeNote
             ? getWelcomeNoteContent(language === "th" ? "th" : "en", workspaceName)
@@ -3825,7 +3944,7 @@ export default function Index() {
             const folderName = data.folderName || workspaceName;
             try {
               localStorage.setItem(`luno_open_folders_${folderName}`, JSON.stringify(["__opened_root__"]));
-            } catch {}
+            } catch { /* ignore */ }
             setOpenedFolderName(folderName);
             setRootFolderName(folderName);
             setElectronWorkspacePath(data.folderPath);
@@ -3876,14 +3995,14 @@ export default function Index() {
 
   const handleCloseWorkspace = useCallback(async () => {
     try {
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
       if (electronAPI?.setSavedWorkspace) {
         await electronAPI.setSavedWorkspace(null);
       }
       if (openedFolderName) {
         try {
           localStorage.removeItem(`luno_open_folders_${openedFolderName}`);
-        } catch {}
+        } catch { /* ignore */ }
       }
       electronWorkspacePathRef.current = null;
       setElectronWorkspacePath(null);
@@ -3899,7 +4018,7 @@ export default function Index() {
       setIsWorkspaceLoading(false);
       try {
         localStorage.removeItem("luno_last_workspace_name");
-      } catch {}
+      } catch { /* ignore */ }
     } catch (err) {
       console.warn("Failed closing workspace:", err);
     }
@@ -3937,12 +4056,12 @@ export default function Index() {
         });
 
         toast({
-          title: t("settings.gdriveConnectedTitle") || "Google Drive Connected",
+          title: t("settings.gdriveConnectedTitle"),
           description: `${folderName} loaded from Google Drive`,
         });
       } catch (err: any) {
         toast({
-          title: t("settings.gdriveConnectFailed") || "Connection Failed",
+          title: t("settings.gdriveConnectFailed"),
           description: err.message || "Failed to open cloud workspace",
           variant: "destructive",
         });
@@ -3978,7 +4097,7 @@ export default function Index() {
         });
       } catch (err: any) {
         toast({
-          title: t("settings.gdriveConnectFailed") || "Failed to create workspace",
+          title: t("settings.gdriveConnectFailed"),
           description: err.message || "Could not create workspace on Google Drive",
           variant: "destructive",
         });
@@ -4008,12 +4127,12 @@ export default function Index() {
       });
 
       toast({
-        title: t("settings.gdriveConnectedTitle") || "Google Drive Connected",
-        description: t("settings.gdriveConnectedDesc") || "Luno is now synced with your Google Drive.",
+        title: t("settings.gdriveConnectedTitle"),
+        description: t("settings.gdriveConnectedDesc"),
       });
     } catch (err: any) {
       toast({
-        title: t("settings.gdriveConnectFailed") || "Connection Failed",
+        title: t("settings.gdriveConnectFailed"),
         description: err.message || "Failed to connect to Google Drive",
         variant: "destructive",
       });
@@ -4068,7 +4187,7 @@ export default function Index() {
 
     async function restoreFolderConnection() {
       try {
-        const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+        const electronAPI = window.electronAPI;
 
         // 1. Electron Desktop Native Saved Workspace Load (Priority 1)
         if (electronAPI?.getSavedWorkspace && electronAPI?.readWorkspaceTree) {
@@ -4251,7 +4370,7 @@ export default function Index() {
 
   // Listen for real-time filesystem events from Electron workspace watcher (sub-second reactivity)
   useEffect(() => {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (!electronAPI?.onWorkspaceChanged) return;
 
     const unsubscribe = electronAPI.onWorkspaceChanged((data: { folderPath: string; entries: any[]; folderPaths: string[] }) => {
@@ -4305,9 +4424,10 @@ export default function Index() {
   // Load .luno/settings.json and .luno/favorites.json when workspace opens
   useEffect(() => {
     let active = true;
+    loadedWorkspaceKeyRef.current = null;
+    workspaceFavoritesRef.current = new Set();
     const currentWsKey = electronWorkspacePathRef.current || openedRootDirHandle?.name || openedFolderName;
     if (!currentWsKey) {
-      loadedWorkspaceKeyRef.current = null;
       return;
     }
 
@@ -4368,12 +4488,16 @@ export default function Index() {
     existingSet.add("favorites");
     existingSet.add("tags");
     existingSet.add("trash");
+    existingSet.add("help");
     existingSet.add("whats-new");
     if (newlyCreatedNoteIdRef.current) {
       existingSet.add(newlyCreatedNoteIdRef.current);
     }
     removeTabsForDeletedNotes(existingSet);
-  }, [notes, removeTabsForDeletedNotes]);
+    if (splitTabId && !isSystemOrWebTab(splitTabId) && !existingSet.has(splitTabId)) {
+      setSplitTabId(null);
+    }
+  }, [notes, removeTabsForDeletedNotes, splitTabId]);
 
   const openTabNotes = useMemo(() => {
     return openTabIds
@@ -4496,7 +4620,7 @@ export default function Index() {
         e.preventDefault();
         e.stopPropagation();
         if (activeTabId) {
-          handleCloseTab(activeTabId);
+          handleCloseTabRef.current(activeTabId);
         }
         return;
       }
@@ -4521,13 +4645,15 @@ export default function Index() {
       if ((key === "," || code === "Comma") && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
-        openTab("settings");
+        handleOpenSettings();
         return;
       }
 
       // 7. Ctrl + K / Ctrl + F (Universal Search Focus)
+      // When cursor is inside rich-text ProseMirror, let Ctrl+K open the Editor's Insert/Edit Link dialog.
+      const isInsideRichTextEditor = Boolean(target?.closest?.(".ProseMirror"));
       const isSearchTrigger =
-        (key === "k" || code === "KeyK" || key === "า" || e.keyCode === 75) ||
+        ((key === "k" || code === "KeyK" || key === "า" || e.keyCode === 75) && !isInsideRichTextEditor) ||
         ((key === "f" || code === "KeyF" || key === "ด" || e.keyCode === 70) && !isEditing);
 
       if (isSearchTrigger && !e.shiftKey && !e.altKey) {
@@ -4646,16 +4772,24 @@ export default function Index() {
         return;
       }
 
-      // 9. Ctrl + Shift + T (Toggle Floating Clock when not in editor)
-      if (e.shiftKey && (key === "t" || code === "KeyT") && !isEditing) {
+      // 9. Ctrl + Shift + T (Toggle Floating Clock)
+      if (e.shiftKey && (key === "t" || code === "KeyT")) {
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent("app:toggle-clock"));
         return;
       }
 
-      // 10. Ctrl + Shift + A (Open Luno AI) or Ctrl + Shift + L (when not in editor)
-      if ((e.shiftKey && (key === "a" || code === "KeyA")) || (e.shiftKey && (key === "l" || code === "KeyL") && !isEditing)) {
+      // 10. Ctrl + Shift + L (System-wide Fix Mistyped Language TH/EN everywhere in app)
+      if (isFixLanguageShortcutEvent(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerInAppFixLanguage();
+        return;
+      }
+
+      // 11. Ctrl + Shift + A (Open Luno AI)
+      if (e.shiftKey && !e.altKey && (key === "a" || code === "KeyA")) {
         e.preventDefault();
         e.stopPropagation();
         if (settings.appLayout === "compact") {
@@ -4670,19 +4804,71 @@ export default function Index() {
 
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
-  }, [createNoteInFolder, handleOpenFolder, activeTabId, closeTab, notes, setSidebarOpen, openTab, isMobile, sidebarOpen, cycleActiveTab, handleOpenHelp]);
+  }, [createNoteInFolder, handleOpenFolder, activeTabId, closeTab, notes, setSidebarOpen, openTab, isMobile, sidebarOpen, cycleActiveTab, handleOpenHelp, handleOpenSettings, settings.appLayout]);
+
+  // Subscribe to Electron main-process global Fix Language triggers & feedback
+  useEffect(() => {
+    const electronAPI = window.electronAPI;
+    if (!electronAPI) return;
+    const unsubTrigger = electronAPI.onTriggerFixLanguage?.(() => {
+      triggerInAppFixLanguage();
+    });
+    const unsubFeedback = electronAPI.onFixLanguageFeedback?.((payload) => {
+      if (payload?.status === "empty-selection") {
+        showSelectTextToFixToast();
+      }
+    });
+    return () => {
+      unsubTrigger?.();
+      unsubFeedback?.();
+    };
+  }, []);
+
+  // Sync OS-wide Fix Language setting, background helper & localized labels with Electron main process
+  useEffect(() => {
+    const configure = window.electronAPI?.configureGlobalFixLanguage;
+    if (!configure) return;
+    void configure({
+      enabled: settings.globalFixLanguage !== false,
+      backgroundHelper: settings.backgroundFixLanguageHelper !== false,
+      language: settings.language,
+      labels: {
+        title: t("editor.fixLanguage"),
+        selectTextFirst: t("editor.selectTextToFix"),
+        trayTooltipActive: t("settings.helperTrayTooltipActive"),
+        trayTooltipPaused: t("settings.helperTrayTooltipPaused"),
+        menuHeader: t("settings.helperMenuHeader"),
+        menuEnabled: t("settings.helperMenuEnabled"),
+        menuOpenApp: t("settings.helperMenuOpenApp"),
+        menuExit: t("settings.helperMenuExit"),
+        conflictBalloon: t("settings.helperConflictBalloon"),
+      },
+    })
+      .then((status) => {
+        window.dispatchEvent(new CustomEvent("luno:fix-language-status", { detail: status }));
+      })
+      .catch((err) => {
+        console.warn("Failed configuring global Fix Language shortcut:", err);
+      });
+  }, [settings.globalFixLanguage, settings.backgroundFixLanguageHelper, settings.language, t]);
 
   useEffect(() => {
     const handleOpenSettingsEvent = (e: Event) => {
       const customEvent = e as CustomEvent<{ category?: unknown }>;
-      handleOpenSettings(customEvent.detail?.category || "ai");
+      handleOpenSettings(customEvent.detail?.category || "general");
+    };
+    const handleOpenHelpEvent = () => {
+      handleOpenHelp();
     };
     window.addEventListener("luno:open-settings", handleOpenSettingsEvent);
+    window.addEventListener("luno:open-help", handleOpenHelpEvent);
     return () => {
       window.removeEventListener("luno:open-settings", handleOpenSettingsEvent);
+      window.removeEventListener("luno:open-help", handleOpenHelpEvent);
     };
-  }, [handleOpenSettings]);
+  }, [handleOpenSettings, handleOpenHelp]);
 
+  const handleCloseTabRef = useRef<(id: string) => void>(() => {});
   const [pendingPdfCloseRequest, setPendingPdfCloseRequest] = useState<{
     dirtyNoteIds: string[];
     action: PendingPdfCloseAction;
@@ -4696,6 +4882,9 @@ export default function Index() {
       }
       void finalizePdfTabSession(id);
       clearNoteEditorHistory(id);
+      if (splitTabId === id) {
+        setSplitTabId(null);
+      }
       if (lastActiveNoteId === id) {
         const nextValid = openTabIds.find((t) => t !== id && !isSystemOrWebTab(t)) ?? null;
         setLastActiveNoteId(nextValid);
@@ -4713,7 +4902,7 @@ export default function Index() {
         });
       }
     },
-    [closeTab, notes, lastActiveNoteId, lastActiveSplitNoteId, openTabIds]
+    [closeTab, notes, lastActiveNoteId, lastActiveSplitNoteId, openTabIds, splitTabId]
   );
 
   const handleCloseTab = useCallback(
@@ -4732,6 +4921,7 @@ export default function Index() {
     },
     [activeTabId, openTab, executeCloseTab]
   );
+  handleCloseTabRef.current = handleCloseTab;
 
   const executeCloseOtherTabs = useCallback(
     (keepId: string) => {
@@ -4743,6 +4933,9 @@ export default function Index() {
         void finalizePdfTabSession(id);
         clearNoteEditorHistory(id);
       });
+      if (splitTabId && tabsToClose.includes(splitTabId)) {
+        setSplitTabId(null);
+      }
       if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
         setLastActiveNoteId(!isSystemOrWebTab(keepId) ? keepId : null);
       }
@@ -4760,7 +4953,7 @@ export default function Index() {
         });
       }
     },
-    [openTabIds, closeOtherTabs, lastActiveNoteId, lastActiveSplitNoteId]
+    [openTabIds, closeOtherTabs, lastActiveNoteId, lastActiveSplitNoteId, splitTabId]
   );
 
   const handleCloseOtherTabs = useCallback(
@@ -4790,6 +4983,7 @@ export default function Index() {
       void finalizePdfTabSession(id);
       clearNoteEditorHistory(id);
     });
+    setSplitTabId(null);
     setLastActiveNoteId(null);
     setLastActiveSplitNoteId(null);
     closeAllTabs();
@@ -4823,6 +5017,9 @@ export default function Index() {
         void finalizePdfTabSession(id);
         clearNoteEditorHistory(id);
       });
+      if (splitTabId && tabsToClose.includes(splitTabId)) {
+        setSplitTabId(null);
+      }
       if (lastActiveNoteId && tabsToClose.includes(lastActiveNoteId)) {
         const remaining = openTabIds.slice(0, idx + 1).filter((t) => !isSystemOrWebTab(t));
         setLastActiveNoteId(remaining[remaining.length - 1] ?? null);
@@ -4842,7 +5039,7 @@ export default function Index() {
         });
       }
     },
-    [openTabIds, closeTabsToRight, lastActiveNoteId, lastActiveSplitNoteId]
+    [openTabIds, closeTabsToRight, lastActiveNoteId, lastActiveSplitNoteId, splitTabId]
   );
 
   const handleCloseTabsToRight = useCallback(
@@ -4990,7 +5187,7 @@ export default function Index() {
         if (webUrl) {
           handleOpenWebTab(webUrl, note.title);
           toast({
-            title: t("editor.duplicateTab") || "Duplicate",
+            title: t("editor.duplicateTab"),
             description: note.title || webUrl,
           });
         }
@@ -5019,7 +5216,7 @@ export default function Index() {
       if (newNote) {
         openTab(newNote.id);
         toast({
-          title: t("editor.duplicateTab") || "Duplicate",
+          title: t("editor.duplicateTab"),
           description: newNote.fileName || newNote.title,
         });
       }
@@ -5042,13 +5239,172 @@ export default function Index() {
   const handleCloseSplitTab = useCallback(
     (id: string) => {
       if (id === splitTabId) {
-        clearNoteEditorHistory(id);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("luno:flush-note-before-close", { detail: { noteId: id } }));
+        }
+        if (!openTabIds.includes(id)) {
+          clearNoteEditorHistory(id);
+        }
         setSplitTabId(null);
       } else {
         handleCloseTab(id);
       }
     },
-    [splitTabId, handleCloseTab]
+    [splitTabId, openTabIds, handleCloseTab]
+  );
+
+  const persistModifiedNotesToDisk = useCallback(
+    async (modifiedNotes: Note[]) => {
+      if (modifiedNotes.length === 0) return;
+      const electronAPI = window.electronAPI;
+      let savedFolderPath: string | null = null;
+      if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
+        try {
+          const saved = await electronAPI.getSavedWorkspace();
+          savedFolderPath = saved?.folderPath ?? null;
+        } catch { /* ignore */ }
+      }
+
+      for (const n of modifiedNotes) {
+        noteEditorStateMap.delete(n.id);
+        let payloadToWrite = n.content;
+        if (n.isLocked) {
+          const activePin = unlockedSessionPinsRef.current.get(n.id);
+          if (!activePin || isEncryptedNote(n.content)) continue;
+          try {
+            payloadToWrite = await encryptNoteContent(n.content, activePin);
+          } catch {
+            continue;
+          }
+        }
+        if (savedFolderPath && electronAPI?.writeFileContent && n.fileName) {
+          const fullPath = n.folderPath
+            ? `${savedFolderPath}/${n.folderPath}/${n.fileName}`
+            : `${savedFolderPath}/${n.fileName}`;
+          await electronAPI.writeFileContent({ fullPath, content: payloadToWrite });
+        } else {
+          try {
+            const handle = await getStoredFileHandle(n.id);
+            if (handle?.createWritable) {
+              const writable = await handle.createWritable();
+              await writable.write(payloadToWrite);
+              await writable.close();
+            }
+          } catch { /* ignore */ }
+        }
+        if (settings.storageMode === "gdrive" && isGoogleDriveConnected()) {
+          queueSync(n, (syncedNote) => {
+            updateNote(syncedNote.id, {
+              driveFileId: syncedNote.driveFileId,
+              driveSyncedAt: syncedNote.driveSyncedAt,
+            });
+          });
+        }
+      }
+    },
+    [settings.storageMode, queueSync, updateNote]
+  );
+
+  const handleRenameTagGlobally = useCallback(
+    (oldTag: string, newTag: string) => {
+      const targetOld = oldTag.replace(/^#+/, "").trim();
+      const targetNew = newTag.replace(/^#+/, "").trim();
+      if (!targetOld || !targetNew || targetOld.toLowerCase() === targetNew.toLowerCase()) return;
+
+      const modifiedNotes: Note[] = [];
+      for (const note of notesRef.current) {
+        if (!isMarkdownNote(note) || (note.isLocked && !note.isDecrypted)) continue;
+        const hasTag = note.tags?.some((t) => t.toLowerCase() === targetOld.toLowerCase());
+        if (!hasTag) continue;
+        const newContent = renameTagInMarkdown(note.content, targetOld, targetNew);
+        const parsed = parseFrontmatterAndTags(newContent);
+        modifiedNotes.push({
+          ...note,
+          content: newContent,
+          tags: parsed.allTags,
+          updatedAt: Date.now(),
+        });
+      }
+      renameTagGlobally(oldTag, newTag);
+      void persistModifiedNotesToDisk(modifiedNotes);
+    },
+    [renameTagGlobally, persistModifiedNotesToDisk]
+  );
+
+  const handleDeleteTagGlobally = useCallback(
+    (tagToDelete: string) => {
+      const target = tagToDelete.replace(/^#+/, "").trim();
+      if (!target) return;
+
+      const modifiedNotes: Note[] = [];
+      for (const note of notesRef.current) {
+        if (!isMarkdownNote(note) || (note.isLocked && !note.isDecrypted)) continue;
+        const hasTag = note.tags?.some((t) => t.toLowerCase() === target.toLowerCase());
+        if (!hasTag) continue;
+        const newContent = removeTagFromMarkdown(note.content, target);
+        const parsed = parseFrontmatterAndTags(newContent);
+        modifiedNotes.push({
+          ...note,
+          content: newContent,
+          tags: parsed.allTags,
+          updatedAt: Date.now(),
+        });
+      }
+      deleteTagGlobally(tagToDelete);
+      void persistModifiedNotesToDisk(modifiedNotes);
+    },
+    [deleteTagGlobally, persistModifiedNotesToDisk]
+  );
+
+  const handleInsertAiTextToNote = useCallback(
+    (
+      targetNote: Note | null | undefined,
+      text: string,
+      showToast = true,
+      imagePayload?: {
+        images: Array<{ src: string; alt?: string; relativeSrc?: string }>;
+        captionText?: string;
+        htmlContent?: string;
+      }
+    ) => {
+      if (!targetNote || (!text && !imagePayload?.images?.length)) return;
+      let wasHandled = false;
+      window.dispatchEvent(
+        new CustomEvent("luno:insert-to-active-editor", {
+          detail: {
+            noteId: targetNote.id,
+            text,
+            images: imagePayload?.images,
+            captionText: imagePayload?.captionText,
+            onHandled: () => {
+              wasHandled = true;
+            },
+          },
+        })
+      );
+      if (!wasHandled) {
+        const isHtml =
+          targetNote.contentFormat === "html" ||
+          Boolean(targetNote.fileName?.toLowerCase().endsWith(".html"));
+        const contentToAppend = isHtml && imagePayload?.htmlContent ? imagePayload.htmlContent : text;
+        const existingContent = targetNote.content || "";
+        const updatedContent = existingContent.trim()
+          ? `${existingContent}\n\n${contentToAppend}`
+          : contentToAppend;
+        noteEditorStateMap.delete(targetNote.id);
+        updateNote(targetNote.id, { content: updatedContent });
+        void persistModifiedNotesToDisk([{ ...targetNote, content: updatedContent, updatedAt: Date.now() }]);
+      }
+      if (showToast) {
+        toast({
+          title: t("lunoAi.insertSuccessTitle"),
+          description: t("lunoAi.insertToNoteSuccess", {
+            name: targetNote.fileName || targetNote.title || "Note",
+          }),
+        });
+      }
+    },
+    [updateNote, persistModifiedNotesToDisk, t]
   );
 
   const handleOpenSidebar = useCallback(() => {
@@ -5105,7 +5461,7 @@ export default function Index() {
     }
 
     // Write restored files to physical disk (Electron workspace)
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && (electronAPI?.writeFileContent || electronAPI?.writeFileBase64)) {
       void (async () => {
         try {
@@ -5242,7 +5598,7 @@ export default function Index() {
     closeTab(id, notes.map((n) => n.id));
     const result = deleteNote(id);
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && targetNote.fileName) {
       void (async () => {
         try {
@@ -5337,7 +5693,7 @@ export default function Index() {
             } else if (!contentToTrash) {
               contentToTrash = await file.text();
             }
-          } catch {}
+          } catch { /* ignore */ }
 
           moveToTrash({
             ...targetNote,
@@ -5489,19 +5845,10 @@ export default function Index() {
         </div>
 
         {/* Center Animated Loader */}
-        <div className="flex flex-col items-center gap-4 text-center px-6 animate-in fade-in zoom-in-95 duration-300">
-          <div className="relative flex items-center justify-center py-2">
-            <Loader2 className="h-9 w-9 text-primary animate-spin" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground tracking-tight">
-              {(t as any)("sidebar.loadingWorkspaceTitle") || "Opening Workspace..."}
-            </h2>
-            <p className="text-xs text-muted-foreground max-w-[320px]">
-              {(t as any)("sidebar.loadingWorkspaceDesc") || "Reading files and restoring workspace data..."}
-            </p>
-          </div>
-        </div>
+        <PageLoader
+          title={t("sidebar.loadingWorkspaceTitle")}
+          description={t("sidebar.loadingWorkspaceDesc")}
+        />
       </div>
     );
   }
@@ -5511,6 +5858,325 @@ export default function Index() {
     !openedRootDirHandle &&
     !electronWorkspacePathRef.current &&
     Boolean(openedFolderName);
+
+  const paneSuspenseFallback = <PageLoader />;
+
+  /**
+   * Unified pane view switchboard shared across Split Left, Split Right, and Single Pane modes (LN-REUSE-01 / C-3).
+   */
+  const renderPaneViews = (pane: "left" | "right" | "main") => {
+    const isRight = pane === "right";
+    const tabId = isRight ? splitTabId : activeTabId;
+    const tabNote = isRight ? splitTabNote : activeTabNote;
+    const editorNote = isRight ? splitEditorNote : activeEditorNote;
+
+    const isMatch = (key: string) => tabId === key || Boolean(tabId?.startsWith(`${key}:`));
+    const isMounted = (key: string) =>
+      isRight
+        ? isMatch(key)
+        : openTabIds.some((id) => id === key || id.startsWith(`${key}:`));
+
+    const handleToggleFavorite = (id: string) => {
+      const found = notes.find((n) => n.id === id);
+      if (found) {
+        handleUpdateNote(id, { isFavorite: !found.isFavorite });
+      }
+    };
+
+    const handleCloseSystemView = (fallbackId: string) => {
+      if (isRight) {
+        setSplitTabId(null);
+      } else {
+        closeTab(tabId || fallbackId, notes.map((n) => n.id));
+      }
+    };
+
+    const openTarget = (id: string) => (isRight ? setSplitTabId(id) : openTab(id));
+    const isEditorVisible =
+      (!isRight || Boolean(tabId)) &&
+      !isSystemOrWebTab(tabId || "") &&
+      tabNote?.fileType !== "web-viewer";
+
+    return (
+      <>
+        {!isRight && (
+          <div className={isMatch("home") ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+            {isMounted("home") && (
+              <HomeView
+                notes={notes}
+                onOpenNote={(id) => openTab(id)}
+                onCreateWithTemplate={handleCreateFromHomeTemplate}
+                onCreateBlankNote={handleCreateBlankFromHome}
+                onViewAllTemplates={() => openTab("templates")}
+                onToggleFavorite={handleToggleFavorite}
+                onOpenSearch={() => {
+                  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+                }}
+                onViewAllNotes={() => {
+                  setSidebarOpen(true);
+                  window.dispatchEvent(new CustomEvent("luno:filter-notes", { detail: "all" }));
+                }}
+                onViewAllFavorites={() => openTab("favorites")}
+              />
+            )}
+          </div>
+        )}
+        <div className={isMatch("templates") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("templates") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <TemplatesView onCreateWithTemplate={handleCreateFromHomeTemplate} notes={notes} />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("relations") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("relations") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <RelationsView
+                notes={notes}
+                onSelectNote={isRight ? handleSelectNoteFromRelationsSplit : handleSelectNoteFromRelations}
+                activeNoteId={tabId}
+                isMobile={isMobile}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("favorites") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("favorites") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <FavoritesTabView
+                notes={notes}
+                onOpenNote={openTarget}
+                onToggleFavorite={handleToggleFavorite}
+                onCreateBlankNote={handleCreateBlankFromHome}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("tags") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("tags") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <TagsTabView
+                notes={notes}
+                onOpenNote={openTarget}
+                onToggleFavorite={handleToggleFavorite}
+                onRenameTagGlobally={handleRenameTagGlobally}
+                onDeleteTagGlobally={handleDeleteTagGlobally}
+                onCreateBlankNote={handleCreateBlankFromHome}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("trash") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("trash") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <TrashView
+                trashedNotes={trashedNotes}
+                onRestore={handleRestoreFromTrash}
+                onDeletePermanently={handleDeletePermanently}
+                onEmptyTrash={handleEmptyTrash}
+                onOpenSettings={() => handleOpenSettings("files")}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("settings") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("settings") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <SettingsTabView
+                initialCategory={settingsCategory}
+                onCategoryChange={setSettingsCategory}
+                onClose={() => handleCloseSystemView("settings")}
+                notes={notes}
+                onNotesUpdated={replaceNotes}
+                openedFolderName={openedFolderName}
+                folderPaths={openedFolderPaths}
+                isCloudWorkspace={isCloudWorkspace}
+                onCloseWorkspace={handleCloseWorkspace}
+                onOpenWebTab={handleOpenWebTab}
+                onOpenWhatsNew={handleOpenWhatsNew}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("help") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("help") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <HelpTabView
+                initialCategory={helpCategory}
+                onCategoryChange={setHelpCategory}
+                onClose={() => handleCloseSystemView("help")}
+                onOpenSettings={handleOpenSettings}
+                onOpenWhatsNew={handleOpenWhatsNew}
+                onOpenWebTab={handleOpenWebTab}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("whats-new") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+          {isMounted("whats-new") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <WhatsNewView
+                onClose={() => handleCloseSystemView("whats-new")}
+                onOpenSettings={handleOpenSettings}
+                onOpenHelp={handleOpenHelp}
+                onOpenWebTab={handleOpenWebTab}
+              />
+            </Suspense>
+          )}
+        </div>
+        <div className={isMatch("luno-ai") ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
+          {isMounted("luno-ai") && (
+            <Suspense fallback={paneSuspenseFallback}>
+              <LunoAiView
+                notes={notes}
+                openedFolderName={openedFolderName}
+                activeNote={
+                  isRight
+                    ? splitTabNote
+                    : splitTabNote ??
+                      (notes.find(
+                        (n) =>
+                          n.id ===
+                          openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:")),
+                      ) ??
+                        notes[0] ??
+                        null)
+                }
+                onInsertToActiveNote={(text, imagePayload) => {
+                  const targetNote = isRight
+                    ? splitTabNote
+                    : notes.find(
+                        (n) =>
+                          n.id ===
+                          openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:")),
+                      ) ?? notes[0];
+                  handleInsertAiTextToNote(targetNote, text, !isRight, imagePayload);
+                }}
+                onInsertToSelectedNote={(targetNoteId, text, imagePayload) => {
+                  const targetNote = notes.find((n) => n.id === targetNoteId);
+                  handleInsertAiTextToNote(targetNote, text, !isRight, imagePayload);
+                }}
+                onCreateNewNote={(fileName, content, folderPath) => {
+                  const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
+                  void createNoteInFolder(folderPath || "", {
+                    fileName: targetName,
+                    initialContent: content,
+                  });
+                  if (!isRight) {
+                    toast({
+                      title: t("lunoAi.createSuccessTitle"),
+                      description: t("lunoAi.fileCreatedSuccess", { name: targetName }),
+                    });
+                  }
+                }}
+                onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
+                onOpenWebTab={handleOpenWebTab}
+              />
+            </Suspense>
+          )}
+        </div>
+        {isRight ? (
+          splitTabId?.startsWith("web:") && (
+            <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+              <Suspense fallback={paneSuspenseFallback}>
+                <WebViewerView
+                  tabId={splitTabId}
+                  initialUrl={
+                    webTabs[splitTabId]?.url ||
+                    (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")
+                  }
+                  title={webTabs[splitTabId]?.title}
+                  displayUrl={webTabs[splitTabId]?.displayUrl}
+                  filePath={webTabs[splitTabId]?.filePath}
+                  onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
+                  onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
+                  onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
+                  onInsertToActiveNote={handleInsertLinkToActiveNote}
+                  activeNotes={openNoteTabs}
+                  onClose={() => setSplitTabId(null)}
+                  onSplit={() => setSplitTabId(null)}
+                  isSplit={true}
+                />
+              </Suspense>
+            </div>
+          )
+        ) : (
+          openTabIds
+            .filter((id) => id.startsWith("web:") || (id === activeTabId && activeTabNote?.fileType === "web-viewer"))
+            .map((webId) => (
+              <div
+                key={webId}
+                className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
+              >
+                <Suspense fallback={paneSuspenseFallback}>
+                  <WebViewerView
+                    tabId={webId}
+                    initialUrl={
+                      webTabs[webId]?.url ||
+                      (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")
+                    }
+                    title={webTabs[webId]?.title}
+                    displayUrl={webTabs[webId]?.displayUrl}
+                    filePath={webTabs[webId]?.filePath}
+                    onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
+                    onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
+                    onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
+                    onInsertToActiveNote={handleInsertLinkToActiveNote}
+                    activeNotes={openNoteTabs}
+                    onClose={() => handleCloseTab(webId)}
+                    onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
+                    isSplit={splitTabId === webId}
+                  />
+                </Suspense>
+              </div>
+            ))
+        )}
+        <div
+          className={
+            isSystemOrWebTab(tabId || "") || tabNote?.fileType === "web-viewer"
+              ? "hidden"
+              : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"
+          }
+        >
+          <Editor
+            key={`editor-pane-${pane}`}
+            note={editorNote}
+            notes={notes}
+            onUpdate={handleUpdateNote}
+            onDelete={handleDeleteNote}
+            onDeleteFile={deleteFileInFolder}
+            onCreate={handleCreateNote}
+            onCreateFolder={createFolderInFolder}
+            onOpenFolder={handleOpenFolder}
+            onRenameFile={renameFileInFolder}
+            onDuplicateFile={duplicateFileInFolder}
+            openedFolderName={openedFolderName}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            isSidebarOpen={sidebarOpen}
+            editorFontSize={settings.editorFontSize}
+            isMobile={isMobile}
+            rootDirHandle={openedRootDirHandle}
+            onCloseSplit={isRight ? () => setSplitTabId(null) : undefined}
+            settingsOpen={settingsOpen}
+            onSettingsOpenChange={(open) => {
+              if (open) openTab("settings");
+              else closeTab("settings", notes.map((n) => n.id));
+            }}
+            rightPanelOpen={isRight ? undefined : rightPanelOpen}
+            onCloseRightPanel={isRight ? undefined : () => setRightPanelOpen(false)}
+            onSelectNote={openTarget}
+            onOpenWebTab={handleOpenWebTab}
+            onOpenSettings={handleOpenSettings}
+            onUnlockNote={handleUnlockNote}
+            onRelockNote={handleRelockNote}
+            onGetActivePin={handleGetActivePin}
+            paneId={pane}
+            isVisible={isEditorVisible}
+          />
+        </div>
+      </>
+    );
+  };
 
   return (
     <div className="flex h-full w-full max-h-full max-w-full overflow-hidden bg-background">
@@ -5556,8 +6222,8 @@ export default function Index() {
           isMobile={isMobile}
           onClose={handleCloseSidebar}
           confirmBeforeDelete={settings.confirmBeforeDelete}
-          onRenameTagGlobally={renameTagGlobally}
-          onDeleteTagGlobally={deleteTagGlobally}
+          onRenameTagGlobally={handleRenameTagGlobally}
+          onDeleteTagGlobally={handleDeleteTagGlobally}
           onToggleFavorite={handleToggleFavoriteSidebar}
           onOpenPinModal={handleOpenPinModal}
           onOpenSettings={handleOpenSettings}
@@ -5622,255 +6288,7 @@ export default function Index() {
                   </div>
                 ) : (
                   <>
-                    <div className={(activeTabId === "home" || activeTabId?.startsWith("home:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                      {openTabIds.some((id) => id === "home" || id.startsWith("home:")) && (
-                        <HomeView
-                          notes={notes}
-                          onOpenNote={(id) => openTab(id)}
-                          onCreateWithTemplate={handleCreateFromHomeTemplate}
-                          onCreateBlankNote={handleCreateBlankFromHome}
-                          onViewAllTemplates={() => openTab("templates")}
-                          onToggleFavorite={(id) => {
-                            const found = notes.find((n) => n.id === id);
-                            if (found) {
-                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                            }
-                          }}
-                          onOpenSearch={() => {
-                            window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-                          }}
-                          onViewAllNotes={() => {
-                            setSidebarOpen(true);
-                            window.dispatchEvent(new CustomEvent("luno:filter-notes", { detail: "all" }));
-                          }}
-                          onViewAllFavorites={() => openTab("favorites")}
-                        />
-                      )}
-                    </div>
-                    <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <TemplatesView
-                            onCreateWithTemplate={handleCreateFromHomeTemplate}
-                            notes={notes}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "relations" || activeTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "relations" || id.startsWith("relations:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <RelationsView
-                            notes={notes}
-                            onSelectNote={handleSelectNoteFromRelations}
-                            activeNoteId={activeTabId}
-                            isMobile={isMobile}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <FavoritesTabView
-                            notes={notes}
-                            onOpenNote={(id) => openTab(id)}
-                            onToggleFavorite={(id) => {
-                              const found = notes.find((n) => n.id === id);
-                              if (found) {
-                                handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                              }
-                            }}
-                            onCreateBlankNote={handleCreateBlankFromHome}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <TagsTabView
-                            notes={notes}
-                            onOpenNote={(id) => openTab(id)}
-                            onToggleFavorite={(id) => {
-                              const found = notes.find((n) => n.id === id);
-                              if (found) {
-                                handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                              }
-                            }}
-                            onRenameTagGlobally={renameTagGlobally}
-                            onDeleteTagGlobally={deleteTagGlobally}
-                            onCreateBlankNote={handleCreateBlankFromHome}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <TrashView
-                            trashedNotes={trashedNotes}
-                            onRestore={handleRestoreFromTrash}
-                            onDeletePermanently={handleDeletePermanently}
-                            onEmptyTrash={handleEmptyTrash}
-                            onOpenSettings={() => handleOpenSettings("files")}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <SettingsTabView
-                            initialCategory={settingsCategory}
-                            onCategoryChange={setSettingsCategory}
-                            onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
-                            notes={notes}
-                            onNotesUpdated={replaceNotes}
-                            openedFolderName={openedFolderName}
-                            folderPaths={openedFolderPaths}
-                            isCloudWorkspace={isCloudWorkspace}
-                            onCloseWorkspace={handleCloseWorkspace}
-                            onOpenWebTab={handleOpenWebTab}
-                            onOpenWhatsNew={handleOpenWhatsNew}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <HelpTabView
-                            initialCategory={helpCategory}
-                            onCategoryChange={setHelpCategory}
-                            onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
-                            onOpenSettings={handleOpenSettings}
-                            onOpenWhatsNew={handleOpenWhatsNew}
-                            onOpenWebTab={handleOpenWebTab}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <WhatsNewView
-                            onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
-                            onOpenSettings={handleOpenSettings}
-                            onOpenHelp={handleOpenHelp}
-                            onOpenWebTab={handleOpenWebTab}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
-                      {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <LunoAiView
-                            notes={notes}
-                            openedFolderName={openedFolderName}
-                            activeNote={splitTabNote ?? (notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null)}
-                            onInsertToActiveNote={(text) => {
-                              const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
-                              if (targetNote) {
-                                const existingContent = targetNote.content || "";
-                                const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                                updateNote(targetNote.id, { content: updatedContent });
-                                toast({
-                                  title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                  description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
-                                });
-                              }
-                            }}
-                            onInsertToSelectedNote={(targetNoteId, text) => {
-                              const targetNote = notes.find((n) => n.id === targetNoteId);
-                              if (targetNote) {
-                                const existingContent = targetNote.content || "";
-                                const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                                updateNote(targetNote.id, { content: updatedContent });
-                                toast({
-                                  title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                  description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
-                                });
-                              }
-                            }}
-                            onCreateNewNote={(fileName, content, folderPath) => {
-                              const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                              void createNoteInFolder(folderPath || "", {
-                                fileName: targetName,
-                                initialContent: content,
-                              });
-                              toast({
-                                title: t("lunoAi.createSuccessTitle") || "Note Created",
-                                description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
-                              });
-                            }}
-                            onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                            onOpenWebTab={handleOpenWebTab}
-                          />
-                        </Suspense>
-                      )}
-                    </div>
-                    {openTabIds.filter((id) => id.startsWith("web:") || (id === activeTabId && activeTabNote?.fileType === "web-viewer")).map((webId) => (
-                      <div
-                        key={webId}
-                        className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
-                      >
-                        <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                          <WebViewerView
-                            tabId={webId}
-                            initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
-                            title={webTabs[webId]?.title}
-                            displayUrl={webTabs[webId]?.displayUrl}
-                            filePath={webTabs[webId]?.filePath}
-                            onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
-                            onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
-                            onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
-                            onInsertToActiveNote={handleInsertLinkToActiveNote}
-                            activeNotes={openNoteTabs}
-                            onClose={() => handleCloseTab(webId)}
-                            onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
-                            isSplit={splitTabId === webId}
-                          />
-                        </Suspense>
-                      </div>
-                    ))}
-                    <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
-                      <Editor
-                        key="editor-pane-left"
-                        note={activeEditorNote}
-                        notes={notes}
-                        onUpdate={handleUpdateNote}
-                        onDelete={handleDeleteNote}
-                        onDeleteFile={deleteFileInFolder}
-                        onCreate={handleCreateNote}
-                        onCreateFolder={createFolderInFolder}
-                        onOpenFolder={handleOpenFolder}
-                        onRenameFile={renameFileInFolder}
-                        onDuplicateFile={duplicateFileInFolder}
-                        openedFolderName={openedFolderName}
-                        onOpenSidebar={() => setSidebarOpen(true)}
-                        isSidebarOpen={sidebarOpen}
-                        editorFontSize={settings.editorFontSize}
-                        isMobile={isMobile}
-                        rootDirHandle={openedRootDirHandle}
-                        settingsOpen={settingsOpen}
-                        onSettingsOpenChange={(open) => {
-                          if (open) openTab("settings");
-                          else closeTab("settings", notes.map((n) => n.id));
-                        }}
-                        rightPanelOpen={rightPanelOpen}
-                        onCloseRightPanel={() => setRightPanelOpen(false)}
-                        onSelectNote={(id) => openTab(id)}
-                        onOpenWebTab={handleOpenWebTab}
-                        onOpenSettings={handleOpenSettings}
-                        onUnlockNote={handleUnlockNote}
-                        onRelockNote={handleRelockNote}
-                        onGetActivePin={handleGetActivePin}
-                        paneId="left"
-                        isVisible={!isSystemOrWebTab(activeTabId || "") && activeTabNote?.fileType !== "web-viewer"}
-                      />
-                    </div>
+                    {renderPaneViews("left")}
                   </>
                 )}
               </div>
@@ -5918,210 +6336,7 @@ export default function Index() {
                 />
               )}
               <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-                <div className={(splitTabId === "templates" || splitTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "templates" || splitTabId?.startsWith("templates:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <TemplatesView
-                        onCreateWithTemplate={handleCreateFromHomeTemplate}
-                        notes={notes}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "relations" || splitTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "relations" || splitTabId?.startsWith("relations:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <RelationsView
-                        notes={notes}
-                        onSelectNote={handleSelectNoteFromRelationsSplit}
-                        activeNoteId={splitTabId}
-                        isMobile={isMobile}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "favorites" || splitTabId?.startsWith("favorites:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <FavoritesTabView
-                        notes={notes}
-                        onOpenNote={(id) => setSplitTabId(id)}
-                        onToggleFavorite={(id) => {
-                          const found = notes.find((n) => n.id === id);
-                          if (found) {
-                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                          }
-                        }}
-                        onCreateBlankNote={handleCreateBlankFromHome}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "tags" || splitTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "tags" || splitTabId?.startsWith("tags:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <TagsTabView
-                        notes={notes}
-                        onOpenNote={(id) => setSplitTabId(id)}
-                        onToggleFavorite={(id) => {
-                          const found = notes.find((n) => n.id === id);
-                          if (found) {
-                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                          }
-                        }}
-                        onRenameTagGlobally={renameTagGlobally}
-                        onDeleteTagGlobally={deleteTagGlobally}
-                        onCreateBlankNote={handleCreateBlankFromHome}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "trash" || splitTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "trash" || splitTabId?.startsWith("trash:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <TrashView
-                        trashedNotes={trashedNotes}
-                        onRestore={handleRestoreFromTrash}
-                        onDeletePermanently={handleDeletePermanently}
-                        onEmptyTrash={handleEmptyTrash}
-                        onOpenSettings={() => handleOpenSettings("files")}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "settings" || splitTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "settings" || splitTabId?.startsWith("settings:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <SettingsTabView
-                        initialCategory={settingsCategory}
-                        onCategoryChange={setSettingsCategory}
-                        onClose={() => setSplitTabId(null)}
-                        notes={notes}
-                        onNotesUpdated={replaceNotes}
-                        openedFolderName={openedFolderName}
-                        folderPaths={openedFolderPaths}
-                        isCloudWorkspace={isCloudWorkspace}
-                        onCloseWorkspace={handleCloseWorkspace}
-                        onOpenWebTab={handleOpenWebTab}
-                        onOpenWhatsNew={handleOpenWhatsNew}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "help" || splitTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "help" || splitTabId?.startsWith("help:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <HelpTabView
-                        initialCategory={helpCategory}
-                        onCategoryChange={setHelpCategory}
-                        onClose={() => setSplitTabId(null)}
-                        onOpenSettings={handleOpenSettings}
-                        onOpenWhatsNew={handleOpenWhatsNew}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                  {(splitTabId === "whats-new" || splitTabId?.startsWith("whats-new:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <WhatsNewView
-                        onClose={() => setSplitTabId(null)}
-                        onOpenSettings={handleOpenSettings}
-                        onOpenHelp={handleOpenHelp}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                <div className={(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
-                  {(splitTabId === "luno-ai" || splitTabId?.startsWith("luno-ai:")) && (
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <LunoAiView
-                        notes={notes}
-                        openedFolderName={openedFolderName}
-                        activeNote={splitTabNote}
-                        onInsertToActiveNote={(text) => {
-                          if (splitTabNote) {
-                            const existingContent = splitTabNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            updateNote(splitTabNote.id, { content: updatedContent });
-                          }
-                        }}
-                        onInsertToSelectedNote={(targetNoteId, text) => {
-                          const targetNote = notes.find((n) => n.id === targetNoteId);
-                          if (targetNote) {
-                            const existingContent = targetNote.content || "";
-                            const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                            updateNote(targetNote.id, { content: updatedContent });
-                          }
-                        }}
-                        onCreateNewNote={(fileName, content, folderPath) => {
-                          const targetName = fileName?.trim() || `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                          void createNoteInFolder(folderPath || "", { fileName: targetName, initialContent: content });
-                        }}
-                        onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                        onOpenWebTab={handleOpenWebTab}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-                {splitTabId?.startsWith("web:") && (
-                  <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
-                    <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                      <WebViewerView
-                        tabId={splitTabId}
-                        initialUrl={splitTabId ? (webTabs[splitTabId]?.url || (splitTabId.startsWith("web:http") ? splitTabId.replace(/^web:/, "") : "https://www.google.com")) : "https://www.google.com"}
-                        title={splitTabId ? webTabs[splitTabId]?.title : undefined}
-                        displayUrl={splitTabId ? webTabs[splitTabId]?.displayUrl : undefined}
-                        filePath={splitTabId ? webTabs[splitTabId]?.filePath : undefined}
-                        onUrlChange={(newUrl) => handleWebTabUrlChange(splitTabId, newUrl)}
-                        onTitleChange={(newTitle) => handleWebTabTitleChange(splitTabId, newTitle)}
-                        onFaviconChange={(icon) => handleWebTabFaviconChange(splitTabId, icon)}
-                        onInsertToActiveNote={handleInsertLinkToActiveNote}
-                        activeNotes={openNoteTabs}
-                        onClose={() => setSplitTabId(null)}
-                        onSplit={() => setSplitTabId(null)}
-                        isSplit={true}
-                      />
-                    </Suspense>
-                  </div>
-                )}
-                <div className={(isSystemOrWebTab(splitTabId || "") || splitTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
-                  <Editor
-                    key="editor-pane-right"
-                    note={splitEditorNote}
-                    notes={notes}
-                    onUpdate={handleUpdateNote}
-                    onDelete={handleDeleteNote}
-                    onDeleteFile={deleteFileInFolder}
-                    onCreate={handleCreateNote}
-                    onCreateFolder={createFolderInFolder}
-                    onOpenFolder={handleOpenFolder}
-                    onRenameFile={renameFileInFolder}
-                    onDuplicateFile={duplicateFileInFolder}
-                    openedFolderName={openedFolderName}
-                    onOpenSidebar={() => setSidebarOpen(true)}
-                    isSidebarOpen={sidebarOpen}
-                    editorFontSize={settings.editorFontSize}
-                    isMobile={isMobile}
-                    rootDirHandle={openedRootDirHandle}
-                    onCloseSplit={() => setSplitTabId(null)}
-                    settingsOpen={settingsOpen}
-                    onSettingsOpenChange={(open) => {
-                      if (open) openTab("settings");
-                      else closeTab("settings", notes.map((n) => n.id));
-                    }}
-                    onSelectNote={setSplitTabId}
-                    onOpenWebTab={handleOpenWebTab}
-                    onOpenSettings={handleOpenSettings}
-                    onUnlockNote={handleUnlockNote}
-                    onRelockNote={handleRelockNote}
-                    onGetActivePin={handleGetActivePin}
-                    paneId="right"
-                    isVisible={Boolean(splitTabId) && !isSystemOrWebTab(splitTabId || "") && splitTabNote?.fileType !== "web-viewer"}
-                  />
-                </div>
+                {renderPaneViews("right")}
               </div>
             </div>
           </div>
@@ -6167,261 +6382,7 @@ export default function Index() {
                 </div>
               ) : (
                 <>
-                  <div className={(activeTabId === "home" || activeTabId?.startsWith("home:")) ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                    {openTabIds.some((id) => id === "home" || id.startsWith("home:")) && (
-                      <HomeView
-                        notes={notes}
-                        onOpenNote={(id) => openTab(id)}
-                        onCreateWithTemplate={handleCreateFromHomeTemplate}
-                        onCreateBlankNote={handleCreateBlankFromHome}
-                        onViewAllTemplates={() => openTab("templates")}
-                        onToggleFavorite={(id) => {
-                          const found = notes.find((n) => n.id === id);
-                          if (found) {
-                            handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                          }
-                        }}
-                        onOpenSearch={() => {
-                          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
-                        }}
-                        onViewAllNotes={() => {
-                          setSidebarOpen(true);
-                          window.dispatchEvent(new CustomEvent("luno:filter-notes", { detail: "all" }));
-                        }}
-                        onViewAllFavorites={() => openTab("favorites")}
-                      />
-                    )}
-                  </div>
-                  <div className={(activeTabId === "templates" || activeTabId?.startsWith("templates:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "templates" || id.startsWith("templates:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <TemplatesView
-                          onCreateWithTemplate={handleCreateFromHomeTemplate}
-                          notes={notes}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "relations" || activeTabId?.startsWith("relations:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "relations" || id.startsWith("relations:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <RelationsView
-                          notes={notes}
-                          onSelectNote={handleSelectNoteFromRelations}
-                          activeNoteId={activeTabId}
-                          isMobile={isMobile}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "favorites" || activeTabId?.startsWith("favorites:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "favorites" || id.startsWith("favorites:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <FavoritesTabView
-                          notes={notes}
-                          onOpenNote={(id) => openTab(id)}
-                          onToggleFavorite={(id) => {
-                            const found = notes.find((n) => n.id === id);
-                            if (found) {
-                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                            }
-                          }}
-                          onCreateBlankNote={handleCreateBlankFromHome}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "tags" || activeTabId?.startsWith("tags:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "tags" || id.startsWith("tags:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <TagsTabView
-                          notes={notes}
-                          onOpenNote={(id) => openTab(id)}
-                          onToggleFavorite={(id) => {
-                            const found = notes.find((n) => n.id === id);
-                            if (found) {
-                              handleUpdateNote(id, { isFavorite: !found.isFavorite });
-                            }
-                          }}
-                          onRenameTagGlobally={renameTagGlobally}
-                          onDeleteTagGlobally={deleteTagGlobally}
-                          onCreateBlankNote={handleCreateBlankFromHome}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "trash" || activeTabId?.startsWith("trash:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "trash" || id.startsWith("trash:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <TrashView
-                          trashedNotes={trashedNotes}
-                          onRestore={handleRestoreFromTrash}
-                          onDeletePermanently={handleDeletePermanently}
-                          onEmptyTrash={handleEmptyTrash}
-                          onOpenSettings={() => handleOpenSettings("files")}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "settings" || activeTabId?.startsWith("settings:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "settings" || id.startsWith("settings:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <SettingsTabView
-                          initialCategory={settingsCategory}
-                          onCategoryChange={setSettingsCategory}
-                          onClose={() => closeTab(activeTabId || "settings", notes.map((n) => n.id))}
-                          notes={notes}
-                          onNotesUpdated={replaceNotes}
-                          openedFolderName={openedFolderName}
-                          folderPaths={openedFolderPaths}
-                          isCloudWorkspace={isCloudWorkspace}
-                          onCloseWorkspace={handleCloseWorkspace}
-                          onOpenWebTab={handleOpenWebTab}
-                          onOpenWhatsNew={handleOpenWhatsNew}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "help" || activeTabId?.startsWith("help:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "help" || id.startsWith("help:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <HelpTabView
-                          initialCategory={helpCategory}
-                          onCategoryChange={setHelpCategory}
-                          onClose={() => closeTab(activeTabId || "help", notes.map((n) => n.id))}
-                          onOpenSettings={handleOpenSettings}
-                          onOpenWhatsNew={handleOpenWhatsNew}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "whats-new" || activeTabId?.startsWith("whats-new:")) ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "whats-new" || id.startsWith("whats-new:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <WhatsNewView
-                          onClose={() => closeTab(activeTabId || "whats-new", notes.map((n) => n.id))}
-                          onOpenSettings={handleOpenSettings}
-                          onOpenHelp={handleOpenHelp}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  <div className={(activeTabId === "luno-ai" || activeTabId?.startsWith("luno-ai:")) ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
-                    {openTabIds.some((id) => id === "luno-ai" || id.startsWith("luno-ai:")) && (
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <LunoAiView
-                          notes={notes}
-                          openedFolderName={openedFolderName}
-                          activeNote={notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0] ?? null}
-                          onInsertToActiveNote={(text) => {
-                            const targetNote = notes.find((n) => n.id === openTabIds.find((id) => id !== "luno-ai" && id !== "settings" && !id.startsWith("web:"))) ?? notes[0];
-                            if (targetNote) {
-                              const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                              updateNote(targetNote.id, { content: updatedContent });
-                              toast({
-                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content!`,
-                              });
-                            }
-                          }}
-                          onInsertToSelectedNote={(targetNoteId, text) => {
-                            const targetNote = notes.find((n) => n.id === targetNoteId);
-                            if (targetNote) {
-                              const existingContent = targetNote.content || "";
-                              const updatedContent = existingContent.trim() ? `${existingContent}\n\n${text}` : text;
-                              updateNote(targetNote.id, { content: updatedContent });
-                              toast({
-                                title: t("lunoAi.insertSuccessTitle") || "Content Inserted",
-                                description: t("lunoAi.insertToNoteSuccess", { name: targetNote.fileName || targetNote.title || "Note" }) || `Inserted content into '${targetNote.fileName}'!`,
-                              });
-                            }
-                          }}
-                          onCreateNewNote={(fileName, content, folderPath) => {
-                            let targetName = fileName?.trim();
-                            if (!targetName) {
-                              targetName = `Luno_Note_${Date.now().toString().slice(-4)}.md`;
-                            }
-                            if (!/\.[a-zA-Z0-9]+$/.test(targetName)) {
-                              targetName += ".md";
-                            }
-
-                            void createNoteInFolder(folderPath || "", {
-                              fileName: targetName,
-                              initialContent: content,
-                            });
-                            toast({
-                              title: t("lunoAi.createSuccessTitle") || "Note Created",
-                              description: t("lunoAi.fileCreatedSuccess", { name: targetName }) || `Created '${targetName}' successfully!`,
-                            });
-                          }}
-                          onOpenSettings={(cat) => handleOpenSettings((cat as SettingsCategory) || "ai")}
-                          onOpenWebTab={handleOpenWebTab}
-                        />
-                      </Suspense>
-                    )}
-                  </div>
-                  {openTabIds.filter((id) => id.startsWith("web:") || (id === activeTabId && activeTabNote?.fileType === "web-viewer")).map((webId) => (
-                    <div
-                      key={webId}
-                      className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
-                    >
-                      <Suspense fallback={<div className="flex-1 flex items-center justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
-                        <WebViewerView
-                          tabId={webId}
-                          initialUrl={webTabs[webId]?.url || (webId.startsWith("web:http") ? webId.replace(/^web:/, "") : "https://www.google.com")}
-                          title={webTabs[webId]?.title}
-                          displayUrl={webTabs[webId]?.displayUrl}
-                          filePath={webTabs[webId]?.filePath}
-                          onUrlChange={(newUrl) => handleWebTabUrlChange(webId, newUrl)}
-                          onTitleChange={(newTitle) => handleWebTabTitleChange(webId, newTitle)}
-                          onFaviconChange={(icon) => handleWebTabFaviconChange(webId, icon)}
-                          onInsertToActiveNote={handleInsertLinkToActiveNote}
-                          activeNotes={openNoteTabs}
-                          onClose={() => handleCloseTab(webId)}
-                          onSplit={() => setSplitTabId((prev) => (prev === webId ? null : webId))}
-                          isSplit={splitTabId === webId}
-                        />
-                      </Suspense>
-                    </div>
-                  ))}
-                  <div className={(isSystemOrWebTab(activeTabId || "") || activeTabNote?.fileType === "web-viewer") ? "hidden" : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"}>
-                    <Editor
-                      key="editor-pane-main"
-                      note={activeEditorNote}
-                      notes={notes}
-                      onUpdate={handleUpdateNote}
-                      onDelete={handleDeleteNote}
-                      onDeleteFile={deleteFileInFolder}
-                      onCreate={handleCreateNote}
-                      onCreateFolder={createFolderInFolder}
-                      onOpenFolder={handleOpenFolder}
-                      onRenameFile={renameFileInFolder}
-                      onDuplicateFile={duplicateFileInFolder}
-                      openedFolderName={openedFolderName}
-                      onOpenSidebar={() => setSidebarOpen(true)}
-                      isSidebarOpen={sidebarOpen}
-                      editorFontSize={settings.editorFontSize}
-                      isMobile={isMobile}
-                      rootDirHandle={openedRootDirHandle}
-                      settingsOpen={settingsOpen}
-                      onSettingsOpenChange={(open) => {
-                        if (open) openTab("settings");
-                        else closeTab("settings", notes.map((n) => n.id));
-                      }}
-                      rightPanelOpen={rightPanelOpen}
-                      onCloseRightPanel={() => setRightPanelOpen(false)}
-                      onSelectNote={(id) => openTab(id)}
-                      onOpenWebTab={handleOpenWebTab}
-                      onOpenSettings={handleOpenSettings}
-                      onUnlockNote={handleUnlockNote}
-                      onRelockNote={handleRelockNote}
-                      onGetActivePin={handleGetActivePin}
-                      isVisible={!isSystemOrWebTab(activeTabId || "") && activeTabNote?.fileType !== "web-viewer"}
-                    />
-                  </div>
+                  {renderPaneViews("main")}
                 </>
               )}
             </div>
@@ -6452,9 +6413,7 @@ export default function Index() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {isTh
-                ? "บันทึกการเปลี่ยนแปลงก่อนปิดหรือไม่?"
-                : "Save changes before closing?"}
+              {t("workspace.saveChangesBeforeClosing")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {(() => {
@@ -6462,9 +6421,7 @@ export default function Index() {
                   pendingPdfTargetNote?.fileName ||
                   pendingPdfTargetNote?.title ||
                   "PDF";
-                return isTh
-                  ? `ไฟล์ "${pdfName}" มีการแก้ไขที่ยังไม่ได้บันทึก คุณต้องการบันทึกการเปลี่ยนแปลงก่อนปิดหรือไม่?`
-                  : `"${pdfName}" has unsaved changes. Do you want to save your changes before closing?`;
+                return t("workspace.hasUnsavedChangesDoYou", { pdfName });
               })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -6473,7 +6430,7 @@ export default function Index() {
               disabled={isSavingPendingPdfClose}
               onClick={() => setPendingPdfCloseRequest(null)}
             >
-              {t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}
+              {t("common.cancel")}
             </AlertDialogCancel>
             <Button
               type="button"
@@ -6484,7 +6441,7 @@ export default function Index() {
                 void handleDiscardPendingPdfAndClose();
               }}
             >
-              {isTh ? "ไม่บันทึก" : "Don't Save"}
+              {t("workspace.donTSave")}
             </Button>
             <AlertDialogAction
               disabled={isSavingPendingPdfClose}
@@ -6496,10 +6453,10 @@ export default function Index() {
               {isSavingPendingPdfClose ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  {isTh ? "กำลังบันทึก..." : "Saving..."}
+                  {t("settings.syncStatusSaving")}
                 </span>
               ) : (
-                isTh ? "บันทึก" : "Save"
+                t("common.save")
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -6508,6 +6465,9 @@ export default function Index() {
 
       {/* Global In-App Video Picture-in-Picture Player (Floats across all tabs/workspaces) */}
       <GlobalVideoPip onNavigateToNote={(noteId) => openTab(noteId)} />
+
+      {/* Global Floating Utility Windows (Single instance across Split View & Tabs) */}
+      <FloatingWidgetsHost rootDirHandle={openedRootDirHandle} />
     </div>
   );
 }

@@ -59,10 +59,10 @@ export function AppUpdateToastItem() {
             <>
               <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
                 <Download className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span>{t("settings.updateAvailable") || "Update Available"}</span>
+                <span>{t("settings.updateAvailable")}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
-                {t("settings.newVersion") || "New Version"} {updateInfo?.version || ""} {t("settings.isReadyToDownload") || "is ready to download."}
+                {t("settings.newVersion")} {updateInfo?.version || ""} {t("settings.isReadyToDownload")}
               </ToastDescription>
             </>
           )}
@@ -70,7 +70,7 @@ export function AppUpdateToastItem() {
           {isDownloading && (
             <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
-              <span>{t("settings.downloadingUpdate") || "Downloading update..."}</span>
+              <span>{t("settings.downloadingUpdate")}</span>
             </ToastTitle>
           )}
 
@@ -78,10 +78,10 @@ export function AppUpdateToastItem() {
             <>
               <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span>{t("settings.updateDownloaded") || "Update Ready to Install"}</span>
+                <span>{t("settings.updateDownloaded")}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
-                {t("settings.restartToInstallDesc") || "Restart Luno Note to install the latest version."}
+                {t("settings.restartToInstallDesc")}
               </ToastDescription>
             </>
           )}
@@ -90,7 +90,7 @@ export function AppUpdateToastItem() {
             <>
               <ToastTitle className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-foreground leading-tight">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-                <span>{t("settings.updateError") || "Update Check Failed"}</span>
+                <span>{t("settings.updateError")}</span>
               </ToastTitle>
               <ToastDescription className="text-xs text-muted-foreground mt-0.5 leading-relaxed truncate max-w-full">
                 {errorMessage || t("settings.downloadFailed") || "Download failed. Please try again."}
@@ -102,33 +102,33 @@ export function AppUpdateToastItem() {
         {/* Action Button: Matches trash undo button style (<ToastAction>) */}
         {isAvailable && (
           <ToastAction
-            altText={t("settings.downloadUpdate") || "Update"}
+            altText={t("settings.downloadUpdate")}
             onClick={() => {
               downloadUpdate(true);
             }}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground border-transparent gap-1.5 shadow-2xs font-medium cursor-pointer"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground border-transparent gap-1.5 shadow-sm font-medium cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />
-            <span>{t("settings.updateNow") || t("settings.downloadUpdate") || "Update"}</span>
+            <span>{t("settings.updateNow")}</span>
           </ToastAction>
         )}
 
         {isDownloaded && (
           <ToastAction
-            altText={t("settings.installAndRestart") || "Restart & Install"}
+            altText={t("settings.installAndRestart")}
             onClick={() => {
               quitAndInstall();
             }}
-            className="bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white border-transparent gap-1.5 shadow-2xs font-medium cursor-pointer"
+            className="bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white border-transparent gap-1.5 shadow-sm font-medium cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>{t("settings.installAndRestart") || "Restart"}</span>
+            <span>{t("settings.installAndRestart")}</span>
           </ToastAction>
         )}
 
         {isError && (
           <ToastAction
-            altText={t("settings.retry") || "Retry"}
+            altText={t("settings.retry")}
             onClick={() => {
               if (updateInfo) {
                 downloadUpdate(true);
@@ -139,7 +139,7 @@ export function AppUpdateToastItem() {
             className="gap-1.5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>{t("settings.retry") || "Retry"}</span>
+            <span>{t("settings.retry")}</span>
           </ToastAction>
         )}
       </div>
@@ -149,7 +149,7 @@ export function AppUpdateToastItem() {
         <div className="space-y-1.5 w-full">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              {updateInfo?.version ? `${t("settings.newVersion") || "New Version"} ${updateInfo.version}` : ""}
+              {updateInfo?.version ? `${t("settings.newVersion")} ${updateInfo.version}` : ""}
             </span>
             <span className="font-semibold tabular-nums text-foreground">
               {progress ? `${progress.percent}%` : "0%"}

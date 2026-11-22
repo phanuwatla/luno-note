@@ -97,5 +97,5 @@ export function sanitizeHtml(rawHtml: string): string {
     return "";
   }
 
-  return rawHtml;
+  return "";
 }

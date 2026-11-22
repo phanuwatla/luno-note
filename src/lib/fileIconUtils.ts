@@ -1,3 +1,4 @@
+import { translate } from "@/translation/translate";
 import { Note } from "@/hooks/useNotes";
 import { isAudioMedia, isVideoMedia } from "./webmClassifier";
 
@@ -184,7 +185,7 @@ export function getFileFormatLabel(
   if (name.endsWith(".bmp")) return "BMP Image";
   if (name.endsWith(".ico")) return "ICO Icon";
   if (name.endsWith(".avif")) return "AVIF Image";
-  if (note.fileType === "image") return isTh ? "รูปภาพ" : "Image";
+  if (note.fileType === "image") return translate(isTh ? "th" : "en", "editor.image");
 
   if (name.endsWith(".zip")) return "ZIP Archive";
   if (name.endsWith(".rar")) return "RAR Archive";
@@ -194,14 +195,14 @@ export function getFileFormatLabel(
   if (name.endsWith(".doc") || name.endsWith(".docx")) return "Word Document";
   if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "Excel Spreadsheet";
   if (name.endsWith(".ppt") || name.endsWith(".pptx")) return "PowerPoint Presentation";
-  if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return isTh ? "ไฟล์เสียง" : "Audio File";
+  if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return translate(isTh ? "th" : "en", "editor.audioFile");
   if (name.endsWith(".webm")) {
     return isAudioMedia(name, note)
-      ? (isTh ? "ไฟล์เสียง WebM" : "WebM Audio")
-      : (isTh ? "วิดีโอ WebM" : "WebM Video");
+      ? (translate(isTh ? "th" : "en", "editor.webmAudio"))
+      : (translate(isTh ? "th" : "en", "editor.webmVideo"));
   }
-  if (name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv")) return isTh ? "ไฟล์วิดีโอ" : "Video File";
-  if (note.fileType === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
+  if (name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".avi") || name.endsWith(".mkv")) return translate(isTh ? "th" : "en", "fileFormats.videoFile");
+  if (note.fileType === "binary") return translate(isTh ? "th" : "en", "editor.binaryFile");
 
   if (note.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
   if (note.contentFormat === "css" || name.endsWith(".css")) return "CSS";
@@ -225,7 +226,7 @@ export function getFileFormatLabel(
   if (name.endsWith(".xml")) return "XML";
   if (name.endsWith(".sh") || name.endsWith(".bash") || name.endsWith(".zsh")) return "Shell";
 
-  if (name.endsWith(".txt") || note.contentFormat === "plain") return isTh ? "ข้อความธรรมดา" : "Plain Text";
-  return isTh ? "มาร์กดาวน์" : "Markdown";
+  if (name.endsWith(".txt") || note.contentFormat === "plain") return translate(isTh ? "th" : "en", "editor.syntaxText");
+  return translate(isTh ? "th" : "en", "editor.formatMarkdown");
 }
 

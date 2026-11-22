@@ -91,7 +91,7 @@ describe("Reopening closed note - activeEditorNote and history isolation", () =>
     const notes = [note1, note2];
 
     let openTabIds = ["home", "note-1", "note-2"];
-    let activeTabId: string | null = "home";
+    const activeTabId: string | null = "home";
     let lastActiveNoteId: string | null = "note-1";
 
     const getActiveEditorNote = () => {

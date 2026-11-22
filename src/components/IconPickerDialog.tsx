@@ -188,7 +188,7 @@ export default function IconPickerDialog({
         <TooltipProvider delayDuration={200}>
           <DialogHeader className="p-0 pb-1">
             <DialogTitle className="text-lg font-semibold leading-none tracking-tight">
-              {title || t("iconPicker.title") || "Change Icon"}
+              {title || t("iconPicker.title")}
             </DialogTitle>
           </DialogHeader>
 
@@ -196,7 +196,7 @@ export default function IconPickerDialog({
           <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2.5">
             <div className="flex items-center gap-3">
               <div
-                className="w-10 h-10 rounded-xl border border-border/60 bg-background flex items-center justify-center shadow-2xs text-lg transition-all shrink-0"
+                className="w-10 h-10 rounded-xl border border-border/60 bg-background flex items-center justify-center shadow-sm text-lg transition-all shrink-0"
                 style={{ color: isEmojiMode ? undefined : (selectedColor || undefined) }}
               >
                 {selectedIcon ? (
@@ -207,12 +207,12 @@ export default function IconPickerDialog({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-foreground truncate">
-                  {selectedIcon ? selectedIcon.replace(/^(emoji|lucide|tabler|ph):/, "") : t("iconPicker.noIconSelected") || "No Icon Selected"}
+                  {selectedIcon ? selectedIcon.replace(/^(emoji|lucide|tabler|ph):/, "") : t("iconPicker.noIconSelected")}
                 </p>
                 <p className="text-[10.5px] text-muted-foreground">
                   {isEmojiMode
-                    ? (selectedIcon ? t("iconPicker.emojiSelected") || "Emoji icon selected" : t("iconPicker.pickEmojiBelow") || "Choose an emoji below")
-                    : (selectedIcon ? t("iconPicker.clickColorToTint") || "Select color tint below" : t("iconPicker.pickIconBelow") || "Choose an icon below")}
+                    ? (selectedIcon ? t("iconPicker.emojiSelected") : t("iconPicker.pickEmojiBelow"))
+                    : (selectedIcon ? t("iconPicker.clickColorToTint") : t("iconPicker.pickIconBelow"))}
                 </p>
               </div>
             </div>
@@ -227,7 +227,7 @@ export default function IconPickerDialog({
                     onClick={() => setColorPage((p) => Math.max(0, p - 1))}
                     disabled={colorPage === 0}
                     className="h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-20 disabled:pointer-events-none transition-all cursor-pointer shrink-0"
-                    aria-label="Previous color page"
+                    aria-label={t("uiMisc.previousColorPage")}
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -256,7 +256,7 @@ export default function IconPickerDialog({
                                   borderColor: item.color ? "transparent" : "var(--border)",
                                 }}
                               >
-                                {isSelected && <Check className="w-3 h-3 text-white drop-shadow-xs" />}
+                                {isSelected && <Check className="w-3 h-3 text-white drop-shadow-sm" />}
                               </button>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="text-xs">
@@ -287,7 +287,7 @@ export default function IconPickerDialog({
                                       ? "conic-gradient(from 0deg, #f43f5e, #fb923c, #facc15, #4ade80, #38bdf8, #818cf8, #c084fc, #f43f5e)"
                                       : undefined,
                                   }}
-                                  className={`w-5 h-5 rounded-full border border-transparent transition-all cursor-pointer shrink-0 flex items-center justify-center relative shadow-2xs ${
+                                  className={`w-5 h-5 rounded-full border border-transparent transition-all cursor-pointer shrink-0 flex items-center justify-center relative shadow-sm ${
                                     isCustomSelected
                                       ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
                                       : "opacity-80 hover:opacity-100 hover:scale-105"
@@ -317,7 +317,7 @@ export default function IconPickerDialog({
                               </div>
 
                               <div className="flex items-center gap-2">
-                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                                   <input
                                     type="color"
                                     value={
@@ -333,7 +333,7 @@ export default function IconPickerDialog({
                                   value={selectedColor || "#26A295"}
                                   onChange={(e) => setSelectedColor(e.target.value)}
                                   placeholder="#26A295"
-                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                                   maxLength={7}
                                 />
                               </div>
@@ -367,7 +367,7 @@ export default function IconPickerDialog({
                                       className={`h-5 w-5 rounded-full transition-transform cursor-pointer ${
                                         selectedColor?.toLowerCase() === color.toLowerCase()
                                           ? "ring-2 ring-primary ring-offset-1 scale-110"
-                                          : "hover:scale-115 opacity-85 hover:opacity-100"
+                                          : "hover:scale-110 opacity-85 hover:opacity-100"
                                       }`}
                                     />
                                   ))}
@@ -393,7 +393,7 @@ export default function IconPickerDialog({
                                     <span>{t("settings.previewAccentText")}</span>
                                   </span>
                                   <span
-                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-xs transition-colors"
+                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-sm transition-colors"
                                     style={{ backgroundColor: selectedColor || "#26A295" }}
                                   >
                                     {t("settings.previewActive")}
@@ -413,7 +413,7 @@ export default function IconPickerDialog({
                     onClick={() => setColorPage((p) => Math.min(totalColorPages - 1, p + 1))}
                     disabled={colorPage === totalColorPages - 1}
                     className="h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-20 disabled:pointer-events-none transition-all cursor-pointer shrink-0"
-                    aria-label="Next color page"
+                    aria-label={t("uiMisc.nextColorPage")}
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -431,7 +431,7 @@ export default function IconPickerDialog({
                           ? "w-5 bg-primary"
                           : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
                       }`}
-                      aria-label={`Color page ${idx + 1}`}
+                      aria-label={t("uiMisc.colorPage", { page: idx + 1 })}
                     />
                   ))}
                 </div>
@@ -452,7 +452,7 @@ export default function IconPickerDialog({
                   handleApply();
                 }
               }}
-              placeholder={t("iconPicker.searchPlaceholder") || "Search icons or emojis..."}
+              placeholder={t("iconPicker.searchPlaceholder")}
               className="w-full rounded-xl border border-border bg-background pl-9 pr-8 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors min-w-0"
             />
             {searchQuery && (
@@ -473,18 +473,18 @@ export default function IconPickerDialog({
               onClick={() => setActiveTab("emoji")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
                 activeTab === "emoji"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              😊 <span className="truncate">{t("iconPicker.tabEmoji") || "Emojis"}</span>
+              😊 <span className="truncate">{t("iconPicker.tabEmoji")}</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab("lucide")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
                 activeTab === "lucide"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -495,7 +495,7 @@ export default function IconPickerDialog({
               onClick={() => setActiveTab("tabler")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
                 activeTab === "tabler"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -506,7 +506,7 @@ export default function IconPickerDialog({
               onClick={() => setActiveTab("phosphor")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
                 activeTab === "phosphor"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -538,7 +538,7 @@ export default function IconPickerDialog({
                                 }}
                                 className={`h-9 w-9 rounded-xl border flex items-center justify-center text-lg transition-all cursor-pointer ${
                                   isSelected
-                                    ? "bg-primary/20 border-primary shadow-xs scale-105"
+                                    ? "bg-primary/20 border-primary shadow-sm scale-105"
                                     : "border-border/40 hover:border-primary hover:bg-primary/10 hover:scale-105"
                                 }`}
                               >
@@ -556,7 +556,7 @@ export default function IconPickerDialog({
                 ))}
                 {filteredEmojiCategories.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
-                    {t("iconPicker.noMatchingIcons") || "No matching icons found"}
+                    {t("iconPicker.noMatchingIcons")}
                   </div>
                 )}
               </div>
@@ -582,7 +582,7 @@ export default function IconPickerDialog({
                                 onClick={() => setSelectedIcon(iconId)}
                                 className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-150 cursor-pointer min-h-[58px] ${
                                   isSelected
-                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-xs"
+                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-sm"
                                     : "border-border/60 bg-card hover:border-primary hover:bg-primary/10 text-muted-foreground hover:text-foreground"
                                 }`}
                               >
@@ -604,7 +604,7 @@ export default function IconPickerDialog({
                 ))}
                 {filteredLucideCategories.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
-                    {t("iconPicker.noMatchingIcons") || "No matching icons found"}
+                    {t("iconPicker.noMatchingIcons")}
                   </div>
                 )}
               </div>
@@ -631,7 +631,7 @@ export default function IconPickerDialog({
                                 onClick={() => setSelectedIcon(iconId)}
                                 className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-150 cursor-pointer min-h-[58px] ${
                                   isSelected
-                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-xs"
+                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-sm"
                                     : "border-border/60 bg-card hover:border-primary hover:bg-primary/10 text-muted-foreground hover:text-foreground"
                                 }`}
                               >
@@ -653,7 +653,7 @@ export default function IconPickerDialog({
                 ))}
                 {filteredTablerCategories.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
-                    {t("iconPicker.noMatchingIcons") || "No matching icons found"}
+                    {t("iconPicker.noMatchingIcons")}
                   </div>
                 )}
               </div>
@@ -679,7 +679,7 @@ export default function IconPickerDialog({
                                 onClick={() => setSelectedIcon(iconId)}
                                 className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-150 cursor-pointer min-h-[58px] ${
                                   isSelected
-                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-xs"
+                                    ? "bg-primary/20 border-primary text-primary font-semibold shadow-sm"
                                     : "border-border/60 bg-card hover:border-primary hover:bg-primary/10 text-muted-foreground hover:text-foreground"
                                 }`}
                               >
@@ -701,7 +701,7 @@ export default function IconPickerDialog({
                 ))}
                 {filteredPhosphorCategories.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
-                    {t("iconPicker.noMatchingIcons") || "No matching icons found"}
+                    {t("iconPicker.noMatchingIcons")}
                   </div>
                 )}
               </div>
@@ -720,7 +720,7 @@ export default function IconPickerDialog({
               className="rounded-xl border-border/70 hover:bg-muted text-muted-foreground hover:text-foreground h-9 px-3.5 text-xs gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>{t("iconPicker.removeIcon") || "Remove"}</span>
+              <span>{t("iconPicker.removeIcon")}</span>
             </Button>
           ) : (
             <div />
@@ -734,7 +734,7 @@ export default function IconPickerDialog({
               onClick={() => onOpenChange(false)}
               className="rounded-xl h-9 px-4 text-xs cursor-pointer"
             >
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -742,7 +742,7 @@ export default function IconPickerDialog({
               onClick={handleApply}
               className="rounded-xl h-9 px-4 text-xs font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              {t("common.save") || "Save"}
+              {t("common.save")}
             </Button>
           </div>
         </DialogFooter>

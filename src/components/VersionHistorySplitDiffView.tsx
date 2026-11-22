@@ -169,10 +169,10 @@ export default function VersionHistorySplitDiffView({
       const triggerLabel =
         version.label ||
         (version.trigger === "manual"
-          ? t("versionHistoryPanel.manualSnapshot") || (isTh ? "บันทึกด้วยตนเอง" : "Manual save")
+          ? t("versionHistoryPanel.manualSnapshot")
           : version.trigger === "pre-restore"
-          ? t("versionHistoryPanel.preRestoreBackup") || (isTh ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
-          : t("versionHistoryPanel.autoSnapshot") || (isTh ? "บันทึกอัตโนมัติ" : "Auto-save"));
+          ? t("versionHistoryPanel.preRestoreBackup")
+          : t("versionHistoryPanel.autoSnapshot"));
       toast({
         title: t("versionHistoryPanel.contentCopied"),
         description: `${triggerLabel} • ${timeLabel}`,
@@ -192,23 +192,23 @@ export default function VersionHistorySplitDiffView({
           <div className="flex items-center gap-2.5 min-w-0 text-[11.5px] font-semibold">
             {summary.addedLines > 0 && (
               <span className="text-emerald-600 dark:text-emerald-400">
-                +{summary.addedLines} {isTh ? "เพิ่ม" : "added"}
+                +{summary.addedLines} {t("versionHistory.added")}
               </span>
             )}
             {summary.removedLines > 0 && (
               <span className="text-rose-600 dark:text-rose-400">
-                -{summary.removedLines} {isTh ? "ลบ" : "removed"}
+                -{summary.removedLines} {t("versionHistory.removed")}
               </span>
             )}
             {summary.wordCountDiff !== 0 && (
               <span className="text-muted-foreground">
                 {summary.wordCountDiff > 0 ? `+${summary.wordCountDiff}` : summary.wordCountDiff}{" "}
-                {isTh ? "คำ" : "words"}
+                {t("versionHistory.words")}
               </span>
             )}
             {summary.addedLines === 0 && summary.removedLines === 0 && summary.wordCountDiff === 0 && (
               <span className="text-muted-foreground text-[11px]">
-                {isTh ? "ไม่มีการเปลี่ยนแปลง" : "No changes"}
+                {t("versionHistory.noChanges")}
               </span>
             )}
           </div>
@@ -225,18 +225,18 @@ export default function VersionHistorySplitDiffView({
                     onClick={() => setViewMode("split-editor")}
                     className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "split-editor"
-                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        ? "bg-background text-foreground shadow-sm font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Columns2 className="h-3 w-3" />
                     <span className="hidden sm:inline">
-                      {t("versionHistoryPanel.splitEditor") || (isTh ? "สองฝั่ง" : "Side-by-Side")}
+                      {t("versionHistoryPanel.splitEditor")}
                     </span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
-                  {t("versionHistoryPanel.splitEditor") || "Side-by-Side Editor Comparison (100% Editor WYSIWYG)"}
+                  {t("versionHistoryPanel.splitEditor")}
                 </TooltipContent>
               </Tooltip>
 
@@ -248,18 +248,18 @@ export default function VersionHistorySplitDiffView({
                     onClick={() => setViewMode("preview")}
                     className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "preview"
-                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        ? "bg-background text-foreground shadow-sm font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Eye className="h-3 w-3" />
                     <span className="hidden sm:inline">
-                      {t("versionHistoryPanel.preview") || (isTh ? "พรีวิว" : "Preview")}
+                      {t("versionHistoryPanel.preview")}
                     </span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
-                  {t("versionHistoryPanel.preview") || "Full Historical Preview (100% Editor WYSIWYG)"}
+                  {t("versionHistoryPanel.preview")}
                 </TooltipContent>
               </Tooltip>
 
@@ -271,18 +271,18 @@ export default function VersionHistorySplitDiffView({
                     onClick={() => setViewMode("code-diff")}
                     className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-all cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus:ring-0 select-none ${
                       viewMode === "code-diff"
-                        ? "bg-background text-foreground shadow-xs font-semibold"
+                        ? "bg-background text-foreground shadow-sm font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Code className="h-3 w-3" />
                     <span className="hidden sm:inline">
-                      {t("versionHistoryPanel.codeDiff") || "Code Diff"}
+                      {t("versionHistoryPanel.codeDiff")}
                     </span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
-                  {t("versionHistoryPanel.codeDiff") || "Raw Line-by-Line Code Diff"}
+                  {t("versionHistoryPanel.codeDiff")}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -299,22 +299,22 @@ export default function VersionHistorySplitDiffView({
                     className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                     aria-label={
                       syncScroll
-                        ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
-                        : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"
+                        ? t("versionHistory.disableSyncScroll")
+                        : t("versionHistory.enableSyncScroll")
                     }
                   >
                     {syncScroll ? <Link2Off className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
                     <span className="sr-only">
                       {syncScroll
-                        ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
-                        : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"}
+                        ? t("versionHistory.disableSyncScroll")
+                        : t("versionHistory.enableSyncScroll")}
                     </span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
                   {syncScroll
-                    ? isTh ? "ปิดการเลื่อนพร้อมกัน" : "Disable sync scroll"
-                    : isTh ? "เปิดการเลื่อนพร้อมกัน" : "Enable sync scroll"}
+                    ? t("versionHistory.disableSyncScroll")
+                    : t("versionHistory.enableSyncScroll")}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -340,7 +340,7 @@ export default function VersionHistorySplitDiffView({
                 <Button
                   type="button"
                   onClick={() => onRestore(version)}
-                  className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs cursor-pointer shrink-0 outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
+                  className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm cursor-pointer shrink-0 outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   <span>{t("versionHistoryPanel.restore")}</span>
@@ -357,7 +357,7 @@ export default function VersionHistorySplitDiffView({
                   size="icon"
                   onClick={onClose}
                   className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:ring-0"
-                  aria-label={t("common.close") || "Close"}
+                  aria-label={t("common.close")}
                 >
                   <X className="h-3.5 w-3.5" />
                 </Button>
@@ -384,7 +384,7 @@ export default function VersionHistorySplitDiffView({
                   </span>
                 </div>
                 <span className="text-[11px] text-muted-foreground shrink-0">
-                  {version.wordCount || countWords(version.content || "")} {isTh ? "คำ" : "words"}
+                  {version.wordCount || countWords(version.content || "")} {t("versionHistory.words")}
                 </span>
               </div>
               <div className="flex-1 min-h-0 w-full overflow-hidden">
@@ -412,7 +412,7 @@ export default function VersionHistorySplitDiffView({
                   </span>
                 </div>
                 <span className="text-[11px] text-muted-foreground shrink-0">
-                  {countWords(note.content || "")} {isTh ? "คำ" : "words"}
+                  {countWords(note.content || "")} {t("versionHistory.words")}
                 </span>
               </div>
               <div className="flex-1 min-h-0 w-full overflow-hidden">
@@ -453,7 +453,7 @@ export default function VersionHistorySplitDiffView({
                   {t("versionHistoryPanel.historicalVersion")} ({formattedVersionTime})
                 </span>
                 <span>
-                  {version.wordCount || 0} {isTh ? "คำ" : "words"}
+                  {version.wordCount || 0} {t("versionHistory.words")}
                 </span>
               </div>
               <div
@@ -485,7 +485,7 @@ export default function VersionHistorySplitDiffView({
                   {t("versionHistoryPanel.liveCurrentVersion")}
                 </span>
                 <span>
-                  {diffLines.length} {isTh ? "บรรทัด" : "lines"}
+                  {diffLines.length} {t("versionHistory.lines")}
                 </span>
               </div>
               <div

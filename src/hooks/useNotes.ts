@@ -138,7 +138,7 @@ export function useNotes() {
   const [notes, setNotes] = useState<Note[]>(loadNotes);
   const notesRef = useRef<Note[]>(notes);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(
-    () => loadNotes()[0]?.id ?? null
+    () => notes[0]?.id ?? null
   );
 
   useEffect(() => {

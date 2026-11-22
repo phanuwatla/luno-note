@@ -1,6 +1,9 @@
+import { escapeHtml as baseEscapeHtml } from "@/lib/htmlUtils";
+export const escapeHtml = (str: string): string => baseEscapeHtml(str, "&#039;");
 import { FONT_FAMILY_CSS, type FontFamilyOption, type AppTheme } from "@/hooks/useAppSettings";
 import { getTagColorClass } from "@/lib/tagColors";
 import { generateQrCodeDataUrl } from "./qrCode";
+import { sanitizeHtml } from "./sanitizeHtml";
 
 export interface GeneratePdfHtmlOptions {
   title?: string;
@@ -102,13 +105,20 @@ export async function inlineImagesForPdf(
         }
 
         // Relative / local workspace file path via Electron API
-        if (options?.readImageDataUrl) {
+        if (options?.readImageDataUrl && !/^https?:\/\//i.test(src)) {
           try {
-            let rel = decodeURIComponent(src);
+            const candidateSrc =
+              src.startsWith("blob:") && img.getAttribute("data-relative-src")
+                ? img.getAttribute("data-relative-src")!
+                : src;
+            let rel = decodeURIComponent(candidateSrc)
+              .replace(/^luno-asset:\/\/\/?/i, "")
+              .replace(/^file:\/\/\/?/i, "");
             while (rel.startsWith("../") || rel.startsWith("./")) {
               rel = rel.replace(/^(\.\.\/|\.\/)/, "");
             }
-            const fullPath = options.workspacePath ? `${options.workspacePath}/${rel}` : rel;
+            const isAbsolute = /^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/");
+            const fullPath = !isAbsolute && options.workspacePath ? `${options.workspacePath}/${rel}` : rel;
             const dataUrl = await options.readImageDataUrl(fullPath);
             if (dataUrl) {
               img.setAttribute("src", dataUrl);
@@ -143,17 +153,7 @@ export async function inlineImagesForPdf(
   }
 }
 
-/**
- * Escapes characters for HTML content.
- */
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+// escapeHtml is re-exported from @/lib/htmlUtils
 
 /**
  * Map theme IDs to their primary accent hex/hsl color for PDF rendering.
@@ -182,7 +182,10 @@ const THEME_PRIMARY_COLORS: Record<string, string> = {
  */
 function getPrimaryColor(theme?: string, customAccentColor?: string): string {
   if (customAccentColor && customAccentColor.trim()) {
-    return customAccentColor.trim();
+    const trimmed = customAccentColor.trim();
+    if (/^(#[0-9a-fA-F]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s/+-]+\))$/.test(trimmed)) {
+      return trimmed;
+    }
   }
   if (theme && THEME_PRIMARY_COLORS[theme]) {
     return THEME_PRIMARY_COLORS[theme];
@@ -306,15 +309,17 @@ export function generatePdfHtml(options: GeneratePdfHtmlOptions): string {
   const primaryColor = getPrimaryColor(theme, customAccentColor);
 
   // Resolve CSS font-family string
+  const safeFontFamily = String(editorFontFamily || "inter").replace(/['";{}<>\\]/g, "");
   const resolvedFontFamily =
     FONT_FAMILY_CSS[editorFontFamily as FontFamilyOption] ||
-    `'${editorFontFamily}', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif`;
+    `'${safeFontFamily}', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif`;
 
   const parsedFontSize = typeof editorFontSize === "number" ? editorFontSize : 15;
   const parsedLineHeight = typeof lineHeight === "number" ? lineHeight : parseFloat(String(lineHeight)) || 1.6;
 
-  // Format any unwrapped inline hashtags into styled badges matching the Editor
-  const formattedBodyHtml = formatInlineTagsInHtml(bodyHtml, theme, tagColorStyle, customAccentColor);
+  // Sanitize bodyHtml and format any unwrapped inline hashtags into styled badges matching the Editor
+  const safeBodyHtml = sanitizeHtml(bodyHtml || "");
+  const formattedBodyHtml = formatInlineTagsInHtml(safeBodyHtml, theme, tagColorStyle, customAccentColor);
 
   // Determine if content already has an <h1> at the top
   const hasH1 = /^\s*(?:<div[^>]*>)?\s*<h1[^>]*>/i.test(formattedBodyHtml.trim());

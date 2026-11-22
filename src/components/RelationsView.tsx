@@ -222,7 +222,7 @@ export function RelationsView({
       const next = !prev;
       try {
         localStorage.setItem("luno:relations_show_images", String(next));
-      } catch {}
+      } catch { /* ignore */ }
       return next;
     });
   }, []);
@@ -248,10 +248,12 @@ export function RelationsView({
   const dragStartMouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const hasMovedSignificantlyRef = useRef(false);
   const simulationAlphaRef = useRef(1);
+  const wakeLoopRef = useRef<() => void>(() => {});
 
   // Reheat physics slightly when filters change so nodes gracefully rearrange
   useEffect(() => {
     simulationAlphaRef.current = Math.max(simulationAlphaRef.current, 0.4);
+    wakeLoopRef.current();
   }, [showImages, showOrphans]);
 
   // Animation flag from global app settings
@@ -343,6 +345,7 @@ export function RelationsView({
         }
         setZoomLevel(currentK / baseK);
         setSelectedNodeId(nodeId);
+        wakeLoopRef.current();
       }
     },
     [enableAnimations, rawGraph.nodes]
@@ -380,6 +383,7 @@ export function RelationsView({
       }
       setZoomLevel(1);
       hasInitialCenteredRef.current = true;
+      wakeLoopRef.current();
       return;
     }
 
@@ -403,6 +407,7 @@ export function RelationsView({
         transformRef.current = { x: clientWidth / 2, y: clientHeight / 2, k: 1.0 };
       }
       setZoomLevel(1);
+      wakeLoopRef.current();
       return;
     }
 
@@ -465,6 +470,7 @@ export function RelationsView({
     }
     setZoomLevel(1);
     hasInitialCenteredRef.current = true;
+    wakeLoopRef.current();
   }, [visibleNodeMap, rawGraph.nodes, enableAnimations]);
 
   // Sync / Initialize nodes and positions preserving existing coordinates
@@ -502,6 +508,7 @@ export function RelationsView({
     } else {
       simulationAlphaRef.current = enableAnimations ? 0.6 : 0;
     }
+    wakeLoopRef.current();
 
     if (!hasInitialCenteredRef.current) {
       centerGraph();
@@ -524,6 +531,7 @@ export function RelationsView({
           if (!hasInitialCenteredRef.current) {
             centerGraph();
           }
+          wakeLoopRef.current();
         }
       }
     });
@@ -602,6 +610,7 @@ export function RelationsView({
       transformRef.current = { x: newX, y: newY, k: newK };
     }
     setZoomLevel(newK / baseK);
+    wakeLoopRef.current();
   }, [enableAnimations]);
 
   // Re-organize/Rearrange graph: in case user moved nodes around, resets back to pristine initial layout like when opened
@@ -638,18 +647,77 @@ export function RelationsView({
 
     // 3. Center graph at 100% zoom and centered
     centerGraph();
+    wakeLoopRef.current();
   }, [notes, visibleNodeMap, centerGraph, enableAnimations]);
 
-  // Main Simulation & Render Loop
+  // Main Simulation & Render Loop (Demand-driven: sleeps at 0% CPU when hidden or converged)
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
     let isRunning = true;
+    let isFrameScheduled = false;
+
+    const readThemePalette = () => {
+      const isDark = document.documentElement.classList.contains("dark") || settings?.colorScheme === "dark";
+      const computed = getComputedStyle(document.documentElement);
+      const rawPrimary = computed.getPropertyValue("--primary").trim() || "174 62% 39%";
+      const rawBg = computed.getPropertyValue("--background").trim();
+      const rawMutedFg = computed.getPropertyValue("--muted-foreground").trim() || (isDark ? "215 12% 55%" : "215 14% 46%");
+      const rawFg = computed.getPropertyValue("--foreground").trim() || (isDark ? "220 13% 92%" : "220 26% 14%");
+      const rawBorder = computed.getPropertyValue("--border").trim() || (isDark ? "222 14% 18%" : "220 13% 91%");
+      return {
+        isDark,
+        accentHsl: `hsl(${rawPrimary})`,
+        accentEdge: `hsla(${rawPrimary} / 0.85)`,
+        canvasBg: rawBg ? `hsl(${rawBg})` : isDark ? "#090d16" : "#ffffff",
+        rawMutedFg,
+        rawFg,
+        rawBorder,
+        imageNodeColor: getSystemThemeColor("emerald", isDark),
+        videoNodeColor: getSystemThemeColor("violet", isDark),
+        audioNodeColor: getSystemThemeColor("amber", isDark),
+        fileNodeColor: getSystemThemeColor("sky", isDark),
+        noteNodeColor: `hsl(${rawMutedFg})`,
+        dimmedNodeColor: `hsla(${rawMutedFg} / 0.2)`,
+      };
+    };
+
+    let cachedPalette = readThemePalette();
+    const themeObserver =
+      typeof MutationObserver !== "undefined"
+        ? new MutationObserver(() => {
+            cachedPalette = readThemePalette();
+            scheduleFrame();
+          })
+        : null;
+    themeObserver?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+
+    const scheduleFrame = () => {
+      if (!isRunning || isFrameScheduled) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      isFrameScheduled = true;
+      simAnimFrameRef.current = requestAnimationFrame(render);
+    };
+
+    wakeLoopRef.current = scheduleFrame;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        cachedPalette = readThemePalette();
+        scheduleFrame();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     const render = () => {
+      isFrameScheduled = false;
       if (!isRunning) return;
+      if (typeof document !== "undefined" && document.hidden) return;
 
       const dpr = window.devicePixelRatio || 1;
       const width = container.clientWidth;
@@ -667,10 +735,12 @@ export function RelationsView({
       }
 
       const ctx = canvas.getContext("2d");
+      // Pause animation loop when tab is hidden in background (ResizeObserver wakes it when shown)
       if (!ctx || width <= 0 || height <= 0) {
-        simAnimFrameRef.current = requestAnimationFrame(render);
         return;
       }
+
+      let hasActiveMotion = Boolean(isDraggingCanvasRef.current || isDraggingNodeRef.current);
 
       // Initial auto-center if camera not yet placed
       if (!hasInitialCenteredRef.current && width > 50 && height > 50) {
@@ -692,6 +762,7 @@ export function RelationsView({
           t.x += dx * 0.16;
           t.y += dy * 0.16;
           t.k += dk * 0.16;
+          hasActiveMotion = true;
         } else {
           t.x = target.x;
           t.y = target.y;
@@ -713,27 +784,28 @@ export function RelationsView({
           isDraggingNodeRef.current?.id || null
         );
         simulationAlphaRef.current *= enableAnimations ? 0.982 : 0.92;
+        if (simulationAlphaRef.current > 0.003) {
+          hasActiveMotion = true;
+        } else {
+          simulationAlphaRef.current = 0;
+        }
       }
 
-      // Read Theme Accent & Background Colors dynamically from computed CSS variables
-      const isDark = document.documentElement.classList.contains("dark") || settings?.colorScheme === "dark";
-      const computed = getComputedStyle(document.documentElement);
-      const rawPrimary = computed.getPropertyValue("--primary").trim() || "174 62% 39%";
-      const accentHsl = `hsl(${rawPrimary})`;
-      const accentEdge = `hsla(${rawPrimary} / 0.85)`;
-      const rawBg = computed.getPropertyValue("--background").trim();
-      const canvasBg = rawBg ? `hsl(${rawBg})` : isDark ? "#090d16" : "#ffffff";
-      const rawMutedFg = computed.getPropertyValue("--muted-foreground").trim() || (isDark ? "215 12% 55%" : "215 14% 46%");
-      const rawFg = computed.getPropertyValue("--foreground").trim() || (isDark ? "220 13% 92%" : "220 26% 14%");
-      const rawBorder = computed.getPropertyValue("--border").trim() || (isDark ? "222 14% 18%" : "220 13% 91%");
-
-      // System palette colors for media node types & note nodes
-      const imageNodeColor = getSystemThemeColor("emerald", isDark);
-      const videoNodeColor = getSystemThemeColor("violet", isDark);
-      const audioNodeColor = getSystemThemeColor("amber", isDark);
-      const fileNodeColor = getSystemThemeColor("sky", isDark);
-      const noteNodeColor = `hsl(${rawMutedFg})`;
-      const dimmedNodeColor = `hsla(${rawMutedFg} / 0.2)`;
+      const {
+        isDark,
+        accentHsl,
+        accentEdge,
+        canvasBg,
+        rawMutedFg,
+        rawFg,
+        rawBorder,
+        imageNodeColor,
+        videoNodeColor,
+        audioNodeColor,
+        fileNodeColor,
+        noteNodeColor,
+        dimmedNodeColor,
+      } = cachedPalette;
 
       // Drawing Graph
       const { x: panX, y: panY, k } = transformRef.current;
@@ -820,8 +892,9 @@ export function RelationsView({
         // Smooth per-node hover progress interpolation
         const targetProgress = isHovered ? 1.0 : 0.0;
         let currentProgress = hoverProgressMap.current.get(node.id) ?? 0.0;
-        if (enableAnimations) {
+        if (enableAnimations && Math.abs(targetProgress - currentProgress) > 0.005) {
           currentProgress += (targetProgress - currentProgress) * 0.22;
+          hasActiveMotion = true;
         } else {
           currentProgress = targetProgress;
         }
@@ -896,18 +969,23 @@ export function RelationsView({
 
       ctx.restore();
 
-      simAnimFrameRef.current = requestAnimationFrame(render);
+      if (hasActiveMotion) {
+        scheduleFrame();
+      }
     };
 
-    simAnimFrameRef.current = requestAnimationFrame(render);
+    scheduleFrame();
 
     return () => {
       isRunning = false;
+      isFrameScheduled = false;
+      themeObserver?.disconnect();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (simAnimFrameRef.current) {
         cancelAnimationFrame(simAnimFrameRef.current);
       }
     };
-  }, [visibleNodeMap, hoveredNodeId, selectedNodeId, searchMatchedNodeIds, showLabels, settings?.colorScheme, rawGraph]);
+  }, [visibleNodeMap, hoveredNodeId, selectedNodeId, searchMatchedNodeIds, showLabels, settings?.colorScheme, settings?.theme, settings?.customAccentColor, rawGraph, centerGraph, enableAnimations]);
 
   // Mouse / Pointer Event Handlers
   const screenToWorld = useCallback((screenX: number, screenY: number) => {
@@ -1028,6 +1106,7 @@ export function RelationsView({
         isDraggingNodeRef.current = null;
         isDraggingCanvasRef.current = true;
       }
+      wakeLoopRef.current();
     },
     [findNodeAtPosition]
   );
@@ -1045,6 +1124,7 @@ export function RelationsView({
         isDraggingNodeRef.current.x = wx;
         isDraggingNodeRef.current.y = wy;
         simulationAlphaRef.current = 0.5;
+        wakeLoopRef.current();
         return;
       }
 
@@ -1054,6 +1134,7 @@ export function RelationsView({
         targetTransformRef.current.x = transformRef.current.x;
         targetTransformRef.current.y = transformRef.current.y;
         dragStartMouseRef.current = { x: e.clientX, y: e.clientY };
+        wakeLoopRef.current();
         return;
       }
 
@@ -1074,6 +1155,7 @@ export function RelationsView({
 
       isDraggingNodeRef.current = null;
       isDraggingCanvasRef.current = false;
+      wakeLoopRef.current();
     },
     [onSelectNote]
   );
@@ -1101,6 +1183,7 @@ export function RelationsView({
       transformRef.current = { x: newX, y: newY, k: newK };
       targetTransformRef.current = { x: newX, y: newY, k: newK };
       setZoomLevel(newK / baseK);
+      wakeLoopRef.current();
     },
     []
   );
@@ -1120,7 +1203,7 @@ export function RelationsView({
           <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden py-0.5">
             <span className="font-semibold text-foreground truncate min-w-0 px-0.5 leading-none flex items-center gap-1.5 text-xs">
               <GitFork className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="truncate">{t("relations.title") || (isTh ? "ความสัมพันธ์" : "Relations")}</span>
+              <span className="truncate">{t("relations.title")}</span>
             </span>
           </div>
 
@@ -1138,12 +1221,12 @@ export function RelationsView({
                       className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
                     >
                       <Search className="h-3.5 w-3.5" />
-                      <span className="sr-only">{t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}</span>
+                      <span className="sr-only">{t("sidebar.searchShortPlaceholder")}</span>
                     </Button>
                   </PopoverTrigger>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  {t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}
+                  {t("sidebar.searchShortPlaceholder")}
                 </TooltipContent>
               </Tooltip>
 
@@ -1177,7 +1260,7 @@ export function RelationsView({
                         }
                       }
                     }}
-                    placeholder={t("sidebar.searchPlaceholder") || (isTh ? "ค้นหาโน้ต..." : "Search notes...")}
+                    placeholder={t("sidebar.searchPlaceholder")}
                     className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
                     autoFocus
                   />
@@ -1196,12 +1279,11 @@ export function RelationsView({
                   <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
                     <span>
                       {matchedNodes.length > 0
-                        ? isTh
-                          ? `พบ ${matchedNodes.length} โน้ต${currentMatchIndex >= 0 ? ` (${currentMatchIndex + 1}/${matchedNodes.length})` : ""}`
-                          : `Found ${matchedNodes.length} matching ${matchedNodes.length === 1 ? "note" : "notes"}${currentMatchIndex >= 0 ? ` (${currentMatchIndex + 1}/${matchedNodes.length})` : ""}`
-                        : isTh
-                        ? "ไม่พบโน้ตที่ตรงกัน"
-                        : "No matching notes"}
+                        ? t(matchedNodes.length === 1 ? "relations.foundNotesOne" : "relations.foundNotesMany", {
+                            total: matchedNodes.length,
+                            progress: currentMatchIndex >= 0 ? ` (${currentMatchIndex + 1}/${matchedNodes.length})` : "",
+                          })
+                        : t("relations.noMatchingNotes")}
                     </span>
                     {matchedNodes.length > 0 && (
                       <div className="flex items-center gap-0.5">
@@ -1213,11 +1295,11 @@ export function RelationsView({
                               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                             >
                               <ChevronUp className="h-3.5 w-3.5" />
-                              <span className="sr-only">Previous note</span>
+                              <span className="sr-only">{t("uiMisc.previousNote")}</span>
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="top">
-                            {isTh ? "โน้ตก่อนหน้า (Shift+Enter)" : "Previous match (Shift+Enter)"}
+                            {t("relations.previousMatchShiftEnter")}
                           </TooltipContent>
                         </Tooltip>
 
@@ -1229,11 +1311,11 @@ export function RelationsView({
                               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                             >
                               <ChevronDown className="h-3.5 w-3.5" />
-                              <span className="sr-only">Next note</span>
+                              <span className="sr-only">{t("uiMisc.nextNote")}</span>
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="top">
-                            {isTh ? "โน้ตถัดไป (Enter)" : "Next match (Enter)"}
+                            {t("relations.nextMatchEnter")}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -1262,15 +1344,15 @@ export function RelationsView({
                   )}
                   <span className="sr-only">
                     {showOrphans
-                      ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide unlinked notes"))
-                      : (t("relations.showOrphans") || (isTh ? "แสดงโน้ตทั้งหมด" : "Show all notes"))}
+                      ? (t("relations.hideOrphans"))
+                      : (t("relations.showOrphans"))}
                   </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {showOrphans
-                  ? (t("relations.hideOrphans") || (isTh ? "ซ่อนโน้ตที่ไม่มีลิงก์" : "Hide unlinked notes"))
-                  : (t("relations.showOrphans") || (isTh ? "แสดงโน้ตทั้งหมด" : "Show all notes"))}
+                  ? (t("relations.hideOrphans"))
+                  : (t("relations.showOrphans"))}
               </TooltipContent>
             </Tooltip>
 
@@ -1291,15 +1373,15 @@ export function RelationsView({
                   )}
                   <span className="sr-only">
                     {showLabels
-                      ? (t("relations.hideLabels") || (isTh ? "ซ่อนชื่อโน้ต" : "Hide labels"))
-                      : (t("relations.showLabels") || (isTh ? "แสดงชื่อโน้ต" : "Show labels"))}
+                      ? (t("relations.hideLabels"))
+                      : (t("relations.showLabels"))}
                   </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {showLabels
-                  ? (t("relations.hideLabels") || (isTh ? "ซ่อนชื่อโน้ต" : "Hide labels"))
-                  : (t("relations.showLabels") || (isTh ? "แสดงชื่อโน้ต" : "Show labels"))}
+                  ? (t("relations.hideLabels"))
+                  : (t("relations.showLabels"))}
               </TooltipContent>
             </Tooltip>
 
@@ -1313,8 +1395,8 @@ export function RelationsView({
                   onClick={handleToggleImages}
                   aria-label={
                     showImages
-                      ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
-                      : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))
+                      ? (t("relations.hideMedia"))
+                      : (t("relations.showMedia"))
                   }
                   className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
                 >
@@ -1325,15 +1407,15 @@ export function RelationsView({
                   )}
                   <span className="sr-only">
                     {showImages
-                      ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
-                      : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))}
+                      ? (t("relations.hideMedia"))
+                      : (t("relations.showMedia"))}
                   </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {showImages
-                  ? (t("relations.hideMedia") || (isTh ? "ซ่อนไฟล์มีเดียในกราฟ" : "Hide media in graph"))
-                  : (t("relations.showMedia") || (isTh ? "แสดงไฟล์มีเดียในกราฟ" : "Show media in graph"))}
+                  ? (t("relations.hideMedia"))
+                  : (t("relations.showMedia"))}
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1348,11 +1430,9 @@ export function RelationsView({
           {rawGraph.nodes.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-muted-foreground gap-2">
               <GitFork className="h-10 w-10 opacity-30 text-primary" />
-              <p className="text-sm font-medium">{isTh ? "ยังไม่มีโน้ตในพื้นที่ทำงาน" : "No notes in workspace"}</p>
+              <p className="text-sm font-medium">{t("relations.noNotesInWorkspace")}</p>
               <p className="text-xs text-muted-foreground/80 max-w-sm text-center">
-                {isTh
-                  ? "สร้างโน้ตและเชื่อมโยงด้วย [[ชื่อโน้ต]] เพื่อดูความสัมพันธ์"
-                  : "Create notes and link them using [[Note Title]] to visualize relationships."}
+                {t("relations.createNotesAndLinkThem")}
               </p>
             </div>
           )}
@@ -1378,14 +1458,14 @@ export function RelationsView({
           {/* Left side: Notes count | Links count | Hint */}
           <div className="flex items-center gap-2.5 shrink-0">
             <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-              {noteCount} {t("relations.notes") || (isTh ? "โน้ต" : "notes")}
+              {noteCount} {t("relations.notes")}
             </span>
 
             {imageCount > 0 && showImages && (
               <>
                 <div className="h-3 w-[1px] bg-border/60" />
                 <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                  {imageCount} {isTh ? "รูปภาพ" : "images"}
+                  {imageCount} {t("relations.images")}
                 </span>
               </>
             )}
@@ -1394,7 +1474,7 @@ export function RelationsView({
               <>
                 <div className="h-3 w-[1px] bg-border/60" />
                 <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                  {videoCount} {isTh ? "วิดีโอ" : "videos"}
+                  {videoCount} {t("relations.videos")}
                 </span>
               </>
             )}
@@ -1403,7 +1483,7 @@ export function RelationsView({
               <>
                 <div className="h-3 w-[1px] bg-border/60" />
                 <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                  {audioCount} {isTh ? "เสียง" : "audio"}
+                  {audioCount} {t("relations.audio")}
                 </span>
               </>
             )}
@@ -1412,7 +1492,7 @@ export function RelationsView({
               <>
                 <div className="h-3 w-[1px] bg-border/60" />
                 <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                  {fileCount} {isTh ? "ไฟล์แนบ" : "files"}
+                  {fileCount} {t("relations.files")}
                 </span>
               </>
             )}
@@ -1420,15 +1500,13 @@ export function RelationsView({
             <div className="h-3 w-[1px] bg-border/60" />
 
             <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-              {rawGraph.edges.length} {t("relations.connections") || (isTh ? "ความสัมพันธ์" : "links")}
+              {rawGraph.edges.length} {t("relations.connections")}
             </span>
 
             <div className="h-3 w-[1px] bg-border/60 hidden sm:block" />
 
             <span className="hidden sm:inline text-muted-foreground/70">
-              {isTh
-                ? "เลื่อนเมาส์เพื่อซูม • ลากเพื่อเลื่อน • กดที่โน้ตเพื่อเปิด"
-                : "Scroll to zoom • Drag to pan • Click node to open note"}
+              {t("relations.scrollToZoomDragTo")}
             </span>
           </div>
 
@@ -1443,10 +1521,10 @@ export function RelationsView({
                   className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                 >
                   <ZoomOut className="h-3.5 w-3.5" />
-                  <span className="sr-only">{isTh ? "ซูมออก" : "Zoom Out"}</span>
+                  <span className="sr-only">{t("relations.zoomOut")}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">{isTh ? "ซูมออก" : "Zoom out"}</TooltipContent>
+              <TooltipContent side="top">{t("relations.zoomOut2")}</TooltipContent>
             </Tooltip>
 
             {/* Zoom Level / Reset Toggle */}
@@ -1461,7 +1539,7 @@ export function RelationsView({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {isTh ? "จัดกึ่งกลาง / รีเซ็ต (100%)" : "Reset Zoom & Center"}
+                {t("relations.resetZoomCenter")}
               </TooltipContent>
             </Tooltip>
 
@@ -1474,10 +1552,10 @@ export function RelationsView({
                   className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                 >
                   <ZoomIn className="h-3.5 w-3.5" />
-                  <span className="sr-only">{isTh ? "ซูมเข้า" : "Zoom In"}</span>
+                  <span className="sr-only">{t("relations.zoomIn")}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">{isTh ? "ซูมเข้า" : "Zoom in"}</TooltipContent>
+              <TooltipContent side="top">{t("relations.zoomIn2")}</TooltipContent>
             </Tooltip>
 
             <div className="h-3 w-[1px] bg-border/60 mx-0.5" />
@@ -1491,10 +1569,10 @@ export function RelationsView({
                   className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                 >
                   <Shuffle className="h-3.5 w-3.5" />
-                  <span className="sr-only">{isTh ? "จัดเรียงกราฟใหม่" : "Rearrange graph"}</span>
+                  <span className="sr-only">{t("relations.rearrangeGraph")}</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">{isTh ? "จัดเรียงกราฟใหม่" : "Rearrange graph"}</TooltipContent>
+              <TooltipContent side="top">{t("relations.rearrangeGraph")}</TooltipContent>
             </Tooltip>
           </div>
         </div>

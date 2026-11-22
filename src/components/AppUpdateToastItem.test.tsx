@@ -4,10 +4,19 @@ import { ToastProvider, ToastViewport } from "@/components/ui/toast";
 import { AppUpdateToastItem } from "./AppUpdateToastItem";
 import { useAppUpdate, resetUpdateStoreForTesting } from "@/hooks/useAppUpdate";
 import { AppSettingsProvider } from "@/hooks/useAppSettings";
+import { APP_VERSION } from "@/lib/appVersion";
+
+function getNextMajorVersion(version: string): string {
+  const [major = 1] = version.split(".").map((n) => parseInt(n, 10) || 0);
+  return `${major + 1}.0.0`;
+}
+
+const NEXT_VERSION = getNextMajorVersion(APP_VERSION);
+const NEXT_VERSION_RE = new RegExp(NEXT_VERSION.replace(/\./g, "\\."));
 
 // Mock electronAPI
 const mockElectronAPI = {
-  getAppVersion: vi.fn().mockResolvedValue("1.3.2"),
+  getAppVersion: vi.fn().mockResolvedValue(APP_VERSION),
   checkForUpdates: vi.fn(),
   downloadUpdate: vi.fn(),
   quitAndInstallUpdate: vi.fn(),
@@ -22,6 +31,7 @@ const mockElectronAPI = {
 describe("AppUpdateToastItem Component", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockElectronAPI.getAppVersion.mockResolvedValue(APP_VERSION);
     resetUpdateStoreForTesting();
     (window as any).electronAPI = mockElectronAPI;
   });
@@ -108,7 +118,7 @@ describe("AppUpdateToastItem Component", () => {
     await act(async () => {
       if (onAvailableCallback) {
         onAvailableCallback({
-          version: "1.4.0",
+          version: NEXT_VERSION,
           releaseDate: "2026-10-03",
         });
       }
@@ -116,7 +126,7 @@ describe("AppUpdateToastItem Component", () => {
 
     // Check that toast shows update available and version
     expect(screen.getByText(/Update Available|มีเวอร์ชันใหม่อัปเดต/i)).toBeInTheDocument();
-    expect(screen.getByText(/1\.4\.0/)).toBeInTheDocument();
+    expect(screen.getByText(NEXT_VERSION_RE)).toBeInTheDocument();
 
     // Check that the Update action button is rendered
     const updateButton = screen.getByRole("button", { name: /Update|อัปเดต|Download Update|ดาวน์โหลดอัปเดต/i });
@@ -162,7 +172,7 @@ describe("AppUpdateToastItem Component", () => {
     // Simulate download progress
     await act(async () => {
       if (onAvailableCallback) {
-        onAvailableCallback({ version: "1.4.0" });
+        onAvailableCallback({ version: NEXT_VERSION });
       }
       if (onProgressCallback) {
         onProgressCallback({
@@ -177,7 +187,7 @@ describe("AppUpdateToastItem Component", () => {
     // Verify progress text and percentage
     expect(screen.getAllByText(/Downloading update|กำลังดาวน์โหลดอัปเดต/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/54%/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/1\.4\.0/)).toBeInTheDocument();
+    expect(screen.getByText(NEXT_VERSION_RE)).toBeInTheDocument();
   });
 
   it("renders restart button when update is downloaded", async () => {

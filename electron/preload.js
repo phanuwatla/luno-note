@@ -168,6 +168,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("native-spell-suggestions", subscription);
   },
   getNativeKeyboardLanguage: () => ipcRenderer.invoke("get-native-keyboard-language"),
+  configureGlobalFixLanguage: (config) => ipcRenderer.invoke("configure-global-fix-language", config),
+  getGlobalFixLanguageStatus: () => ipcRenderer.invoke("get-global-fix-language-status"),
+  restartGlobalFixLanguageHelper: () => ipcRenderer.invoke("restart-global-fix-language-helper"),
+  onTriggerFixLanguage: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on("trigger-fix-language", subscription);
+    return () => ipcRenderer.removeListener("trigger-fix-language", subscription);
+  },
+  onFixLanguageFeedback: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on("fix-language-feedback", subscription);
+    return () => ipcRenderer.removeListener("fix-language-feedback", subscription);
+  },
   onNativeKeyboardLanguageChanged: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on("native-keyboard-language-changed", subscription);

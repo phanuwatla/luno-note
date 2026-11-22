@@ -369,7 +369,8 @@ describe("versionHistoryStorage", () => {
       expect(safeName.length).toBeLessThan(90);
       expect(safeName.endsWith(".json")).toBe(true);
       // Must not contain illegal Windows filesystem characters
-      expect(safeName).not.toMatch(/[\\/:*?"<>|\x00-\x1F]/);
+      // eslint-disable-next-line no-control-regex
+    expect(safeName).not.toMatch(/[\\/:*?"<>|\x00-\x1F]/);
       // Contains human readable prefix
       expect(safeName).toContain("Testing Files_ห้องเช่า");
     });

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { NodeViewWrapper, NodeViewContent, NodeViewProps } from "@tiptap/react";
 import { Copy, Check } from "lucide-react";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const { settings } = useAppSettings();
+  const { t } = useTranslation();
 
   const showLineNumbers = settings.showCodeLineNumbers;
   const codeText = node.textContent || "";
@@ -55,10 +57,10 @@ const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
       (l.value === "plaintext" && (rawLang.toLowerCase() === "text" || !rawLang))
   );
   const displayLabel = foundLang
-    ? foundLang.label
+    ? (foundLang.value === "plaintext" ? t("codeBlock.plainText") : foundLang.label)
     : rawLang
     ? rawLang.charAt(0).toUpperCase() + rawLang.slice(1)
-    : "Plain Text";
+    : t("codeBlock.plainText");
 
   const handleCopy = () => {
     const textContent = node.textContent || "";
@@ -66,15 +68,15 @@ const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
       navigator.clipboard.writeText(textContent);
       setCopied(true);
       toast({
-        title: "Copied to clipboard",
-        description: "Code block content copied.",
+        title: t("codeBlock.copiedToClipboard"),
+        description: t("codeBlock.copiedDesc"),
       });
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
   return (
-    <NodeViewWrapper className="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-2xs transition-all">
+    <NodeViewWrapper className="code-block-wrapper my-5 md:my-6 rounded-xl border border-border/50 bg-muted/70 overflow-hidden shadow-sm transition-all">
       {/* Seamless Header Bar with System Select & Tooltip UI */}
       <div className="flex items-center justify-between px-3.5 pt-2 pb-1 text-[11px] select-none border-b border-border/30">
         <Select
@@ -84,36 +86,34 @@ const CodeBlockNodeViewComponent: React.FC<NodeViewProps> = ({
           <SelectTrigger className="h-auto w-auto border-0 bg-transparent p-0 gap-1 font-medium text-muted-foreground/80 hover:text-foreground outline-none shadow-none focus:ring-0 focus:ring-offset-0 text-[11px]">
             <span className="font-semibold text-muted-foreground/90">{displayLabel}</span>
           </SelectTrigger>
-          <SelectContent align="start" className="w-36 max-h-56 p-1 text-xs z-50">
+          <SelectContent align="start" className="w-36 max-h-56 p-1 text-xs">
             {LANGUAGES.map((l) => (
               <SelectItem key={l.value} value={l.value} className="text-xs py-1.5 cursor-pointer">
-                {l.label}
+                {l.value === "plaintext" ? t("codeBlock.plainText") : l.label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="flex items-center gap-1 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-background/40 transition-all cursor-pointer outline-none"
-                aria-label="Copy code"
-              >
-                {copied ? (
-                  <Check className="h-3.5 w-3.5 text-primary" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="text-[11px] px-2 py-1">
-              {copied ? "Copied!" : "Copy code"}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex items-center gap-1 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-background/40 transition-all cursor-pointer outline-none"
+              aria-label={t("codeBlock.copyCode")}
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-[11px] px-2 py-1">
+            {copied ? t("codeBlock.copied") : t("codeBlock.copyCode")}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Code Content Area with Line Numbers */}

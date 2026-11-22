@@ -31,7 +31,7 @@ function getStorage(): Storage | null {
     if (typeof localStorage !== "undefined") {
       return localStorage;
     }
-  } catch {}
+  } catch { /* ignore */ }
   return null;
 }
 
@@ -40,7 +40,7 @@ function dispatchStorageEvent(name: string, detail: unknown): void {
     if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
       window.dispatchEvent(new CustomEvent(name, { detail }));
     }
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 function safeGenerateId(): string {

@@ -14,7 +14,7 @@ import { saveVersionSnapshot, type NoteVersionSnapshot } from "@/lib/versionHist
 import { AnimatePresence } from "framer-motion";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Note, extractBaseTitleFromFileName, isSystemGeneratedUntitledName } from "@/hooks/useNotes";
-import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_SPELL_REGEX, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS } from "@/lib/spellChecker";
+import { getSpellingSuggestions, THAI_SPELL_CORRECTIONS, getThaiSpellRegex, getThaiAnomalyRegex, THAI_SPELL_REGEX, THAI_STRUCTURAL_ANOMALY_REGEX, isWordMisspelled, IGNORED_SPELL_WORDS, findThaiMisspellingsInText, addCustomSpellWord } from "@/lib/spellChecker";
 import {
   Bold,
   Bookmark,
@@ -137,16 +137,13 @@ import { SpellCheckIcon } from "@/components/icons/SpellCheckIcon";
 import { BriefcaseBusinessIcon } from "@/components/icons/BriefcaseBusinessIcon";
 import { PenLineIcon } from "@/components/icons/PenLineIcon";
 import AiAssistantPanel from "@/components/AiAssistantPanel";
-import FloatingCalculator from "@/components/FloatingCalculator";
-import FloatingTranslator from "@/components/FloatingTranslator";
-import FloatingClock from "@/components/FloatingClock";
-import FloatingAudioRecorder from "@/components/FloatingAudioRecorder";
 import QrCodeDialog from "@/components/QrCodeDialog";
 import AudioExtension from "@/components/editor/AudioExtension";
 import AudioPlayer from "@/components/editor/AudioPlayer";
 import { audioLocalCache } from "@/components/editor/AudioNodeView";
 import VideoExtension from "@/components/editor/VideoExtension";
 import VideoPlayer from "@/components/editor/VideoPlayer";
+import { PageLoader } from "@/components/shared/PageLoader";
 import { isAudioMedia, isVideoMedia, probeWebmMediaKind } from "@/lib/webmClassifier";
 import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -165,7 +162,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,10 +173,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "@/hooks/useTranslation";
-import { APP_THEMES, useAppSettings, FONT_OPTIONS, FONT_FAMILY_CSS, type AppTheme, useCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/hooks/useAppSettings";
+import { APP_THEMES, useAppSettings, useKeyboardLanguage, FONT_OPTIONS, FONT_FAMILY_CSS, type AppTheme, useCustomFonts, saveCustomFont, renameCustomFont, deleteCustomFont, type CustomFont } from "@/hooks/useAppSettings";
 import { getToolbarIcon, renderCustomIcon } from "@/lib/iconPacks";
-import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
-import { SettingsBody } from "@/components/SettingsBody";
+import { getNoteDefaultIconKey, formatFileSize } from "@/lib/fileIconUtils";
+import { escapeHtml } from "@/lib/htmlUtils";
+export { escapeHtml };
 import { docxToHtml } from "@/lib/docxUtils";
 import { parseFrontmatterAndTags, updateFrontmatterTags, updateFrontmatterIcon, updateFrontmatterFavorite, isMarkdownNote } from "@/lib/frontmatter";
 import { uploadDriveAttachmentFile, getDriveFileShareLink, revokeDriveFileShare } from "@/lib/googleDriveApi";
@@ -190,6 +187,7 @@ import { getTagColorClass } from "@/lib/tagColors";
 import { generatePdfHtml, inlineImagesForPdf } from "@/lib/pdfExportGenerator";
 import { generateDocHtml } from "@/lib/docExportGenerator";
 import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
+import { FIX_LANGUAGE_EVENT, type FixLanguageEventDetail } from "@/lib/fixLanguageSystem";
 import { getWrongLanguageCandidate } from "@/lib/wrongLanguageDetector";
 import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
 export type { AiActionType };
@@ -221,6 +219,119 @@ import { formatDateForFileName, formatRelativeDateTime } from "@/lib/dateTimeFor
 import HeadingToggle, { headingTogglePluginKey } from "@/lib/headingToggle";
 export { HeadingToggle, headingTogglePluginKey };
 import { Underline, Highlight, Superscript, Subscript, Kbd, TextColor, FontFamily, FontSize, TextAlign } from "@/lib/tiptapCustomMarks";
+import {
+  hashtagPluginKey,
+  HashtagDecoration,
+  type HashtagDecorationOptions,
+  spellCheckPluginKey,
+  setGlobalSpellCheckEnabled,
+  expandThaiAnomalyCluster,
+  SpellCheckDecoration,
+  inlineCodeHighlightPluginKey,
+  InlineCodeHighlight,
+  type InlineCodeHighlightOptions,
+  SmartTypography,
+  type SmartTypographyOptions,
+  wrongLanguageSuggestionPluginKey,
+  WrongLanguageSuggestion,
+  type WrongLanguageSuggestionOptions,
+  type WrongLangPluginState,
+  getToggleButtonMode,
+  handleToggleClick,
+  isToggleActive,
+  unwrapToggleAtPos,
+  subscribeToggleFocusChange,
+  Toggle,
+  CustomParagraph,
+  LivePreview,
+  livePreviewPluginKey,
+  getCleanCollapsedHtml,
+  type LivePreviewOptions,
+} from "@/components/editor/extensions/editorExtensions";
+import {
+  SLASH_ITEMS,
+  insertFootnoteAtSelection,
+  slashMenuStateRef,
+  slashMenuScrollRef,
+  type SlashMenuItem,
+} from "@/components/editor/slashItems";
+import { TableInteractiveOverlay } from "@/components/editor/TableInteractiveOverlay";
+import { createTurndownService } from "@/components/editor/turndownService";
+import { WorkspaceImagePickerDialog } from "@/components/editor/WorkspaceImagePickerDialog";
+import { WorkspaceVideoPickerDialog } from "@/components/editor/WorkspaceVideoPickerDialog";
+import { videoLocalCache } from "@/components/editor/VideoNodeView";
+import { LockedNoteViewer } from "@/components/LockedNoteViewer";
+import { encryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
+import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
+import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
+import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
+import { compressImageFile } from "@/lib/imageCompressor";
+import { saveImageToIndexedDb, getImageFromIndexedDb } from "@/lib/imageStore";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { Heading1Icon } from "@/components/icons/Heading1Icon";
+import { Heading2Icon } from "@/components/icons/Heading2Icon";
+import { Heading3Icon } from "@/components/icons/Heading3Icon";
+import { Heading4Icon } from "@/components/icons/Heading4Icon";
+import { Heading5Icon } from "@/components/icons/Heading5Icon";
+import { Heading6Icon } from "@/components/icons/Heading6Icon";
+import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
+import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
+import { PanelRightCloseIcon } from "@/components/icons/PanelRightCloseIcon";
+import { DeleteRowIcon } from "@/components/icons/DeleteRowIcon";
+import { DeleteColumnIcon } from "@/components/icons/DeleteColumnIcon";
+import { DeleteTableIcon } from "@/components/icons/DeleteTableIcon";
+
+export {
+  HashtagDecoration,
+  spellCheckPluginKey,
+  setGlobalSpellCheckEnabled,
+  expandThaiAnomalyCluster,
+  SpellCheckDecoration,
+  InlineCodeHighlight,
+  SmartTypography,
+  WrongLanguageSuggestion,
+  getToggleButtonMode,
+  handleToggleClick,
+  isToggleActive,
+  unwrapToggleAtPos,
+  subscribeToggleFocusChange,
+  Toggle,
+  CustomParagraph,
+  LivePreview,
+  livePreviewPluginKey,
+  getCleanCollapsedHtml,
+  SLASH_ITEMS,
+  insertFootnoteAtSelection,
+  slashMenuStateRef,
+  slashMenuScrollRef,
+  createTurndownService,
+};
+export type {
+  HashtagDecorationOptions,
+  InlineCodeHighlightOptions,
+  SmartTypographyOptions,
+  WrongLanguageSuggestionOptions,
+  SlashMenuItem,
+};
 
 marked.use({
   extensions: [
@@ -941,15 +1052,7 @@ export const EDITOR_CLASSES =
   " [&_.tableWrapper]:overflow-x-auto [&_.tableWrapper]:max-w-full [&_.tableWrapper]:my-4 [&_table]:my-0 [&_table]:w-[70%] max-md:[&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:py-2 [&_td]:px-3 [&_td]:relative [&_th]:border [&_th]:border-border/60 [&_th]:py-2 [&_th]:px-3 [&_th]:bg-muted [&_th]:font-semibold [&_th]:text-left [&_td_p]:my-0 [&_td_p]:leading-normal [&_th_p]:my-0 [&_th_p]:leading-normal" +
   " [&_.footnote-ref]:text-primary [&_.footnote-ref]:no-underline hover:[&_.footnote-ref]:underline [&_.footnote-ref]:font-medium [&_.footnote-ref]:cursor-pointer [&_sup]:text-[0.75em] [&_sup]:leading-none [&_sup]:align-super [&_sub]:text-[0.75em] [&_sub]:leading-none [&_sub]:align-sub [&_.footnote-def]:text-sm [&_.footnote-def]:text-muted-foreground [&_.footnote-def]:my-1 [&_.footnote-backref]:text-primary [&_.footnote-backref]:no-underline hover:[&_.footnote-backref]:underline [&_.footnote-backref]:font-medium [&_.footnote-backref]:cursor-pointer";
 
-export function escapeHtml(s: string): string {
-  if (typeof s !== "string") return "";
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+// escapeHtml is re-exported from @/lib/htmlUtils
 
 export const toTaskItemHtml = (isChecked: boolean, text: string) => {
   const trimmed = (text || "").trim();
@@ -1102,7 +1205,7 @@ export const prepareDomForEditor = (
       let decodedRel = src;
       try {
         decodedRel = decodeURIComponent(src);
-      } catch {}
+      } catch { /* ignore */ }
       video.setAttribute("data-relative-src", encodedRel);
       if (options?.assetBlobUrlMap) {
         const cachedBlobUrl =
@@ -1129,7 +1232,7 @@ export const prepareDomForEditor = (
       let decodedRel = src;
       try {
         decodedRel = decodeURIComponent(src);
-      } catch {}
+      } catch { /* ignore */ }
       audio.setAttribute("data-relative-src", encodedRel);
       if (options?.assetBlobUrlMap) {
         const cachedBlobUrl =
@@ -1156,7 +1259,7 @@ export const prepareDomForEditor = (
       let decodedRel = src;
       try {
         decodedRel = decodeURIComponent(src);
-      } catch {}
+      } catch { /* ignore */ }
       img.setAttribute("data-relative-src", encodedRel);
       if (options?.assetBlobUrlMap) {
         const cachedBlobUrl =
@@ -1450,828 +1553,6 @@ export function renderMarkdownToEditorHtml(
   return finalHtml;
 }
 
-function createHashtagDecorations(doc: any, theme?: any, tagColorStyle?: any) {
-  const decorations: Decoration[] = [];
-  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
-
-  doc.descendants((node: any, pos: number, parent: any) => {
-    if (node.isText) {
-      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) {
-        return;
-      }
-      if (node.marks && node.marks.some((m: any) => m.type.name === "code")) {
-        return;
-      }
-
-      const text = node.text || "";
-      let match: RegExpExecArray | null;
-      tagRegex.lastIndex = 0;
-
-      while ((match = tagRegex.exec(text)) !== null) {
-        const rawTag = match[1];
-        if (/^\d+$/.test(rawTag)) continue;
-
-        const hashIndex = match[0].indexOf("#");
-        const startPos = pos + match.index + hashIndex;
-        const endPos = startPos + 1 + rawTag.length;
-
-        const colorClass = getTagColorClass(rawTag, theme, undefined, tagColorStyle);
-
-        decorations.push(
-          Decoration.inline(startPos, endPos, {
-            class: `inline-tag-badge border ${colorClass}`,
-          })
-        );
-      }
-    }
-  });
-
-  return DecorationSet.create(doc, decorations);
-}
-
-const hashtagPluginKey = new PluginKey("hashtagDecoration");
-
-export interface HashtagDecorationOptions {
-  theme: AppTheme;
-  tagColorStyle: "multicolor" | "accent";
-}
-
-export const HashtagDecoration = Extension.create<HashtagDecorationOptions>({
-  name: "hashtagDecoration",
-
-  addOptions() {
-    return {
-      theme: "emerald",
-      tagColorStyle: "multicolor",
-    };
-  },
-
-  addProseMirrorPlugins() {
-    const options = this.options;
-    return [
-      new Plugin({
-        key: hashtagPluginKey,
-        state: {
-          init(_, { doc }) {
-            return createHashtagDecorations(doc, options.theme, options.tagColorStyle);
-          },
-          apply(tr, oldState) {
-            if (tr.getMeta(hashtagPluginKey)?.recompute) {
-              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
-            }
-            if (!tr.docChanged) return oldState;
-            if (!oldState || tr.steps.length === 0) {
-              return createHashtagDecorations(tr.doc, options.theme, options.tagColorStyle);
-            }
-            try {
-              let set = oldState.map(tr.mapping, tr.doc);
-              for (const step of tr.steps) {
-                step.getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
-                  const docSize = tr.doc.content.size;
-                  if (docSize === 0) {
-                    set = DecorationSet.empty;
-                    return;
-                  }
-                  const safeStart = Math.max(1, Math.min(newStart, docSize));
-                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
-                  const $from = tr.doc.resolve(safeStart);
-                  const $to = tr.doc.resolve(safeEnd);
-                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
-                  const toDepth = Math.max(0, Math.min($to.depth, 1));
-                  const depth = Math.min(fromDepth, toDepth);
-                  if (depth >= 1) {
-                    const start = $from.start(depth);
-                    const end = $to.end(depth);
-                    set = set.remove(set.find(start, end));
-                    const newDecos: Decoration[] = [];
-                    const parentNode = $from.node(depth);
-                  const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
-                  parentNode.descendants((child: any, childPos: number, parent: any) => {
-                    if (child.isText) {
-                      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
-                      if (child.marks && child.marks.some((m: any) => m.type.name === "code")) return;
-                      const text = child.text || "";
-                      let match: RegExpExecArray | null;
-                      tagRegex.lastIndex = 0;
-                      const absPos = start + childPos;
-                      while ((match = tagRegex.exec(text)) !== null) {
-                        const rawTag = match[1];
-                        if (/^\d+$/.test(rawTag)) continue;
-                        const hashIndex = match[0].indexOf("#");
-                        const startPos = absPos + match.index + hashIndex;
-                        const endPos = startPos + 1 + rawTag.length;
-                        if (startPos >= 0 && endPos <= tr.doc.content.size && startPos < endPos) {
-                          const colorClass = getTagColorClass(rawTag, options.theme, undefined, options.tagColorStyle);
-                          newDecos.push(
-                            Decoration.inline(startPos, endPos, {
-                              class: `inline-tag-badge border ${colorClass}`,
-                            })
-                          );
-                        }
-                      }
-                    }
-                  });
-                  if (newDecos.length > 0) {
-                    set = set.add(tr.doc, newDecos);
-                  }
-                }
-                });
-              }
-              return set;
-            } catch {
-              return oldState.map(tr.mapping, tr.doc);
-            }
-          },
-        },
-        props: {
-          decorations(state) {
-            return hashtagPluginKey.getState(state);
-          },
-        },
-      }),
-    ];
-  },
-});
-
-export const spellCheckPluginKey = new PluginKey("spellCheckDecoration");
-const LATIN_SPELL_REGEX = /[A-Za-z']+/g;
-const THAI_CHAR_TEST = /[\u0E00-\u0E7F]/;
-
-const THAI_COMBINING_OR_ATTACHED = /[\u0E30-\u0E3A\u0E47-\u0E4E]/;
-const THAI_BASE_CONSONANT = /[\u0E01-\u0E2E]/;
-
-export function expandThaiAnomalyCluster(
-  text: string,
-  matchStart: number,
-  matchEnd: number
-): { start: number; end: number } | null {
-  // If the anomaly is purely leading vowels like "เเ", it does not attach to a preceding consonant
-  if (!THAI_COMBINING_OR_ATTACHED.test(text[matchStart])) {
-    return { start: matchStart, end: matchEnd };
-  }
-
-  // Scan backwards to find the base consonant
-  let clusterStart = matchStart;
-  while (clusterStart > 0 && THAI_COMBINING_OR_ATTACHED.test(text[clusterStart - 1])) {
-    clusterStart--;
-  }
-
-  if (clusterStart === 0 || !THAI_BASE_CONSONANT.test(text[clusterStart - 1])) {
-    // No preceding base consonant to anchor to.
-    // Creating an isolated inline element around orphan combining marks breaks Blink/HarfBuzz shaping.
-    return null;
-  }
-
-  // Include the base consonant
-  clusterStart--;
-
-  // Scan forwards to include any trailing combining marks belonging to the same cluster
-  let clusterEnd = matchEnd;
-  while (clusterEnd < text.length && THAI_COMBINING_OR_ATTACHED.test(text[clusterEnd])) {
-    clusterEnd++;
-  }
-
-  return { start: clusterStart, end: clusterEnd };
-}
-
-function collectSpellCheckDecorationsForNode(
-  node: any,
-  pos: number,
-  decorations: Decoration[]
-): boolean {
-  if (
-    node.type.name === "codeBlock" ||
-    node.type.name === "codeBlockLowlight" ||
-    node.type.name === "mathBlock" ||
-    node.type.name === "image"
-  ) {
-    return false;
-  }
-
-  if (node.isText && node.text) {
-    if (node.marks && node.marks.some((m: any) => m.type.name === "code")) {
-      return false;
-    }
-
-    const text = node.text;
-
-    // Collect ranges of hashtags, wikilinks, and URLs to exclude from spell checking
-    const excludedRanges: Array<{ start: number; end: number }> = [];
-
-    // 1. Hashtags: #tag (exclude from spell check so spell check decorations don't split the hashtag pill badge)
-    const tagRegex = /(?:^|[\s(\[{])#([a-zA-Z\u0E00-\u0E7F0-9_\-\/]+)(?=[\s)\]},.!?:;\r\n]|$)/g;
-    let tagMatch: RegExpExecArray | null;
-    while ((tagMatch = tagRegex.exec(text)) !== null) {
-      const rawTag = tagMatch[1];
-      if (!/^\d+$/.test(rawTag)) {
-        const hashIdx = tagMatch[0].indexOf("#");
-        const start = tagMatch.index + hashIdx;
-        const end = start + 1 + rawTag.length;
-        excludedRanges.push({ start, end });
-      }
-    }
-
-    // 2. Wikilinks: [[target]] or [[target|alias]]
-    const wikilinkRegex = /\[\[([^\]|\r\n]+)(?:\|([^\]\r\n]+))?\]\]/g;
-    let wikiMatch: RegExpExecArray | null;
-    while ((wikiMatch = wikilinkRegex.exec(text)) !== null) {
-      excludedRanges.push({ start: wikiMatch.index, end: wikiMatch.index + wikiMatch[0].length });
-    }
-
-    // 3. URLs: https://... or http://...
-    const urlRegex = /https?:\/\/[^\s<>)\]}]+/g;
-    let urlMatch: RegExpExecArray | null;
-    while ((urlMatch = urlRegex.exec(text)) !== null) {
-      excludedRanges.push({ start: urlMatch.index, end: urlMatch.index + urlMatch[0].length });
-    }
-
-    const isInsideExcludedRange = (fromIdx: number, toIdx: number) =>
-      excludedRanges.some((r) => fromIdx < r.end && toIdx > r.start);
-
-    const thaiSpellRegex = THAI_SPELL_REGEX;
-    const thaiAnomalyRegex = THAI_STRUCTURAL_ANOMALY_REGEX;
-    const latinSpellRegex = /[A-Za-z']+/g;
-
-    // 1. Thai Misspellings & Typographical Anomalies check
-    if (THAI_CHAR_TEST.test(text)) {
-      const decoratedRanges: Array<{ start: number; end: number }> = [];
-
-      thaiSpellRegex.lastIndex = 0;
-      let match: RegExpExecArray | null;
-      while ((match = thaiSpellRegex.exec(text)) !== null) {
-        if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
-        const misspelled = match[0];
-        const from = pos + match.index;
-        const to = from + misspelled.length;
-        if (from >= 0 && to <= pos + text.length && from < to) {
-          decoratedRanges.push({ start: match.index, end: match.index + match[0].length });
-          decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": misspelled,
-            })
-          );
-        }
-      }
-
-      thaiAnomalyRegex.lastIndex = 0;
-      let lastAnomalyEnd = -1;
-      while ((match = thaiAnomalyRegex.exec(text)) !== null) {
-        if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
-        const expanded = expandThaiAnomalyCluster(text, match.index, match.index + match[0].length);
-        if (!expanded) continue;
-        if (decoratedRanges.some((r) => expanded.start < r.end && expanded.end > r.start)) {
-          continue;
-        }
-        if (expanded.start < lastAnomalyEnd) {
-          continue;
-        }
-        lastAnomalyEnd = expanded.end;
-        const word = text.slice(expanded.start, expanded.end);
-        const from = pos + expanded.start;
-        const to = pos + expanded.end;
-        if (from >= 0 && to <= pos + text.length && from < to) {
-          decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": word,
-            })
-          );
-        }
-      }
-    }
-
-    // 2. English words check
-    latinSpellRegex.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = latinSpellRegex.exec(text)) !== null) {
-      if (isInsideExcludedRange(match.index, match.index + match[0].length)) continue;
-      const word = match[0];
-      if (word.length >= 2 && !IGNORED_SPELL_WORDS.has(word.toLowerCase())) {
-        if (isWordMisspelled(word)) {
-          const from = pos + match.index;
-          const to = from + word.length;
-          if (from >= 0 && to <= pos + text.length && from < to) {
-            decorations.push(
-              Decoration.inline(from, to, {
-                class: "luno-spell-error",
-                "data-spell-word": word,
-              })
-            );
-          }
-        }
-      }
-    }
-  }
-  return true;
-}
-
-function createSpellCheckDecorations(doc: any, enabled: boolean): DecorationSet {
-  if (!enabled) return DecorationSet.empty;
-  const decorations: Decoration[] = [];
-
-  doc.descendants((node: any, pos: number) => {
-    return collectSpellCheckDecorationsForNode(node, pos, decorations);
-  });
-
-  return DecorationSet.create(doc, decorations);
-}
-
-export const SpellCheckDecoration = Extension.create({
-  name: "spellCheckDecoration",
-
-  addOptions() {
-    return {
-      enabled: true,
-    };
-  },
-
-  addProseMirrorPlugins() {
-    const extension = this;
-    return [
-      new Plugin({
-        key: spellCheckPluginKey,
-        state: {
-          init(_, { doc }) {
-            return extension.options.enabled ? createSpellCheckDecorations(doc, true) : DecorationSet.empty;
-          },
-          apply(tr, oldState) {
-            if (!extension.options.enabled) return DecorationSet.empty;
-            const meta = tr.getMeta(spellCheckPluginKey);
-            if (meta?.recompute || oldState === DecorationSet.empty) {
-              return createSpellCheckDecorations(tr.doc, true);
-            }
-            if (!tr.docChanged || tr.steps.length === 0) return oldState;
-
-            try {
-              let set = oldState.map(tr.mapping, tr.doc);
-              for (const step of tr.steps) {
-                step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-                  const docSize = tr.doc.content.size;
-                  if (docSize === 0) {
-                    set = DecorationSet.empty;
-                    return;
-                  }
-                  const safeStart = Math.max(1, Math.min(newStart, docSize));
-                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
-                  const $from = tr.doc.resolve(safeStart);
-                  const $to = tr.doc.resolve(safeEnd);
-                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
-                  const toDepth = Math.max(0, Math.min($to.depth, 1));
-                  const depth = Math.min(fromDepth, toDepth);
-                  if (depth >= 1) {
-                    const start = $from.start(depth);
-                    const end = $to.end(depth);
-                    set = set.remove(set.find(start, end));
-                    const newDecos: Decoration[] = [];
-                    const parentNode = $from.node(depth);
-                    parentNode.descendants((child: any, childPos: number) => {
-                      const absPos = start + childPos;
-                      collectSpellCheckDecorationsForNode(child, absPos, newDecos);
-                    });
-                    if (newDecos.length > 0) {
-                      set = set.add(tr.doc, newDecos);
-                    }
-                  }
-                });
-              }
-              return set;
-            } catch {
-              return oldState.map(tr.mapping, tr.doc);
-            }
-          },
-        },
-        props: {
-          decorations(state) {
-            if (!extension.options.enabled) return DecorationSet.empty;
-            return spellCheckPluginKey.getState(state) || DecorationSet.empty;
-          },
-        },
-      }),
-    ];
-  },
-});
-
-function parseLowlightAst(
-  nodes: any[],
-  currentPos: number,
-  decorations: Decoration[],
-  parentClasses: string[] = []
-): number {
-  let pos = currentPos;
-  for (const node of nodes) {
-    if (node.type === "text") {
-      const text = node.value || "";
-      const textLen = text.length;
-      if (textLen > 0 && parentClasses.length > 0) {
-        decorations.push(
-          Decoration.inline(pos, pos + textLen, {
-            class: parentClasses.join(" "),
-          })
-        );
-      }
-      pos += textLen;
-    } else if (node.type === "element") {
-      const nodeClasses = Array.isArray(node.properties?.className)
-        ? node.properties.className
-        : [];
-      const merged = [...parentClasses, ...nodeClasses];
-      pos = parseLowlightAst(node.children || [], pos, decorations, merged);
-    }
-  }
-  return pos;
-}
-
-function createInlineCodeDecorations(doc: any) {
-  const decorations: Decoration[] = [];
-
-  doc.descendants((node: any, pos: number, parent: any) => {
-    if (node.isText) {
-      if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) {
-        return;
-      }
-      const hasCodeMark = node.marks && node.marks.some((m: any) => m.type.name === "code");
-      if (!hasCodeMark) return;
-
-      const text = node.text || "";
-      if (!text.trim()) return;
-
-      try {
-        const result = lowlight.highlightAuto(text);
-        if (result && result.children && result.children.length > 0) {
-          parseLowlightAst(result.children, pos, decorations, []);
-        }
-      } catch {
-        // Fallback gracefully
-      }
-    }
-  });
-
-  return DecorationSet.create(doc, decorations);
-}
-
-const inlineCodeHighlightPluginKey = new PluginKey("inlineCodeHighlight");
-
-export interface InlineCodeHighlightOptions {
-  enabled: boolean;
-}
-
-export const InlineCodeHighlight = Extension.create<InlineCodeHighlightOptions>({
-  name: "inlineCodeHighlight",
-
-  addOptions() {
-    return {
-      enabled: false,
-    };
-  },
-
-  addProseMirrorPlugins() {
-    const extension = this;
-    return [
-      new Plugin({
-        key: inlineCodeHighlightPluginKey,
-        state: {
-          init(_, { doc }) {
-            return extension.options.enabled ? createInlineCodeDecorations(doc) : DecorationSet.empty;
-          },
-          apply(tr, oldState) {
-            if (!extension.options.enabled) return DecorationSet.empty;
-            if (!tr.docChanged || tr.steps.length === 0) return oldState;
-            try {
-              let set = oldState.map(tr.mapping, tr.doc);
-              for (const step of tr.steps) {
-                step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-                  const docSize = tr.doc.content.size;
-                  if (docSize === 0) {
-                    set = DecorationSet.empty;
-                    return;
-                  }
-                  const safeStart = Math.max(1, Math.min(newStart, docSize));
-                  const safeEnd = Math.max(1, Math.min(newEnd, docSize));
-                  const $from = tr.doc.resolve(safeStart);
-                  const $to = tr.doc.resolve(safeEnd);
-                  const fromDepth = Math.max(0, Math.min($from.depth, 1));
-                  const toDepth = Math.max(0, Math.min($to.depth, 1));
-                  const depth = Math.min(fromDepth, toDepth);
-                  if (depth >= 1) {
-                    const start = $from.start(depth);
-                    const end = $to.end(depth);
-                    set = set.remove(set.find(start, end));
-                    const newDecos: Decoration[] = [];
-                    const parentNode = $from.node(depth);
-                    parentNode.descendants((child: any, childPos: number, parent: any) => {
-                      if (child.isText) {
-                        if (parent && (parent.type.name === "codeBlock" || parent.type.name === "code")) return;
-                        const hasCodeMark = child.marks && child.marks.some((m: any) => m.type.name === "code");
-                        if (!hasCodeMark) return;
-                        const text = child.text || "";
-                        if (!text.trim()) return;
-                        try {
-                          const result = lowlight.highlightAuto(text);
-                          if (result?.children?.length) {
-                            parseLowlightAst(result.children, start + childPos, newDecos, []);
-                          }
-                        } catch {}
-                      }
-                    });
-                    if (newDecos.length > 0) {
-                      set = set.add(tr.doc, newDecos);
-                    }
-                  }
-                });
-              }
-              return set;
-            } catch {
-              return oldState.map(tr.mapping, tr.doc);
-            }
-          },
-        },
-        props: {
-          decorations(state) {
-            return inlineCodeHighlightPluginKey.getState(state);
-          },
-        },
-      }),
-    ];
-  },
-});
-
-export interface SmartTypographyOptions {
-  enabled: boolean | (() => boolean);
-}
-
-function makeSmartRule(
-  match: RegExp,
-  replacement: string,
-  isEnabled: () => boolean
-): InputRule {
-  return new InputRule(
-    match,
-    (state, matchArr, start, end) => {
-      if (!isEnabled()) return null;
-      let insert = replacement;
-      if (matchArr[1]) {
-        const offset = matchArr[0].lastIndexOf(matchArr[1]);
-        insert += matchArr[0].slice(offset + matchArr[1].length);
-        start += offset;
-        const cutOff = start - end;
-        if (cutOff > 0) {
-          insert = matchArr[0].slice(offset - cutOff, offset) + insert;
-          start = end;
-        }
-      }
-      return state.tr.insertText(insert, start, end);
-    },
-    { inCodeMark: false, inCode: false }
-  );
-}
-
-function buildSmartTypographyRules(isEnabled: () => boolean): InputRule[] {
-  return [
-    // 1. Em-dash: '---' or when adding third dash after en-dash '–-'
-    makeSmartRule(/(?:^|[^\-])(---)$/, "—", isEnabled),
-    makeSmartRule(/(–-)$/, "—", isEnabled),
-
-    // 2. En-dash: '--'
-    makeSmartRule(/(?:^|[^\-])(--)$/, "–", isEnabled),
-
-    // 3. Ellipsis: '...' -> '…'
-    makeSmartRule(/(\.\.\.)$/, "…", isEnabled),
-
-    // 4. Smart Double Quotes:
-    // Opening quote: after space, start of line, or open brackets/quotes
-    makeSmartRule(/(?:^|[\s\{\[\(\<'"\u2018\u201C])(")$/, "“", isEnabled),
-    // Closing quote: after any non-whitespace
-    makeSmartRule(/(")$/, "”", isEnabled),
-
-    // 5. Smart Single Quotes & Apostrophe:
-    // Opening single quote: after space, start of line, or open brackets/quotes
-    makeSmartRule(/(?:^|[\s\{\[\(\<'"\u2018\u201C])(')$/, "‘", isEnabled),
-    // Closing single quote / apostrophe: after any character
-    makeSmartRule(/(')$/, "’", isEnabled),
-
-    // 6. Arrows:
-    makeSmartRule(/(?:^|\s)(->)$/, "→", isEnabled),
-    makeSmartRule(/(?:^|\s)(<-)$/, "←", isEnabled),
-    makeSmartRule(/(?:^|\s)(=>)$/, "⇒", isEnabled),
-
-    // 7. Symbols:
-    makeSmartRule(/(\(c\))$/i, "©", isEnabled),
-    makeSmartRule(/(\(r\))$/i, "®", isEnabled),
-    makeSmartRule(/(\(tm\))$/i, "™", isEnabled),
-    makeSmartRule(/(?:^|\s)(\+-)$/, "±", isEnabled),
-    makeSmartRule(/(?:^|\s)(!=)$/, "≠", isEnabled),
-
-    // 8. Fractions:
-    makeSmartRule(/(?:^|\s)(1\/2)$/, "½", isEnabled),
-    makeSmartRule(/(?:^|\s)(1\/4)$/, "¼", isEnabled),
-    makeSmartRule(/(?:^|\s)(3\/4)$/, "¾", isEnabled),
-  ];
-}
-
-export const SmartTypography = Extension.create<SmartTypographyOptions>({
-  name: "smartTypography",
-
-  addOptions() {
-    return {
-      enabled: true,
-    };
-  },
-
-  addStorage() {
-    return {
-      enabled: true,
-    };
-  },
-
-  addProseMirrorPlugins() {
-    const extension = this;
-    const rules = buildSmartTypographyRules(() => {
-      const opt = extension.options.enabled;
-      if (typeof opt === "function") return Boolean(opt());
-      if (typeof (extension.editor?.storage as any)?.smartTypography?.enabled === "boolean") {
-        return (extension.editor.storage as any).smartTypography.enabled;
-      }
-      return Boolean(opt);
-    });
-    return [inputRules({ rules })];
-  },
-});
-
-export const wrongLanguageSuggestionPluginKey = new PluginKey("wrongLanguageSuggestion");
-
-export interface WrongLanguageSuggestionOptions {
-  enabled: boolean;
-}
-
-export interface WrongLangPluginState {
-  suggestion: {
-    from: number;
-    to: number;
-    original: string;
-    replacement: string;
-    targetLang: "th" | "en";
-  } | null;
-  dismissedPos: number | null;
-}
-
-export const WrongLanguageSuggestion = Extension.create<WrongLanguageSuggestionOptions>({
-  name: "wrongLanguageSuggestion",
-
-  addOptions() {
-    return {
-      enabled: true,
-    };
-  },
-
-  addProseMirrorPlugins() {
-    const extension = this;
-
-    return [
-      new Plugin({
-        key: wrongLanguageSuggestionPluginKey,
-        state: {
-          init() {
-            return { suggestion: null, dismissedPos: null } as WrongLangPluginState;
-          },
-          apply(tr, oldState: WrongLangPluginState, _oldEditorState, newEditorState) {
-            if (!extension.options.enabled) {
-              return { suggestion: null, dismissedPos: null };
-            }
-
-            const meta = tr.getMeta(wrongLanguageSuggestionPluginKey);
-            if (meta?.dismiss) {
-              return { suggestion: null, dismissedPos: newEditorState.selection.head };
-            }
-
-            const sel = newEditorState.selection;
-            if (!sel.empty) {
-              return { suggestion: null, dismissedPos: null };
-            }
-
-            const head = sel.head;
-            if (oldState.dismissedPos === head && !tr.docChanged) {
-              return oldState;
-            }
-
-            const $head = sel.$head;
-            const parent = $head.parent;
-            if (!parent.isTextblock || parent.type.name === "codeBlock" || parent.type.name === "codeBlockLowlight") {
-              return { suggestion: null, dismissedPos: null };
-            }
-
-            const startOfBlock = $head.start();
-            const textBefore = newEditorState.doc.textBetween(startOfBlock, head, "\n", "\n");
-            const candidate = getWrongLanguageCandidate(textBefore);
-
-            if (!candidate) {
-              return { suggestion: null, dismissedPos: null };
-            }
-
-            const from = head - candidate.fromOffset;
-            const to = head;
-
-            return {
-              suggestion: {
-                from,
-                to,
-                original: candidate.original,
-                replacement: candidate.replacement,
-                targetLang: candidate.targetLang,
-              },
-              dismissedPos: null,
-            };
-          },
-        },
-        props: {
-          decorations(state) {
-            try {
-              if (!extension.options.enabled) return DecorationSet.empty;
-              const pluginState = wrongLanguageSuggestionPluginKey.getState(state) as WrongLangPluginState | undefined;
-              if (!pluginState || !pluginState.suggestion) return DecorationSet.empty;
-
-              const { to, replacement } = pluginState.suggestion;
-              const widget = Decoration.widget(
-                to,
-                () => {
-                  const span = document.createElement("span");
-                  span.className =
-                    "luno-ghost-suggestion select-none pointer-events-none opacity-50 dark:opacity-60 italic text-muted-foreground font-normal inline-flex items-center align-middle gap-1.5 ml-1";
-                  span.dataset.ghostReplacement = replacement;
-
-                  const textSpan = document.createElement("span");
-                  textSpan.className = "inline-flex items-center leading-none";
-                  textSpan.textContent = replacement;
-                  span.appendChild(textSpan);
-
-                  const kbd = document.createElement("kbd");
-                  kbd.className =
-                    "not-italic text-[0.8em] leading-none px-1.5 py-1 rounded-md bg-muted border border-border/80 text-muted-foreground font-mono font-medium shadow-2xs inline-flex items-center justify-center align-middle";
-                  kbd.textContent = "Tab ⇥";
-                  span.appendChild(kbd);
-
-                  return span;
-                },
-                { side: 1, key: "luno-ghost-suggestion" }
-              );
-
-              return DecorationSet.create(state.doc, [widget]);
-            } catch {
-              return DecorationSet.empty;
-            }
-          },
-        },
-      }),
-    ];
-  },
-});
-
-
-import TurndownService from "turndown";
-import ToggleNodeView from "@/components/ToggleNodeView";
-import { WorkspaceImagePickerDialog } from "@/components/editor/WorkspaceImagePickerDialog";
-import { WorkspaceVideoPickerDialog } from "@/components/editor/WorkspaceVideoPickerDialog";
-import { videoLocalCache } from "@/components/editor/VideoNodeView";
-import { LockedNoteViewer } from "@/components/LockedNoteViewer";
-import { encryptNoteContent, isEncryptedNote } from "@/lib/noteCrypto";
-import { canUseNativeFileSystem, getStoredFileHandle, removeStoredFileHandle, setStoredFileHandle, requestPermissionIfAvailable, isNoteDeleted, isRelativePathDeleted, type CreateNoteOptions, type OpenFolderPending } from "@/lib/fileHandles";
-import { rewriteHtmlForPreview } from "@/lib/htmlPreview";
-import { toast } from "@/hooks/use-toast";
-import { ToastAction } from "@/components/ui/toast";
-import { compressImageFile } from "@/lib/imageCompressor";
-import { saveImageToIndexedDb, getImageFromIndexedDb } from "@/lib/imageStore";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuShortcut,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Heading1Icon } from "@/components/icons/Heading1Icon";
-import { Heading2Icon } from "@/components/icons/Heading2Icon";
-import { Heading3Icon } from "@/components/icons/Heading3Icon";
-import { Heading4Icon } from "@/components/icons/Heading4Icon";
-import { Heading5Icon } from "@/components/icons/Heading5Icon";
-import { Heading6Icon } from "@/components/icons/Heading6Icon";
-import { CircleDotDashedIcon } from "@/components/icons/CircleDotDashedIcon";
-import { CircleEllipsisIcon } from "@/components/icons/CircleEllipsisIcon";
-import { PanelRightCloseIcon } from "./icons/PanelRightCloseIcon";
-import { DeleteRowIcon } from "@/components/icons/DeleteRowIcon";
-import { DeleteColumnIcon } from "@/components/icons/DeleteColumnIcon";
-import { DeleteTableIcon } from "@/components/icons/DeleteTableIcon";
-
 const FONT_SIZE_OPTIONS = Array.from({ length: 10 }, (_, i) => 13 + i);
 
 const EMOJI_LIST = [
@@ -2291,724 +1572,6 @@ const EMOJI_LIST = [
   "📁", "📂", "📅", "📆", "📊", "📈", "📉", "🔍", "🔎", "🔒",
   "🔓", "🔑", "📦", "✉️", "📧", "💼", "📱", "💻", "⌨️", "🖥️",
   "📷", "🎥", "🎬", "🎨", "🚀", "🛸", "⏰", "⏱️", "☕", "🍺"
-];
-
-export function getToggleButtonMode(selection: { empty: boolean }): "wrap" | "insert" {
-  return selection.empty ? "insert" : "wrap";
-}
-
-export function handleToggleClick(editor: TiptapEditor | null) {
-  if (!editor) return;
-  const { from, to, empty } = editor.state.selection;
-  const selectedText = empty ? "" : editor.state.doc.textBetween(from, to, " ", " ").trim();
-
-  if (selectedText) {
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: "toggle",
-        attrs: { title: selectedText },
-        content: [{ type: "paragraph" }],
-      })
-      .run();
-  } else {
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: "toggle",
-        attrs: { title: "" },
-        content: [{ type: "paragraph" }],
-      })
-      .run();
-  }
-}
-
-export const Toggle = TiptapNode.create({
-  name: "toggle",
-  group: "block",
-  content: "block+",
-  defining: true,
-  draggable: false,
-  addAttributes() {
-    return {
-      title: {
-        default: "",
-      },
-      open: {
-        default: false,
-        parseHTML: (element) => Boolean((element as HTMLDetailsElement).open),
-        renderHTML: (attributes) => (attributes.open ? { open: "" } : {}),
-      },
-    };
-  },
-  parseHTML() {
-    return [
-      {
-        tag: "details",
-        getAttrs: (element) => {
-          const summary = (element as HTMLElement).querySelector("summary");
-          return {
-            title: summary?.textContent?.trim() || "",
-            open: Boolean((element as HTMLDetailsElement).open),
-          };
-        },
-        contentElement: "div",
-      },
-    ];
-  },
-  renderHTML({ node, HTMLAttributes }) {
-    const sanitizedAttributes = { ...HTMLAttributes };
-    delete sanitizedAttributes.open;
-
-    return [
-      "details",
-      node.attrs.open ? mergeAttributes(sanitizedAttributes, { open: "" }) : mergeAttributes(sanitizedAttributes),
-      ["summary", node.attrs.title],
-      ["div", 0],
-    ];
-  },
-  addNodeView() {
-    return ReactNodeViewRenderer(ToggleNodeView, {
-      update: ({ oldNode, newNode, updateProps }) => {
-        if (newNode.type.name !== oldNode.type.name) {
-          return false;
-        }
-        if (
-          oldNode.attrs.open !== newNode.attrs.open ||
-          oldNode.attrs.title !== newNode.attrs.title ||
-          oldNode.content !== newNode.content
-        ) {
-          updateProps();
-        }
-        return true;
-      },
-    });
-  },
-});
-
-export type SlashMenuItem = {
-  id: string;
-  titleKey: string;
-  categoryKey?: string;
-  icon: React.ReactNode;
-  keywords: string[];
-  action: (
-    editor: TiptapEditor,
-    helpers: {
-      openLinkDialog: () => void;
-      openFootnoteDialog?: () => void;
-      openImageDialog: () => void;
-      openWorkspaceImageDialog?: () => void;
-      triggerImageUpload: () => void;
-      openVideoDialog?: () => void;
-      openWorkspaceVideoDialog?: () => void;
-      triggerVideoUpload?: () => void;
-      openAudioRecorder: () => void;
-      openQrCodeDialog?: () => void;
-      openEmojiPicker?: () => void;
-      handleFixLanguage: () => void;
-      openTranslator?: () => void;
-      openCalculator?: () => void;
-      openClock?: () => void;
-      triggerAi?: (actionType?: AiActionType) => void;
-    }
-  ) => void;
-};
-
-export const slashMenuStateRef = {
-  current: {
-    open: false,
-    query: "",
-    slashRange: null as { from: number; to: number } | null,
-    coords: null as { top: number; left: number } | null,
-    selectedIndex: 0,
-    filteredItems: [] as SlashMenuItem[],
-    onSelect: null as ((item: SlashMenuItem) => void) | null,
-    notify: null as (() => void) | null,
-  },
-};
-
-export const slashMenuScrollRef = {
-  current: null as HTMLDivElement | null,
-};
-
-const escHtml = (str: string): string =>
-  str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-
-export const insertFootnoteAtSelection = (editor: any, referenceText: string = "") => {
-  if (!editor || editor.isDestroyed) return;
-
-  const doc = editor.state.doc;
-  const existingNums: number[] = [];
-
-  try {
-    // Collect all existing citation numbers across the whole document
-    doc.descendants((node: any) => {
-      if (node.isText && node.text) {
-        const matches = Array.from(node.text.matchAll(/\[\^?(\d+)\]/g));
-        for (const m of matches as RegExpMatchArray[]) {
-          const n = parseInt(m[1], 10);
-          if (!isNaN(n)) existingNums.push(n);
-        }
-      }
-      if (node.marks) {
-        node.marks.forEach((mark: any) => {
-          if (mark.attrs?.["data-footnote-ref"]) {
-            const n = parseInt(mark.attrs["data-footnote-ref"], 10);
-            if (!isNaN(n)) existingNums.push(n);
-          }
-          if (mark.attrs?.["data-footnote-backref"]) {
-            const n = parseInt(mark.attrs["data-footnote-backref"], 10);
-            if (!isNaN(n)) existingNums.push(n);
-          }
-        });
-      }
-      if (node.attrs?.["data-footnote-def"]) {
-        const n = parseInt(node.attrs["data-footnote-def"], 10);
-        if (!isNaN(n)) existingNums.push(n);
-      }
-    });
-  } catch {
-    const docText = editor.getText();
-    const matches = Array.from(docText.matchAll(/\[\^(\d+)\]/g));
-    for (const m of matches as RegExpMatchArray[]) {
-      const n = parseInt(m[1], 10);
-      if (!isNaN(n)) existingNums.push(n);
-    }
-  }
-
-  let nextNum = 1;
-  if (existingNums.length > 0) {
-    nextNum = Math.max(...existingNums) + 1;
-  }
-
-  const tr = editor.state.tr;
-  const cursorPos = editor.state.selection.from;
-
-  // 1. Insert citation [nextNum] at current cursor position
-  const citationSchema = editor.schema;
-  const supMark = citationSchema.marks.superscript ? citationSchema.marks.superscript.create() : null;
-  const linkMark = citationSchema.marks.link.create({
-    href: `#fn-${nextNum}`,
-    id: `fnref-${nextNum}`,
-    "data-footnote-ref": String(nextNum),
-    class: "footnote-ref text-primary hover:underline cursor-pointer select-none font-medium px-0.5",
-  });
-  const marks = supMark ? [linkMark, supMark] : [linkMark];
-  const citationText = citationSchema.text(`[${nextNum}]`, marks);
-  tr.insert(cursorPos, citationText);
-
-  // 2. Build the definition paragraph: [^nextNum]: referenceText
-  const backlink = citationSchema.marks.link.create({
-    href: `#fnref-${nextNum}`,
-    "data-footnote-backref": String(nextNum),
-    class: "footnote-backref text-primary font-medium mr-1 select-none no-underline hover:underline cursor-pointer",
-  });
-  const prefix = citationSchema.text(`[^${nextNum}]:`, [backlink]);
-  const children = [prefix];
-  const trimmed = referenceText.trim();
-  if (trimmed) {
-    children.push(citationSchema.text(" " + trimmed));
-  } else {
-    children.push(citationSchema.text(" "));
-  }
-
-  const defPara = citationSchema.nodes.paragraph.create(
-    {
-      id: `fn-${nextNum}`,
-      "data-footnote-def": String(nextNum),
-      class: "footnote-def text-sm text-muted-foreground my-1.5",
-    },
-    children
-  );
-
-  // 3. Append definition to the end of the document preceded by 1 empty line
-  const lastChild = tr.doc.lastChild;
-  const isLastChildDef =
-    lastChild?.type?.name === "paragraph" &&
-    (lastChild.attrs?.["data-footnote-def"] ||
-      (lastChild.attrs?.["id"]?.startsWith("fn-") ? lastChild.attrs["id"].replace(/^fn-/, "") : null) ||
-      /^\s*\[\^[^\]]+\]:/.test(lastChild.textContent || ""));
-
-  const isLastChildEmpty =
-    lastChild?.type?.name === "paragraph" &&
-    !lastChild.textContent?.trim();
-
-  const docEndPos = tr.doc.content.size;
-
-  if (isLastChildDef) {
-    // If the last line is already a footnote definition, append directly below it
-    tr.insert(docEndPos, defPara);
-  } else if (isLastChildEmpty) {
-    // Already has 1 empty line at the end, insert definition after it
-    tr.insert(docEndPos, defPara);
-  } else {
-    // Precede with 1 empty line (empty paragraph), followed by the definition
-    const emptyPara = citationSchema.nodes.paragraph.create();
-    tr.insert(docEndPos, [emptyPara, defPara]);
-  }
-
-  // 4. Move selection to right after the inserted citation [nextNum]
-  const afterCitationPos = cursorPos + citationText.nodeSize;
-  if (afterCitationPos <= tr.doc.content.size) {
-    tr.setSelection(editor.state.selection.constructor.near(tr.doc.resolve(afterCitationPos)));
-  }
-
-  editor.view.dispatch(tr);
-  editor.view.focus();
-};
-
-export const SLASH_ITEMS: SlashMenuItem[] = [
-  // 1. History
-  {
-    id: "undo",
-    titleKey: "editor.undo",
-    categoryKey: "settings.toolCategoryHistory",
-    icon: <Undo2 className="mr-2 h-4 w-4" />,
-    keywords: ["undo", "history", "ย้อนกลับ", "เลิกทำ", "ยกเลิก"],
-    action: (editor) => editor.chain().focus().undo().run(),
-  },
-  {
-    id: "redo",
-    titleKey: "editor.redo",
-    categoryKey: "settings.toolCategoryHistory",
-    icon: <Redo2 className="mr-2 h-4 w-4" />,
-    keywords: ["redo", "history", "ทำซ้ำ", "ทำอีกครั้ง"],
-    action: (editor) => editor.chain().focus().redo().run(),
-  },
-
-  // 2. Headings
-  {
-    id: "h1",
-    titleKey: "editor.heading1",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading1Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h1", "heading1", "header1", "หัวข้อ1", "หัวข้อ 1", "หัวเรื่องใหญ่"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run(),
-  },
-  {
-    id: "h2",
-    titleKey: "editor.heading2",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading2Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h2", "heading2", "header2", "หัวข้อ2", "หัวข้อ 2", "หัวเรื่องกลาง"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run(),
-  },
-  {
-    id: "h3",
-    titleKey: "editor.heading3",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading3Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h3", "heading3", "header3", "หัวข้อ3", "หัวข้อ 3", "หัวเรื่องเล็ก"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run(),
-  },
-  {
-    id: "h4",
-    titleKey: "editor.heading4",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading4Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h4", "heading4", "header4", "หัวข้อ4", "หัวข้อ 4"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 4 }).run(),
-  },
-  {
-    id: "h5",
-    titleKey: "editor.heading5",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading5Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h5", "heading5", "header5", "หัวข้อ5", "หัวข้อ 5"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 5 }).run(),
-  },
-  {
-    id: "h6",
-    titleKey: "editor.heading6",
-    categoryKey: "settings.toolCategoryHeading",
-    icon: <Heading6Icon className="mr-2 h-4 w-4" />,
-    keywords: ["h6", "heading6", "header6", "หัวข้อ6", "หัวข้อ 6"],
-    action: (editor) => editor.chain().focus().toggleHeading({ level: 6 }).run(),
-  },
-
-  // 3. Inline Formatting
-  {
-    id: "bold",
-    titleKey: "editor.bold",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <Bold className="mr-2 h-4 w-4" />,
-    keywords: ["bold", "b", "ตัวหนา", "หนา"],
-    action: (editor) => editor.chain().focus().toggleBold().run(),
-  },
-  {
-    id: "italic",
-    titleKey: "editor.italic",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <Italic className="mr-2 h-4 w-4" />,
-    keywords: ["italic", "i", "ตัวเอียง", "เอียง"],
-    action: (editor) => editor.chain().focus().toggleItalic().run(),
-  },
-  {
-    id: "underline",
-    titleKey: "editor.underline",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <UnderlineIcon className="mr-2 h-4 w-4" />,
-    keywords: ["underline", "u", "ขีดเส้นใต้", "เส้นใต้"],
-    action: (editor) => editor.chain().focus().toggleUnderline().run(),
-  },
-  {
-    id: "strike",
-    titleKey: "editor.strikethrough",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <Strikethrough className="mr-2 h-4 w-4" />,
-    keywords: ["strike", "strikethrough", "s", "ขีดฆ่า"],
-    action: (editor) => editor.chain().focus().toggleStrike().run(),
-  },
-  {
-    id: "highlight",
-    titleKey: "editor.highlight",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <Highlighter className="mr-2 h-4 w-4" />,
-    keywords: ["highlight", "mark", "hl", "ไฮไลต์", "ไฮไลท์", "เน้นข้อความ", "ป้าย"],
-    action: (editor) => editor.chain().focus().toggleHighlight().run(),
-  },
-  {
-    id: "superscript",
-    titleKey: "editor.superscript",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <SuperscriptIcon className="mr-2 h-4 w-4" />,
-    keywords: ["superscript", "sup", "ตัวยก", "ยกกำลัง", "x2"],
-    action: (editor) => editor.chain().focus().toggleSuperscript().run(),
-  },
-  {
-    id: "subscript",
-    titleKey: "editor.subscript",
-    categoryKey: "settings.toolCategoryInline",
-    icon: <SubscriptIcon className="mr-2 h-4 w-4" />,
-    keywords: ["subscript", "sub", "ตัวห้อย", "ห้อย", "x2"],
-    action: (editor) => editor.chain().focus().toggleSubscript().run(),
-  },
-  {
-    id: "alignLeft",
-    titleKey: "editor.alignLeft",
-    categoryKey: "settings.toolCategoryAlign",
-    icon: <AlignLeft className="mr-2 h-4 w-4" />,
-    keywords: ["align", "left", "alignleft", "ชิดซ้าย", "จัดซ้าย"],
-    action: (editor) => editor.chain().focus().setTextAlign("left").run(),
-  },
-  {
-    id: "alignCenter",
-    titleKey: "editor.alignCenter",
-    categoryKey: "settings.toolCategoryAlign",
-    icon: <AlignCenter className="mr-2 h-4 w-4" />,
-    keywords: ["align", "center", "aligncenter", "กึ่งกลาง", "จัดกลาง"],
-    action: (editor) => editor.chain().focus().setTextAlign("center").run(),
-  },
-  {
-    id: "alignRight",
-    titleKey: "editor.alignRight",
-    categoryKey: "settings.toolCategoryAlign",
-    icon: <AlignRight className="mr-2 h-4 w-4" />,
-    keywords: ["align", "right", "alignright", "ชิดขวา", "จัดขวา"],
-    action: (editor) => editor.chain().focus().setTextAlign("right").run(),
-  },
-  {
-    id: "alignJustify",
-    titleKey: "editor.alignJustify",
-    categoryKey: "settings.toolCategoryAlign",
-    icon: <AlignJustify className="mr-2 h-4 w-4" />,
-    keywords: ["align", "justify", "alignjustify", "กระจายเท่ากัน", "กระจาย"],
-    action: (editor) => editor.chain().focus().setTextAlign("justify").run(),
-  },
-
-  // 4. Lists
-  {
-    id: "bulletList",
-    titleKey: "editor.bulletList",
-    categoryKey: "settings.toolCategoryList",
-    icon: <List className="mr-2 h-4 w-4" />,
-    keywords: ["bullet", "list", "ul", "รายการ", "จุด"],
-    action: (editor) => editor.chain().focus().toggleBulletList().run(),
-  },
-  {
-    id: "orderedList",
-    titleKey: "editor.numberedList",
-    categoryKey: "settings.toolCategoryList",
-    icon: <ListOrdered className="mr-2 h-4 w-4" />,
-    keywords: ["number", "ordered", "ol", "เลข", "ลำดับ"],
-    action: (editor) => editor.chain().focus().toggleOrderedList().run(),
-  },
-  {
-    id: "taskList",
-    titleKey: "editor.checkbox",
-    categoryKey: "settings.toolCategoryList",
-    icon: <ListTodoIcon className="mr-2 h-4 w-4" />,
-    keywords: ["todo", "task", "check", "checkbox", "กล่อง", "เช็ค", "ทาสก์"],
-    action: (editor) => editor.chain().focus().toggleTaskList().run(),
-  },
-
-  // 5. Blocks & Structure
-  {
-    id: "toggle",
-    titleKey: "editor.toggle",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <ChevronsDownUp className="mr-2 h-4 w-4" />,
-    keywords: ["toggle", "collapse", "details", "พับ", "ย่อย"],
-    action: (editor) => handleToggleClick(editor),
-  },
-  {
-    id: "code",
-    titleKey: "editor.inlineCode",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <CodeXml className="mr-2 h-4 w-4" />,
-    keywords: ["code", "inline", "โค้ด", "โค้ดในบรรทัด"],
-    action: (editor) => editor.chain().focus().toggleCode().run(),
-  },
-  {
-    id: "codeBlock",
-    titleKey: "editor.codeBlock",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <SquareCode className="mr-2 h-4 w-4" />,
-    keywords: ["codeblock", "code", "block", "โค้ด", "บล็อกโค้ด"],
-    action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
-  },
-  {
-    id: "blockquote",
-    titleKey: "editor.blockquote",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <Quote className="mr-2 h-4 w-4" />,
-    keywords: ["quote", "blockquote", "คำพูด", "อ้างอิง"],
-    action: (editor) => editor.chain().focus().toggleBlockquote().run(),
-  },
-  {
-    id: "footnote",
-    titleKey: "editor.footnote",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <FootnoteIcon className="mr-2 h-4 w-4" />,
-    keywords: ["footnote", "note", "fn", "เชิงอรรถ", "อ้างอิงท้ายหน้า", "อ้างอิง", "reference"],
-    action: (editor, helpers) => {
-      if (helpers.openFootnoteDialog) {
-        helpers.openFootnoteDialog();
-      } else {
-        insertFootnoteAtSelection(editor);
-      }
-    },
-  },
-  {
-    id: "horizontalRule",
-    titleKey: "editor.horizontalRule",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <Minus className="mr-2 h-4 w-4" />,
-    keywords: ["hr", "horizontal", "rule", "line", "divider", "เส้นแบ่ง", "เส้น", "คั่น"],
-    action: (editor) => editor.chain().focus().setHorizontalRule().run(),
-  },
-  {
-    id: "table",
-    titleKey: "editor.insertTable",
-    categoryKey: "settings.toolCategoryBlock",
-    icon: <TableIcon className="mr-2 h-4 w-4" />,
-    keywords: ["table", "grid", "ตาราง", "แถว", "คอลัมน์"],
-    action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
-  },
-
-  // 6. Media & Tools
-  {
-    id: "link",
-    titleKey: "editor.link",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Link2 className="mr-2 h-4 w-4" />,
-    keywords: ["link", "url", "ลิงก์"],
-    action: (_editor, helpers) => helpers.openLinkDialog(),
-  },
-  {
-    id: "imageUrl",
-    titleKey: "editor.insertImageByUrl",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <ImagePlus className="mr-2 h-4 w-4" />,
-    keywords: ["image", "img", "photo", "pic", "รูป", "ภาพ", "url"],
-    action: (_editor, helpers) => helpers.openImageDialog(),
-  },
-  {
-    id: "imageWorkspace",
-    titleKey: "editor.insertImageFromWorkspace",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Images className="mr-2 h-4 w-4" />,
-    keywords: ["image", "workspace", "attachment", "attachments", "รูป", "ไฟล์แนบ", "คลังภาพ"],
-    action: (_editor, helpers) => helpers.openWorkspaceImageDialog?.(),
-  },
-  {
-    id: "imageUpload",
-    titleKey: "editor.uploadImage",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Upload className="mr-2 h-4 w-4" />,
-    keywords: ["upload", "file", "image", "img", "อัปโหลด", "อัพโหลด", "รูป", "ไฟล์"],
-    action: (_editor, helpers) => helpers.triggerImageUpload(),
-  },
-  {
-    id: "videoUrl",
-    titleKey: "editor.insertVideoByUrl",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Film className="mr-2 h-4 w-4" />,
-    keywords: ["video", "vid", "movie", "clip", "วิดีโอ", "คลิป", "หนัง", "url"],
-    action: (_editor, helpers) => helpers.openVideoDialog?.(),
-  },
-  {
-    id: "videoWorkspace",
-    titleKey: "editor.insertVideoFromWorkspace",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Video className="mr-2 h-4 w-4" />,
-    keywords: ["video", "workspace", "attachment", "attachments", "วิดีโอ", "ไฟล์แนบ", "คลังวิดีโอ"],
-    action: (_editor, helpers) => helpers.openWorkspaceVideoDialog?.(),
-  },
-  {
-    id: "videoUpload",
-    titleKey: "editor.uploadVideo",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Upload className="mr-2 h-4 w-4" />,
-    keywords: ["upload", "file", "video", "vid", "อัปโหลด", "อัพโหลด", "วิดีโอ", "ไฟล์"],
-    action: (_editor, helpers) => helpers.triggerVideoUpload?.(),
-  },
-  {
-    id: "qrCode",
-    titleKey: "editor.qrCode",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <QrCode className="mr-2 h-4 w-4" />,
-    keywords: ["qr", "qrcode", "คิวอาร์", "บาร์โค้ด", "สแกน", "คิวอาร์โค้ด"],
-    action: (_editor, helpers) => helpers.openQrCodeDialog?.(),
-  },
-  {
-    id: "emoji",
-    titleKey: "editor.insertEmoji",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Smile className="mr-2 h-4 w-4" />,
-    keywords: ["emoji", "smile", "อิโมจิ", "ยิ้ม"],
-    action: (_editor, helpers) => helpers.openEmojiPicker?.(),
-  },
-  {
-    id: "audio",
-    titleKey: "editor.recordAudio",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Mic className="mr-2 h-4 w-4" />,
-    keywords: ["audio", "record", "voice", "sound", "mic", "อัดเสียง", "เสียง", "บันทึกเสียง", "ไมค์"],
-    action: (_editor, helpers) => helpers.openAudioRecorder(),
-  },
-  {
-    id: "calculator",
-    titleKey: "editor.calculator",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Calculator className="mr-2 h-4 w-4" />,
-    keywords: ["calculator", "calc", "math", "เครื่องคิดเลข", "คำนวณ", "เลข"],
-    action: (_editor, helpers) => helpers.openCalculator?.(),
-  },
-  {
-    id: "translator",
-    titleKey: "editor.translator",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Languages className="mr-2 h-4 w-4" />,
-    keywords: ["translate", "translator", "language", "แปล", "แปลภาษา", "ดิกชันนารี", "ภาษา"],
-    action: (_editor, helpers) => helpers.openTranslator?.(),
-  },
-  {
-    id: "clock",
-    titleKey: "editor.clock",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Clock className="mr-2 h-4 w-4" />,
-    keywords: ["clock", "timer", "stopwatch", "time", "นาฬิกา", "จับเวลา", "เวลา"],
-    action: (_editor, helpers) => helpers.openClock?.(),
-  },
-  {
-    id: "fixLanguage",
-    titleKey: "editor.fixLanguage",
-    categoryKey: "settings.toolCategoryMedia",
-    icon: <Wrench className="mr-2 h-4 w-4" />,
-    keywords: ["fix", "lang", "language", "th", "en", "ซ่อม", "ภาษา", "แก้แป้นพิมพ์"],
-    action: (_editor, helpers) => helpers.handleFixLanguage(),
-  },
-
-  // 7. AI Assistant
-  {
-    id: "aiImprove",
-    titleKey: "settings.aiImprove",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <WandSparklesIcon className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "improve", "เขียนดีขึ้น", "ปรับปรุง", "เกลา", "เอไอ"],
-    action: (_editor, helpers) => helpers.triggerAi?.("improve"),
-  },
-  {
-    id: "aiFixGrammar",
-    titleKey: "settings.aiFixGrammar",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <SpellCheckIcon className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "grammar", "spell", "ไวยากรณ์", "สะกด", "ตรวจคำผิด"],
-    action: (_editor, helpers) => helpers.triggerAi?.("fix_grammar"),
-  },
-  {
-    id: "aiMakeShorter",
-    titleKey: "settings.aiMakeShorter",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <Minimize2 className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "short", "shorter", "summarize", "ย่อ", "สั้นลง", "สรุป"],
-    action: (_editor, helpers) => helpers.triggerAi?.("make_shorter"),
-  },
-  {
-    id: "aiMakeLonger",
-    titleKey: "settings.aiMakeLonger",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <Maximize2 className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "long", "longer", "expand", "ขยาย", "ยาวขึ้น", "เพิ่มรายละเอียด"],
-    action: (_editor, helpers) => helpers.triggerAi?.("make_longer"),
-  },
-  {
-    id: "aiSimplify",
-    titleKey: "settings.aiSimplify",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <BookOpen className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "simplify", "เข้าใจง่าย", "ภาษาเรียบง่าย"],
-    action: (_editor, helpers) => helpers.triggerAi?.("simplify"),
-  },
-  {
-    id: "aiFormalize",
-    titleKey: "settings.aiFormalize",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <BriefcaseBusinessIcon className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "formal", "formalize", "ทางการ", "ภาษาทางการ"],
-    action: (_editor, helpers) => helpers.triggerAi?.("formalize"),
-  },
-  {
-    id: "aiMakeCasual",
-    titleKey: "settings.aiMakeCasual",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <MessageCircle className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "casual", "เป็นกันเอง", "ภาษาสนทนา"],
-    action: (_editor, helpers) => helpers.triggerAi?.("make_casual"),
-  },
-  {
-    id: "aiTranslate",
-    titleKey: "settings.aiTranslate",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <Languages className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "translate", "แปล", "แปลภาษา", "อังกฤษ", "ไทย"],
-    action: (_editor, helpers) => helpers.triggerAi?.("translate"),
-  },
-  {
-    id: "aiContinueWriting",
-    titleKey: "settings.aiContinueWriting",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <ArrowRight className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "continue", "write", "เขียนต่อ", "ต่อข้อความ"],
-    action: (_editor, helpers) => helpers.triggerAi?.("continue_writing"),
-  },
-  {
-    id: "aiRewrite",
-    titleKey: "settings.aiRewrite",
-    categoryKey: "settings.toolCategoryAi",
-    icon: <PenLineIcon className="mr-2 h-4 w-4" />,
-    keywords: ["ai", "rewrite", "เขียนใหม่", "เรียบเรียงใหม่", "สำนวนใหม่"],
-    action: (_editor, helpers) => helpers.triggerAi?.("rewrite"),
-  },
 ];
 
 const IndentKeymap = Extension.create({
@@ -3150,1531 +1713,6 @@ interface SaveSnapshot {
   content: string;
 }
 
-function TableInteractiveOverlay({ editor }: { editor: TiptapEditor }) {
-  const { t } = useTranslation();
-  const [tableRect, setTableRect] = useState<DOMRect | null>(null);
-  const [cellRect, setCellRect] = useState<DOMRect | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const [duplicateSubmenuOpen, setDuplicateSubmenuOpen] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [canScrollUp, setCanScrollUp] = useState(false);
-  const [canScrollDown, setCanScrollDown] = useState(false);
-
-  const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopAutoScroll = useCallback(() => {
-    if (scrollIntervalRef.current) {
-      clearInterval(scrollIntervalRef.current);
-      scrollIntervalRef.current = null;
-    }
-  }, []);
-
-  const checkScroll = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const hasScrollable = el.scrollHeight > el.clientHeight;
-    setCanScrollUp(hasScrollable && el.scrollTop > 2);
-    setCanScrollDown(hasScrollable && el.scrollTop < el.scrollHeight - el.clientHeight - 2);
-  }, []);
-
-  const startAutoScroll = useCallback((direction: "up" | "down") => {
-    stopAutoScroll();
-    const step = () => {
-      const el = scrollContainerRef.current;
-      if (!el) return;
-      el.scrollTop += direction === "up" ? -12 : 12;
-      checkScroll();
-    };
-    step();
-    scrollIntervalRef.current = setInterval(step, 30);
-  }, [checkScroll, stopAutoScroll]);
-
-  const scrollMenu = useCallback((direction: "up" | "down") => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const delta = direction === "up" ? -100 : 100;
-    el.scrollBy({ top: delta, behavior: "smooth" });
-    setTimeout(checkScroll, 150);
-  }, [checkScroll]);
-
-  useEffect(() => {
-    if (menuOpen) {
-      setTimeout(checkScroll, 50);
-    } else {
-      stopAutoScroll();
-      setCanScrollUp(false);
-      setCanScrollDown(false);
-    }
-  }, [menuOpen, duplicateSubmenuOpen, checkScroll, stopAutoScroll]);
-
-  useEffect(() => {
-    if (!menuOpen) {
-      setDuplicateSubmenuOpen(false);
-    }
-  }, [menuOpen]);
-
-  // Click / Tap outside to dismiss popover menu
-  useEffect(() => {
-    if (!menuOpen) return;
-
-    const handlePointerDown = (e: PointerEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
-  }, [menuOpen]);
-
-  const updatePositions = useCallback(() => {
-    if (!editor || editor.isDestroyed || !editor.isActive("table")) {
-      setTableRect((prev) => (prev !== null ? null : prev));
-      setCellRect((prev) => (prev !== null ? null : prev));
-      return;
-    }
-
-    try {
-      const { selection } = editor.state;
-      const domAtPos = editor.view.domAtPos(selection.from);
-      let node: Node | null = domAtPos.node;
-      if (node && node.nodeType === Node.TEXT_NODE) {
-        node = node.parentNode;
-      }
-      const tableEl = (node as HTMLElement)?.closest?.("table") as HTMLElement | null;
-
-      if (!tableEl) {
-        setCellRect((prev) => (prev !== null ? null : prev));
-        setTableRect((prev) => (prev !== null ? null : prev));
-        return;
-      }
-
-      setTableRect(tableEl.getBoundingClientRect());
-
-      // Check if multiple cells are selected (.selectedCell)
-      const selectedCells = tableEl.querySelectorAll("td.selectedCell, th.selectedCell");
-
-      if (selectedCells.length > 0) {
-        let minTop = Infinity;
-        let minLeft = Infinity;
-        let maxRight = -Infinity;
-        let maxBottom = -Infinity;
-
-        selectedCells.forEach((cell) => {
-          const r = cell.getBoundingClientRect();
-          if (r.top < minTop) minTop = r.top;
-          if (r.left < minLeft) minLeft = r.left;
-          if (r.right > maxRight) maxRight = r.right;
-          if (r.bottom > maxBottom) maxBottom = r.bottom;
-        });
-
-        setCellRect(new DOMRect(minLeft, minTop, maxRight - minLeft, maxBottom - minTop));
-      } else {
-        const cellEl = (node as HTMLElement)?.closest?.("td, th") as HTMLElement | null;
-        if (cellEl) {
-          setCellRect(cellEl.getBoundingClientRect());
-        } else {
-          setCellRect((prev) => (prev !== null ? null : prev));
-        }
-      }
-    } catch {
-      setCellRect((prev) => (prev !== null ? null : prev));
-      setTableRect((prev) => (prev !== null ? null : prev));
-    }
-  }, [editor]);
-
-  useEffect(() => {
-    if (!editor || editor.isDestroyed) return;
-    updatePositions();
-
-    const handleSelectionUpdate = () => updatePositions();
-    const handleTransaction = () => {
-      if (editor.isActive("table")) {
-        updatePositions();
-      }
-    };
-
-    editor.on("selectionUpdate", handleSelectionUpdate);
-    editor.on("transaction", handleTransaction);
-    window.addEventListener("scroll", handleSelectionUpdate, true);
-    window.addEventListener("resize", handleSelectionUpdate);
-
-    return () => {
-      if (!editor.isDestroyed) {
-        editor.off("selectionUpdate", handleSelectionUpdate);
-        editor.off("transaction", handleTransaction);
-      }
-      window.removeEventListener("scroll", handleSelectionUpdate, true);
-      window.removeEventListener("resize", handleSelectionUpdate);
-    };
-  }, [editor, updatePositions]);
-
-  let isMultiSelection = false;
-  try {
-    if (editor && !editor.isDestroyed && tableRect) {
-      const { selection } = editor.state;
-      const domAtPos = editor.view.domAtPos(selection.from);
-      let node: Node | null = domAtPos.node;
-      if (node && node.nodeType === Node.TEXT_NODE) {
-        node = node.parentNode;
-      }
-      const tableEl = (node as HTMLElement)?.closest?.("table") as HTMLElement | null;
-      if (tableEl) {
-        isMultiSelection = tableEl.querySelectorAll("td.selectedCell, th.selectedCell").length > 1;
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  const canMerge = editor?.can()?.mergeCells();
-  const canSplit = editor?.can()?.splitCell();
-
-  const items = useMemo(() => {
-    if (!editor || editor.isDestroyed) return [];
-    return [
-      {
-        id: "toggleHeaderRow",
-        label: t("editor.toggleHeaderRow"),
-        icon: <TableIcon className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().toggleHeaderRow().run(),
-      },
-      {
-        id: "toggleHeaderColumn",
-        label: t("editor.toggleHeaderColumn"),
-        icon: <Columns className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().toggleHeaderColumn().run(),
-      },
-      ...(isMultiSelection || canMerge
-        ? [
-            {
-              id: "mergeCells",
-              label: t("editor.mergeCells"),
-              icon: <Layers className="h-4 w-4 shrink-0" />,
-              action: () => editor.chain().focus().mergeCells().run(),
-            },
-          ]
-        : []),
-      ...(canSplit
-        ? [
-            {
-              id: "splitCell",
-              label: t("editor.splitCell"),
-              icon: <Layers className="h-4 w-4 shrink-0" />,
-              action: () => editor.chain().focus().splitCell().run(),
-            },
-          ]
-        : []),
-      {
-        id: "addColumnBefore",
-        label: t("editor.addColumnLeft"),
-        icon: <ArrowLeft className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().addColumnBefore().run(),
-      },
-      {
-        id: "addColumnAfter",
-        label: t("editor.addColumnRight"),
-        icon: <ArrowRight className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().addColumnAfter().run(),
-      },
-      {
-        id: "addRowBefore",
-        label: t("editor.addRowAbove"),
-        icon: <ArrowUp className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().addRowBefore().run(),
-      },
-      {
-        id: "addRowAfter",
-        label: t("editor.addRowBelow"),
-        icon: <ArrowDown className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().addRowAfter().run(),
-      },
-      {
-        id: "clearContents",
-        label: t("editor.clearContents"),
-        icon: <Eraser className="h-4 w-4 shrink-0" />,
-        action: () => editor.chain().focus().deleteSelection().run(),
-      },
-      {
-        id: "deleteRow",
-        label: t("editor.deleteRow"),
-        icon: <DeleteRowIcon className="h-4 w-4 shrink-0" />,
-        danger: true,
-        action: () => editor.chain().focus().deleteRow().run(),
-      },
-      {
-        id: "deleteColumn",
-        label: t("editor.deleteColumn"),
-        icon: <DeleteColumnIcon className="h-4 w-4 shrink-0" />,
-        danger: true,
-        action: () => editor.chain().focus().deleteColumn().run(),
-      },
-      {
-        id: "deleteTable",
-        label: t("editor.deleteTable"),
-        icon: <DeleteTableIcon className="h-4 w-4 shrink-0" />,
-        danger: true,
-        action: () => editor.chain().focus().deleteTable().run(),
-      },
-    ];
-  }, [editor, isMultiSelection, canMerge, canSplit, t]);
-
-  const normalItems = useMemo(() => items.filter((item) => !item.danger), [items]);
-  const dangerItems = useMemo(() => items.filter((item) => item.danger), [items]);
-
-  const allFlatItems = useMemo(() => {
-    const list: Array<{ id: string; label: string; icon: React.ReactNode; danger?: boolean; action: () => void }> = [];
-    normalItems.forEach((item) => list.push(item));
-    list.push({
-      id: "duplicate",
-      label: t("editor.duplicate"),
-      icon: <Copy className="h-4 w-4 shrink-0" />,
-      action: () => setDuplicateSubmenuOpen((v) => !v),
-    });
-    if (duplicateSubmenuOpen) {
-      list.push({
-        id: "duplicateRow",
-        label: t("editor.duplicateRow"),
-        icon: <DeleteRowIcon className="h-4 w-4 shrink-0 opacity-70" />,
-        action: () => {
-          editor.chain().focus().addRowAfter().run();
-          setMenuOpen(false);
-          setDuplicateSubmenuOpen(false);
-        },
-      });
-      list.push({
-        id: "duplicateColumn",
-        label: t("editor.duplicateColumn"),
-        icon: <DeleteColumnIcon className="h-4 w-4 shrink-0 opacity-70" />,
-        action: () => {
-          editor.chain().focus().addColumnAfter().run();
-          setMenuOpen(false);
-          setDuplicateSubmenuOpen(false);
-        },
-      });
-    }
-    dangerItems.forEach((item) => list.push(item));
-    return list;
-  }, [normalItems, duplicateSubmenuOpen, dangerItems, editor, t]);
-
-  useEffect(() => {
-    setSelectedIndex(-1);
-  }, [menuOpen, duplicateSubmenuOpen]);
-
-  // Arrow up/down & Enter/Escape keyboard navigation
-  useEffect(() => {
-    if (!menuOpen || allFlatItems.length === 0) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelectedIndex((prev) => (prev < 0 ? 0 : (prev + 1) % allFlatItems.length));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < 0 ? allFlatItems.length - 1 : (prev - 1 + allFlatItems.length) % allFlatItems.length
-        );
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (selectedIndex >= 0) {
-          const selected = allFlatItems[selectedIndex];
-          if (selected) {
-            selected.action();
-            if (selected.id !== "duplicate") {
-              setMenuOpen(false);
-            }
-          }
-        }
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        setMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [menuOpen, selectedIndex, allFlatItems]);
-
-  useEffect(() => {
-    if (!menuOpen || selectedIndex < 0 || !scrollContainerRef.current) return;
-    const activeEl = scrollContainerRef.current.querySelector(`[data-flat-index="${selectedIndex}"]`);
-    if (activeEl) {
-      activeEl.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedIndex, menuOpen]);
-
-  if (!editor || !editor.isEditable || editor.isDestroyed || !editor.isActive("table") || !tableRect || !cellRect) {
-    return null;
-  }
-
-  let currentFlatIndex = 0;
-
-  return (
-    <>
-      {/* Active Focused Cell Blue Outline */}
-      <div
-        className="fixed pointer-events-none z-30 border-2 border-primary rounded-[2px]"
-        style={{
-          top: `${cellRect.top}px`,
-          left: `${cellRect.left}px`,
-          width: `${cellRect.width}px`,
-          height: `${cellRect.height}px`,
-        }}
-      />
-
-      {/* Column Handle Bar */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            className="fixed z-40 cursor-pointer rounded-full bg-primary shadow-sm hover:scale-110 transition-transform -translate-x-1/2 -translate-y-1/2"
-            style={{
-              top: `${cellRect.top + 1}px`,
-              left: `${cellRect.left + cellRect.width / 2}px`,
-              width: "20px",
-              height: "6px",
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuPos({ top: cellRect.top + 10, left: cellRect.left + cellRect.width / 2 - 100 });
-              setMenuOpen((v) => !v);
-            }}
-          />
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.tableOptions")}</TooltipContent>
-      </Tooltip>
-
-      {/* Right Margin Plus Button (+) to add Column */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            className="fixed z-30 flex items-center justify-center rounded-lg border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
-            style={{
-              top: `${tableRect.top}px`,
-              left: `${tableRect.right + 10}px`,
-              width: "16px",
-              height: `${tableRect.height}px`,
-            }}
-            onClick={() => {
-              editor.chain().focus().addColumnAfter().run();
-              setTimeout(updatePositions, 50);
-            }}
-          >
-            <Plus className="h-3 w-3" />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.addColumnRight")}</TooltipContent>
-      </Tooltip>
-
-      {/* Bottom Margin Plus Button (+) to add Row */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            className="fixed z-30 flex items-center justify-center rounded-lg border border-border/80 bg-popover/90 text-muted-foreground hover:text-primary hover:border-primary/50 hover:bg-accent/10 cursor-pointer shadow-sm transition-all"
-            style={{
-              top: `${tableRect.bottom + 10}px`,
-              left: `${tableRect.left}px`,
-              width: `${tableRect.width}px`,
-              height: "16px",
-            }}
-            onClick={() => {
-              editor.chain().focus().addRowAfter().run();
-              setTimeout(updatePositions, 50);
-            }}
-          >
-            <Plus className="h-3 w-3" />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>{t("editor.addRowBelow")}</TooltipContent>
-      </Tooltip>
-
-      {/* Floating Actions Popover Card (100% Identical to Slash Commands Menu with Chevron Scroll Indicators) */}
-      {menuOpen && (
-        <div
-          ref={popoverRef}
-          className="fixed z-50 w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-80 overflow-hidden text-popover-foreground select-none"
-          style={{
-            top: `${Math.min(menuPos.top, window.innerHeight - 360)}px`,
-            left: `${Math.min(menuPos.left, window.innerWidth - 240)}px`,
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
-            {t("editor.tableOptions")}
-          </div>
-
-          {canScrollUp && (
-            <div
-              role="button"
-              tabIndex={-1}
-              onMouseEnter={() => startAutoScroll("up")}
-              onMouseLeave={stopAutoScroll}
-              onClick={() => scrollMenu("up")}
-              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
-            >
-              <ChevronUp className="h-4 w-4" />
-            </div>
-          )}
-
-          <div
-            ref={scrollContainerRef}
-            onScroll={checkScroll}
-            className="overflow-y-auto no-scrollbar flex-1 py-1"
-          >
-            {normalItems.map((item) => {
-              const flatIndex = currentFlatIndex++;
-              const isSelected = flatIndex === selectedIndex;
-              return (
-                <div
-                  key={item.id}
-                  data-flat-index={flatIndex}
-                  role="button"
-                  tabIndex={0}
-                  className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground ${
-                    isSelected
-                      ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                      : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                  }`}
-                  onMouseEnter={() => setSelectedIndex(flatIndex)}
-                  onClick={() => {
-                    item.action();
-                    setMenuOpen(false);
-                  }}
-                >
-                  {item.icon}
-                  <span className="truncate flex-1">{item.label}</span>
-                </div>
-              );
-            })}
-
-            {/* Duplicate Waterfall Submenu */}
-            {(() => {
-              const duplicateFlatIndex = currentFlatIndex++;
-              const isDuplicateSelected = duplicateFlatIndex === selectedIndex;
-              return (
-                <>
-                  <div
-                    data-flat-index={duplicateFlatIndex}
-                    role="button"
-                    tabIndex={0}
-                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:text-muted-foreground ${
-                      isDuplicateSelected
-                        ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                        : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                    }`}
-                    onMouseEnter={() => setSelectedIndex(duplicateFlatIndex)}
-                    onClick={() => setDuplicateSubmenuOpen((v) => !v)}
-                  >
-                    <Copy className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate flex-1">{t("editor.duplicate")}</span>
-                    <ChevronRight
-                      className={`ml-auto h-4 w-4 shrink-0 opacity-60 transition-transform ${
-                        duplicateSubmenuOpen ? "rotate-90" : ""
-                      }`}
-                    />
-                  </div>
-
-                  {duplicateSubmenuOpen && (
-                    <div className="my-0.5 space-y-0.5 animate-in fade-in-50 slide-in-from-top-1">
-                      {(() => {
-                        const dupRowIndex = currentFlatIndex++;
-                        const isDupRowSelected = dupRowIndex === selectedIndex;
-                        return (
-                          <div
-                            data-flat-index={dupRowIndex}
-                            role="button"
-                            tabIndex={0}
-                            className={`ml-4 flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:text-muted-foreground ${
-                              isDupRowSelected
-                                ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                                : "text-foreground/90 font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                            }`}
-                            onMouseEnter={() => setSelectedIndex(dupRowIndex)}
-                            onClick={() => {
-                              editor.chain().focus().addRowAfter().run();
-                              setMenuOpen(false);
-                              setDuplicateSubmenuOpen(false);
-                            }}
-                          >
-                            <DeleteRowIcon className="h-4 w-4 shrink-0 opacity-70" />
-                            <span className="truncate flex-1">{t("editor.duplicateRow")}</span>
-                          </div>
-                        );
-                      })()}
-                      {(() => {
-                        const dupColIndex = currentFlatIndex++;
-                        const isDupColSelected = dupColIndex === selectedIndex;
-                        return (
-                          <div
-                            data-flat-index={dupColIndex}
-                            role="button"
-                            tabIndex={0}
-                            className={`ml-4 flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:text-muted-foreground ${
-                              isDupColSelected
-                                ? "bg-primary/15 text-primary font-medium [&>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                                : "text-foreground/90 font-normal hover:bg-primary/8 hover:text-primary hover:[&>svg]:text-primary hover:[&_svg]:text-primary"
-                            }`}
-                            onMouseEnter={() => setSelectedIndex(dupColIndex)}
-                            onClick={() => {
-                              editor.chain().focus().addColumnAfter().run();
-                              setMenuOpen(false);
-                              setDuplicateSubmenuOpen(false);
-                            }}
-                          >
-                            <DeleteColumnIcon className="h-4 w-4 shrink-0 opacity-70" />
-                            <span className="truncate flex-1">{t("editor.duplicateColumn")}</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-
-            {dangerItems.length > 0 && (
-              <>
-                <div className="-mx-1 my-1 h-px bg-border/60" />
-                <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider shrink-0">
-                  {t("editor.deleteActions")}
-                </div>
-                {dangerItems.map((item) => {
-                  const flatIndex = currentFlatIndex++;
-                  const isSelected = flatIndex === selectedIndex;
-                  return (
-                    <div
-                      key={item.id}
-                      data-flat-index={flatIndex}
-                      role="button"
-                      tabIndex={0}
-                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 ${
-                        isSelected
-                          ? "bg-destructive/10 text-destructive font-medium"
-                          : "text-destructive font-normal hover:bg-destructive/10 hover:text-destructive"
-                      }`}
-                      onMouseEnter={() => setSelectedIndex(flatIndex)}
-                      onClick={() => {
-                        item.action();
-                        setMenuOpen(false);
-                      }}
-                    >
-                      {item.icon}
-                      <span className="truncate flex-1">{item.label}</span>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-
-          {canScrollDown && (
-            <div
-              role="button"
-              tabIndex={-1}
-              onMouseEnter={() => startAutoScroll("down")}
-              onMouseLeave={stopAutoScroll}
-              onClick={() => scrollMenu("down")}
-              className="flex cursor-default items-center justify-center py-1 shrink-0 text-muted-foreground select-none"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </div>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
-export const CustomParagraph = Paragraph.extend({
-  parseHTML() {
-    return [
-      { tag: "p" },
-      {
-        tag: "div",
-        getAttrs: (element: HTMLElement) => {
-          if (
-            element.classList?.contains("code-block-wrapper") ||
-            element.classList?.contains("tableWrapper") ||
-            element.closest("details, table, [data-type='taskItem']")
-          ) {
-            return false;
-          }
-          return { rawTag: "div" };
-        },
-      },
-    ];
-  },
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      id: {
-        default: null,
-        parseHTML: (element) => element.getAttribute("id"),
-        renderHTML: (attributes) => {
-          if (!attributes.id) return {};
-          return { id: attributes.id };
-        },
-      },
-      "data-footnote-def": {
-        default: null,
-        parseHTML: (element) => element.getAttribute("data-footnote-def"),
-        renderHTML: (attributes) => {
-          if (!attributes["data-footnote-def"]) return {};
-          return { "data-footnote-def": attributes["data-footnote-def"] };
-        },
-      },
-      rawTag: {
-        default: null,
-        parseHTML: (element) =>
-          element.getAttribute("data-raw-tag") ||
-          (element.tagName?.toLowerCase() === "div" ? "div" : null),
-        renderHTML: (attributes) => {
-          if (!attributes.rawTag) return {};
-          return { "data-raw-tag": attributes.rawTag };
-        },
-      },
-      style: {
-        default: null,
-        parseHTML: (element) => {
-          const raw = element.getAttribute("style");
-          if (!raw) return null;
-          const cleaned = raw.replace(/(?:^|;)\s*text-align\s*:[^;]+/gi, "").trim().replace(/^;/, "");
-          return cleaned || null;
-        },
-        renderHTML: (attributes) => {
-          if (!attributes.style) return {};
-          return { style: attributes.style };
-        },
-      },
-    };
-  },
-});
-
-export function createTurndownService(assetBlobUrlMap?: Map<string, string>): TurndownService {
-  const td = new TurndownService({
-    headingStyle: "atx",
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    fence: "```",
-  });
-
-  // Preserve raw Markdown content without escaping dots after numbers (e.g. ## 8. Ordered Lists) or brackets
-  td.escape = (str: string) => str;
-
-  // Serialize empty paragraphs using a placeholder token so Turndown cannot collapse consecutive blank lines
-  td.addRule("emptyParagraph", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.nodeName === "P" &&
-        !el.textContent?.trim() &&
-        !el.querySelector("img, audio, video, input, label") &&
-        !el.closest("table, li, blockquote, [data-type='taskItem']")
-      );
-    },
-    replacement: () => "\n<!--luno:blank-->\n",
-  });
-
-  // Serialize headings matching Obsidian line structure
-  td.addRule("heading", {
-    filter: ["h1", "h2", "h3", "h4", "h5", "h6"],
-    replacement: (content, node) => {
-      const h = node as HTMLElement;
-      const level = Number(h.nodeName.charAt(1)) || 1;
-      const align = h.style?.textAlign || h.getAttribute("align");
-      const prev = h.previousElementSibling;
-      const next = h.nextElementSibling;
-      const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
-      );
-      const isNextNonEmptyBlock = next && (
-        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
-      );
-      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-      const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
-      if (align && align !== "left") {
-        return `${leadingNl}<h${level} style="text-align: ${align}">\n${content}\n</h${level}>${trailingNl}`;
-      }
-      const prefix = "#".repeat(level);
-      return `${leadingNl}${prefix} ${content}\n`;
-    },
-  });
-
-  // Serialize normal non-empty paragraphs matching Obsidian line structure
-  td.addRule("paragraph", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.nodeName === "P" &&
-        Boolean(el.textContent?.trim() || el.querySelector("img, audio, video, input, label")) &&
-        !el.closest("table, li, blockquote, [data-type='taskItem']")
-      );
-    },
-    replacement: (content, node) => {
-      const el = node as HTMLElement;
-      const prev = el.previousElementSibling;
-      const next = el.nextElementSibling;
-      const isPrevNonEmptyBlock = prev && (
-        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-        (prev.nodeName === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
-      );
-      const isNextNonEmptyBlock = next && (
-        /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-        (next.nodeName === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
-      );
-      const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-      const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
-      const rawTag = el.getAttribute("data-raw-tag");
-      if (rawTag === "div") {
-        return `${leadingNl}<div>\n    ${el.innerHTML}\n</div>${trailingNl}`;
-      }
-      const style = el.getAttribute("style");
-      if (style) {
-        return `${leadingNl}<p style="${style}">\n${content}\n</p>${trailingNl}`;
-      }
-      return `${leadingNl}${content}${trailingNl}`;
-    },
-  });
-
-  // Serialize lists matching CommonMark block boundaries
-  td.addRule("list", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        (el.nodeName === "UL" || el.nodeName === "OL") &&
-        !el.classList?.contains("footnotes-list") &&
-        !el.closest("section.footnotes, [data-footnotes]")
-      );
-    },
-    replacement: (content, node) => {
-      const parent = node.parentNode;
-      if (parent && parent.nodeName === "LI") {
-        return "\n" + content;
-      }
-      return `\n${content}\n`;
-    },
-  });
-
-  // Serialize blockquotes matching Obsidian line structure
-  td.addRule("blockquote", {
-    filter: "blockquote",
-    replacement: (content) => {
-      const clean = content.trim().replace(/^/gm, "> ");
-      return `\n${clean}\n`;
-    },
-  });
-
-  // Serialize horizontal rules matching Obsidian line structure
-  td.addRule("horizontalRule", {
-    filter: "hr",
-    replacement: () => `\n---\n`,
-  });
-
-  // Register custom inline code rule via td.addRule
-
-  td.addRule("code", {
-    filter: (node) => {
-      const hasSiblings = node.previousSibling || node.nextSibling;
-      const isCodeBlock = node.parentNode && node.parentNode.nodeName === "PRE" && !hasSiblings;
-      return node.nodeName === "CODE" && !isCodeBlock;
-    },
-    replacement: (content) => {
-      if (!content.trim()) return "";
-      let delimiter = "`";
-      const matches = content.match(/`+/gm) || [];
-      while (matches.indexOf(delimiter) !== -1) delimiter = delimiter + "`";
-      return delimiter + content + delimiter;
-    },
-  });
-
-  const defaultBlankReplacement = td.rules.blankRule.replacement;
-  td.rules.blankRule.replacement = (content, node, options) => {
-    const el = node as HTMLElement;
-    if (
-      el.nodeName === "P" &&
-      !el.textContent?.trim() &&
-      !el.closest("table, li, blockquote, [data-type='taskItem']")
-    ) {
-      return "\n<!--luno:blank-->\n";
-    }
-    return defaultBlankReplacement ? defaultBlankReplacement.call(td.rules.blankRule, content, node, options) : "\n<!--luno:blank-->\n";
-  };
-
-  // Convert <u> to <u>text</u> in markdown
-  td.addRule("underline", {
-    filter: "u",
-    replacement: (content) => `<u>${content}</u>`,
-  });
-
-  // Convert <mark> or .luno-highlight to ==text== in markdown
-  td.addRule("highlight", {
-    filter: (node) =>
-      node.nodeName.toUpperCase() === "MARK" ||
-      (node.nodeName.toUpperCase() === "SPAN" && (node as HTMLElement).classList?.contains("luno-highlight")),
-    replacement: (content) => {
-      if (!content || !content.trim()) return content;
-      const leadingSpace = content.match(/^(\s*)/)?.[1] || "";
-      const trailingSpace = content.match(/(\s*)$/)?.[1] || "";
-      const trimmed = content.slice(leadingSpace.length, content.length - trailingSpace.length);
-      if (!trimmed) return content;
-      return `${leadingSpace}==${trimmed}==${trailingSpace}`;
-    },
-  });
-
-  // Preserve <kbd> in markdown
-  td.addRule("kbd", {
-    filter: "kbd",
-    replacement: (content) => `<kbd>${content}</kbd>`,
-  });
-
-  // Convert footnote reference HTML <sup><a href="#fn-1" data-footnote-ref="1">[1]</a></sup> back into [^1]
-  td.addRule("footnoteRef", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.getAttribute("data-footnote-ref") !== null ||
-        (el.nodeName === "SUP" && Boolean(el.querySelector("[data-footnote-ref]") || /\[\^?[^\]]+\]/.test(el.textContent || ""))) ||
-        (el.nodeName === "A" && (el.getAttribute("href") || "").startsWith("#fn-"))
-      );
-    },
-    replacement: (_content, node) => {
-      const el = node as HTMLElement;
-      const ref =
-        el.getAttribute("data-footnote-ref") ||
-        el.querySelector("[data-footnote-ref]")?.getAttribute("data-footnote-ref") ||
-        (el.getAttribute("href") || "").replace(/^#fn-/, "") ||
-        el.textContent ||
-        "";
-      const cleanRef = ref.replace(/[\[\]\^]/g, "").trim();
-      return cleanRef ? `[^${cleanRef}]` : "";
-    },
-  });
-
-  // Convert in-place footnote definition HTML <p id="fn-1" data-footnote-def="1">... back into [^1]: ...
-  td.addRule("footnoteDef", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.nodeName === "P" &&
-        (el.getAttribute("data-footnote-def") !== null || el.classList?.contains("footnote-def") || /^\s*\[\^[^\]]+\]:/.test(el.textContent || ""))
-      );
-    },
-    replacement: (_content, node) => {
-      const el = node as HTMLElement;
-      const fnId =
-        el.getAttribute("data-footnote-def") ||
-        (el.getAttribute("id") || "").replace(/^fn-/, "") ||
-        "1";
-      const clone = el.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll(".footnote-backref, [data-footnote-backref]").forEach((a) => a.remove());
-      const rawContent = td.turndown(clone.innerHTML).trim();
-      const cleanContent = rawContent.replace(/^\[\^[^\]]+\]:\s*/, "").trim();
-
-      const prev = el.previousElementSibling;
-      const isPrevFootnoteDef =
-        prev &&
-        prev.nodeName === "P" &&
-        (prev.getAttribute("data-footnote-def") !== null ||
-          prev.classList?.contains("footnote-def") ||
-          /^\s*\[\^[^\]]+\]:/.test(prev.textContent || ""));
-
-      return isPrevFootnoteDef ? `[^${fnId}]: ${cleanContent}\n` : `\n\n[^${fnId}]: ${cleanContent}\n`;
-    },
-  });
-
-  // Ignore reading mode bottom footnotes list items and section so they never write to disk
-  td.addRule("readingModeFootnoteItem", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.nodeName === "LI" &&
-        (el.classList?.contains("footnote-item") ||
-          el.getAttribute("data-footnote-id") !== null ||
-          Boolean(el.querySelector("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']")))
-      );
-    },
-    replacement: () => "",
-  });
-
-  td.addRule("footnotesSection", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      if (
-        (el.nodeName === "SECTION" && (el.classList?.contains("footnotes") || el.getAttribute("data-footnotes") !== null)) ||
-        (el.nodeName === "DIV" && (el.classList?.contains("footnotes") || el.getAttribute("data-footnotes") !== null))
-      ) {
-        return true;
-      }
-      if (el.nodeName === "OL") {
-        if (el.classList?.contains("footnotes-list")) return true;
-        const allItemsAreFootnotes =
-          el.children.length > 0 &&
-          Array.from(el.children).every(
-            (li) =>
-              (li as HTMLElement).classList?.contains("footnote-item") ||
-              (li as HTMLElement).getAttribute("data-footnote-id") !== null ||
-              Boolean((li as HTMLElement).querySelector("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']"))
-          );
-        if (allItemsAreFootnotes) return true;
-      }
-      return false;
-    },
-    replacement: () => "",
-  });
-
-  td.addRule("footnotesSep", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      if (el.nodeName !== "HR") return false;
-      if (el.classList?.contains("footnotes-sep")) return true;
-      let next = el.nextElementSibling;
-      while (next && !next.textContent?.trim() && (next.tagName === "P" || next.tagName === "BR")) {
-        next = next.nextElementSibling;
-      }
-      if (
-        next &&
-        (next.matches?.("section.footnotes, [data-footnotes], ol.footnotes-list") ||
-          Boolean(next.querySelector?.("[data-footnote-backref], [data-footnote-target], a[href*='#fnref-']")))
-      ) {
-        return true;
-      }
-      return false;
-    },
-    replacement: () => "",
-  });
-
-  // Suppress duplicate standalone footnote backrefs
-  td.addRule("footnoteBackref", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.getAttribute("data-footnote-backref") !== null ||
-        el.classList?.contains("footnote-backref") ||
-        (el.nodeName === "A" && (el.getAttribute("href") || "").startsWith("#fnref-"))
-      );
-    },
-    replacement: () => "",
-  });
-
-  // Convert <sup> to <sup>text</sup> in markdown (if not a footnote ref)
-  td.addRule("superscript", {
-    filter: (node) => node.nodeName === "SUP" && !node.querySelector("[data-footnote-ref]"),
-    replacement: (content) => `<sup>${content}</sup>`,
-  });
-
-  // Convert <sub> to <sub>text</sub> in markdown
-  td.addRule("subscript", {
-    filter: "sub",
-    replacement: (content) => `<sub>${content}</sub>`,
-  });
-
-  // Preserve styled spans (font-family, font-size, color) in markdown
-  td.addRule("styledSpan", {
-    filter: (node) => {
-      if (node.nodeName !== "SPAN") return false;
-      const el = node as HTMLElement;
-      if (el.classList?.contains("luno-highlight")) return false;
-      const style = el.getAttribute("style");
-      const color = el.getAttribute("data-color");
-      const fontFamily = el.getAttribute("data-font-family");
-      const fontSize = el.getAttribute("data-font-size");
-      return Boolean(style || color || fontFamily || fontSize);
-    },
-    replacement: (content, node) => {
-      if (!content || !content.trim()) return content;
-      const el = node as HTMLElement;
-      const style = el.getAttribute("style");
-      const color = el.getAttribute("data-color");
-      const fontFamily = el.getAttribute("data-font-family");
-      const fontSize = el.getAttribute("data-font-size");
-      let styleAttr = "";
-      if (style) {
-        styleAttr = ` style="${style.replace(/"/g, "'").trim()}"`;
-      } else {
-        const parts: string[] = [];
-        if (color) parts.push(`color: ${color.replace(/"/g, "'")}`);
-        if (fontFamily) parts.push(`font-family: ${fontFamily.replace(/"/g, "'")}`);
-        if (fontSize) parts.push(`font-size: ${fontSize.replace(/"/g, "'")}`);
-        if (parts.length) styleAttr = ` style="${parts.join("; ")}"`;
-      }
-      return `<span${styleAttr}>${content}</span>`;
-    },
-  });
-
-  // Convert HTML images back to Markdown, preserving relative asset paths and width
-  td.addRule("relativeImage", {
-    filter: "img",
-    replacement: (_content, node) => {
-      const img = node as HTMLImageElement;
-      const alt = img.getAttribute("alt") || "";
-      const title = img.getAttribute("title");
-      const rawWidth = img.getAttribute("width") || img.style.width || "";
-      const widthMatch = rawWidth ? String(rawWidth).match(/\d+/) : null;
-      const width = widthMatch ? widthMatch[0] : "";
-      let relSrc = img.getAttribute("data-relative-src") || assetBlobUrlMap?.get(img.src) || img.getAttribute("src") || "";
-      if (relSrc && !/^(https?:\/\/|data:|blob:)/i.test(relSrc)) {
-        try {
-          relSrc = encodeURI(decodeURI(relSrc));
-        } catch {
-          relSrc = relSrc.replace(/ /g, "%20");
-        }
-      }
-      const titleAttr = title ? ` "${title}"` : "";
-      const qrCode = img.getAttribute("data-qr-code");
-      const qrText = img.getAttribute("data-qr-text");
-      const qrColor = img.getAttribute("data-qr-color");
-      const qrBg = img.getAttribute("data-qr-bg");
-      const qrLevel = img.getAttribute("data-qr-level");
-      const isQr =
-        qrCode === "true" ||
-        Boolean(qrText) ||
-        alt === "QR Code" ||
-        alt?.toLowerCase().startsWith("qr code") ||
-        (typeof relSrc === "string" && relSrc.toLowerCase().includes("qrcode"));
-
-      let md: string;
-      if (isQr) {
-        const qrAttrs = [
-          `src="${relSrc}"`,
-          alt && alt !== "QR Code" ? `alt="${escapeHtml(alt)}"` : `alt="QR Code"`,
-          width ? `width="${width}"` : "",
-          `data-qr-code="true"`,
-          qrText ? `data-qr-text="${escapeHtml(qrText)}"` : "",
-          qrColor ? `data-qr-color="${escapeHtml(qrColor)}"` : "",
-          qrBg ? `data-qr-bg="${escapeHtml(qrBg)}"` : "",
-          qrLevel ? `data-qr-level="${escapeHtml(qrLevel)}"` : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        md = `<img ${qrAttrs} />`;
-      } else if (img.getAttribute("data-wikilink-embed") === "true") {
-        // Explicitly entered or loaded as Obsidian Wikilink embed ![[relSrc|width]]
-        let decodedRel = relSrc;
-        try {
-          decodedRel = decodeURIComponent(relSrc);
-        } catch {}
-        md = width ? `![[${decodedRel}|${width}]]` : `![[${decodedRel}]]`;
-      } else {
-        md = width ? `![${alt}|${width}](${relSrc}${titleAttr})` : `![${alt}](${relSrc}${titleAttr})`;
-      }
-      const parent = img.parentElement;
-      const parentTag = parent?.nodeName?.toUpperCase() || "";
-      const isStandaloneBlock =
-        !parent ||
-        parentTag === "X-TURNDOWN" ||
-        parentTag === "DIV" ||
-        parentTag === "BODY" ||
-        parent.classList?.contains("ProseMirror") ||
-        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
-
-      if (isStandaloneBlock && parentTag !== "P") {
-        const prev = img.previousElementSibling;
-        const next = img.nextElementSibling;
-        const isPrevNonEmptyBlock = prev && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
-        );
-        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-
-        const isNextNonEmptyBlock = next && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
-        );
-        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
-
-        return `${leadingNl}${md}${trailingNl}`;
-      }
-      return md;
-    },
-  });
-
-  // Convert HTML audio back to Markdown audio (Obsidian Wikilink embed for local files)
-  td.addRule("audio", {
-    filter: "audio",
-    replacement: (_content, node) => {
-      const el = node as HTMLElement;
-      let src =
-        el.getAttribute("data-relative-src") ||
-        assetBlobUrlMap?.get(el.getAttribute("src") || "") ||
-        el.getAttribute("src") ||
-        "";
-      if (!src) return "";
-
-      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
-
-      // If src is a blob: URL and title exists, convert to attachments/title
-      if (src.startsWith("blob:") && title && !title.startsWith("blob:")) {
-        const ext = title.includes(".") ? "" : ".webm";
-        src = `attachments/${title}${ext}`;
-      }
-
-      // If src is a data:audio URL and title exists (e.g. from previously recorded/pasted audio),
-      // convert to attachments/title
-      if (src.startsWith("data:audio/") && title) {
-        const ext = title.includes(".") ? "" : ".webm";
-        src = `attachments/${title}${ext}`;
-      }
-
-      let md = "";
-      if (!/^(https?:\/\/|data:|blob:)/i.test(src)) {
-        let decodedRel = src;
-        try {
-          decodedRel = decodeURIComponent(src);
-        } catch {}
-        md = `![[${decodedRel}]]`;
-      } else {
-        const titleAttr = title ? ` data-title="${title.replace(/"/g, "&quot;")}"` : "";
-        md = `<audio controls src="${src}"${titleAttr}></audio>`;
-      }
-
-      const parent = el.parentElement;
-      const parentTag = parent?.nodeName?.toUpperCase() || "";
-      const isStandaloneBlock =
-        !parent ||
-        parentTag === "X-TURNDOWN" ||
-        parentTag === "DIV" ||
-        parentTag === "BODY" ||
-        parent.classList?.contains("ProseMirror") ||
-        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
-
-      if (isStandaloneBlock && parentTag !== "P") {
-        const prev = el.previousElementSibling;
-        const next = el.nextElementSibling;
-        const isPrevNonEmptyBlock = prev && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
-        );
-        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-
-        const isNextNonEmptyBlock = next && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
-        );
-        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
-
-        return `${leadingNl}${md}${trailingNl}`;
-      }
-      return md;
-    },
-  });
-
-  // Convert HTML video back to Markdown video (Obsidian Wikilink embed for local files)
-  td.addRule("video", {
-    filter: "video",
-    replacement: (_content, node) => {
-      const el = node as HTMLElement;
-      let relSrc =
-        el.getAttribute("data-relative-src") ||
-        assetBlobUrlMap?.get(el.getAttribute("src") || "") ||
-        el.getAttribute("src") ||
-        "";
-
-      if (!relSrc) return "";
-
-      if (relSrc.startsWith("luno-asset://")) {
-        relSrc = decodeURIComponent(relSrc.replace(/^luno-asset:\/\//, ""));
-        if (/^\/[a-zA-Z]:[\\/]/.test(relSrc)) relSrc = relSrc.slice(1);
-      }
-
-      const rawWidth = el.getAttribute("width") || el.style?.width || "";
-      const widthMatch = rawWidth ? String(rawWidth).match(/\d+/) : null;
-      const width = widthMatch ? widthMatch[0] : "";
-
-      const title = el.getAttribute("data-title") || el.getAttribute("title") || "";
-
-      if (relSrc.startsWith("blob:") && title && !title.startsWith("blob:")) {
-        relSrc = `attachments/${title}`;
-      }
-
-      let md = "";
-      // Local / relative video attachment: serialize as Obsidian Wikilink embed ![[relSrc|width]]
-      if (!/^(https?:\/\/|data:|blob:)/i.test(relSrc)) {
-        let decodedRel = relSrc;
-        try {
-          decodedRel = decodeURIComponent(relSrc);
-        } catch {}
-        md = width ? `![[${decodedRel}|${width}]]` : `![[${decodedRel}]]`;
-      } else {
-        // External web URL: serialize as Markdown link with width or standard video
-        md = width ? `![${title || "video"}|${width}](${relSrc})` : `![${title || "video"}](${relSrc})`;
-      }
-
-      const parent = el.parentElement;
-      const parentTag = parent?.nodeName?.toUpperCase() || "";
-      const isStandaloneBlock =
-        !parent ||
-        parentTag === "X-TURNDOWN" ||
-        parentTag === "DIV" ||
-        parentTag === "BODY" ||
-        parent.classList?.contains("ProseMirror") ||
-        (parentTag === "P" && parent.children.length === 1 && !parent.textContent?.trim());
-
-      if (isStandaloneBlock && parentTag !== "P") {
-        const prev = el.previousElementSibling;
-        const next = el.nextElementSibling;
-        const isPrevNonEmptyBlock = prev && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(prev.nodeName) ||
-          (prev.nodeName.toUpperCase() === "P" && Boolean(prev.textContent?.trim() || prev.querySelector("img, audio, video, input, label")))
-        );
-        const leadingNl = isPrevNonEmptyBlock ? "" : "\n\n";
-
-        const isNextNonEmptyBlock = next && (
-          /^H[1-6]|IMG|AUDIO|VIDEO|HR|UL|OL|TABLE|BLOCKQUOTE$/i.test(next.nodeName) ||
-          (next.nodeName.toUpperCase() === "P" && Boolean(next.textContent?.trim() || next.querySelector("img, audio, video, input, label")))
-        );
-        const trailingNl = isNextNonEmptyBlock ? "\n" : "\n\n";
-
-        return `${leadingNl}${md}${trailingNl}`;
-      }
-      return md;
-    },
-  });
-
-  // Convert Wikilinks (<a href="wikilink:..." data-wikilink="...">) back into standard [[Target]] or [[Target|Alias]]
-  td.addRule("wikilink", {
-    filter: (node) => {
-      if (node.nodeName !== "A") return false;
-      const href = (node.getAttribute("href") || "").trim();
-      const dataWiki = node.getAttribute("data-wikilink");
-      return Boolean(dataWiki) || href.startsWith("wikilink:");
-    },
-    replacement: (content, node) => {
-      const rawTarget =
-        node.getAttribute("data-wikilink") ||
-        decodeURIComponent((node.getAttribute("href") || "").replace(/^wikilink:/, ""));
-      const target = rawTarget.trim();
-      const text = (content || node.textContent || "").trim();
-      if (!target) return text;
-      if (!text || text === target) {
-        return `[[${target}]]`;
-      }
-      return `[[${target}|${text}]]`;
-    },
-  });
-
-  // Clean list item formatting to prevent loose lists with blank lines and broken indentation
-  td.addRule("cleanListItem", {
-    filter: (node) => {
-      const el = node as HTMLElement;
-      return (
-        el.nodeName === "LI" &&
-        el.getAttribute("data-type") !== "taskItem" &&
-        !el.classList?.contains("footnote-item") &&
-        el.getAttribute("data-footnote-id") === null
-      );
-    },
-    replacement: (content, node, options) => {
-      const cleanContent = content
-        .replace(/^\n+/, "")
-        .replace(/\n+$/, "")
-        .replace(/\n/gm, "\n    ");
-
-      const parent = node.parentNode;
-      const isOrdered = parent && parent.nodeName === "OL";
-      let prefix = options.bulletListMarker + " ";
-      if (isOrdered) {
-        const start = (parent as HTMLElement).getAttribute("start");
-        const index = Array.from((parent as HTMLElement).children).filter((c) => (c as HTMLElement).nodeName === "LI").indexOf(node as HTMLElement) + 1;
-        prefix = (start ? Number(start) + index - 1 : index) + ". ";
-      }
-      return (
-        prefix + cleanContent + (node.nextSibling && !/\n$/.test(cleanContent) ? "\n" : "")
-      );
-    },
-  });
-
-  // Prevent Turndown built-in inline `code`, `span`, and other element rules from processing children inside <pre> and splitting code blocks
-  td.addRule("insidePreCode", {
-    filter: (node) => {
-      let curr: Node | null = node.parentNode;
-      while (curr) {
-        if (curr.nodeName === "PRE" || (curr.nodeName === "DIV" && (curr as HTMLElement).classList.contains("code-block-wrapper"))) return true;
-        curr = curr.parentNode;
-      }
-      return false;
-    },
-    replacement: (_content, node) => node.textContent || "",
-  });
-
-  // Preserve fenced code blocks when converting HTML to Markdown for disk, intercepting .code-block-wrapper cleanly
-  td.addRule("fencedCodeBlock", {
-    filter: (node) => {
-      if (node.nodeName === "PRE") {
-        // If pre is inside a code-block-wrapper, let the parent wrapper handle it
-        let parent: Node | null = node.parentNode;
-        while (parent) {
-          if (parent.nodeName === "DIV" && (parent as HTMLElement).classList?.contains("code-block-wrapper")) {
-            return false;
-          }
-          parent = parent.parentNode;
-        }
-        return true;
-      }
-      return node.nodeName === "DIV" && (node as HTMLElement).classList?.contains("code-block-wrapper");
-    },
-    replacement: (_content, node) => {
-      const el = node as HTMLElement;
-      const codeEl = el.querySelector("code") || el.querySelector("pre") || el;
-      const className = codeEl.getAttribute("class") || el.getAttribute("class") || "";
-      const langMatch = className.match(/language-([a-zA-Z0-9_-]+)/);
-      const lang = langMatch ? langMatch[1] : "";
-      const rawText = codeEl.textContent || "";
-      const codeText = rawText.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
-      const prev = el.previousElementSibling;
-      const isAfterHeading = prev && /^H[1-6]$/.test(prev.nodeName);
-      const leadingNl = isAfterHeading ? "\n" : "\n\n";
-      return `${leadingNl}\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
-    },
-  });
-
-  // Convert HTML tables back into clean GFM Markdown tables unless originally HTML or using merged cells
-  td.addRule("table", {
-    filter: "table",
-    replacement: (_content, node) => {
-      const table = node as HTMLElement;
-
-      const hasSpans = Boolean(table.querySelector('[colspan]:not([colspan="1"]), [rowspan]:not([rowspan="1"])'));
-      const isOriginalHtmlTable = table.getAttribute("data-original-html-table") === "true";
-
-      if (isOriginalHtmlTable || hasSpans) {
-        const clone = table.cloneNode(true) as HTMLElement;
-        clone.removeAttribute("data-original-html-table");
-        return `\n${clone.outerHTML}\n`;
-      }
-
-      const rows = Array.from(table.querySelectorAll("tr"));
-      if (rows.length === 0) return "";
-
-      const matrix: string[][] = [];
-      let maxCols = 0;
-
-      rows.forEach((row) => {
-        const cells = Array.from(row.querySelectorAll("th, td"));
-        if (cells.length === 0) return;
-        const rowData = cells.map((cell) => {
-          let text = td.turndown(cell.innerHTML).replace(/\n+/g, " ").trim();
-          text = text.replace(/\\\|/g, "___PIPE_TEMP___").replace(/\|/g, "\\|").replace(/___PIPE_TEMP___/g, "\\|");
-          return text;
-        });
-        if (rowData.length > maxCols) maxCols = rowData.length;
-        matrix.push(rowData);
-      });
-
-      while (matrix.length > 1 && matrix[matrix.length - 1].every((cell) => !cell.trim())) {
-        matrix.pop();
-      }
-
-      if (matrix.length === 0 || maxCols === 0) return "";
-
-      const header = matrix[0];
-      while (header.length < maxCols) header.push("");
-      const headerLine = `| ${header.join(" | ")} |`;
-
-      // Determine column alignments from table header and cells
-      const colAlignments: string[] = [];
-      for (let c = 0; c < maxCols; c++) {
-        let align = "";
-        for (const row of rows) {
-          const cell = row.querySelectorAll("th, td")[c];
-          if (cell) {
-            const a = cell.getAttribute("align") || (cell as HTMLElement).style?.textAlign;
-            if (a) {
-              align = a.toLowerCase();
-              break;
-            }
-          }
-        }
-        if (align === "center") {
-          colAlignments.push(":---:");
-        } else if (align === "right") {
-          colAlignments.push("---:");
-        } else if (align === "left") {
-          colAlignments.push(":---");
-        } else {
-          colAlignments.push("---");
-        }
-      }
-      const separatorLine = `| ${colAlignments.join(" | ")} |`;
-
-      const bodyLines = matrix.slice(1).map((row) => {
-        while (row.length < maxCols) row.push("");
-        return `| ${row.join(" | ")} |`;
-      });
-
-      const lines = [headerLine, separatorLine, ...bodyLines];
-      return `\n\n${lines.join("\n")}\n\n`;
-    },
-  });
-
-  // Serialize individual taskItem if standalone (or suppress if handled by taskList parent)
-  td.addRule("taskItem", {
-    filter: (node: HTMLElement) =>
-      node.nodeName === "LI" && node.getAttribute("data-type") === "taskItem",
-    replacement: (content: string, node: TurndownService.Node) => {
-      const li = node as HTMLElement;
-      if (li.closest('ul[data-type="taskList"]')) {
-        return "";
-      }
-      const checked = li.getAttribute("data-checked") === "true" ? "x" : " ";
-      const contentDiv = li.querySelector("div");
-      const text = (contentDiv ? contentDiv.textContent?.trim() : "") || content.trim() || li.textContent?.trim() || "";
-      return `- [${checked}] ${text}\n`;
-    },
-  });
-
-  // Convert Tiptap's <ul data-type="taskList"> to markdown checkboxes
-  td.addRule("taskList", {
-    filter: (node: HTMLElement) =>
-      node.nodeName === "UL" && node.getAttribute("data-type") === "taskList",
-    replacement: (_content: string, node: TurndownService.Node) => {
-      const ul = node as HTMLElement;
-      const directItems = Array.from(ul.children).filter(
-        (el) => el.nodeName === "LI" && el.getAttribute("data-type") === "taskItem"
-      ) as HTMLElement[];
-      const itemsToUse = directItems.length > 0 ? directItems : (Array.from(ul.querySelectorAll('li[data-type="taskItem"]')) as HTMLElement[]);
-      const items = itemsToUse.map((li) => {
-        const checked = li.getAttribute("data-checked") === "true" ? "x" : " ";
-        const contentDiv = li.querySelector("div");
-        const text = contentDiv ? contentDiv.textContent?.trim() ?? "" : li.textContent?.trim() ?? "";
-        return `- [${checked}] ${text}`;
-      });
-      return "\n" + items.join("\n") + "\n";
-    },
-  });
-
-  // Preserve Tiptap <details><summary>title</summary>...<details> in markdown
-  td.addRule("toggle", {
-    filter: (node: HTMLElement) => node.nodeName === "DETAILS",
-    replacement: (_content: string, node: TurndownService.Node) => {
-      const el = node as HTMLElement;
-      const summary = el.querySelector("summary");
-      const title = summary?.textContent?.trim() || "";
-      const isOpen = el.hasAttribute("open");
-
-      const div = el.querySelector("div");
-      let innerHtml = "";
-      if (div) {
-        innerHtml = div.innerHTML;
-      } else {
-        const clone = el.cloneNode(true) as HTMLElement;
-        clone.querySelector("summary")?.remove();
-        innerHtml = clone.innerHTML;
-      }
-
-      const innerMarkdown = td.turndown(innerHtml).replace(/^[\r\n]+|[\r\n]+$/g, "");
-      const bodyContent = innerMarkdown || "<p></p>";
-
-      return `\n\n<details${isOpen ? " open" : ""}>\n<summary>${title}</summary>\n\n${bodyContent}\n\n</details>\n\n`;
-    },
-  });
-
-  return td;
-}
 
 /**
  * Shared helper to navigate footnote citations ([1]), footnote return backrefs (↩),
@@ -4754,7 +1792,8 @@ export function navigateFootnoteOrAnchor(clickedEl: HTMLElement, container: HTML
 export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const { note, isVisible = true, onUpdate, onDelete, onDeleteFile, onCreate, onCreateFolder, onOpenFolder, onRenameFile, onDuplicateFile, openedFolderName, onOpenSidebar, isSidebarOpen = false, editorFontSize = 15, isMobile = false, notes, rootDirHandle, onCloseSplit, settingsOpen: propSettingsOpen, onSettingsOpenChange, rightPanelOpen = false, onCloseRightPanel, onSelectNote, onOpenWebTab, onOpenSettings, onUnlockNote, onRelockNote, onGetActivePin, paneId = "main" } = props;
 
-  const { settings, updateSetting, resetSettings, keyboardLanguage, toggleKeyboardLanguage } = useAppSettings();
+  const { settings, updateSetting, resetSettings } = useAppSettings();
+  const { keyboardLanguage, toggleKeyboardLanguage } = useKeyboardLanguage();
 
   const [createFileDialogOpen, setCreateFileDialogOpen] = useState(false);
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -4765,6 +1804,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [isReadingMode, setIsReadingMode] = useState(false);
   const isReadingModeRef = useRef(isReadingMode);
   isReadingModeRef.current = isReadingMode;
+  const readingModeLivePreviewEnabled = Boolean(settings.readingModeLivePreview);
+  const isReadingLivePreview = false;
+  const isStrictReadingMode = Boolean(isReadingMode);
+  const isStrictReadingModeRef = useRef(isStrictReadingMode);
+  isStrictReadingModeRef.current = isStrictReadingMode;
+  const resolveRelativeImagesInEditorRef = useRef<((instance: TiptapEditor | null) => Promise<void>) | null>(null);
   const [htmlCursor, setHtmlCursor] = useState({ line: 1, col: 1 });
 
   // Version History State
@@ -4799,13 +1844,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const saved = await saveCustomFont(file);
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontUploadedSuccess") || "Font uploaded successfully",
-        description: (t("settings.fontUploadedSuccessDesc") || 'Added font "{name}" to workspace.').replace("{name}", saved.name),
+        title: t("settings.fontUploadedSuccess"),
+        description: (t("settings.fontUploadedSuccessDesc")).replace("{name}", saved.name),
       });
     } catch (err: any) {
       console.error("[CustomFont] Upload error:", err);
       toast({
-        title: t("settings.fontUploadFailed") || "Failed to upload font",
+        title: t("settings.fontUploadFailed"),
         description: err?.message || t("settings.fontUploadFailedDesc") || "Could not process font file",
         variant: "destructive",
       });
@@ -4824,13 +1869,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       await renameCustomFont(fontToRename.id, newName);
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontRenameSuccess") || "Font renamed successfully",
-        description: (t("settings.fontRenameSuccessDesc") || 'Font renamed to "{name}".').replace("{name}", newName),
+        title: t("settings.fontRenameSuccess"),
+        description: (t("settings.fontRenameSuccessDesc")).replace("{name}", newName),
       });
       setFontToRename(null);
     } catch (err: any) {
       toast({
-        title: t("settings.fontRenameFailed") || "Failed to rename font",
+        title: t("settings.fontRenameFailed"),
         description: err?.message || "Could not rename font",
         variant: "destructive",
       });
@@ -4850,13 +1895,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontDeletedSuccess") || "Font removed successfully",
-        description: (t("settings.fontDeletedSuccessDesc") || 'Removed font "{name}" from workspace.').replace("{name}", deletedName),
+        title: t("settings.fontDeletedSuccess"),
+        description: (t("settings.fontDeletedSuccessDesc")).replace("{name}", deletedName),
       });
       setFontToDelete(null);
     } catch (err: any) {
       toast({
-        title: t("settings.fontDeleteFailed") || "Failed to delete font",
+        title: t("settings.fontDeleteFailed"),
         description: err?.message || "Could not delete font",
         variant: "destructive",
       });
@@ -4918,11 +1963,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             await navigator.clipboard.writeText(link);
             setCopiedShareLink(true);
             setTimeout(() => setCopiedShareLink(false), 3000);
-          } catch {}
+          } catch { /* ignore */ }
           setShareSuccessDialogOpen(true);
           toast({
-            title: t("shareDialog.shareViaDrive") || "Share via Google Drive",
-            description: t("shareDialog.copied") || "Link copied to clipboard!",
+            title: t("shareDialog.shareViaDrive"),
+            description: t("shareDialog.copied"),
           });
           return;
         }
@@ -4991,12 +2036,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           await navigator.clipboard.writeText(link);
           setCopiedShareLink(true);
           setTimeout(() => setCopiedShareLink(false), 3000);
-        } catch {}
+        } catch { /* ignore */ }
         setShareSyncDialogOpen(false);
         setShareSuccessDialogOpen(true);
         toast({
-          title: t("shareDialog.shareViaDrive") || "Share via Google Drive",
-          description: t("shareDialog.copied") || "Link copied to clipboard!",
+          title: t("shareDialog.shareViaDrive"),
+          description: t("shareDialog.copied"),
         });
       } else {
         // Fallback: full sync and get structure
@@ -5010,7 +2055,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             await navigator.clipboard.writeText(link);
             setCopiedShareLink(true);
             setTimeout(() => setCopiedShareLink(false), 3000);
-          } catch {}
+          } catch { /* ignore */ }
           setShareSyncDialogOpen(false);
           setShareSuccessDialogOpen(true);
         }
@@ -5018,8 +2063,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } catch (err) {
       console.warn("Sync and share error:", err);
       toast({
-        title: t("shareDialog.title") || "Share",
-        description: t("shareDialog.error") || "Failed to generate share link.",
+        title: t("shareDialog.title"),
+        description: t("shareDialog.error"),
         variant: "destructive",
       });
     } finally {
@@ -5044,21 +2089,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         setShareLink("");
         setShareSuccessDialogOpen(false);
         toast({
-          title: t("shareDialog.revokeSuccessTitle") || "Sharing Stopped",
-          description: t("shareDialog.revokeSuccessDesc") || "Public access to this note has been revoked.",
+          title: t("shareDialog.revokeSuccessTitle"),
+          description: t("shareDialog.revokeSuccessDesc"),
         });
       } else {
         toast({
-          title: t("shareDialog.title") || "Share",
-          description: t("shareDialog.revokeError") || "Failed to stop sharing. Please try again.",
+          title: t("shareDialog.title"),
+          description: t("shareDialog.revokeError"),
           variant: "destructive",
         });
       }
     } catch (err) {
       console.warn("Revoke share error:", err);
       toast({
-        title: t("shareDialog.title") || "Share",
-        description: t("shareDialog.revokeError") || "Failed to stop sharing. Please try again.",
+        title: t("shareDialog.title"),
+        description: t("shareDialog.revokeError"),
         variant: "destructive",
       });
     } finally {
@@ -5203,7 +2248,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
         }
       } catch (e) {
-        setAlertMessage("นำเข้า docx ไม่สำเร็จ: " + (e as Error).message);
+        setAlertMessage(t("uiMisc.docxImportFailed", { message: (e as Error).message }));
       }
       setImportDocxDialogOpen(false);
       event.target.value = "";
@@ -5250,7 +2295,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [workspaceVideoDialogOpen, setWorkspaceVideoDialogOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
-  const [audioRecorderOpen, setAudioRecorderOpen] = useState(false);
 
   const filteredWorkspaceNotes = useMemo(() => {
     if (!notes || notes.length === 0) return [];
@@ -5456,15 +2500,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setPdfSearchStats({ total: 0, current: -1 });
   }, [note?.id]);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
-  const [calculatorOpen, setCalculatorOpen] = useState(false);
-  const [clockOpen, setClockOpen] = useState(false);
-  const [calculatorZIndex, setCalculatorZIndex] = useState<number>(50);
-  const [clockZIndex, setClockZIndex] = useState<number>(50);
-  const [audioRecorderZIndex, setAudioRecorderZIndex] = useState<number>(50);
-  const [translatorOpen, setTranslatorOpen] = useState(false);
-  const [translatorInitialText, setTranslatorInitialText] = useState("");
-  const [translatorZIndex, setTranslatorZIndex] = useState<number>(50);
-  const nextWindowZIndexRef = useRef<number>(51);
+  // Floating utility widgets (Calculator, Clock, Translator, Audio Recorder) are hosted globally in Index.tsx via FloatingWidgetsHost
 
   const imageElementRef = useRef<HTMLImageElement | null>(null);
 
@@ -5505,37 +2541,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }, [imageZoomMode]);
 
-  const bringCalculatorToFront = useCallback(() => {
-    setCalculatorZIndex(nextWindowZIndexRef.current++);
-  }, []);
-
-  const bringClockToFront = useCallback(() => {
-    setClockZIndex(nextWindowZIndexRef.current++);
-  }, []);
-
-  const bringAudioRecorderToFront = useCallback(() => {
-    setAudioRecorderZIndex(nextWindowZIndexRef.current++);
-  }, []);
-
-  const bringTranslatorToFront = useCallback(() => {
-    setTranslatorZIndex(nextWindowZIndexRef.current++);
-  }, []);
-
   const toggleCalculator = useCallback(() => {
-    setCalculatorOpen((prev) => {
-      const next = !prev;
-      if (next) bringCalculatorToFront();
-      return next;
-    });
-  }, [bringCalculatorToFront]);
+    window.dispatchEvent(new CustomEvent("app:toggle-calculator"));
+  }, []);
 
   const toggleClock = useCallback(() => {
-    setClockOpen((prev) => {
-      const next = !prev;
-      if (next) bringClockToFront();
-      return next;
-    });
-  }, [bringClockToFront]);
+    window.dispatchEvent(new CustomEvent("app:toggle-clock"));
+  }, []);
 
   const spellCheckEnabled = settings.spellCheck !== false;
   const settingsRef = useRef(settings);
@@ -5565,11 +2577,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   useEffect(() => {
     const map = assetBlobUrlMap.current;
     return () => {
-      for (const [, val] of map.entries()) {
+      for (const [key, val] of map.entries()) {
         if (typeof val === "string" && val.startsWith("blob:")) {
           try {
             URL.revokeObjectURL(val);
-          } catch {}
+          } catch { /* ignore */ }
+        }
+        if (typeof key === "string" && key.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(key);
+          } catch { /* ignore */ }
         }
       }
       map.clear();
@@ -5658,15 +2675,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return /\.(js|jsx|ts|tsx|json|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|swift|kt|scss|less|yaml|yml|toml|xml|sql|sh|bash|zsh|vue|svelte)$/i.test(name);
   }, [isCssFile, isHtmlFile, isJsFile]);
 
-  const formatFileSize = useCallback((bytes: number | null | undefined): string => {
-    if (bytes == null || isNaN(bytes) || bytes < 0) return "";
-    if (bytes === 0) return "0 B";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }, []);
-
   const formatVideoDuration = useCallback((seconds: number | null | undefined): string => {
     if (seconds == null || isNaN(seconds) || !isFinite(seconds) || seconds < 0) return "--:--";
     const totalSecs = Math.round(seconds);
@@ -5692,7 +2700,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (name.endsWith(".bmp")) return "BMP Image";
     if (name.endsWith(".ico")) return "ICO Icon";
     if (name.endsWith(".avif")) return "AVIF Image";
-    if (targetNote.fileType === "image") return isTh ? "รูปภาพ" : "Image";
+    if (targetNote.fileType === "image") return t("editor.image");
 
     if (name.endsWith(".zip")) return "ZIP Archive";
     if (name.endsWith(".rar")) return "RAR Archive";
@@ -5701,19 +2709,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (name.endsWith(".pdf")) return "PDF Document";
     if (name.endsWith(".doc") || name.endsWith(".docx")) return "Word Document";
     if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "Excel Spreadsheet";
-    if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return isTh ? "ไฟล์เสียง" : "Audio File";
+    if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".m4a") || name.endsWith(".flac") || name.endsWith(".weba")) return t("editor.audioFile");
     if (name.endsWith(".webm")) {
       return isAudioMedia(name, targetNote)
-        ? (isTh ? "ไฟล์เสียง WebM" : "WebM Audio")
-        : (isTh ? "วิดีโอ WebM" : "WebM Video");
+        ? (t("editor.webmAudio"))
+        : (t("editor.webmVideo"));
     }
     if (name.endsWith(".mp4") || name.endsWith(".m4v")) return "MP4 Video";
     if (name.endsWith(".mov")) return "QuickTime Video";
     if (name.endsWith(".mkv")) return "Matroska Video";
     if (name.endsWith(".avi")) return "AVI Video";
     if (name.endsWith(".wmv") || name.endsWith(".flv") || name.endsWith(".ogv") || name.endsWith(".3gp") || name.endsWith(".mpg") || name.endsWith(".mpeg")) return "Video File";
-    if ((targetNote.fileType as string) === "video") return isTh ? "วิดีโอ" : "Video";
-    if ((targetNote.fileType as string) === "binary") return isTh ? "ไฟล์ไบนารี" : "Binary File";
+    if ((targetNote.fileType as string) === "video") return t("editor.video");
+    if ((targetNote.fileType as string) === "binary") return t("editor.binaryFile");
 
     if (targetNote.contentFormat === "html" || name.endsWith(".html") || name.endsWith(".htm")) return "HTML";
     if (targetNote.contentFormat === "css" || name.endsWith(".css")) return "CSS";
@@ -5737,8 +2745,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (name.endsWith(".xml")) return "XML";
     if (name.endsWith(".sh") || name.endsWith(".bash") || name.endsWith(".zsh")) return "Shell";
 
-    if (name.endsWith(".txt") || targetNote.contentFormat === "plain") return t("editor.formatText") || "Plain Text";
-    return t("editor.formatMarkdown") || "Markdown";
+    if (name.endsWith(".txt") || targetNote.contentFormat === "plain") return t("editor.formatText");
+    return t("editor.formatMarkdown");
   }, [settings.language, t]);
 
   const handleCopyImage = useCallback(async () => {
@@ -5772,14 +2780,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         new ClipboardItem({ "image/png": pngBlob })
       ]);
       toast({
-        title: t("editor.copyImage") || "Copy Image",
-        description: t("editor.imageCopied") || "Image copied to clipboard",
+        title: t("editor.copyImage"),
+        description: t("editor.imageCopied"),
       });
     } catch (err) {
       console.warn("Copy image failed:", err);
       toast({
-        title: t("editor.copyImage") || "Copy Image",
-        description: t("editor.copyImageFailed") || "Failed to copy image",
+        title: t("editor.copyImage"),
+        description: t("editor.copyImageFailed"),
         variant: "destructive",
       });
     }
@@ -5787,7 +2795,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleOpenInSystemApp = useCallback(async () => {
     if (!note) return;
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && (electronAPI?.openPath || electronAPI?.openExternal)) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -5815,7 +2823,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleRevealInFileExplorer = useCallback(async () => {
     if (!note) return;
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.showItemInFolder) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -6188,7 +3196,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         open: true,
         query,
         slashRange: { from: startPos, to: endPos },
-        coords: { top: coords.bottom + window.scrollY, left: coords.left + window.scrollX },
+        coords: { top: coords.bottom, left: coords.left },
         selectedIndex: -1,
         filteredItems: filtered,
       };
@@ -6359,10 +3367,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
   }, [isVisible, note?.id, restoreScrollPosition, isHtmlFile, isCssFile, isJsFile]);
 
+  useEffect(() => {
+    if (!slashMenuState.open) return;
+    const handleOutsideMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-slash-menu="true"]')) return;
+      slashMenuStateRef.current.open = false;
+      setSlashMenuState((prev) => ({ ...prev, open: false }));
+    };
+    document.addEventListener("mousedown", handleOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", handleOutsideMouseDown);
+  }, [slashMenuState.open]);
+
   const handleEditorScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (slashMenuStateRef.current.open) {
+      slashMenuStateRef.current.open = false;
+      setSlashMenuState((prev) => ({ ...prev, open: false }));
+    }
     if (!note?.id) return;
     if (isRestoringScrollRef.current) return;
-    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || isJsFile(note) || isImageFile(note) || isBinaryFile(note)) return;
+    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || isImageFile(note) || isBinaryFile(note)) return;
     const target = e.currentTarget;
     if (
       target.scrollTop === 0 &&
@@ -6376,13 +3400,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const serializeEditorContent = useCallback((targetNote: Note, instance: TiptapEditor): string => {
     if (isTxtFile(targetNote)) {
-      return getPlainTextFromHtml(instance.getHTML());
+      return getPlainTextFromHtml(getCleanCollapsedHtml(instance));
     }
-    if (isReadingModeRef.current && isMarkdownNote(targetNote)) {
+    if (isStrictReadingModeRef.current && isMarkdownNote(targetNote)) {
       const sourceContent = noteRef.current?.id === targetNote.id ? (noteRef.current?.content ?? targetNote.content ?? "") : (targetNote.content ?? "");
       if (sourceContent) return sourceContent;
     }
-    const html = instance.getHTML();
+    const html = getCleanCollapsedHtml(instance);
     const temp = document.createElement("div");
     temp.innerHTML = html;
     // Strip reading-mode footnote section, items, and separator if any are present in the DOM
@@ -6586,6 +3610,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }),
       HeadingToggle.configure({
         enabled: () => (settingsRef.current as any)?.toggleHeading !== false,
+      }),
+      LivePreview.configure({
+        enabled: () => Boolean(!isReadingModeRef.current && settingsRef.current?.readingModeLivePreview),
+        hasTitleH1: () => !isTxtFile(noteRef.current),
+        isSlashMenuOpen: () => Boolean(slashMenuStateRef.current?.open),
       }),
       Underline,
       Highlight,
@@ -6921,7 +3950,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
 
           if (!isSlashCommandEnabled) {
-            return tRef.current("editor.startWritingNoSlash") || (settingsRef.current?.language === "th" ? "เริ่มเขียนข้อความที่นี่..." : "Start writing here...");
+            return tRef.current("editor.startWritingNoSlash");
           }
 
           return isMobileRef.current
@@ -6944,9 +3973,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       transformPastedHTML: (html: string) => sanitizeHtml(html),
       attributes: {
         spellcheck: "false",
+        "data-spellcheck-enabled": spellCheckEnabled ? "true" : "false",
         lang: settings.language || "en",
         style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
-        class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view !cursor-default" : "cursor-text"} ${
+        class: `${EDITOR_CLASSES} ${
+          isReadingMode
+            ? isReadingLivePreview
+              ? "luno-reading-view luno-reading-live-preview cursor-text"
+              : "luno-reading-view !cursor-default"
+            : "cursor-text"
+        } ${
           settings.accentHeadings
             ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
             : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
@@ -6984,7 +4020,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             return true;
           } else {
             toast({
-              title: t("editor.noteNotFound") || "Note not found",
+              title: t("editor.noteNotFound"),
               description: `[[${wikilinkTarget}]]`,
             });
             return true;
@@ -7288,6 +4324,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           instance.view.dispatch(
             instance.state.tr
               .setMeta("addToHistory", false)
+              .setMeta(spellCheckPluginKey, { recompute: true, enabled: spellCheckEnabled })
               .setMeta(headingTogglePluginKey, {
                 setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
               })
@@ -7324,7 +4361,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const currentNote = activeNoteRef.current;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
       if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked) {
-        if (editor?.state && !isReadingModeRef.current && !syncingFromNote.current) {
+        if (editor?.state && !isStrictReadingModeRef.current && !syncingFromNote.current) {
           noteEditorStateMap.set(currentActiveId, editor.state);
         }
         flushPendingRename();
@@ -7333,12 +4370,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onSelectionUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
-      const isTyping = Boolean(transaction?.docChanged);
+      const isTyping = Boolean(transaction?.docChanged && !transaction?.getMeta("isLivePreviewToggle"));
       scheduleEditorTick(!isTyping, isTyping);
       const currentActiveId = editorActiveNoteIdRef.current;
       const currentNote = activeNoteRef.current;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
-      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isReadingModeRef.current && !syncingFromNote.current) {
+      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isStrictReadingModeRef.current && !syncingFromNote.current) {
         noteEditorStateMap.set(currentActiveId, instance.state);
       }
       const { from } = instance.state.selection;
@@ -7348,7 +4385,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     },
     onUpdate: ({ editor: instance, transaction }: any) => {
       checkSlashCommand(instance);
-      const isTyping = Boolean(transaction?.docChanged && !transaction.getMeta("isSync"));
+      const isLivePreviewCommit = Boolean(transaction?.getMeta("isLivePreviewCommit"));
+      const isLiveToggleOnly = Boolean(transaction?.getMeta("isLivePreviewToggle") && !isLivePreviewCommit);
+      if (isLivePreviewCommit) {
+        void resolveRelativeImagesInEditorRef.current?.(instance);
+      }
+      const isTyping = Boolean(transaction?.docChanged && !transaction.getMeta("isSync") && !isLiveToggleOnly);
       if (isTyping) {
         scheduleEnsureCursorVisible(instance);
       }
@@ -7358,13 +4400,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const currentNote = activeNoteRef.current || note;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
 
-      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isReadingModeRef.current && !syncingFromNote.current) {
+      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isStrictReadingModeRef.current && !syncingFromNote.current) {
         noteEditorStateMap.set(currentActiveId, instance.state);
       }
       if (isLocked || (currentActiveId && note && currentActiveId !== note.id)) return;
-      if (isReadingModeRef.current || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
+      if (isStrictReadingModeRef.current || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
       if (loadingNoteIdRef.current === note.id) return;
       if (transaction?.getMeta("isSync")) return;
+      if (isLiveToggleOnly) return;
       if (transaction && !transaction.docChanged) return;
       userEditedRef.current = true;
       hasPendingDiskSaveRef.current = true;
@@ -7373,7 +4416,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const firstChild = doc.firstChild;
       let firstH1Text = "";
       if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
-        firstH1Text = (firstChild.textContent || "").trim();
+        const rawH1 = firstChild.textContent || "";
+        const isFirstBlockLiveExpanded =
+          livePreviewPluginKey.getState(instance.state)?.activeBlock?.blockPos === 0;
+        firstH1Text = (isFirstBlockLiveExpanded ? rawH1.replace(/^#{1,6}\s+/, "") : rawH1).trim();
       }
 
       const currentBaseTitle = getBaseTitle(note);
@@ -7408,7 +4454,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(debouncedContentSaveTimeoutRef.current);
       }
       debouncedContentSaveTimeoutRef.current = setTimeout(() => {
-        if (isReadingModeRef.current) return;
+        if (isStrictReadingModeRef.current) return;
         if (userEditedRef.current && noteRef.current) {
           const currentNote = noteRef.current;
           if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== currentNote.id) return;
@@ -7416,15 +4462,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
           const savedContent = serializeEditorContent(currentNote, instance);
           pendingSaveContentRef.current = { id: currentNote.id, content: savedContent };
-          try {
-            if (savedContent) {
-              localStorage.setItem(`luno_backup_${currentNote.id}`, savedContent);
-              if (currentNote.fileName) {
-                localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, savedContent);
+          if (!currentNote.isLocked) {
+            try {
+              if (savedContent) {
+                localStorage.setItem(`luno_backup_${currentNote.id}`, savedContent);
+                if (currentNote.fileName) {
+                  localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, savedContent);
+                }
               }
+            } catch {
+              /* ignore localStorage quota */
             }
-          } catch {
-            /* ignore localStorage quota */
           }
           pendingSaveContentRef.current = null;
           setLastEditedTime(Date.now());
@@ -7465,25 +4513,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   editorInstanceRef.current = editor;
 
   const toggleTranslator = useCallback(() => {
-    setTranslatorOpen((prev) => {
-      const next = !prev;
-      if (next) {
-        bringTranslatorToFront();
-        if (editor && !editor.state.selection.empty) {
-          const selectedText = editor.state.doc.textBetween(
-            editor.state.selection.from,
-            editor.state.selection.to,
-            " ",
-            " ",
-          );
-          setTranslatorInitialText(selectedText);
-        } else {
-          setTranslatorInitialText("");
-        }
-      }
-      return next;
-    });
-  }, [editor, bringTranslatorToFront]);
+    let selectedText = "";
+    if (editor && !editor.state.selection.empty) {
+      selectedText = editor.state.doc.textBetween(
+        editor.state.selection.from,
+        editor.state.selection.to,
+        " ",
+        " ",
+      );
+    }
+    window.dispatchEvent(
+      new CustomEvent("app:toggle-translator", {
+        detail: { initialText: selectedText, paneId },
+      }),
+    );
+  }, [editor, paneId]);
 
   const openTranslatorWithSelection = useCallback(() => {
     let selectedText = "";
@@ -7495,10 +4539,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         " ",
       );
     }
-    setTranslatorInitialText(selectedText);
-    bringTranslatorToFront();
-    setTranslatorOpen(true);
-  }, [editor, bringTranslatorToFront]);
+    window.dispatchEvent(
+      new CustomEvent("app:toggle-translator", {
+        detail: { initialText: selectedText, forceOpen: true, paneId },
+      }),
+    );
+  }, [editor, paneId]);
 
   const handleInsertTranslation = useCallback((textToInsert: string) => {
     if (!textToInsert) return;
@@ -7526,17 +4572,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const { from: selFrom, to: selTo, empty } = editor.state.selection;
     if (!empty && selTo - selFrom < 100) {
       const selectedText = editor.state.doc.textBetween(selFrom, selTo, "\n", "\n").trim();
-      if (selectedText) {
+      if (selectedText && isWordMisspelled(selectedText)) {
         const suggestions = getSpellingSuggestions(selectedText);
-        if (suggestions.length > 0) {
-          setContextSpellData({
-            word: selectedText,
-            suggestions,
-            from: selFrom,
-            to: selTo,
-          });
-          return;
-        }
+        setContextSpellData({
+          word: selectedText,
+          suggestions,
+          from: selFrom,
+          to: selTo,
+        });
+        return;
       }
     }
 
@@ -7547,6 +4591,33 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       setContextSpellData(null);
       return;
     }
+
+    // 2.5. Prefer active SpellCheckDecoration range directly under cursor
+    const activeDecoSet = spellCheckPluginKey.getState(view.state);
+    if (activeDecoSet) {
+      const docSize = view.state.doc.content.size;
+      const searchFrom = Math.max(0, pos.pos - 1);
+      const searchTo = Math.min(docSize, pos.pos + 1);
+      const foundDecos = activeDecoSet.find(searchFrom, searchTo);
+      if (foundDecos && foundDecos.length > 0) {
+        const targetDeco =
+          foundDecos.find((d: any) => pos.pos >= d.from && pos.pos <= d.to) || foundDecos[0];
+        const decoWord =
+          targetDeco.spec?.["data-spell-word"] ||
+          view.state.doc.textBetween(targetDeco.from, targetDeco.to);
+        if (decoWord) {
+          const suggestions = getSpellingSuggestions(decoWord);
+          setContextSpellData({
+            word: decoWord,
+            suggestions,
+            from: targetDeco.from,
+            to: targetDeco.to,
+          });
+          return;
+        }
+      }
+    }
+
     const $pos = view.state.doc.resolve(pos.pos);
     const parentText = $pos.parent.textContent;
     const offsetInParent = $pos.parentOffset;
@@ -7556,30 +4627,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return;
     }
 
-    // 3. Try Intl.Segmenter (word level segmentation for Thai/English)
-    if (typeof Intl !== "undefined" && (Intl as any).Segmenter) {
-      try {
-        const segmenter = new (Intl as any).Segmenter(["th", "en"], { granularity: "word" });
-        for (const seg of segmenter.segment(parentText)) {
-          if (seg.isWordLike) {
-            const start = seg.index;
-            const end = seg.index + seg.segment.length;
-            if (offsetInParent >= start && offsetInParent <= end) {
-              const suggestions = getSpellingSuggestions(seg.segment);
-              if (suggestions.length > 0) {
-                setContextSpellData({
-                  word: seg.segment,
-                  suggestions,
-                  from: parentStartPos + start,
-                  to: parentStartPos + end,
-                });
-                return;
-              }
-            }
-          }
-        }
-      } catch {
-        // continue to next detection strategy
+    // 3. Check Thai DAG segmentation & misspellings in parentText around offset
+    const thaiErrors = findThaiMisspellingsInText(parentText);
+    for (const err of thaiErrors) {
+      if (offsetInParent >= err.start - 1 && offsetInParent <= err.end + 1) {
+        const suggestions = getSpellingSuggestions(err.word);
+        setContextSpellData({
+          word: err.word,
+          suggestions,
+          from: parentStartPos + err.start,
+          to: parentStartPos + err.end,
+        });
+        return;
       }
     }
 
@@ -7615,28 +4674,26 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (offsetInParent >= start - 1 && offsetInParent <= end + 1) {
         const clusterText = parentText.slice(start, end);
         const suggestions = getSpellingSuggestions(clusterText);
-        if (suggestions.length > 0) {
-          setContextSpellData({
-            word: clusterText,
-            suggestions,
-            from: parentStartPos + start,
-            to: parentStartPos + end,
-          });
-          return;
-        }
+        setContextSpellData({
+          word: clusterText,
+          suggestions,
+          from: parentStartPos + start,
+          to: parentStartPos + end,
+        });
+        return;
       }
     }
 
     // 5. English / latin word regex boundary around offset
-    const latinWordRegex = /[A-Za-z0-9_']+/g;
+    const latinWordRegex = /(?<![A-Za-z0-9_])[A-Za-z]+(?:['\u2019][A-Za-z]+)*(?![A-Za-z0-9_])/g;
     let match: RegExpExecArray | null;
     while ((match = latinWordRegex.exec(parentText)) !== null) {
       const start = match.index;
       const end = match.index + match[0].length;
       if (offsetInParent >= start && offsetInParent <= end) {
         const word = match[0];
-        const suggestions = getSpellingSuggestions(word);
-        if (suggestions.length > 0) {
+        if (isWordMisspelled(word)) {
+          const suggestions = getSpellingSuggestions(word);
           setContextSpellData({
             word,
             suggestions,
@@ -7683,7 +4740,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [editor]);
 
   const editorStats = useMemo(() => {
-    let syntaxLabel = t("editor.formatMarkdown") || "Markdown";
+    let syntaxLabel = t("editor.formatMarkdown");
     const fileName = note?.fileName?.toLowerCase() ?? "";
     if (fileName.endsWith(".css") || note?.contentFormat === "css") {
       syntaxLabel = "CSS";
@@ -7692,7 +4749,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else if (fileName.endsWith(".js") || fileName.endsWith(".mjs") || fileName.endsWith(".cjs") || note?.contentFormat === "javascript" || note?.contentFormat === "js" || isJsFile(note)) {
       syntaxLabel = "JavaScript";
     } else if (fileName.endsWith(".txt")) {
-      syntaxLabel = t("editor.formatText") || "Plain Text";
+      syntaxLabel = t("editor.formatText");
     }
 
     const currentFontSize = settings.editorFontSize || editorFontSize || 15;
@@ -7778,7 +4835,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, [rootDirHandle]);
 
   const saveLinkedFileToDisk = useCallback(async (targetNote?: Note) => {
-    if (isReadingModeRef.current) return;
+    if (isStrictReadingModeRef.current) return;
     if (!hasPendingDiskSaveRef.current) return;
     const n = targetNote || activeNoteRef.current || note;
     if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n) && !isJsFile(n)) || !settings.autoSave) return;
@@ -7855,6 +4912,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
   }, [editor, editorTick, settings.showCodeLineNumbers, note?.id]);
 
+  // Sync toolbar active state when a Toggle title input gains or loses focus
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    return subscribeToggleFocusChange((changedEditor) => {
+      if (changedEditor === editor) {
+        scheduleEditorTick(true);
+      }
+    });
+  }, [editor, scheduleEditorTick]);
+
   // Dynamically update Hashtag badges when theme or tagColorStyle changes in settings
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -7866,7 +4933,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const tr = editor.state.tr.setMeta(hashtagPluginKey, { recompute: true });
         editor.view.dispatch(tr);
       }
-    } catch {}
+    } catch { /* ignore */ }
   }, [editor, settings.theme, settings.tagColorStyle]);
 
   // Dynamically sync SmartTypography and autolink when changed in settings
@@ -7876,7 +4943,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if ((editor.storage as any)?.smartTypography) {
         (editor.storage as any).smartTypography.enabled = settings.smartTypography !== false;
       }
-    } catch {}
+    } catch { /* ignore */ }
   }, [editor, settings.smartTypography]);
 
   useEffect(() => {
@@ -8106,50 +5173,120 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         text?: string;
         url?: string;
         title?: string;
+        image?: { src: string; alt?: string; relativeSrc?: string };
+        images?: Array<{ src: string; alt?: string; relativeSrc?: string }>;
+        captionText?: string;
         onHandled?: () => void;
       }>;
-      const { noteId, text, url, title, onHandled } = customEvent.detail || {};
+      const { noteId, text, url, title, image, images, captionText, onHandled } = customEvent.detail || {};
       if (!editor || editor.isDestroyed) return;
+
+      // Only handle TipTap-editable notes (markdown / plain text)
+      if (
+        note &&
+        (isHtmlFile(note) ||
+          isCssFile(note) ||
+          isJsFile(note) ||
+          isPdfFile(note) ||
+          isImageFile(note) ||
+          isAudioFile(note) ||
+          isVideoFile(note))
+      ) {
+        return;
+      }
 
       // If noteId is specified, only handle if it matches this editor's note
       if (noteId && note?.id && noteId !== note.id) return;
 
       try {
-        const targetUrl = (url || "").trim() || (text || "").trim();
-        if (!targetUrl) return;
-
-        const displayText = (title || "").trim() || targetUrl;
-        const linkNode = {
-          type: "text",
-          text: displayText,
-          marks: [{ type: "link", attrs: { href: targetUrl } }],
-        };
-
         const { state } = editor;
         const { selection, doc } = state;
         const isFocused = editor.isFocused;
         const hasCustomSelection = isFocused && selection.from > 1;
 
-        if (hasCustomSelection) {
-          if (!selection.empty) {
-            editor.chain().focus().setLink({ href: targetUrl }).run();
+        const imageList = images && images.length > 0 ? images : image ? [image] : [];
+        if (imageList.length > 0) {
+          const validNodes: Array<Record<string, unknown>> = [];
+          for (const img of imageList) {
+            if (!img?.src || /^(javascript|vbscript):/i.test(img.src.trim())) continue;
+            if (img.relativeSrc) {
+              let decodedRel = img.relativeSrc;
+              try {
+                decodedRel = decodeURIComponent(img.relativeSrc);
+              } catch {
+                /* ignore malformed URI */
+              }
+              assetBlobUrlMap.current.set(img.relativeSrc, img.src);
+              assetBlobUrlMap.current.set(decodedRel, img.src);
+              assetBlobUrlMap.current.set(img.src, img.relativeSrc);
+              imageLocalCache.set(img.relativeSrc, img.src);
+              imageLocalCache.set(decodedRel, img.src);
+            }
+            validNodes.push({
+              type: "image",
+              attrs: {
+                src: img.src,
+                alt: img.alt || "",
+                ...(img.relativeSrc ? { "data-relative-src": img.relativeSrc } : {}),
+              },
+            });
+          }
+
+          if (validNodes.length === 0) return;
+
+          if (hasCustomSelection) {
+            editor.chain().focus().insertContent([...validNodes, { type: "paragraph" }]).run();
           } else {
-            editor.chain().focus().insertContent([linkNode, { type: "text", text: " " }]).run();
+            const endPos = doc.content.size;
+            editor.chain().focus().insertContentAt(endPos, [...validNodes, { type: "paragraph" }]).run();
+          }
+
+          const extraCaption = (captionText || "").trim();
+          if (extraCaption) {
+            const captionHtml = toEditorHtml(extraCaption, isTxtFile(note), false);
+            const nextEndPos = editor.state.doc.content.size;
+            editor.chain().focus().insertContentAt(nextEndPos, captionHtml).run();
+          }
+        } else if ((url || "").trim()) {
+          const targetUrl = (url || "").trim();
+          const displayText = (title || "").trim() || targetUrl;
+          const linkNode = {
+            type: "text",
+            text: displayText,
+            marks: [{ type: "link", attrs: { href: targetUrl } }],
+          };
+
+          if (hasCustomSelection) {
+            if (!selection.empty) {
+              editor.chain().focus().setLink({ href: targetUrl }).run();
+            } else {
+              editor.chain().focus().insertContent([linkNode, { type: "text", text: " " }]).run();
+            }
+          } else {
+            // If the last node in the document is an empty paragraph, insert directly into it
+            const lastChild = doc.lastChild;
+            if (lastChild && lastChild.type.name === "paragraph" && lastChild.content.size === 0) {
+              const pos = Math.max(1, doc.content.size - 1);
+              editor.chain().focus().insertContentAt(pos, linkNode).run();
+            } else {
+              // Append exactly one new paragraph with the link
+              const endPos = doc.content.size;
+              editor.chain().focus().insertContentAt(endPos, {
+                type: "paragraph",
+                content: [linkNode],
+              }).run();
+            }
+          }
+        } else if ((text || "").trim()) {
+          const html = toEditorHtml(text!.trim(), isTxtFile(note), false);
+          if (hasCustomSelection) {
+            editor.chain().focus().insertContent(html).run();
+          } else {
+            const endPos = doc.content.size;
+            editor.chain().focus().insertContentAt(endPos, html).run();
           }
         } else {
-          // If the last node in the document is an empty paragraph, insert directly into it
-          const lastChild = doc.lastChild;
-          if (lastChild && lastChild.type.name === "paragraph" && lastChild.content.size === 0) {
-            const pos = Math.max(1, doc.content.size - 1);
-            editor.chain().focus().insertContentAt(pos, linkNode).run();
-          } else {
-            // Append exactly one new paragraph with the link
-            const endPos = doc.content.size;
-            editor.chain().focus().insertContentAt(endPos, {
-              type: "paragraph",
-              content: [linkNode],
-            }).run();
-          }
+          return;
         }
 
         userEditedRef.current = true;
@@ -8162,7 +5299,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         }
         onHandled?.();
       } catch (err) {
-        console.warn("Failed inserting link into editor:", err);
+        console.warn("Failed inserting content into editor:", err);
       }
     };
 
@@ -8241,6 +5378,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
       const prevId = editorActiveNoteIdRef.current;
       const prevNote = activeNoteRef.current;
+      if (editor && !editor.isDestroyed && livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+        editor.view.dispatch(
+          editor.state.tr
+            .setMeta(livePreviewPluginKey, { collapse: true })
+            .setMeta("addToHistory", false)
+        );
+      }
       if (userEditedRef.current && prevNote) {
         flushDebouncedContentSave(prevNote);
       }
@@ -8248,7 +5392,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         void saveLinkedFileToDisk(prevNote);
       }
       if (!closedNoteIds.has(prevId)) {
-        if (editor?.state && !isReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
+        if (editor?.state && !isStrictReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
           noteEditorStateMap.set(prevId, editor.state);
         }
         if (editorScrollContainerRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
@@ -8311,7 +5455,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     // Check if this note already has a preserved editor state (from an open tab)
     const savedState = noteEditorStateMap.get(note.id);
     if (savedState) {
-      if (!isReadingMode && hasReadingModeFootnotesDoc(savedState.doc)) {
+      if (!isStrictReadingMode && hasReadingModeFootnotesDoc(savedState.doc)) {
         noteEditorStateMap.delete(note.id);
       } else {
         syncingFromNote.current = true;
@@ -8322,17 +5466,27 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           editor.view.dispatch(
             editor.state.tr
               .setMeta("addToHistory", false)
+              .setMeta(spellCheckPluginKey, { recompute: true, enabled: spellCheckEnabled })
               .setMeta(headingTogglePluginKey, {
                 setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
               })
           );
         }
-        if (isReadingMode) {
+        if (isStrictReadingMode) {
           editor.setEditable(false);
           const rawContent = noteRef.current?.content ?? note.content ?? "";
           if (/\[\^[^\]]+\]/.test(rawContent)) {
             const parsed = parseEditorContent(rawContent, baseTitle, isTxtFile(note), isHtmlFile(note), true);
             (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+          }
+        } else if (isReadingLivePreview) {
+          editor.setEditable(true);
+          if (livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+            editor.view.dispatch(
+              editor.state.tr
+                .setMeta(livePreviewPluginKey, { collapse: true })
+                .setMeta("addToHistory", false)
+            );
           }
         }
         userEditedRef.current = false;
@@ -8367,7 +5521,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         /* ignore */
       }
     }
-    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note), Boolean(isReadingMode));
+    const parsed = parseEditorContent(noteContent, baseTitle, isTxtFile(note), isHtmlFile(note), Boolean(isStrictReadingMode));
 
     syncingFromNote.current = true;
     editorActiveNoteIdRef.current = note.id;
@@ -8416,7 +5570,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           })
       );
     }
-    if (!isReadingMode) {
+    if (!isStrictReadingMode) {
       noteEditorStateMap.set(note.id, editor.state);
     }
 
@@ -8462,11 +5616,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         autoSaveDiskTimeoutRef.current = null;
       }
       const target = activeNoteRef.current || noteRef.current;
+      if (editor && !editor.isDestroyed && livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+        editor.view.dispatch(
+          editor.state.tr
+            .setMeta(livePreviewPluginKey, { collapse: true })
+            .setMeta("addToHistory", false)
+        );
+      }
       if (target?.id && !closedNoteIds.has(target.id)) {
-        if (editor && !editor.isDestroyed && !isReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target)) {
+        if (editor && !editor.isDestroyed && !isStrictReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target) && !isJsFile(target)) {
           noteEditorStateMap.set(target.id, editor.state);
         }
-        if (editorScrollContainerRef.current && !isHtmlFile(target) && !isCssFile(target)) {
+        if (editorScrollContainerRef.current && !isHtmlFile(target) && !isCssFile(target) && !isJsFile(target)) {
           const container = editorScrollContainerRef.current;
           if (container.scrollTop > 0) {
             setNoteScrollPosition(target.id, container.scrollTop);
@@ -8500,25 +5661,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         transformPastedHTML: (html: string) => sanitizeHtml(html),
         attributes: {
           style: `font-size:${editorFontSize}px;line-height:${settings.lineHeight};`,
-          class: `${EDITOR_CLASSES} ${isReadingMode ? "luno-reading-view !cursor-default" : "cursor-text"} ${
+          class: `${EDITOR_CLASSES} ${
+            isReadingMode
+              ? isReadingLivePreview
+                ? "luno-reading-view luno-reading-live-preview cursor-text"
+                : "luno-reading-view !cursor-default"
+              : "cursor-text"
+          } ${
             settings.accentHeadings
               ? "[&_h1]:text-primary [&_h2]:text-primary [&_h3]:text-primary [&_h4]:text-primary [&_h5]:text-primary [&_h6]:text-primary [&>h1:first-child]:text-primary"
               : "[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_h5]:text-foreground [&_h6]:text-muted-foreground [&>h1:first-child]:text-foreground"
           }`,
           spellcheck: "false",
+          "data-spellcheck-enabled": spellCheckEnabled ? "true" : "false",
           lang: settings.language || "en",
         },
       },
     });
     if (editor?.view?.dom) {
       editor.view.dom.setAttribute("spellcheck", "false");
+      editor.view.dom.setAttribute("data-spellcheck-enabled", spellCheckEnabled ? "true" : "false");
       editor.view.dom.setAttribute("lang", settings.language || "en");
     }
-  }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode, settings.language]);
+  }, [editor, editorFontSize, settings.lineHeight, settings.accentHeadings, isReadingMode, isReadingLivePreview, settings.language, spellCheckEnabled]);
 
   const prevReadingModeRef = useRef(isReadingMode);
   useEffect(() => {
     isReadingModeRef.current = isReadingMode;
+    isStrictReadingModeRef.current = isReadingMode;
     if (!editor || editor.isDestroyed) return;
     if (prevReadingModeRef.current === isReadingMode) {
       if (editor.isEditable !== !isReadingMode) {
@@ -8528,6 +5698,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
     const enteringReadingMode = isReadingMode;
     prevReadingModeRef.current = isReadingMode;
+
     if (!note) {
       if (editor.isEditable !== !isReadingMode) {
         editor.setEditable(!isReadingMode);
@@ -8538,10 +5709,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const prevScroll = editorScrollContainerRef.current?.scrollTop;
 
     if (enteringReadingMode) {
-      // Edit Mode -> Reading Mode:
+      // Edit Mode -> Reading Mode: collapse any active Live Preview line first, flush saves, then enter read-only Reading Mode
       syncingFromNote.current = true;
+      if (livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+        editor.view.dispatch(
+          editor.state.tr
+            .setMeta(livePreviewPluginKey, { collapse: true })
+            .setMeta("addToHistory", false)
+        );
+      }
       if (userEditedRef.current && note) {
         flushDebouncedContentSave(note);
+      }
+      if (note.id && !hasReadingModeFootnotesDoc(editor.state.doc)) {
+        noteEditorStateMap.set(note.id, editor.state);
       }
       userEditedRef.current = false;
       hasPendingDiskSaveRef.current = false;
@@ -8565,7 +5746,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const parsed = parseEditorContent(rawContent, baseTitle, isTxt, isHtml, true);
         (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
       }
-      // In Reading Mode, do not overwrite noteEditorStateMap so that the clean Edit-Mode state is preserved
+
       userEditedRef.current = false;
       hasPendingDiskSaveRef.current = false;
       syncingFromNote.current = false;
@@ -8596,6 +5777,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           editor.view.dispatch(
             editor.state.tr
               .setMeta("addToHistory", false)
+              .setMeta(spellCheckPluginKey, { recompute: true, enabled: spellCheckEnabled })
               .setMeta(headingTogglePluginKey, {
                 setNoteInfo: { noteId: note.id, fileName: note.fileName, restore: true },
               })
@@ -8637,6 +5819,32 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
+    if (!readingModeLivePreviewEnabled || isReadingMode) {
+      if (livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+        editor.view.dispatch(
+          editor.state.tr
+            .setMeta(livePreviewPluginKey, { collapse: true })
+            .setMeta("addToHistory", false)
+        );
+      }
+    } else if (editor.isFocused && !livePreviewPluginKey.getState(editor.state)?.activeBlock) {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(livePreviewPluginKey, { focus: true })
+          .setMeta("addToHistory", false)
+      );
+    }
+  }, [editor, readingModeLivePreviewEnabled, isReadingMode]);
+
+  useEffect(() => {
+    setGlobalSpellCheckEnabled(spellCheckEnabled);
+    if (!spellCheckEnabled) {
+      setContextSpellData(null);
+    }
+    if (!editor || editor.isDestroyed) return;
+    if (editor?.view?.dom) {
+      editor.view.dom.setAttribute("data-spellcheck-enabled", spellCheckEnabled ? "true" : "false");
+    }
     editor.extensionManager.extensions.forEach((ext) => {
       if (ext.name === "spellCheckDecoration") {
         ext.options.enabled = spellCheckEnabled;
@@ -8647,8 +5855,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     });
     const tr = editor.state.tr
       .setMeta("addToHistory", false)
-      .setMeta(spellCheckPluginKey, { recompute: true });
+      .setMeta(spellCheckPluginKey, { recompute: true, enabled: spellCheckEnabled });
     editor.view.dispatch(tr);
+    const currentActiveId = editorActiveNoteIdRef.current;
+    if (currentActiveId && !isStrictReadingModeRef.current && !syncingFromNote.current) {
+      noteEditorStateMap.set(currentActiveId, editor.state);
+    }
   }, [editor, spellCheckEnabled, settings.wrongLanguageSuggestion]);
 
   const toggleHeadingEnabled = (settings as any).toggleHeading !== false;
@@ -8694,33 +5906,56 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   }, []);
 
   const shouldUseMobileOverflow = mobileToolbarWidth > 0 && mobileToolbarWidth < MOBILE_FULL_TOOLBAR_MIN_WIDTH;
-  // Custom events for calculator and clock toggle
+  // Receive insertions from global FloatingTranslator & FloatingAudioRecorder hosted in Index.tsx
   useEffect(() => {
-    const handleToggleCalc = () => {
-      setCalculatorOpen((prev) => {
-        if (!prev) bringCalculatorToFront();
-        return !prev;
-      });
-    };
-    const handleToggleClock = () => {
-      setClockOpen((prev) => {
-        if (!prev) bringClockToFront();
-        return !prev;
-      });
-    };
-    const handleToggleTranslator = () => {
-      toggleTranslator();
+    const isTargetPane = (targetPaneId?: string) => {
+      if (targetPaneId) return targetPaneId === paneId;
+      return paneId === "main" || paneId === "left" || Boolean(editor?.isFocused);
     };
 
-    window.addEventListener("app:toggle-calculator", handleToggleCalc);
-    window.addEventListener("app:toggle-clock", handleToggleClock);
-    window.addEventListener("app:toggle-translator", handleToggleTranslator);
-    return () => {
-      window.removeEventListener("app:toggle-calculator", handleToggleCalc);
-      window.removeEventListener("app:toggle-clock", handleToggleClock);
-      window.removeEventListener("app:toggle-translator", handleToggleTranslator);
+    const handleInsertTranslationEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ text?: string; paneId?: string }>).detail;
+      if (!detail?.text || !isTargetPane(detail.paneId)) return;
+      handleInsertTranslation(detail.text);
     };
-  }, [bringCalculatorToFront, bringClockToFront, toggleTranslator]);
+
+    const handleInsertAudioEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ src: string; title: string; relativeSrc?: string; paneId?: string }>).detail;
+      if (!detail || !editor || !isTargetPane(detail.paneId)) return;
+      const targetTitle = detail.title || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const targetRel =
+        detail.relativeSrc ||
+        `attachments/${targetTitle.endsWith(".webm") || targetTitle.endsWith(".mp3") ? targetTitle : `${targetTitle}.webm`}`;
+      let decodedRel = targetRel;
+      try {
+        decodedRel = decodeURIComponent(targetRel);
+      } catch {
+        /* ignore malformed URI */
+      }
+      if (detail.src) {
+        assetBlobUrlMap.current.set(targetRel, detail.src);
+        assetBlobUrlMap.current.set(decodedRel, detail.src);
+        assetBlobUrlMap.current.set(detail.src, targetRel);
+        audioLocalCache.set(targetRel, detail.src);
+        audioLocalCache.set(decodedRel, detail.src);
+      }
+      editor.chain().focus().insertContent({
+        type: "audio",
+        attrs: {
+          src: detail.src,
+          title: targetTitle,
+          "data-relative-src": targetRel,
+        },
+      }).run();
+    };
+
+    window.addEventListener("luno:insert-translation", handleInsertTranslationEvent);
+    window.addEventListener("luno:insert-audio", handleInsertAudioEvent);
+    return () => {
+      window.removeEventListener("luno:insert-translation", handleInsertTranslationEvent);
+      window.removeEventListener("luno:insert-audio", handleInsertAudioEvent);
+    };
+  }, [paneId, editor, handleInsertTranslation, assetBlobUrlMap]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -8884,198 +6119,148 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       // If not Ctrl, stop here for non-PDF shortcuts
       if (!ctrl) return;
 
-      // Ctrl + S (Save Note)
+      // Ctrl + S (Save Note) — only active/focused pane (or main pane when no editor pane is focused)
       if ((key === "s" || code === "KeyS" || key === "ห") && !e.shiftKey && !e.altKey) {
+        const activeInThisEditor =
+          Boolean(editor && !editor.isDestroyed && editor.isFocused) ||
+          Boolean(target?.closest?.(`[data-editor-pane="${paneId}"]`));
+        const activeInAnyEditorPane = Boolean(target?.closest?.("[data-editor-pane]"));
+        if (!activeInThisEditor && (activeInAnyEditorPane || paneId !== "main")) {
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         handleSaveFile();
         return;
       }
 
-      // Ctrl + Shift + C (Toggle Calculator)
-      if (e.shiftKey && (key === "c" || code === "KeyC")) {
-        e.preventDefault();
-        e.stopPropagation();
-        setCalculatorOpen((prev) => {
-          if (!prev) bringCalculatorToFront();
-          return !prev;
-        });
-        return;
-      }
-
-      // Ctrl + Shift + T (Toggle Clock)
-      if (e.shiftKey && (key === "t" || code === "KeyT")) {
-        e.preventDefault();
-        e.stopPropagation();
-        setClockOpen((prev) => {
-          if (!prev) bringClockToFront();
-          return !prev;
-        });
-        return;
-      }
-
-      // Ctrl + Shift + L (Fix Mistyped Language TH/EN)
-      if (e.shiftKey && (key === "l" || code === "KeyL")) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleFixLanguage();
-        return;
-      }
+      // Formatting shortcuts below require this editor instance to be actively focused
+      if (!editor || editor.isDestroyed || !editor.isFocused) return;
 
       // Ctrl + B (Bold Text)
       if ((key === "b" || code === "KeyB") && !e.shiftKey && !e.altKey) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleBold().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleBold().run();
         return;
       }
 
       // Ctrl + I (Italic Text)
       if ((key === "i" || code === "KeyI") && !e.shiftKey && !e.altKey) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleItalic().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleItalic().run();
         return;
       }
 
       // Ctrl + U (Underline Text)
       if ((key === "u" || code === "KeyU") && !e.shiftKey && !e.altKey) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleUnderline().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleUnderline().run();
         return;
       }
 
       // Ctrl + Shift + X or Alt + Shift + 5 (Strikethrough)
       if ((e.shiftKey && (key === "x" || code === "KeyX")) || (e.altKey && e.shiftKey && (key === "5" || code === "Digit5"))) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleStrike().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleStrike().run();
         return;
       }
 
       // Ctrl + Shift + H (Highlight Text)
       if (e.shiftKey && (key === "h" || code === "KeyH")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleHighlight().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleHighlight().run();
         return;
       }
 
       // Ctrl + . or Ctrl + Shift + . (Superscript)
       if ((key === "." || key === ">" || code === "Period") && !e.altKey) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleSuperscript().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleSuperscript().run();
         return;
       }
 
       // Ctrl + Shift + , (Subscript)
       if ((key === "," || key === "<" || code === "Comma") && e.shiftKey && !e.altKey) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleSubscript().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleSubscript().run();
         return;
       }
 
       // Ctrl + Shift + E or Ctrl + ` (Inline Code)
       if ((e.shiftKey && (key === "e" || code === "KeyE")) || key === "`" || code === "Backquote") {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleCode().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleCode().run();
         return;
       }
 
       // Ctrl + Shift + 7 (Numbered List)
       if (e.shiftKey && (key === "7" || code === "Digit7" || code === "Numpad7")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleOrderedList().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleOrderedList().run();
         return;
       }
 
       // Ctrl + Shift + 8 (Bullet List)
       if (e.shiftKey && (key === "8" || key === "*" || code === "Digit8" || code === "Numpad8")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleBulletList().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleBulletList().run();
         return;
       }
 
       // Ctrl + Shift + 9 (Task / Todo List)
       if (e.shiftKey && (key === "9" || code === "Digit9" || code === "Numpad9")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleTaskList().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleTaskList().run();
         return;
       }
 
       // Ctrl + Shift + Q (Blockquote)
       if (e.shiftKey && (key === "q" || code === "KeyQ")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleBlockquote().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleBlockquote().run();
         return;
       }
 
       // Ctrl + Alt + C (Code Block)
       if (e.altKey && (key === "c" || code === "KeyC")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().toggleCodeBlock().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().toggleCodeBlock().run();
         return;
       }
 
       // Ctrl + K (Insert / Edit Link in Editor)
       if ((key === "k" || code === "KeyK") && !e.shiftKey && !e.altKey) {
-        if (editor && !editor.isDestroyed && editor.isFocused) {
-          e.preventDefault();
-          e.stopPropagation();
-          openLinkDialog();
-          return;
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        openLinkDialog();
+        return;
       }
 
       // Ctrl + Shift + N (Clear Formatting)
       if (e.shiftKey && (key === "n" || code === "KeyN")) {
-        if (editor && !editor.isDestroyed) {
-          e.preventDefault();
-          e.stopPropagation();
-          editor.chain().focus().unsetAllMarks().unsetColor().unsetFontFamily().unsetFontSize().clearNodes().run();
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        editor.chain().focus().unsetAllMarks().unsetColor().unsetFontFamily().unsetFontSize().clearNodes().run();
         return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [note, editor, bringCalculatorToFront, bringClockToFront, handleSaveFile, handleOpenPdfSearch, handleSelectPdfTool]);
+  }, [note, editor, handleSaveFile, handleOpenPdfSearch, handleSelectPdfTool]);
   const showUiAlert = (message: string) => setAlertMessage(message);
   const rememberSelection = () => {
     if (!editor) return;
@@ -9506,7 +6691,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const handleFixLanguage = () => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed || !editor.isEditable) return;
     const {
       from,
       to,
@@ -9515,8 +6700,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (empty) {
       toast({
-        title: t("editor.fixLanguage") || "Fix language",
-        description: t("editor.selectTextToFix") || "Select text before fixing language.",
+        title: t("editor.fixLanguage"),
+        description: t("editor.selectTextToFix"),
       });
       return;
     }
@@ -9524,19 +6709,36 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const selectedText = editor.state.doc.textBetween(from, to, "\n", "\n");
     if (!selectedText.trim()) {
       toast({
-        title: t("editor.fixLanguage") || "Fix language",
-        description: t("editor.selectTextToFix") || "Select text before fixing language.",
+        title: t("editor.fixLanguage"),
+        description: t("editor.selectTextToFix"),
       });
       return;
     }
 
-    const convertedText = swapKeyboardLayout(selectedText);
+    const segments: Array<{ start: number; end: number; converted: string; original: string }> = [];
+    editor.state.doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isText || !node.text) return;
+      const segStart = Math.max(pos, from);
+      const segEnd = Math.min(pos + node.text.length, to);
+      if (segEnd <= segStart) return;
+      const original = node.text.slice(segStart - pos, segEnd - pos);
+      const converted = swapKeyboardLayout(original);
+      if (converted !== original) {
+        segments.push({ start: segStart, end: segEnd, converted, original });
+      }
+    });
 
-    if (convertedText === selectedText) return;
+    if (segments.length === 0) return;
 
-    const tr = editor.state.tr.insertText(convertedText, from, to);
+    const tr = editor.state.tr;
+    let lengthDelta = 0;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      tr.insertText(seg.converted, seg.start, seg.end);
+      lengthDelta += seg.converted.length - seg.original.length;
+    }
     editor.view.dispatch(tr);
-    editor.chain().focus().setTextSelection({ from, to: from + convertedText.length }).run();
+    editor.chain().focus().setTextSelection({ from, to: to + lengthDelta }).run();
   };
 
   // AI Assistant states & handlers
@@ -9559,8 +6761,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const handleOpenAiSettings = useCallback(() => {
     toast({
-      title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
-      description: t("lunoAi.apiKeyRequired") || "Please set up your Gemini API key in Settings.",
+      title: t("lunoAi.apiKeyRequiredTitle"),
+      description: t("lunoAi.apiKeyRequired"),
     });
     if (onOpenSettings) {
       onOpenSettings("ai");
@@ -9823,7 +7025,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     } else {
       // Workspace Note link
       if (!selectedWorkspaceNote) {
-        showUiAlert(t("editor.selectNoteFirst") || "Please select a note from your workspace.");
+        showUiAlert(t("editor.selectNoteFirst"));
         return;
       }
 
@@ -9969,7 +7171,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let decodedRelPath = relativePath;
       try {
         decodedRelPath = decodeURIComponent(relativePath);
-      } catch {}
+      } catch { /* ignore */ }
 
       const finalBlobUrl =
         blobUrl ||
@@ -10011,7 +7213,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let decodedRelPath = relativePath;
       try {
         decodedRelPath = decodeURIComponent(relativePath);
-      } catch {}
+      } catch { /* ignore */ }
 
       const finalBlobUrl =
         (blobUrl && !blobUrl.startsWith("luno-asset:")) ? blobUrl :
@@ -10040,12 +7242,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const openAudioRecorder = useCallback(() => {
     rememberSelection();
-    setAudioRecorderOpen((prev) => {
-      const next = !prev;
-      if (next) bringAudioRecorderToFront();
-      return next;
-    });
-  }, [rememberSelection, bringAudioRecorderToFront]);
+    window.dispatchEvent(new CustomEvent("app:toggle-audio-recorder", { detail: { paneId } }));
+  }, [rememberSelection, paneId]);
 
   const triggerImageUpload = useCallback(() => {
     rememberSelection();
@@ -10073,6 +7271,21 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     processAndInsertVideoFileRef.current = processAndInsertVideoFile;
     processAndInsertAudioFileRef.current = processAndInsertAudioFile;
   });
+
+  useEffect(() => {
+    const onSystemFixLanguage = (event: Event) => {
+      const customEvent = event as CustomEvent<FixLanguageEventDetail>;
+      if (customEvent.detail?.handled) return;
+      if (editor && !editor.isDestroyed && editor.isFocused) {
+        if (customEvent.detail) {
+          customEvent.detail.handled = true;
+        }
+        handleFixLanguageRef.current?.();
+      }
+    };
+    window.addEventListener(FIX_LANGUAGE_EVENT, onSystemFixLanguage);
+    return () => window.removeEventListener(FIX_LANGUAGE_EVENT, onSystemFixLanguage);
+  }, [editor]);
 
   useEffect(() => {
     const handleTriggerAiEvent = (e: Event) => {
@@ -10110,7 +7323,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleApplyVideoUrl = () => {
     const nextUrl = normalizeUrl(videoUrl);
     if (!nextUrl) {
-      showUiAlert(t("editor.invalidVideoUrl") || "Please enter a valid video URL.");
+      showUiAlert(t("editor.invalidVideoUrl"));
       return;
     }
 
@@ -10120,7 +7333,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         throw new Error("Invalid protocol");
       }
     } catch {
-      showUiAlert(t("editor.invalidVideoUrl") || "Please enter a valid video URL.");
+      showUiAlert(t("editor.invalidVideoUrl"));
       return;
     }
 
@@ -10219,14 +7432,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     try {
       const res = await fetch(dataUrl);
       blob = await res.blob();
-    } catch {}
+    } catch { /* ignore */ }
 
     const blobUrl = blob ? URL.createObjectURL(blob) : dataUrlToBlobUrl(dataUrl);
     const relPath = getRelativeAttachmentPath(uniqueTargetName);
     let decodedRel = relPath;
     try {
       decodedRel = decodeURIComponent(relPath);
-    } catch {}
+    } catch { /* ignore */ }
 
     if (blobUrl) {
       assetBlobUrlMap.current.set(relPath, blobUrl);
@@ -10279,8 +7492,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
   const processAndInsertImageFile = async (rawInput: ImageFileInput) => {
     let file: File | null = rawInput instanceof File ? rawInput : (rawInput.file || null);
-    let initialDataUrl = !(rawInput instanceof File) ? (rawInput.dataUrl || null) : null;
-    let initialBlob = !(rawInput instanceof File) ? (rawInput.blob || null) : null;
+    const initialDataUrl = !(rawInput instanceof File) ? (rawInput.dataUrl || null) : null;
+    const initialBlob = !(rawInput instanceof File) ? (rawInput.blob || null) : null;
     let targetFileName = !(rawInput instanceof File) ? (rawInput.fileName || null) : null;
 
     const isImg = (f: { name?: string; type?: string } | null | undefined): boolean => {
@@ -10418,7 +7631,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let decodedRel = relPath;
     try {
       decodedRel = decodeURIComponent(relPath);
-    } catch {}
+    } catch { /* ignore */ }
 
     if (blobUrl) {
       assetBlobUrlMap.current.set(relPath, blobUrl);
@@ -10531,7 +7744,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
 
     if (!isVid(file)) {
-      showUiAlert(t("editor.invalidVideoFile") || "Please choose a valid video file.");
+      showUiAlert(t("editor.invalidVideoFile"));
       return;
     }
 
@@ -10564,7 +7777,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let decodedRel = relPath;
     try {
       decodedRel = decodeURIComponent(relPath);
-    } catch {}
+    } catch { /* ignore */ }
 
     assetBlobUrlMap.current.set(relPath, blobUrl);
     assetBlobUrlMap.current.set(decodedRel, blobUrl);
@@ -10578,7 +7791,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       "data-relative-src": relPath,
     });
     if (!inserted) {
-      showUiAlert(t("editor.invalidVideoFile") || "Failed to insert video.");
+      showUiAlert(t("editor.invalidVideoFile"));
     }
 
     // 2. Electron Desktop Workspace Support - save file to disk asynchronously in background
@@ -10665,7 +7878,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
 
     if (!isAudio(file)) {
-      showUiAlert(t("editor.invalidAudioFile") || "Please choose a valid audio file.");
+      showUiAlert(t("editor.invalidAudioFile"));
       return;
     }
 
@@ -10698,7 +7911,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let decodedRel = relPath;
     try {
       decodedRel = decodeURIComponent(relPath);
-    } catch {}
+    } catch { /* ignore */ }
 
     assetBlobUrlMap.current.set(relPath, blobUrl);
     assetBlobUrlMap.current.set(decodedRel, blobUrl);
@@ -10712,7 +7925,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       "data-relative-src": relPath,
     });
     if (!inserted) {
-      showUiAlert(t("editor.invalidAudioFile") || "Failed to insert audio.");
+      showUiAlert(t("editor.invalidAudioFile"));
     }
 
     // 1. Electron Desktop Workspace Support - save file to disk asynchronously in background
@@ -10869,7 +8082,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     let trimmed = assetPath.trim();
     try {
       trimmed = decodeURIComponent(trimmed);
-    } catch {}
+    } catch { /* ignore */ }
     if (!trimmed) return "";
     if (trimmed.startsWith("/")) return trimmed.replace(/^\/+/, "");
 
@@ -10912,12 +8125,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           try {
             current = await current.getDirectoryHandle("attachments", { create: false });
             continue;
-          } catch {}
+          } catch { /* ignore */ }
         } else if (segment.toLowerCase() === "attachments") {
           try {
             current = await current.getDirectoryHandle("attachment", { create: false });
             continue;
-          } catch {}
+          } catch { /* ignore */ }
         }
         try {
           current = await current.getFileHandle(segment, { create: false });
@@ -10966,7 +8179,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 videoLocalCache.set(resolvedRelPath, blobUrl);
                 return blobUrl;
               }
-            } catch {}
+            } catch { /* ignore */ }
           }
           let dataUrl = electronAPI.readImageDataUrl ? await electronAPI.readImageDataUrl(fullPath) : null;
           if (!dataUrl && electronAPI.readImageDataUrl) {
@@ -11024,10 +8237,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!instance || instance.isDestroyed || !note) return;
 
     const { doc } = instance.state;
-    // Fast check: avoid traversing documents that do not contain any image or video nodes
+    // Fast check: avoid traversing documents that do not contain any image, video, or audio nodes
     let hasMediaNode = false;
     doc.descendants((node) => {
-      if (node.type.name === "image" || node.type.name === "video") {
+      if (node.type.name === "image" || node.type.name === "video" || node.type.name === "audio") {
         hasMediaNode = true;
         return false;
       }
@@ -11038,7 +8251,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const tasks: string[] = [];
 
     doc.descendants((node) => {
-      if (node.type.name === "image" || node.type.name === "video") {
+      if (node.type.name === "image" || node.type.name === "video" || node.type.name === "audio") {
         const src = (node.attrs.src as string) || "";
         const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
         const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
@@ -11065,7 +8278,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let decodedRel = relPath;
       try {
         decodedRel = decodeURIComponent(relPath);
-      } catch {}
+      } catch { /* ignore */ }
 
       let blobUrl =
         assetBlobUrlMap.current.get(encodedRel) ||
@@ -11099,7 +8312,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       let modified = false;
 
       currentDoc.descendants((node, pos) => {
-        if (node.type.name === "image" || node.type.name === "video") {
+        if (node.type.name === "image" || node.type.name === "video" || node.type.name === "audio") {
           const src = (node.attrs.src as string) || "";
           const dataRelSrc = (node.attrs["data-relative-src"] as string) || "";
           const relPath = dataRelSrc || (src && !/^(https?:\/\/|data:|blob:)/i.test(src) ? src : "");
@@ -11135,6 +8348,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
     }
   }, [rootDirHandle, note?.id]);
+  resolveRelativeImagesInEditorRef.current = resolveRelativeImagesInEditor;
 
   useEffect(() => {
     if (editor) {
@@ -11149,16 +8363,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       : serializeEditorContent(note, editor);
     saveVersionSnapshot({ ...note, content: currentContent }, "pre-restore");
 
-    // 1. Update localStorage crash-recovery backups
-    try {
-      if (ver.content) {
-        localStorage.setItem(`luno_backup_${note.id}`, ver.content);
-        if (note.fileName) {
-          localStorage.setItem(`luno_backup_fn_${note.fileName}`, ver.content);
+    // 1. Update localStorage crash-recovery backups (never store plaintext for PIN-locked notes)
+    if (!note.isLocked) {
+      try {
+        if (ver.content) {
+          localStorage.setItem(`luno_backup_${note.id}`, ver.content);
+          if (note.fileName) {
+            localStorage.setItem(`luno_backup_fn_${note.fileName}`, ver.content);
+          }
         }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
 
     // 2. Parse restored properties if present
@@ -11197,12 +8413,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
     onUpdate(note.id, patch);
 
-    // 4. Update TipTap Editor DOM (for markdown and txt files)
-    if (!isHtmlFile(note) && !isCssFile(note) && !isJsFile(note) && editor && !editor.isDestroyed) {
+    // 4. Update TipTap Editor DOM (for markdown and txt files) or CodeEditor cache (for html/css/js)
+    if (isHtmlFile(note) || isCssFile(note) || isJsFile(note)) {
+      codeEditorContentMap.set(note.id, ver.content);
+    } else if (editor && !editor.isDestroyed) {
       const baseTitle = getBaseTitle(note);
       const parsed = parseEditorContent(ver.content, baseTitle, isTxtFile(note), isHtmlFile(note));
       syncingFromNote.current = true;
-      (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+      try {
+        (editor.commands.setContent as any)(parsed as string, false, { preserveWhitespace: "full" });
+        noteEditorStateMap.set(note.id, editor.state);
+      } finally {
+        syncingFromNote.current = false;
+      }
       void resolveRelativeImagesInEditor(editor);
     }
 
@@ -11215,10 +8438,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const triggerLabel =
       ver.label ||
       (ver.trigger === "manual"
-        ? t("versionHistoryPanel.manualSnapshot") || (lang === "th" ? "บันทึกด้วยตนเอง" : "Manual save")
+        ? t("versionHistoryPanel.manualSnapshot")
         : ver.trigger === "pre-restore"
-        ? t("versionHistoryPanel.preRestoreBackup") || (lang === "th" ? "สำรองก่อนกู้คืน" : "Pre-restore backup")
-        : t("versionHistoryPanel.autoSnapshot") || (lang === "th" ? "บันทึกอัตโนมัติ" : "Auto-save"));
+        ? t("versionHistoryPanel.preRestoreBackup")
+        : t("versionHistoryPanel.autoSnapshot"));
 
     toast({
       title: t("versionHistoryPanel.restoreSuccess"),
@@ -11255,13 +8478,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setLastEditedTime(Date.now());
     setSaveStatus("unsaved");
 
-    try {
-      localStorage.setItem(`luno_backup_${note.id}`, val);
-      if (note.fileName) {
-        localStorage.setItem(`luno_backup_fn_${note.fileName}`, val);
+    if (!note.isLocked) {
+      try {
+        localStorage.setItem(`luno_backup_${note.id}`, val);
+        if (note.fileName) {
+          localStorage.setItem(`luno_backup_fn_${note.fileName}`, val);
+        }
+      } catch {
+        /* ignore localStorage quota */
       }
-    } catch {
-      /* ignore localStorage quota */
     }
 
     if (debouncedContentSaveTimeoutRef.current) {
@@ -11278,15 +8503,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         : null) ?? codeEditorContentMap.get(currentNote.id) ?? val;
 
       codeEditorContentMap.set(currentNote.id, latestContent);
-      try {
-        if (latestContent) {
-          localStorage.setItem(`luno_backup_${currentNote.id}`, latestContent);
-          if (currentNote.fileName) {
-            localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, latestContent);
+      if (!currentNote.isLocked) {
+        try {
+          if (latestContent) {
+            localStorage.setItem(`luno_backup_${currentNote.id}`, latestContent);
+            if (currentNote.fileName) {
+              localStorage.setItem(`luno_backup_fn_${currentNote.fileName}`, latestContent);
+            }
           }
+        } catch {
+          /* ignore localStorage quota */
         }
-      } catch {
-        /* ignore localStorage quota */
       }
 
       onUpdate(currentNote.id, { content: latestContent });
@@ -11351,7 +8578,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     }
 
     // 2. Electron Desktop direct file read
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
@@ -11427,7 +8654,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(contentToOpen)}`;
 
     let realFilePath: string | null = null;
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     if (electronAPI?.getSavedWorkspace) {
       try {
@@ -11437,8 +8664,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
             : `${saved.folderPath}/${note.fileName}`;
 
-          if (electronAPI.writeFileContent) {
-            await electronAPI.writeFileContent({ fullPath, content: contentToOpen });
+          if (electronAPI.writeFileContent && (note.contentFormat === "html" || isHtmlFile(note)) && rawHtml) {
+            await electronAPI.writeFileContent({ fullPath, content: rawHtml });
           }
           realFilePath = fullPath.replace(/\\/g, "/");
         }
@@ -11513,14 +8740,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       return n.content || "";
     }
     const sourceContent = noteRef.current?.id === n.id ? (noteRef.current?.content ?? n.content ?? "") : (n.content ?? "");
-    if (isReadingModeRef.current && (!targetExt || targetExt === "md" || isMarkdownNote(n))) {
+    if (isStrictReadingModeRef.current && (!targetExt || targetExt === "md" || isMarkdownNote(n))) {
       return sourceContent;
     }
     const format = targetExt === "txt" ? "plain" : targetExt === "md" ? "markdown" : getContentFormat();
 
     let rawHtml = "";
     if (editor && !editor.isDestroyed) {
-      rawHtml = editor.getHTML();
+      rawHtml = getCleanCollapsedHtml(editor);
     }
 
     let htmlContent = (!n || isTxtFile(n)) ? rawHtml : stripTopH1FromHtml(rawHtml);
@@ -11627,7 +8854,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       ? markdown.replace(/\r?\n/g, "\r\n")
       : markdown.replace(/\r\n/g, "\n");
 
-    const blobType = ext === "txt" ? "text/plain;charset=utf-8" : ext === "html" ? "text/html;charset=utf-8" : ext === "css" ? "text/css;charset=utf-8" : "text/markdown;charset=utf-8";
+    const blobType =
+      ext === "txt"
+        ? "text/plain;charset=utf-8"
+        : ext === "html"
+        ? "text/html;charset=utf-8"
+        : ext === "css"
+        ? "text/css;charset=utf-8"
+        : ext === "js"
+        ? "text/javascript;charset=utf-8"
+        : "text/markdown;charset=utf-8";
     const blob = new Blob([normalizedContent], { type: blobType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -11694,7 +8930,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     };
 
     // 1. Electron Desktop Native Direct Disk Save
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
       const saved = await electronAPI.getSavedWorkspace();
       if (saved?.folderPath && n.fileName) {
@@ -11706,10 +8942,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (ok) {
           if (saveOpIdRef.current === currentOpId) {
             hasPendingDiskSaveRef.current = false;
+            if (!isSilent) {
+              userEditedRef.current = false;
+              pendingSaveContentRef.current = null;
+            }
             if (isHtmlFile(n) || isCssFile(n) || isJsFile(n)) {
               codeEditorContentMap.set(n.id, normalizedContent);
             }
-            if (n.content !== normalizedContent && !userEditedRef.current) {
+            if (n.content !== normalizedContent && (!userEditedRef.current || !isSilent)) {
               onUpdate(n.id, { content: normalizedContent });
             }
           }
@@ -11720,7 +8960,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
           if (!isSilent) {
             toast({
-              title: t("editor.saveToastTitle") || "Saved",
+              title: t("editor.saveToastTitle"),
               description: n.fileName,
             });
           }
@@ -11744,7 +8984,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         setSaveStatus(isSilent ? "auto_saved" : "manually_saved");
         if (!isSilent) {
           toast({
-            title: t("editor.saveToastTitle") || "Saved",
+            title: t("editor.saveToastTitle"),
             description: n.fileName || n.title || "Note",
           });
         }
@@ -11823,11 +9063,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setSaveStatus("saving");
 
     // 1. Electron Desktop Native Save As Dialog
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     if (electronAPI?.showSaveDialog && electronAPI?.writeFileContent) {
       try {
         const filePath = await electronAPI.showSaveDialog({
-          title: t("editor.saveAs") || "Save As",
+          title: t("editor.saveAs"),
           defaultPath: defaultFileName,
           filters: [
             { name: "Markdown Document (*.md)", extensions: ["md", "markdown"] },
@@ -11852,7 +9092,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (saveOpIdRef.current === currentOpId) setSaveStatus("manually_saved");
           const justName = filePath.replace(/\\/g, "/").split("/").pop() || defaultFileName;
           toast({
-            title: t("editor.saveToastTitle") || "Saved",
+            title: t("editor.saveToastTitle"),
             description: justName,
           });
         }
@@ -11919,7 +9159,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         await setStoredFileHandle(targetNoteId, handle);
         updateLinkedMetadata(targetNoteId, file.name);
         toast({
-          title: t("editor.saveToastTitle") || "Saved",
+          title: t("editor.saveToastTitle"),
           description: file.name,
         });
         setSavedSnapshot(targetNoteId, chosenExt, finalContent);
@@ -12027,7 +9267,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
 
       // 1. Electron Desktop Native Support
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
       if (electronAPI && (electronAPI.readImageDataUrl || electronAPI.readFileBase64)) {
         try {
           let fullPath = (note as any).fullPath;
@@ -12202,7 +9442,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   try {
                     const saved = await electronAPI.getSavedWorkspace();
                     workspaceRoot = (typeof saved === "string" ? saved : saved?.folderPath) || null;
-                  } catch {}
+                  } catch { /* ignore */ }
                 }
                 const b64 = await electronAPI.readFileBase64(fullPath);
                 let sourceB64 = pdfSessionCleanBase64Map.get(note.id) || b64;
@@ -12222,7 +9462,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         sourceB64 = cleanB64;
                         break;
                       }
-                    } catch {}
+                    } catch { /* ignore */ }
                   }
                 }
                 if (sourceB64) {
@@ -12239,7 +9479,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     setPdfLoadedNoteId(note.id);
                     setPdfSourceError(null);
                   } else {
-                    setPdfSourceError(lang === "th" ? "ไม่สามารถอ่านไฟล์ PDF ได้" : "Failed to read PDF file");
+                    setPdfSourceError(t("editor.failedToReadPdfFile"));
                   }
                   setIsPdfLoadingSource(false);
                 }
@@ -12261,7 +9501,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const padding = (b64.match(/=/g) || []).length;
                   setActiveFileSize(Math.max(0, Math.floor((b64.length * 3) / 4 - padding)));
                 }
-              } catch {}
+              } catch { /* ignore */ }
             }
           }
         } catch (err) {
@@ -12445,7 +9685,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               setActiveFileSize(idbBlob.size);
               setImageBlobUrl(objectUrl);
             }
-          } catch {}
+          } catch { /* ignore */ }
         }
       }
       if (!cancelled && isPdfFile(note)) {
@@ -12497,7 +9737,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (!iframeDoc) {
       try {
         document.body.removeChild(iframe);
-      } catch {}
+      } catch { /* ignore */ }
       return;
     }
 
@@ -12511,7 +9751,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           if (iframe.parentNode) {
             document.body.removeChild(iframe);
           }
-        } catch {}
+        } catch { /* ignore */ }
       }, 1000);
     };
 
@@ -12561,15 +9801,6 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     void waitForResourcesAndPrint();
   }
 
-  function escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
   const handlePrintImage = useCallback(async () => {
     if (!note) return;
     let src = imageBlobUrl || (note.content?.startsWith("data:") ? note.content : undefined);
@@ -12608,8 +9839,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (!src) {
       toast({
-        title: t("common.error") || "Error",
-        description: t("editor.imageLoadError") || "Image could not be loaded",
+        title: t("common.error"),
+        description: t("editor.imageLoadError"),
         variant: "destructive",
       });
       return;
@@ -12637,7 +9868,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const res = await electronAPI.printContent({ html: printHtml, title: docTitle });
       if (res && !res.success && res.error && res.failureReason !== "cancelled") {
         toast({
-          title: t("common.error") || "Error",
+          title: t("common.error"),
           description: res.error,
           variant: "destructive",
         });
@@ -12756,7 +9987,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         workspacePath = saved?.folderPath || "";
-      } catch {}
+      } catch { /* ignore */ }
     }
 
     // Inline all images (including QR codes, blob: URLs, and workspace attachments) to data: base64 URLs
@@ -12804,20 +10035,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (res.success && res.filePath) {
           const justName = res.filePath.replace(/\\/g, "/").split("/").pop() || `${baseName}.pdf`;
           toast({
-            title: t("editor.exportPdfSuccess") || "Exported PDF",
+            title: t("editor.exportPdfSuccess"),
             description: justName,
             action: electronAPI.showItemInFolder ? (
               <ToastAction
-                altText={t("editor.showInFolder") || "Show in folder"}
+                altText={t("editor.showInFolder")}
                 onClick={() => electronAPI.showItemInFolder?.(res.filePath!)}
               >
-                {t("editor.showInFolder") || "Show in folder"}
+                {t("editor.showInFolder")}
               </ToastAction>
             ) : undefined,
           });
         } else if (res.error) {
           toast({
-            title: t("common.error") || "Error",
+            title: t("common.error"),
             description: res.error,
             variant: "destructive",
           });
@@ -12825,7 +10056,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       } catch (err) {
         console.error("Export PDF failed:", err);
         toast({
-          title: t("common.error") || "Error",
+          title: t("common.error"),
           description: String(err),
           variant: "destructive",
         });
@@ -12937,7 +10168,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         workspacePath = saved?.folderPath || "";
-      } catch {}
+      } catch { /* ignore */ }
     }
 
     // Inline all images (including QR codes, blob: URLs, and workspace attachments) to data: base64 URLs
@@ -12967,7 +10198,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (electronAPI?.showSaveDialog && electronAPI?.writeFileContent) {
       try {
         const filePath = await electronAPI.showSaveDialog({
-          title: t("editor.exportWord") || "Export as Word (.doc)",
+          title: t("editor.exportWord"),
           defaultPath: `${baseName}.doc`,
           filters: [
             { name: "Word Document (*.doc)", extensions: ["doc"] },
@@ -12985,14 +10216,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         if (ok) {
           const justName = filePath.replace(/\\/g, "/").split("/").pop() || `${baseName}.doc`;
           toast({
-            title: t("editor.exportWordSuccess") || "Exported Word",
+            title: t("editor.exportWordSuccess"),
             description: justName,
             action: electronAPI.showItemInFolder ? (
               <ToastAction
-                altText={t("editor.showInFolder") || "Show in folder"}
+                altText={t("editor.showInFolder")}
                 onClick={() => electronAPI.showItemInFolder?.(filePath)}
               >
-                {t("editor.showInFolder") || "Show in folder"}
+                {t("editor.showInFolder")}
               </ToastAction>
             ) : undefined,
           });
@@ -13012,7 +10243,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     a.click();
     URL.revokeObjectURL(url);
     toast({
-      title: t("editor.exportWordSuccess") || "Exported Word",
+      title: t("editor.exportWordSuccess"),
       description: `${baseName}.doc`,
     });
   }
@@ -13041,51 +10272,24 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || ext === "html" || ext === "css") {
       codeEditorContentMap.set(note.id, content);
-      try {
-        localStorage.setItem(`luno_backup_${note.id}`, content);
-        if (note.fileName) {
-          localStorage.setItem(`luno_backup_fn_${note.fileName}`, content);
+      if (!note.isLocked) {
+        try {
+          localStorage.setItem(`luno_backup_${note.id}`, content);
+          if (note.fileName) {
+            localStorage.setItem(`luno_backup_fn_${note.fileName}`, content);
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
       userEditedRef.current = false;
       hasPendingDiskSaveRef.current = false;
       pendingSaveContentRef.current = null;
     }
 
-    // 1. Electron Desktop Native Direct Save to Disk
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
-    if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
-      const saved = await electronAPI.getSavedWorkspace();
-      if (saved?.folderPath && note.fileName) {
-        setSaveStatus("saving");
-        const fullPath = note.folderPath
-          ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
-          : `${saved.folderPath}/${note.fileName}`;
-
-        const ok = await electronAPI.writeFileContent({ fullPath, content });
-        if (ok) {
-          hasPendingDiskSaveRef.current = false;
-          userEditedRef.current = false;
-          pendingSaveContentRef.current = null;
-          if (isHtmlFile(note) || isCssFile(note) || isJsFile(note) || ext === "html" || ext === "css") {
-            codeEditorContentMap.set(note.id, content);
-          }
-          onUpdate(note.id, { content });
-          setSaveStatus("manually_saved");
-          setSavedSnapshot(note.id, ext, content);
-          toast({
-            title: t("editor.saveToastTitle") || "Saved",
-            description: note.fileName,
-          });
-          return;
-        }
-      }
-    }
-
-    // 2. Web Browser File Handle Save or Cloud / Workspace Save
-    if (settings.storageMode === "gdrive" || rootDirHandle || note.fileName) {
+    // 1. Electron Desktop Native Direct Save or Cloud / Workspace Save
+    const electronAPI = window.electronAPI;
+    if ((electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent && note.fileName) || settings.storageMode === "gdrive" || rootDirHandle || note.fileName) {
       await performSave(content, ext, false);
       return;
     }
@@ -13259,10 +10463,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer"
               >
                 <Printer className="h-3.5 w-3.5" />
-                <span className="sr-only">{t("editor.print") || "Print"}</span>
+                <span className="sr-only">{t("editor.print")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("editor.print") || "Print"}</TooltipContent>
+            <TooltipContent>{t("editor.print")}</TooltipContent>
           </Tooltip>
 
           {/* Share Button */}
@@ -13284,10 +10488,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     return <ShareIconComp className="h-3.5 w-3.5" />;
                   })()
                 )}
-                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+                <span className="sr-only">{t("breadcrumb.share")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+            <TooltipContent>{t("breadcrumb.share")}</TooltipContent>
           </Tooltip>
 
           {/* Relock Note */}
@@ -13305,10 +10509,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     const LockIconComp = getToolbarIcon("lock", settings.iconPack);
                     return <LockIconComp className="h-3.5 w-3.5" />;
                   })()}
-                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                  <span className="sr-only">{t("pinLock.relockNote")}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+              <TooltipContent>{t("pinLock.relockNote")}</TooltipContent>
             </Tooltip>
           )}
         </Fragment>
@@ -13336,12 +10540,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       const SearchIconComp = getToolbarIcon("search", settings.iconPack);
                       return <SearchIconComp className="h-3.5 w-3.5" />;
                     })()}
-                    <span className="sr-only">{t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}</span>
+                    <span className="sr-only">{t("sidebar.searchShortPlaceholder")}</span>
                   </Button>
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {isTh ? "ค้นหา (Ctrl+F)" : "Find (Ctrl+F)"}
+                {t("editor.findCtrlF")}
               </TooltipContent>
             </Tooltip>
 
@@ -13380,7 +10584,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }
                     }
                   }}
-                  placeholder={isTh ? "ค้นหาใน PDF..." : "Find in PDF..."}
+                  placeholder={t("editor.findInPdf")}
                   className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
                   autoFocus
                 />
@@ -13400,12 +10604,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
                   <span data-testid="pdf-search-count">
                     {pdfSearchStats.total > 0
-                      ? isTh
-                        ? `พบ ${pdfSearchStats.total} รายการ${pdfSearchStats.current >= 0 ? ` (${pdfSearchStats.current + 1}/${pdfSearchStats.total})` : ""}`
-                        : `Found ${pdfSearchStats.total} matching ${pdfSearchStats.total === 1 ? "result" : "results"}${pdfSearchStats.current >= 0 ? ` (${pdfSearchStats.current + 1}/${pdfSearchStats.total})` : ""}`
-                      : isTh
-                      ? "ไม่พบข้อความที่ตรงกัน"
-                      : "No matching text"}
+                      ? t(pdfSearchStats.total === 1 ? "editor.searchMatchOne" : "editor.searchMatchMany", {
+                          total: pdfSearchStats.total,
+                          progress: pdfSearchStats.current >= 0 ? ` (${pdfSearchStats.current + 1}/${pdfSearchStats.total})` : "",
+                        })
+                      : t("editor.noMatchingText")}
                   </span>
                   {pdfSearchStats.total > 0 && (
                     <div className="flex items-center gap-0.5">
@@ -13422,7 +10625,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {isTh ? "ข้อความก่อนหน้า (Shift+Enter)" : "Previous match (Shift+Enter)"}
+                          {t("editor.previousMatchShiftEnter")}
                         </TooltipContent>
                       </Tooltip>
 
@@ -13439,7 +10642,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {isTh ? "ข้อความถัดไป (Enter)" : "Next match (Enter)"}
+                          {t("editor.nextMatchEnter")}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -13464,12 +10667,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   return <IconComp className="h-3.5 w-3.5" />;
                 })()}
                 <span className="sr-only">
-                  {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+                  {isReadingMode ? (t("editor.editMode")) : (t("editor.readingMode"))}
                 </span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+              {isReadingMode ? (t("editor.editMode")) : (t("editor.readingMode"))}
             </TooltipContent>
           </Tooltip>
 
@@ -13535,10 +10738,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const PrintIconComp = getToolbarIcon("printer", settings.iconPack);
                   return <PrintIconComp className="h-3.5 w-3.5" />;
                 })()}
-                <span className="sr-only">{t("editor.print") || "Print"}</span>
+                <span className="sr-only">{t("editor.print")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{isTh ? "พิมพ์" : "Print"}</TooltipContent>
+            <TooltipContent>{t("editor.print")}</TooltipContent>
           </Tooltip>
 
           {/* Share Button */}
@@ -13560,10 +10763,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     return <ShareIconComp className="h-3.5 w-3.5" />;
                   })()
                 )}
-                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+                <span className="sr-only">{t("breadcrumb.share")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+            <TooltipContent>{t("breadcrumb.share")}</TooltipContent>
           </Tooltip>
 
           {/* Version History Button — Standard Luno Version History */}
@@ -13584,10 +10787,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const HistoryIconComp = getToolbarIcon("history", settings.iconPack);
                   return <HistoryIconComp className="h-3.5 w-3.5" />;
                 })()}
-                <span className="sr-only">{t("breadcrumb.versionHistory") || "Version History"}</span>
+                <span className="sr-only">{t("breadcrumb.versionHistory")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("breadcrumb.versionHistory") || "Version History"}</TooltipContent>
+            <TooltipContent>{t("breadcrumb.versionHistory")}</TooltipContent>
           </Tooltip>
 
           {/* Relock Note */}
@@ -13605,10 +10808,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     const LockIconComp = getToolbarIcon("lock", settings.iconPack);
                     return <LockIconComp className="h-3.5 w-3.5" />;
                   })()}
-                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                  <span className="sr-only">{t("pinLock.relockNote")}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+              <TooltipContent>{t("pinLock.relockNote")}</TooltipContent>
             </Tooltip>
           )}
         </Fragment>
@@ -13638,10 +10841,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     return <ShareIconComp className="h-3.5 w-3.5" />;
                   })()
                 )}
-                <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+                <span className="sr-only">{t("breadcrumb.share")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+            <TooltipContent>{t("breadcrumb.share")}</TooltipContent>
           </Tooltip>
 
           {/* Relock Note */}
@@ -13659,10 +10862,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     const LockIconComp = getToolbarIcon("lock", settings.iconPack);
                     return <LockIconComp className="h-3.5 w-3.5" />;
                   })()}
-                  <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                  <span className="sr-only">{t("pinLock.relockNote")}</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+              <TooltipContent>{t("pinLock.relockNote")}</TooltipContent>
             </Tooltip>
           )}
         </Fragment>
@@ -13681,7 +10884,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 onClick={() => handleToggleHtmlPreview(false)}
                 className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                   !htmlPreviewOpen
-                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    ? "bg-background text-foreground shadow-sm font-semibold"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -13693,7 +10896,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 onClick={() => handleToggleHtmlPreview(true)}
                 className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                   htmlPreviewOpen
-                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    ? "bg-background text-foreground shadow-sm font-semibold"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -13712,7 +10915,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       onClick={() => setHtmlDeviceMode("desktop")}
                       className={`p-1 rounded-md transition-all cursor-pointer ${
                         htmlDeviceMode === "desktop"
-                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          ? "bg-background text-foreground shadow-sm font-semibold"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                       aria-label="Desktop (100%)"
@@ -13732,7 +10935,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       onClick={() => setHtmlDeviceMode("tablet")}
                       className={`p-1 rounded-md transition-all cursor-pointer ${
                         htmlDeviceMode === "tablet"
-                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          ? "bg-background text-foreground shadow-sm font-semibold"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                       aria-label="Tablet (768px)"
@@ -13752,7 +10955,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       onClick={() => setHtmlDeviceMode("mobile")}
                       className={`p-1 rounded-md transition-all cursor-pointer ${
                         htmlDeviceMode === "mobile"
-                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          ? "bg-background text-foreground shadow-sm font-semibold"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                       aria-label="Mobile (375px)"
@@ -13782,12 +10985,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     className="h-auto w-auto p-1 rounded text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ring-0 outline-none select-none"
                   >
                     <Search className="h-3.5 w-3.5" />
-                    <span className="sr-only">{t("sidebar.searchShortPlaceholder") || (isTh ? "ค้นหา" : "Search")}</span>
+                    <span className="sr-only">{t("sidebar.searchShortPlaceholder")}</span>
                   </Button>
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {isTh ? "ค้นหา" : "Find"}
+                {t("editor.find")}
               </TooltipContent>
             </Tooltip>
 
@@ -13822,7 +11025,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }
                     }
                   }}
-                  placeholder={isTh ? "ค้นหาในโค้ด..." : "Find in code..."}
+                  placeholder={t("editor.findInCode")}
                   className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
                   autoFocus
                 />
@@ -13841,12 +11044,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <div className="mt-2 px-1 text-[11px] text-muted-foreground flex items-center justify-between border-t border-border/40 pt-1.5">
                   <span>
                     {codeSearchStats.total > 0
-                      ? isTh
-                        ? `พบ ${codeSearchStats.total} รายการ${codeSearchStats.current >= 0 ? ` (${codeSearchStats.current + 1}/${codeSearchStats.total})` : ""}`
-                        : `Found ${codeSearchStats.total} matching ${codeSearchStats.total === 1 ? "result" : "results"}${codeSearchStats.current >= 0 ? ` (${codeSearchStats.current + 1}/${codeSearchStats.total})` : ""}`
-                      : isTh
-                      ? "ไม่พบข้อความที่ตรงกัน"
-                      : "No matching text"}
+                      ? t(codeSearchStats.total === 1 ? "editor.searchMatchOne" : "editor.searchMatchMany", {
+                          total: codeSearchStats.total,
+                          progress: codeSearchStats.current >= 0 ? ` (${codeSearchStats.current + 1}/${codeSearchStats.total})` : "",
+                        })
+                      : t("editor.noMatchingText")}
                   </span>
                   {codeSearchStats.total > 0 && (
                     <div className="flex items-center gap-0.5">
@@ -13862,7 +11064,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {isTh ? "ข้อความก่อนหน้า (Shift+Enter)" : "Previous match (Shift+Enter)"}
+                          {t("editor.previousMatchShiftEnter")}
                         </TooltipContent>
                       </Tooltip>
 
@@ -13878,7 +11080,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {isTh ? "ข้อความถัดไป (Enter)" : "Next match (Enter)"}
+                          {t("editor.nextMatchEnter")}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -13925,12 +11127,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   return <IconComp className="h-3.5 w-3.5" />;
                 })()}
                 <span className="sr-only">
-                  {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+                  {isReadingMode ? (t("editor.editMode")) : (t("editor.readingMode"))}
                 </span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              {isReadingMode ? (t("editor.editMode") || "Edit mode") : (t("editor.readingMode") || "Reading mode")}
+              {isReadingMode ? (t("editor.editMode")) : (t("editor.readingMode"))}
             </TooltipContent>
           </Tooltip>
         )}
@@ -13950,10 +11152,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const LockIconComp = getToolbarIcon("lock", settings.iconPack);
                   return <LockIconComp className="h-3.5 w-3.5" />;
                 })()}
-                <span className="sr-only">{t("pinLock.relockNote") || "Lock Note"}</span>
+                <span className="sr-only">{t("pinLock.relockNote")}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t("pinLock.relockNote") || "Lock Note Now"}</TooltipContent>
+            <TooltipContent>{t("pinLock.relockNote")}</TooltipContent>
           </Tooltip>
         )}
 
@@ -14010,10 +11212,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   return <ShareIconComp className="h-3.5 w-3.5" />;
                 })()
               )}
-              <span className="sr-only">{t("breadcrumb.share") || "Share"}</span>
+              <span className="sr-only">{t("breadcrumb.share")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{t("breadcrumb.share") || "Share Note"}</TooltipContent>
+          <TooltipContent>{t("breadcrumb.share")}</TooltipContent>
         </Tooltip>
 
         {/* Version History Button */}
@@ -14035,10 +11237,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 const HistoryIconComp = getToolbarIcon("history", settings.iconPack);
                 return <HistoryIconComp className="h-3.5 w-3.5" />;
               })()}
-              <span className="sr-only">{t("breadcrumb.versionHistory") || "Version History"}</span>
+              <span className="sr-only">{t("breadcrumb.versionHistory")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{t("breadcrumb.versionHistory") || "Version History"}</TooltipContent>
+          <TooltipContent>{t("breadcrumb.versionHistory")}</TooltipContent>
         </Tooltip>
       </Fragment>
     );
@@ -14117,8 +11319,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
                     <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
                     <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
-                    <SelectItem value="css">{t("sidebar.fileTypeCss") || "CSS (.css)"}</SelectItem>
-                    <SelectItem value="js">{t("sidebar.fileTypeJs") || "JavaScript (.js)"}</SelectItem>
+                    <SelectItem value="css">{t("sidebar.fileTypeCss")}</SelectItem>
+                    <SelectItem value="js">{t("sidebar.fileTypeJs")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -14439,7 +11641,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       (currentTool !== "select" && currentTool !== "contentSelect") || Boolean(selectedMeta);
 
     const pdfSliderCls =
-      "py-1 cursor-pointer [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&_[role=slider]]:h-4 [&_[role=slider]]:w-4 [&_[role=slider]]:bg-primary [&_[role=slider]]:border-primary [&_[role=slider]]:shadow-xs";
+      "py-1 cursor-pointer [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&_[role=slider]]:h-4 [&_[role=slider]]:w-4 [&_[role=slider]]:bg-primary [&_[role=slider]]:border-primary [&_[role=slider]]:shadow-sm";
 
     const appFontCss =
       FONT_FAMILY_CSS[settings?.fontFamily || "inter"] || "var(--app-font-family)";
@@ -14490,7 +11692,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
     const toolBtnCls = (active: boolean) =>
       `h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full transition-colors ${
-        active ? "bg-primary/12 text-primary font-medium" : "text-foreground"
+        active ? "bg-primary/[0.12] text-primary font-medium" : "text-foreground"
       }`;
 
     return (
@@ -14520,7 +11722,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <span className="sr-only">{t("editor.undo")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{`${t("editor.undo") || "Undo"} (Ctrl+Z)`}</TooltipContent>
+          <TooltipContent>{`${t("editor.undo")} (Ctrl+Z)`}</TooltipContent>
         </Tooltip>
 
         {/* Redo */}
@@ -14545,7 +11747,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <span className="sr-only">{t("editor.redo")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{`${t("editor.redo") || "Redo"} (Ctrl+Y)`}</TooltipContent>
+          <TooltipContent>{`${t("editor.redo")} (Ctrl+Y)`}</TooltipContent>
         </Tooltip>
 
         <div className="h-4 w-px shrink-0 bg-border" />
@@ -14562,11 +11764,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("select")}
             >
               {renderToolIconLocal("select")}
-              <span className="sr-only">{lang === "th" ? "เลือกและย้ายวัตถุ" : "Select & Move"}</span>
+              <span className="sr-only">{t("editor.selectMove")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "เลือกและย้ายวัตถุ (V)" : "Select & Move (V)"}
+            {t("editor.selectMoveV")}
           </TooltipContent>
         </Tooltip>
 
@@ -14582,11 +11784,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("contentSelect")}
             >
               {renderToolIconLocal("textSelect")}
-              <span className="sr-only">{lang === "th" ? "เลือกข้อความใน PDF" : "Select PDF Text"}</span>
+              <span className="sr-only">{t("editor.selectPdfText")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "เลือกข้อความใน PDF (I)" : "Select PDF Text (I)"}
+            {t("editor.selectPdfTextI")}
           </TooltipContent>
         </Tooltip>
 
@@ -14602,11 +11804,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("pen")}
             >
               {renderToolIconLocal("pen")}
-              <span className="sr-only">{lang === "th" ? "ปากกา" : "Pen"}</span>
+              <span className="sr-only">{t("editor.pen")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "ปากกาวาดเขียน (P)" : "Pen Tool (P)"}
+            {t("editor.penToolP")}
           </TooltipContent>
         </Tooltip>
 
@@ -14622,13 +11824,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("highlighter")}
             >
               {renderToolIconLocal("highlight")}
-              <span className="sr-only">{lang === "th" ? "ปากกาเน้นข้อความ" : "Highlighter"}</span>
+              <span className="sr-only">{t("editor.highlighter")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th"
-              ? "ปากกาเน้นข้อความ (H)"
-              : "Highlighter (H)"}
+            {t("editor.highlighterH")}
           </TooltipContent>
         </Tooltip>
 
@@ -14644,11 +11844,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("eraser")}
             >
               {renderToolIconLocal("eraser")}
-              <span className="sr-only">{lang === "th" ? "ยางลบ" : "Eraser"}</span>
+              <span className="sr-only">{t("editor.eraser")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "ยางลบ (E)" : "Eraser Tool (E)"}
+            {t("editor.eraserToolE")}
           </TooltipContent>
         </Tooltip>
 
@@ -14664,11 +11864,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => handleSelectPdfTool("text")}
             >
               {renderToolIconLocal("textBox")}
-              <span className="sr-only">{lang === "th" ? "ข้อความ" : "Text"}</span>
+              <span className="sr-only">{t("favorites.text")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "เพิ่มข้อความ (T)" : "Add Text (T)"}
+            {t("editor.addTextT")}
           </TooltipContent>
         </Tooltip>
 
@@ -14681,20 +11881,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   type="button"
                   variant="ghost"
                   className={`h-8 w-[42px] shrink-0 px-1 py-0 flex items-center justify-center gap-1 rounded-full md:rounded-full text-xs md:text-sm transition-colors ${
-                    isShapeActive ? "bg-primary/12 text-primary font-medium" : "font-normal text-foreground"
+                    isShapeActive ? "bg-primary/[0.12] text-primary font-medium" : "font-normal text-foreground"
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   {renderToolIconLocal(getShapeIconKey(activeShape))}
                   <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                  <span className="sr-only">{lang === "th" ? "รูปร่าง" : "Shapes"}</span>
+                  <span className="sr-only">{t("editor.shapes")}</span>
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent>
-              {lang === "th"
-                ? "รูปร่าง"
-                : "Shapes"}
+              {t("editor.shapes")}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
@@ -14703,25 +11901,25 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 {
                   id: "rectangle" as const,
                   icon: "shapeSquare",
-                  label: lang === "th" ? "สี่เหลี่ยม" : "Rectangle",
+                  label: t("editor.rectangle"),
                   shortcut: "R",
                 },
                 {
                   id: "circle" as const,
                   icon: "shapeCircle",
-                  label: lang === "th" ? "วงกลม / วงรี" : "Circle / Ellipse",
+                  label: t("editor.circleEllipse"),
                   shortcut: "O",
                 },
                 {
                   id: "line" as const,
                   icon: "shapeLine",
-                  label: lang === "th" ? "เส้นตรง" : "Line",
+                  label: t("editor.line"),
                   shortcut: "L",
                 },
                 {
                   id: "arrow" as const,
                   icon: "shapeArrow",
-                  label: lang === "th" ? "ลูกศร" : "Arrow",
+                  label: t("editor.arrow"),
                   shortcut: "A",
                 },
               ]
@@ -14736,7 +11934,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   }}
                   className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
                     isItemActive
-                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
                       : ""
                   }`}
                 >
@@ -14780,11 +11978,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         {currentFontSize}
                       </span>
                       <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                      <span className="sr-only">{t("editor.fontSize") || "Font Size"}</span>
+                      <span className="sr-only">{t("editor.fontSize")}</span>
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.fontSize") || "Font Size"}</TooltipContent>
+                <TooltipContent>{t("editor.fontSize")}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent
                 align="start"
@@ -14800,7 +11998,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       style={{ fontFamily: appFontCss }}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
                         isCurrent
-                          ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                          ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
                           : ""
                       }`}
                     >
@@ -14825,11 +12023,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       onMouseDown={(e) => e.preventDefault()}
                     >
                       <TextColorIcon color={currentColor} className="h-4 w-4" />
-                      <span className="sr-only">{t("editor.textColor") || "Text Color"}</span>
+                      <span className="sr-only">{t("editor.textColor")}</span>
                     </Button>
                   </PopoverTrigger>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.textColor") || "Text Color"}</TooltipContent>
+                <TooltipContent>{t("editor.textColor")}</TooltipContent>
               </Tooltip>
               <PopoverContent
                 align="start"
@@ -14839,7 +12037,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                       <Palette className="w-3.5 h-3.5 text-primary" />
-                      {t("editor.textColor") || (lang === "th" ? "สีข้อความ" : "Text Color")}
+                      {t("editor.textColor")}
                     </span>
                     <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                       {currentColor}
@@ -14847,7 +12045,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                       <input
                         type="color"
                         value={/^#[0-9A-Fa-f]{6}$/.test(currentColor) ? currentColor : "#000000"}
@@ -14864,7 +12062,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         }
                       }}
                       placeholder="#000000"
-                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                       maxLength={7}
                     />
                     <Tooltip>
@@ -14877,16 +12075,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
-                          <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                          <span className="sr-only">{t("editor.defaultColor")}</span>
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                      <TooltipContent>{t("editor.defaultColor")}</TooltipContent>
                     </Tooltip>
                   </div>
 
                   <div>
                     <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
-                      {t("settings.quickPresets") || "Presets"}
+                      {t("settings.quickPresets")}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {PRESET_STROKE_COLORS.map((color) => {
@@ -14937,17 +12135,17 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     onMouseDown={(e) => e.preventDefault()}
                   >
                     <div
-                      className="h-4 w-4 rounded-full border border-border shadow-2xs"
+                      className="h-4 w-4 rounded-full border border-border shadow-sm"
                       style={{ backgroundColor: currentHighlightColor, opacity: 0.85 }}
                     />
                     <span className="sr-only">
-                      {lang === "th" ? "สีและความหนาไฮไลต์" : "Highlight Color & Size"}
+                      {t("editor.highlightColorSize")}
                     </span>
                   </Button>
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent>
-                {lang === "th" ? "สีและความหนาไฮไลต์" : "Highlight Color & Width"}
+                {t("editor.highlightColorWidth")}
               </TooltipContent>
             </Tooltip>
             <PopoverContent
@@ -14957,7 +12155,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                   <Palette className="w-3.5 h-3.5 text-primary" />
-                  {lang === "th" ? "สีเน้นข้อความ" : "Highlight Color"}
+                  {t("editor.highlightColor")}
                 </span>
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                   {currentHighlightColor}
@@ -14965,7 +12163,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                   <input
                     type="color"
                     value={
@@ -14986,7 +12184,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   placeholder="#FACC15"
-                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                   maxLength={7}
                 />
                 <Tooltip>
@@ -14999,10 +12197,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
-                      <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                      <span className="sr-only">{t("editor.defaultColor")}</span>
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                  <TooltipContent>{t("editor.defaultColor")}</TooltipContent>
                 </Tooltip>
               </div>
 
@@ -15031,7 +12229,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <div className="space-y-2.5 pt-2 border-t border-border/60">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {lang === "th" ? "ขนาดหัวไฮไลต์อิสระ" : "Freehand Width"}
+                    {t("editor.freehandWidth")}
                   </span>
                   <span className="text-[11px] font-medium text-foreground tabular-nums">
                     {currentHighlightWidth}px
@@ -15039,7 +12237,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </div>
                 <div className="flex items-center gap-2.5">
                   <div
-                    className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-2xs shrink-0"
+                    className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-sm shrink-0"
                     style={{ backgroundColor: currentHighlightColor, opacity: 0.85 }}
                   />
                   <Slider
@@ -15078,7 +12276,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent>
-                {lang === "th" ? "ขนาดยางลบ" : "Eraser Size"}
+                {t("editor.eraserSize")}
               </TooltipContent>
             </Tooltip>
             <PopoverContent
@@ -15087,7 +12285,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-foreground">
-                  {lang === "th" ? "ขนาดยางลบ" : "Eraser Size"}
+                  {t("editor.eraserSize")}
                 </span>
                 <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
                   {currentEraserWidth}px
@@ -15122,7 +12320,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     >
                       {isFillableShapeContext ? (
                         <div
-                          className="h-4 w-4 rounded-full bg-transparent shadow-2xs relative flex items-center justify-center overflow-hidden"
+                          className="h-4 w-4 rounded-full bg-transparent shadow-sm relative flex items-center justify-center overflow-hidden"
                           style={{
                             borderWidth: "2.5px",
                             borderStyle:
@@ -15143,24 +12341,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </div>
                       ) : (
                         <div
-                          className="h-4 w-4 rounded-full border border-border shadow-2xs"
+                          className="h-4 w-4 rounded-full border border-border shadow-sm"
                           style={{ backgroundColor: currentColor }}
                         />
                       )}
                       <span className="sr-only">
-                        {lang === "th" ? "สีและความหนาเส้น" : "Color & Stroke"}
+                        {t("editor.colorStroke")}
                       </span>
                     </Button>
                   </PopoverTrigger>
                 </TooltipTrigger>
                 <TooltipContent>
                   {isFillableShapeContext
-                    ? lang === "th"
-                      ? "สีเส้นขอบและความหนา"
-                      : "Border Color & Width"
-                    : lang === "th"
-                    ? "สีและความหนาเส้น"
-                    : "Stroke Color & Width"}
+                    ? t("editor.borderColorWidth")
+                    : t("editor.strokeColorWidth")}
                 </TooltipContent>
               </Tooltip>
               <PopoverContent
@@ -15171,12 +12365,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                     <Palette className="w-3.5 h-3.5 text-primary" />
                     {isFillableShapeContext
-                      ? lang === "th"
-                        ? "สีเส้นขอบรูปร่าง"
-                        : "Border Color"
-                      : lang === "th"
-                      ? "สีปากกา / รูปทรง"
-                      : "Stroke Color"}
+                      ? t("editor.borderColor")
+                      : t("editor.strokeColor")}
                   </span>
                   <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                     {currentColor}
@@ -15184,7 +12374,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                  <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                     <input
                       type="color"
                       value={/^#[0-9A-Fa-f]{6}$/.test(currentColor) ? currentColor : "#000000"}
@@ -15201,7 +12391,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }
                     }}
                     placeholder="#000000"
-                    className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                    className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                     maxLength={7}
                   />
                   <Tooltip>
@@ -15214,10 +12404,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
-                        <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                        <span className="sr-only">{t("editor.defaultColor")}</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                    <TooltipContent>{t("editor.defaultColor")}</TooltipContent>
                   </Tooltip>
                 </div>
 
@@ -15234,8 +12424,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           ? "ring-2 ring-primary ring-offset-1 scale-110"
                           : "hover:scale-115 opacity-85 hover:opacity-100"
                       }`}
-                      aria-label={lang === "th" ? "ไม่มีเส้นขอบ" : "No Stroke"}
-                      title={lang === "th" ? "ไม่มีเส้นขอบ" : "No Stroke"}
+                      aria-label={t("editor.noStroke")}
+                      title={t("editor.noStroke")}
                     >
                       <span className="block w-6 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
                     </button>
@@ -15279,7 +12469,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 <div className="space-y-2.5 pt-2 border-t border-border/60">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-muted-foreground">
-                      {lang === "th" ? "ความหนาเส้น" : "Stroke Width"}
+                      {t("editor.strokeWidth")}
                     </span>
                     <span className="text-[11px] font-medium text-foreground tabular-nums">
                       {currentWidth}px
@@ -15287,7 +12477,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   </div>
                   <div className="flex items-center gap-2.5">
                     <div
-                      className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-2xs shrink-0"
+                      className="h-3.5 w-3.5 rounded-full border border-border/70 shadow-sm shrink-0"
                       style={{ backgroundColor: currentColor }}
                     />
                     <Slider
@@ -15316,7 +12506,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         onMouseDown={(e) => e.preventDefault()}
                       >
                         <div
-                          className="h-4 w-4 rounded-[4px] border border-border shadow-2xs relative overflow-hidden flex items-center justify-center bg-background"
+                          className="h-4 w-4 rounded-[4px] border border-border shadow-sm relative overflow-hidden flex items-center justify-center bg-background"
                           style={
                             currentShapeFillColor
                               ? {
@@ -15331,13 +12521,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           )}
                         </div>
                         <span className="sr-only">
-                          {lang === "th" ? "สีภายในรูปร่าง" : "Shape Fill Color"}
+                          {t("editor.shapeFillColor")}
                         </span>
                       </Button>
                     </PopoverTrigger>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {lang === "th" ? "สีภายในรูปร่าง" : "Shape Fill Color"}
+                    {t("editor.shapeFillColor")}
                   </TooltipContent>
                 </Tooltip>
                 <PopoverContent
@@ -15347,15 +12537,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                       <Palette className="w-3.5 h-3.5 text-primary" />
-                      {lang === "th" ? "สีภายในรูปร่าง" : "Fill Color"}
+                      {t("editor.fillColor")}
                     </span>
                     <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-                      {currentShapeFillColor || (lang === "th" ? "ไม่มีสี" : "No Fill")}
+                      {currentShapeFillColor || (t("editor.noFill"))}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50 bg-background flex items-center justify-center">
+                    <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50 bg-background flex items-center justify-center">
                       {!currentShapeFillColor && (
                         <span className="block w-12 h-[1.5px] bg-destructive/75 -rotate-45 pointer-events-none" />
                       )}
@@ -15382,8 +12572,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           handleSetShapeFillColor(val);
                         }
                       }}
-                      placeholder={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
-                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                      placeholder={t("editor.noFill2")}
+                      className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                       maxLength={7}
                     />
                     <Tooltip>
@@ -15397,12 +12587,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         >
                           <X className="h-3.5 w-3.5" />
                           <span className="sr-only">
-                            {lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                            {t("editor.noFill2")}
                           </span>
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        {lang === "th" ? "ไม่มีสีพื้น (โปร่งใส)" : "No Fill (Transparent)"}
+                        {t("editor.noFillTransparent")}
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -15417,8 +12607,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           ? "ring-2 ring-primary ring-offset-1 scale-110"
                           : "hover:scale-115 opacity-85 hover:opacity-100"
                       }`}
-                      aria-label={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
-                      title={lang === "th" ? "ไม่มีสีพื้น" : "No Fill"}
+                      aria-label={t("editor.noFill2")}
+                      title={t("editor.noFill2")}
                     >
                       <span className="block w-6 h-[1.5px] bg-destructive/80 -rotate-45 pointer-events-none" />
                     </button>
@@ -15458,7 +12648,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <div className="space-y-2.5 pt-2 border-t border-border/60">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
-                          {lang === "th" ? "ความทึบสีพื้น" : "Fill Opacity"}
+                          {t("editor.fillOpacity")}
                         </span>
                         <span className="text-[11px] font-medium text-foreground tabular-nums">
                           {currentShapeFillOpacity}%
@@ -15466,7 +12656,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </div>
                       <div className="flex items-center gap-2.5">
                         <div
-                          className="h-3.5 w-3.5 rounded-[3px] border border-border/70 shadow-2xs shrink-0"
+                          className="h-3.5 w-3.5 rounded-[3px] border border-border/70 shadow-sm shrink-0"
                           style={{
                             backgroundColor: currentShapeFillColor,
                             opacity: Math.max(0.2, currentShapeFillOpacity / 100),
@@ -15507,11 +12697,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }}
             >
               {renderToolIconLocal("trash")}
-              <span className="sr-only">{lang === "th" ? "ลบวัตถุที่เลือก" : "Delete Selected"}</span>
+              <span className="sr-only">{t("editor.deleteSelected")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "ลบวัตถุที่เลือก" : "Delete Selected"}
+            {t("editor.deleteSelected")}
           </TooltipContent>
         </Tooltip>
 
@@ -15529,11 +12719,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => pdfEditorRef.current?.sendCommand("toggleThumbnails")}
             >
               {renderToolIconLocal("layoutGrid")}
-              <span className="sr-only">{lang === "th" ? "รูปตัวอย่างหน้า" : "Thumbnails"}</span>
+              <span className="sr-only">{t("editor.thumbnails")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {lang === "th" ? "เปิด/ปิด รูปตัวอย่างหน้า" : "Toggle Page Thumbnails"}
+            {t("editor.togglePageThumbnails")}
           </TooltipContent>
         </Tooltip>
 
@@ -15564,13 +12754,13 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 >
                   {renderToolIconLocal("bookmark")}
                   <span className="sr-only">
-                    {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+                    {t("editor.bookmarksOutline")}
                   </span>
                 </Button>
               </PopoverTrigger>
             </TooltipTrigger>
             <TooltipContent>
-              {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+              {t("editor.bookmarksOutline")}
             </TooltipContent>
           </Tooltip>
           <PopoverContent
@@ -15580,10 +12770,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Bookmark className="w-3.5 h-3.5 text-primary" />
-                {lang === "th" ? "บุ๊กมาร์กและสารบัญ" : "Bookmarks & Outline"}
+                {t("editor.bookmarksOutline")}
               </span>
               <span className="text-[11px] font-medium text-muted-foreground tracking-wide tabular-nums select-none shrink-0">
-                {lang === "th" ? `หน้า ${currentPageNum}` : `Page ${currentPageNum}`}
+                {t("editor.page", { currentPageNum })}
               </span>
             </div>
 
@@ -15592,7 +12782,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 e.preventDefault();
                 const label =
                   pdfBookmarkTitleInput.trim() ||
-                  (lang === "th" ? `หน้า ${currentPageNum}` : `Page ${currentPageNum}`);
+                  (t("editor.page", { currentPageNum }));
                 const next = pdfEditorRef.current?.addBookmark(currentPageNum, label);
                 if (next) setPdfBookmarks(next);
                 setPdfBookmarkTitleInput("");
@@ -15603,9 +12793,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 value={pdfBookmarkTitleInput}
                 onChange={(e) => setPdfBookmarkTitleInput(e.target.value)}
                 placeholder={
-                  lang === "th"
-                    ? `ชื่อบุ๊กมาร์ก (หน้า ${currentPageNum})...`
-                    : `Bookmark title (p. ${currentPageNum})...`
+                  t("editor.bookmarkTitleP", { currentPageNum })
                 }
                 className="h-8 rounded-xl text-xs border-border/70 bg-background px-2.5 focus-visible:ring-1 focus-visible:ring-primary"
               />
@@ -15615,7 +12803,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 className="h-8 px-2.5 rounded-xl text-xs shrink-0 gap-1"
               >
                 <Plus className="h-3.5 w-3.5" />
-                {lang === "th" ? "บันทึก" : "Save"}
+                {t("editor.save")}
               </Button>
             </form>
 
@@ -15623,7 +12811,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               {pdfBookmarks.length > 0 && (
                 <div className="space-y-1">
                   <div className="text-[11px] font-medium text-muted-foreground px-1">
-                    {lang === "th" ? "บุ๊กมาร์กที่บันทึกไว้" : "Saved Bookmarks"}
+                    {t("editor.savedBookmarks")}
                   </div>
                   {pdfBookmarks.map((bm) => {
                     const isActive = bm.page === currentPageNum;
@@ -15641,7 +12829,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         }}
                         className={`group flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors cursor-pointer ${
                           isActive
-                            ? "bg-primary/12 text-primary font-medium"
+                            ? "bg-primary/[0.12] text-primary font-medium"
                             : "text-foreground hover:bg-muted/70"
                         }`}
                       >
@@ -15657,7 +12845,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </span>
                         <span className="flex items-center gap-1 shrink-0">
                           <span className="text-[11px] tabular-nums text-muted-foreground">
-                            {lang === "th" ? `หน้า ${bm.page}` : `p. ${bm.page}`}
+                            {t("editor.p", { v0: bm.page })}
                           </span>
                           <button
                             type="button"
@@ -15666,7 +12854,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               const next = pdfEditorRef.current?.removeBookmark(bm.id);
                               if (next) setPdfBookmarks(next);
                             }}
-                            aria-label={lang === "th" ? "ลบบุ๊กมาร์ก" : "Remove bookmark"}
+                            aria-label={t("webViewer.removeBookmark")}
                             className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                           >
                             <Trash2 className="h-3 w-3" />
@@ -15685,7 +12873,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   }`}
                 >
                   <div className="text-[11px] font-medium text-muted-foreground px-1">
-                    {lang === "th" ? "สารบัญเอกสาร" : "Document Outline"}
+                    {t("editor.documentOutline")}
                   </div>
                   {flatOutlineItems.map((item, idx) => {
                     const isActive = item.page != null && item.page === currentPageNum;
@@ -15707,7 +12895,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           item.page == null
                             ? "opacity-50 cursor-default"
                             : isActive
-                            ? "bg-primary/12 text-primary font-medium cursor-pointer"
+                            ? "bg-primary/[0.12] text-primary font-medium cursor-pointer"
                             : "text-foreground hover:bg-muted/70 cursor-pointer"
                         }`}
                       >
@@ -15725,9 +12913,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
 
               {pdfBookmarks.length === 0 && flatOutlineItems.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-3 px-2">
-                  {lang === "th"
-                    ? "ยังไม่มีบุ๊กมาร์ก กดปุ่มบันทึกด้านบนเพื่อคั่นหน้าปัจจุบัน"
-                    : "No bookmarks yet. Save one above to mark the current page."}
+                  {t("editor.noBookmarksYetSaveOne")}
                 </p>
               )}
             </div>
@@ -15744,9 +12930,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   return (
     <>
       <TooltipProvider delayDuration={420}>
-      <div className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
+      <div data-editor-pane={paneId} className="flex min-h-0 flex-1 flex-row bg-background relative overflow-hidden">
         <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-          <div className={
+          <div
+            data-editor-toolbar="true"
+            className={
             (isPdfFile(note)
               ? (isReadingMode || (isPdfLoadingSource || !isPdfViewLoaded) || isNoteCurrentlyLocked || versionHistoryOpen)
               : (settings.showToolbar === false || isReadingMode || isNoteCurrentlyLocked || versionHistoryOpen || Boolean(comparingVersion && (comparingVersion.noteId === note.id || (comparingVersion.relPath && comparingVersion.relPath === (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName)))) || ((note.contentFormat === "html" || note.contentFormat === "css" || note.contentFormat === "javascript" || note.contentFormat === "js" || isCssFile(note) || isJsFile(note) || isImageFile(note) || isVideoFile(note) || isBinaryFile(note)) && !isMobile)))
@@ -16039,82 +13227,82 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               {renderToolIcon(currentHeadingIcon)}
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.headings") || "Headings"}</span>
+                              <span className="sr-only">{t("editor.headings")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.headings") || "Headings"}</TooltipContent>
+                        <TooltipContent>{t("editor.headings")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH1Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH1Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h1")}
-                            <span>{t("editor.heading1") || "Heading 1"}</span>
+                            <span>{t("editor.heading1")}</span>
                           </div>
                           {isH1Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH2Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH2Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h2")}
-                            <span>{t("editor.heading2") || "Heading 2"}</span>
+                            <span>{t("editor.heading2")}</span>
                           </div>
                           {isH2Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH3Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH3Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h3")}
-                            <span>{t("editor.heading3") || "Heading 3"}</span>
+                            <span>{t("editor.heading3")}</span>
                           </div>
                           {isH3Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH4Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH4Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h4")}
-                            <span>{t("editor.heading4") || "Heading 4"}</span>
+                            <span>{t("editor.heading4")}</span>
                           </div>
                           {isH4Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH5Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH5Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h5")}
-                            <span>{t("editor.heading5") || "Heading 5"}</span>
+                            <span>{t("editor.heading5")}</span>
                           </div>
                           {isH5Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isH6Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isH6Active ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("h6")}
-                            <span>{t("editor.heading6") || "Heading 6"}</span>
+                            <span>{t("editor.heading6")}</span>
                           </div>
                           {isH6Active && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -16129,7 +13317,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   const settingFont = findMatchingFontOption(activeSettingFontId, customFonts) || FONT_OPTIONS[0];
                   const settingFontName = settingFont
                     ? ("isCustom" in settingFont && settingFont.isCustom ? settingFont.displayName : (t(settingFont.nameKey as any) || settingFont.id))
-                    : (t("editor.defaultFont") || "Default");
+                    : (t("editor.defaultFont"));
 
                   const foundFont = findMatchingFontOption(activeFont, customFonts);
                   const displayFontName = foundFont
@@ -16165,18 +13353,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                 {displayFontName}
                               </span>
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.fontFamily") || "Font Family"}</span>
+                              <span className="sr-only">{t("editor.fontFamily")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.fontFamily") || "Font Family"}</TooltipContent>
+                        <TooltipContent>{t("editor.fontFamily")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-56 max-h-80 overflow-y-auto rounded-xl p-1.5 shadow-md">
                         {/* Custom Fonts Group */}
                         {customFonts && customFonts.length > 0 && (
                           <div className="mb-1.5 pb-1.5 border-b border-border/60">
                             <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              {t("settings.customFonts") || "Workspace Fonts"}
+                              {t("settings.customFonts")}
                             </div>
                             {customFonts.map((font) => {
                               const isCurrent = font.id === currentFontId;
@@ -16186,7 +13374,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                     <div
                                       role="menuitem"
                                       className={`cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between outline-none transition-colors select-none ${
-                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/18 focus:bg-primary/18" : "hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary"
+                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/[0.18] focus:bg-primary/[0.18]" : "hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary"
                                       }`}
                                       onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
                                       style={{ fontFamily: font.css }}
@@ -16195,7 +13383,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
                                     </div>
                                   </ContextMenuTrigger>
-                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[999999]">
+                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[65]">
                                     <ContextMenuItem
                                       onClick={() => {
                                         setFontToRename(font);
@@ -16204,7 +13392,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                     >
                                       <Pencil className="h-4 w-4 text-muted-foreground" />
-                                      <span>{t("settings.renameFont") || "Rename"}</span>
+                                      <span>{t("settings.renameFont")}</span>
                                     </ContextMenuItem>
                                     <ContextMenuItem
                                       variant="destructive"
@@ -16214,7 +13402,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                     >
                                       <Trash2 className="h-4 w-4 text-destructive" />
-                                      <span>{t("settings.deleteFont") || "Delete"}</span>
+                                      <span>{t("settings.deleteFont")}</span>
                                     </ContextMenuItem>
                                   </ContextMenuContent>
                                 </ContextMenu>
@@ -16227,7 +13415,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         <div>
                           {customFonts && customFonts.length > 0 && (
                             <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              {t("settings.systemFonts") || "System Fonts"}
+                              {t("settings.systemFonts")}
                             </div>
                           )}
                           {FONT_OPTIONS.map((font) => {
@@ -16238,7 +13426,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                 onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
                                 style={{ fontFamily: font.css }}
                                 className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                                 }`}
                               >
                                 <span className="truncate">{t(font.nameKey as any) || font.id}</span>
@@ -16258,7 +13446,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             }}
                           >
                             <Upload className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate font-medium">{t("settings.uploadFont") || "Upload Font"}</span>
+                            <span className="truncate font-medium">{t("settings.uploadFont")}</span>
                           </DropdownMenuItem>
                         </div>
                       </DropdownMenuContent>
@@ -16315,11 +13503,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                 {displaySize}
                               </span>
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.fontSize") || "Font Size"}</span>
+                              <span className="sr-only">{t("editor.fontSize")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.fontSize") || "Font Size"}</TooltipContent>
+                        <TooltipContent>{t("editor.fontSize")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-40 max-h-72 overflow-y-auto rounded-xl p-1.5 shadow-md" style={{ fontFamily: appFontCss }}>
                         {FONT_SIZES.map((size) => {
@@ -16330,7 +13518,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               onClick={() => editor?.chain().focus().setFontSize(size).run()}
                               style={{ fontFamily: appFontCss }}
                               className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                               }`}
                             >
                               <span style={{ fontFamily: appFontCss }}>{size}</span>
@@ -16377,18 +13565,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               onMouseDown={(e) => e.preventDefault()}
                             >
                               <TextColorIcon color={activeColor} className="h-4 w-4" />
-                              <span className="sr-only">{t("editor.textColor") || "Text Color"}</span>
+                              <span className="sr-only">{t("editor.textColor")}</span>
                             </Button>
                           </PopoverTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.textColor") || "Text Color"}</TooltipContent>
+                        <TooltipContent>{t("editor.textColor")}</TooltipContent>
                       </Tooltip>
                       <PopoverContent align="start" className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md">
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                               <Palette className="w-3.5 h-3.5 text-primary" />
-                              {t("editor.textColor") || "Text Color"}
+                              {t("editor.textColor")}
                             </span>
                             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                               {activeColor || t("editor.defaultColor") || "Default"}
@@ -16396,7 +13584,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                               <input
                                 type="color"
                                 value={activeColor && /^#[0-9A-Fa-f]{6}$/.test(activeColor) ? activeColor : "#000000"}
@@ -16414,8 +13602,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                   editor?.chain().focus().setColor(val).run();
                                 }
                               }}
-                              placeholder={t("editor.defaultColor") || "Default"}
-                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                              placeholder={t("editor.defaultColor")}
+                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                               maxLength={7}
                             />
                             <Tooltip>
@@ -16428,16 +13616,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                   className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
-                                  <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                                  <span className="sr-only">{t("editor.defaultColor")}</span>
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                              <TooltipContent>{t("editor.defaultColor")}</TooltipContent>
                             </Tooltip>
                           </div>
 
                           <div>
                             <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
-                              {t("settings.quickPresets") || "Presets"}
+                              {t("settings.quickPresets")}
                             </span>
                             <div className="flex flex-wrap gap-1.5">
                               {PRESET_TEXT_COLORS.map((color) => {
@@ -16499,58 +13687,58 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               {renderToolIcon(currentAlignIcon)}
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.textAlign") || "Text Align"}</span>
+                              <span className="sr-only">{t("editor.textAlign")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.textAlign") || "Text Align"}</TooltipContent>
+                        <TooltipContent>{t("editor.textAlign")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("left").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("alignLeft")}
-                            <span>{t("editor.alignLeft") || "Align Left"}</span>
+                            <span>{t("editor.alignLeft")}</span>
                           </div>
                           {isLeft && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("center").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("alignCenter")}
-                            <span>{t("editor.alignCenter") || "Align Center"}</span>
+                            <span>{t("editor.alignCenter")}</span>
                           </div>
                           {isCenter && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("right").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("alignRight")}
-                            <span>{t("editor.alignRight") || "Align Right"}</span>
+                            <span>{t("editor.alignRight")}</span>
                           </div>
                           {isRight && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("alignJustify")}
-                            <span>{t("editor.alignJustify") || "Justify"}</span>
+                            <span>{t("editor.alignJustify")}</span>
                           </div>
                           {isJustify && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -16741,46 +13929,46 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               {renderToolIcon(currentListIcon)}
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.list") || "Lists"}</span>
+                              <span className="sr-only">{t("editor.list")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.list") || "Lists"}</TooltipContent>
+                        <TooltipContent>{t("editor.list")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleBulletList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("bulletList")}
-                            <span>{t("editor.bulletList") || "Bullet List"}</span>
+                            <span>{t("editor.bulletList")}</span>
                           </div>
                           {isBullet && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("orderedList")}
-                            <span>{t("editor.orderedList") || t("editor.numberedList") || "Numbered List"}</span>
+                            <span>{t("editor.orderedList")}</span>
                           </div>
                           {isOrdered && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleTaskList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("taskList")}
-                            <span>{t("editor.checkbox") || t("editor.taskList") || "Task List"}</span>
+                            <span>{t("editor.checkbox")}</span>
                           </div>
                           {isTask && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -16788,7 +13976,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </DropdownMenu>
                   );
                 }
-                case "toggle":
+                case "toggle": {
+                  const isActive = isToggleActive(editor);
                   return (
                     <Tooltip key="toggle">
                       <TooltipTrigger asChild>
@@ -16796,7 +13985,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full text-foreground"
+                          aria-pressed={isActive}
+                          className={`h-8 w-8 rounded-full md:h-8 md:w-8 md:rounded-full ${isActive ? "text-primary font-medium" : "text-foreground"}`}
                           disabled={!editor}
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => handleToggleClick(editor)}
@@ -16808,6 +13998,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       <TooltipContent>{t("editor.toggle")}</TooltipContent>
                     </Tooltip>
                   );
+                }
                 case "code":
                 case "codeBlock": {
                   const isInlineCode = editor?.isActive("code");
@@ -16831,34 +14022,34 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               {renderToolIcon(currentCodeIcon)}
                               <ChevronDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                              <span className="sr-only">{t("editor.code") || "Code"}</span>
+                              <span className="sr-only">{t("editor.code")}</span>
                             </Button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.code") || "Code"}</TooltipContent>
+                        <TooltipContent>{t("editor.code")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCode().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("code")}
-                            <span>{t("editor.inlineCode") || t("editor.code") || "Inline Code"}</span>
+                            <span>{t("editor.inlineCode")}</span>
                           </div>
                           {isInlineCode && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderToolIcon("codeBlock")}
-                            <span>{t("editor.codeBlock") || "Code Block"}</span>
+                            <span>{t("editor.codeBlock")}</span>
                           </div>
                           {isCodeBlock && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -17057,7 +14248,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             <button
                               key={`${emoji}-${index}`}
                               type="button"
-                              className="h-8 w-8 text-lg rounded-lg hover:bg-primary/8 focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
+                              className="h-8 w-8 text-lg rounded-lg hover:bg-primary/[0.08] focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => {
                                 if (editor) {
@@ -17326,78 +14517,78 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="heading" open={overflowSubmenu === "heading"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "heading" ? null : "heading")}>
                         {renderDropdownIcon("heading")}
-                        <span>{t("editor.headings") || "Headings"}</span>
+                        <span>{t("editor.headings")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 1 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h1")}
-                            <span>{t("editor.heading1") || "Heading 1"}</span>
+                            <span>{t("editor.heading1")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 1 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 2 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h2")}
-                            <span>{t("editor.heading2") || "Heading 2"}</span>
+                            <span>{t("editor.heading2")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 2 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 3 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 3 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h3")}
-                            <span>{t("editor.heading3") || "Heading 3"}</span>
+                            <span>{t("editor.heading3")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 3 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 4 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 4 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h4")}
-                            <span>{t("editor.heading4") || "Heading 4"}</span>
+                            <span>{t("editor.heading4")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 4 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 5 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 5 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h5")}
-                            <span>{t("editor.heading5") || "Heading 5"}</span>
+                            <span>{t("editor.heading5")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 5 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            editor?.isActive("heading", { level: 6 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            editor?.isActive("heading", { level: 6 }) ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("h6")}
-                            <span>{t("editor.heading6") || "Heading 6"}</span>
+                            <span>{t("editor.heading6")}</span>
                           </div>
                           {editor?.isActive("heading", { level: 6 }) && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -17415,14 +14606,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="fontFamily" open={overflowSubmenu === "fontFamily"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "fontFamily" ? null : "fontFamily")}>
                         {renderDropdownIcon("fontFamily")}
-                        <span>{t("editor.fontFamily") || "Font Family"}</span>
+                        <span>{t("editor.fontFamily")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-56 max-h-80 overflow-y-auto rounded-xl p-1.5 shadow-md">
                         {/* Custom Fonts Group */}
                         {customFonts && customFonts.length > 0 && (
                           <div className="mb-1.5 pb-1.5 border-b border-border/60">
                             <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              {t("settings.customFonts") || "Workspace Fonts"}
+                              {t("settings.customFonts")}
                             </div>
                             {customFonts.map((font) => {
                               const isCurrent = font.id === currentFontId;
@@ -17432,7 +14623,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                     <div
                                       role="menuitem"
                                       className={`cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between outline-none transition-colors select-none ${
-                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/18 focus:bg-primary/18" : "hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary"
+                                        isCurrent ? "bg-primary/15 text-primary font-semibold hover:bg-primary/[0.18] focus:bg-primary/[0.18]" : "hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary"
                                       }`}
                                       onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
                                       style={{ fontFamily: font.css }}
@@ -17441,7 +14632,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       {isCurrent && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0 ml-2" />}
                                     </div>
                                   </ContextMenuTrigger>
-                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[999999]">
+                                  <ContextMenuContent className="w-48 rounded-xl p-1.5 shadow-md z-[65]">
                                     <ContextMenuItem
                                       onClick={() => {
                                         setFontToRename(font);
@@ -17450,7 +14641,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                     >
                                       <Pencil className="h-4 w-4 text-muted-foreground" />
-                                      <span>{t("settings.renameFont") || "Rename"}</span>
+                                      <span>{t("settings.renameFont")}</span>
                                     </ContextMenuItem>
                                     <ContextMenuItem
                                       variant="destructive"
@@ -17460,7 +14651,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                       className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                     >
                                       <Trash2 className="h-4 w-4 text-destructive" />
-                                      <span>{t("settings.deleteFont") || "Delete"}</span>
+                                      <span>{t("settings.deleteFont")}</span>
                                     </ContextMenuItem>
                                   </ContextMenuContent>
                                 </ContextMenu>
@@ -17473,7 +14664,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         <div>
                           {customFonts && customFonts.length > 0 && (
                             <div className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                              {t("settings.systemFonts") || "System Fonts"}
+                              {t("settings.systemFonts")}
                             </div>
                           )}
                           {FONT_OPTIONS.map((font) => {
@@ -17484,7 +14675,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                 onClick={() => editor?.chain().focus().setFontFamily(font.css).run()}
                                 style={{ fontFamily: font.css }}
                                 className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                  isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                                 }`}
                               >
                                 <span className="truncate">{t(font.nameKey as any) || font.id}</span>
@@ -17504,7 +14695,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             }}
                           >
                             <Upload className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate font-medium">{t("settings.uploadFont") || "Upload Font"}</span>
+                            <span className="truncate font-medium">{t("settings.uploadFont")}</span>
                           </DropdownMenuItem>
                         </div>
                       </DropdownMenuSubContent>
@@ -17541,7 +14732,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="fontSize" open={overflowSubmenu === "fontSize"}>
                       <DropdownMenuSubTrigger style={{ fontFamily: appFontCss }} onClick={() => setOverflowSubmenu((prev) => prev === "fontSize" ? null : "fontSize")}>
                         {renderDropdownIcon("fontSize")}
-                        <span style={{ fontFamily: appFontCss }}>{t("editor.fontSize") || "Font Size"}</span>
+                        <span style={{ fontFamily: appFontCss }}>{t("editor.fontSize")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-40 max-h-72 overflow-y-auto rounded-xl p-1.5 shadow-md" style={{ fontFamily: appFontCss }}>
                         {FONT_SIZES.map((size) => {
@@ -17552,7 +14743,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                               onClick={() => editor?.chain().focus().setFontSize(size).run()}
                               style={{ fontFamily: appFontCss }}
                               className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                                isCurrent ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                               }`}
                             >
                               <span style={{ fontFamily: appFontCss }}>{size}</span>
@@ -17588,14 +14779,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="textColor" open={overflowSubmenu === "textColor"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "textColor" ? null : "textColor")}>
                         <TextColorIcon color={activeColor} className="h-4 w-4" />
-                        <span>{t("editor.textColor") || "Text Color"}</span>
+                        <span>{t("editor.textColor")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-64 p-3 rounded-xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md">
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                               <Palette className="w-3.5 h-3.5 text-primary" />
-                              {t("editor.textColor") || "Text Color"}
+                              {t("editor.textColor")}
                             </span>
                             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                               {activeColor || t("editor.defaultColor") || "Default"}
@@ -17603,7 +14794,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                            <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                               <input
                                 type="color"
                                 value={activeColor && /^#[0-9A-Fa-f]{6}$/.test(activeColor) ? activeColor : "#000000"}
@@ -17621,8 +14812,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                   editor?.chain().focus().setColor(val).run();
                                 }
                               }}
-                              placeholder={t("editor.defaultColor") || "Default"}
-                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                              placeholder={t("editor.defaultColor")}
+                              className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                               maxLength={7}
                             />
                             <Tooltip>
@@ -17635,16 +14826,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                   className="h-9 w-9 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-muted transition-colors [&_svg]:size-3.5 cursor-pointer shrink-0 border border-border/70"
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
-                                  <span className="sr-only">{t("editor.defaultColor") || "Reset"}</span>
+                                  <span className="sr-only">{t("editor.defaultColor")}</span>
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("editor.defaultColor") || "Default Color"}</TooltipContent>
+                              <TooltipContent>{t("editor.defaultColor")}</TooltipContent>
                             </Tooltip>
                           </div>
 
                           <div>
                             <span className="text-[10px] font-medium text-muted-foreground mb-1.5 block">
-                              {t("settings.quickPresets") || "Presets"}
+                              {t("settings.quickPresets")}
                             </span>
                             <div className="flex flex-wrap gap-1.5">
                               {PRESET_TEXT_COLORS.map((color) => {
@@ -17693,54 +14884,54 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="align" open={overflowSubmenu === "align"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "align" ? null : "align")}>
                         {renderDropdownIcon(currentAlignIcon)}
-                        <span>{t("editor.textAlign") || "Text Align"}</span>
+                        <span>{t("editor.textAlign")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("left").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isLeft ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("alignLeft")}
-                            <span>{t("editor.alignLeft") || "Align Left"}</span>
+                            <span>{t("editor.alignLeft")}</span>
                           </div>
                           {isLeft && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("center").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isCenter ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("alignCenter")}
-                            <span>{t("editor.alignCenter") || "Align Center"}</span>
+                            <span>{t("editor.alignCenter")}</span>
                           </div>
                           {isCenter && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("right").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isRight ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("alignRight")}
-                            <span>{t("editor.alignRight") || "Align Right"}</span>
+                            <span>{t("editor.alignRight")}</span>
                           </div>
                           {isRight && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isJustify ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("alignJustify")}
-                            <span>{t("editor.alignJustify") || "Justify"}</span>
+                            <span>{t("editor.alignJustify")}</span>
                           </div>
                           {isJustify && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -17861,42 +15052,42 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="list" open={overflowSubmenu === "list"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "list" ? null : "list")}>
                         {renderDropdownIcon(currentListIcon)}
-                        <span>{t("editor.list") || t("editor.bulletList") || "Lists"}</span>
+                        <span>{t("editor.list")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleBulletList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isBullet ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("bulletList")}
-                            <span>{t("editor.bulletList") || "Bullet List"}</span>
+                            <span>{t("editor.bulletList")}</span>
                           </div>
                           {isBullet && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isOrdered ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("orderedList")}
-                            <span>{t("editor.orderedList") || t("editor.numberedList") || "Numbered List"}</span>
+                            <span>{t("editor.orderedList")}</span>
                           </div>
                           {isOrdered && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleTaskList().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isTask ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("taskList")}
-                            <span>{t("editor.checkbox") || t("editor.taskList") || "Task List"}</span>
+                            <span>{t("editor.checkbox")}</span>
                           </div>
                           {isTask && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -17904,13 +15095,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </DropdownMenuSub>
                   );
                 }
-                case "toggle":
+                case "toggle": {
+                  const isActive = isToggleActive(editor);
                   return (
-                    <DropdownMenuItem key="toggle" onClick={() => handleToggleClick(editor)}>
+                    <DropdownMenuItem
+                      key="toggle"
+                      onClick={() => handleToggleClick(editor)}
+                      className={`flex items-center gap-2 cursor-pointer ${isActive ? "text-primary font-medium" : ""}`}
+                    >
                       {renderDropdownIcon("toggle")}
-                      <span>{t("editor.toggle")}</span>
+                      <span className="flex-1">{t("editor.toggle")}</span>
+                      {isActive && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                     </DropdownMenuItem>
                   );
+                }
                 case "code":
                 case "codeBlock": {
                   const isInlineCode = editor?.isActive("code");
@@ -17921,30 +15119,30 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="code" open={overflowSubmenu === "code"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "code" ? null : "code")}>
                         {renderDropdownIcon(currentCodeIcon)}
-                        <span>{t("editor.code") || "Code"}</span>
+                        <span>{t("editor.code")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-48 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCode().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isInlineCode ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("code")}
-                            <span>{t("editor.inlineCode") || t("editor.code") || "Inline Code"}</span>
+                            <span>{t("editor.inlineCode")}</span>
                           </div>
                           {isInlineCode && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                           className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                            isCodeBlock ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
                             {renderDropdownIcon("codeBlock")}
-                            <span>{t("editor.codeBlock") || "Code Block"}</span>
+                            <span>{t("editor.codeBlock")}</span>
                           </div>
                           {isCodeBlock && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                         </DropdownMenuItem>
@@ -18009,7 +15207,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="table" open={overflowSubmenu === "table"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "table" ? null : "table")}>
                         {renderDropdownIcon("table")}
-                        <span>{t("editor.tableOptions") || t("editor.insertTable") || "Table Options"}</span>
+                        <span>{t("editor.tableOptions")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-60 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem onClick={() => editor?.chain().focus().addRowBefore().run()}>
@@ -18122,7 +15320,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="image" open={overflowSubmenu === "image"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "image" ? null : "image")}>
                         {renderDropdownIcon("image")}
-                        <span>{t("editor.image") || "Image"}</span>
+                        <span>{t("editor.image")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-56 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem onClick={openImageDialog} className="flex items-center gap-2 cursor-pointer">
@@ -18151,7 +15349,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     <DropdownMenuSub key="video" open={overflowSubmenu === "video"}>
                       <DropdownMenuSubTrigger onClick={() => setOverflowSubmenu((prev) => prev === "video" ? null : "video")}>
                         {renderDropdownIcon("video")}
-                        <span>{t("editor.video") || "Video"}</span>
+                        <span>{t("editor.video")}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-56 rounded-xl p-1.5 shadow-md">
                         <DropdownMenuItem onClick={openVideoDialog} className="flex items-center gap-2 cursor-pointer">
@@ -18322,12 +15520,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <Dialog open={importDocxDialogOpen} onOpenChange={setImportDocxDialogOpen}>
             <DialogContent className="sm:max-w-md rounded-2xl">
               <DialogHeader>
-                <DialogTitle>นำเข้าไฟล์ docx</DialogTitle>
-                <DialogDescription>เลือกไฟล์ docx เพื่อแปลงเป็น HTML และแก้ไขใน Editor</DialogDescription>
+                <DialogTitle>{t("docxImport.title")}</DialogTitle>
+                <DialogDescription>{t("docxImport.description")}</DialogDescription>
               </DialogHeader>
               <div className="py-1">
                 <Button type="button" onClick={() => docxInputRef.current?.click()}>
-                  เลือกไฟล์ docx
+                  {t("docxImport.selectFile")}
                 </Button>
               </div>
               <DialogFooter>
@@ -18370,7 +15568,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             }
           }}
           className={`flex flex-col cursor-default ${
-            isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || isPdfFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note)
+            isImageFile(note) || isVideoFile(note) || isBinaryFile(note) || isPdfFile(note) || note.contentFormat === "html" || isHtmlFile(note) || note.contentFormat === "css" || isCssFile(note) || note.contentFormat === "javascript" || isJsFile(note)
               ? "flex-1 min-h-0 min-w-0 overflow-hidden"
               : "flex-1 overflow-y-auto overflow-x-hidden min-w-0"
           } w-full`}
@@ -18432,7 +15630,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     }
                   }}
                   onClick={handleToggleZoomFit}
-                  className={`m-auto select-none transition-[width,height] duration-150 border border-border/60 shadow-xs rounded-xl ${
+                  className={`m-auto select-none transition-[width,height] duration-150 border border-border/60 shadow-sm rounded-xl ${
                     imageZoomMode === "fit"
                       ? "cursor-zoom-in"
                       : "cursor-zoom-out"
@@ -18449,10 +15647,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <AudioPlayer src={audioBlobUrl} title={note.fileName} />
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-2.5 text-muted-foreground text-sm">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                  <span>{t("common.loading") || "Loading audio..."}</span>
-                </div>
+                <PageLoader title={note.fileName || t("common.loading")} />
               )}
             </div>
           ) : isVideoFile(note) || videoBlobUrl ? (
@@ -18471,10 +15666,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   />
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-2.5 text-muted-foreground text-sm">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                  <span>{t("common.loading") || "Loading video..."}</span>
-                </div>
+                <PageLoader title={note.fileName || t("common.loading")} />
               )}
             </div>
           ) : isPdfFile(note) ? (
@@ -18676,7 +15868,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || (target.isContentEditable && target.closest(".ProseMirror")))) {
                       return;
                     }
-                    if (editor && !isReadingMode) {
+                    if (editor && !isStrictReadingMode) {
                       const electronAPI = (window as any)?.electronAPI;
                       if (electronAPI?.readClipboardImageSync) {
                         try {
@@ -18689,7 +15881,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             });
                             return;
                           }
-                        } catch {}
+                        } catch { /* ignore */ }
                       }
                       if (e.clipboardData) {
                         const files = e.clipboardData.files;
@@ -18723,10 +15915,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       ))}
                     </div>
                   )}
-                  {editor && !isReadingMode && <TableInteractiveOverlay editor={editor} />}
+                  {editor && !isStrictReadingMode && <TableInteractiveOverlay editor={editor} />}
                   <EditorContent
                     editor={editor}
-                    className={`w-full min-w-0 max-w-full ${isReadingMode ? "cursor-default" : "cursor-text"}`}
+                    className={`w-full min-w-0 max-w-full ${isStrictReadingMode ? "cursor-default" : "cursor-text"}`}
                     onClickCapture={(e) => {
                       const target = (e.target as HTMLElement).closest("a");
                       if (!target) return;
@@ -18754,7 +15946,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           onSelectNote?.(matchedNote.id);
                         } else {
                           toast({
-                            title: t("editor.noteNotFound") || "Note not found",
+                            title: t("editor.noteNotFound"),
                             description: `[[${wikilinkTarget}]]`,
                           });
                         }
@@ -18796,13 +15988,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <div
                     data-editor-bottom-area="true"
                     onClick={() => {
-                      if (editor && !isReadingMode) {
+                      if (editor && !isStrictReadingMode) {
                         editor.commands.focus("end");
                       }
                     }}
                     className={
-                      isReadingMode
+                      isStrictReadingMode
                         ? "min-h-8 sm:min-h-12 w-full shrink-0 cursor-default"
+                        : isReadingLivePreview
+                        ? "min-h-8 sm:min-h-12 w-full shrink-0 cursor-text"
                         : "min-h-[40vh] sm:min-h-[50vh] w-full shrink-0 cursor-text"
                     }
                   />
@@ -18810,31 +16004,51 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               </ContextMenuTrigger>
 
               <ContextMenuContent className={editor && !editor.state.selection.empty ? "w-68 min-w-[17rem] rounded-xl" : "w-56 rounded-xl"}>
-                {contextSpellData && contextSpellData.suggestions.length > 0 && (
+                {contextSpellData && (
                   <>
-                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1">
-                      <span>{t("settings.spellCheckSetting") || "Spell Suggestions"}</span>
-                      <span className="text-[10px] text-muted-foreground/60 italic font-mono">({contextSpellData.word})</span>
+                    <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground flex items-center justify-between border-b border-border/40 mb-1 gap-2">
+                      <span>{t("settings.spellCheckSetting")}</span>
+                      <span className="text-[10px] text-muted-foreground/60 italic font-mono truncate max-w-[9rem]">({contextSpellData.word})</span>
                     </div>
-                    {contextSpellData.suggestions.map((suggestion) => (
-                      <ContextMenuItem
-                        key={suggestion}
-                        onClick={() => {
-                          if (!editor) return;
-                          editor
-                            .chain()
-                            .focus()
-                            .setTextSelection({ from: contextSpellData.from, to: contextSpellData.to })
-                            .insertContent(suggestion)
-                            .run();
-                          setContextSpellData(null);
-                        }}
-                        className="gap-2.5 font-medium text-primary focus:text-primary focus:bg-primary/10"
-                      >
-                        <Check className="h-4 w-4 shrink-0 text-primary stroke-[2.5]" />
-                        <span>{suggestion}</span>
-                      </ContextMenuItem>
-                    ))}
+                    {contextSpellData.suggestions.length > 0 ? (
+                      contextSpellData.suggestions.map((suggestion) => (
+                        <ContextMenuItem
+                          key={suggestion}
+                          onClick={() => {
+                            if (!editor) return;
+                            editor
+                              .chain()
+                              .focus()
+                              .setTextSelection({ from: contextSpellData.from, to: contextSpellData.to })
+                              .insertContent(suggestion)
+                              .run();
+                            setContextSpellData(null);
+                          }}
+                          className="gap-2.5 font-medium text-primary focus:text-primary focus:bg-primary/10"
+                        >
+                          <Check className="h-4 w-4 shrink-0 text-primary stroke-[2.5]" />
+                          <span>{suggestion}</span>
+                        </ContextMenuItem>
+                      ))
+                    ) : (
+                      <div className="px-3 py-1.5 text-xs text-muted-foreground/70 italic select-none">
+                        {t("editor.noSpellSuggestions")}
+                      </div>
+                    )}
+                    <ContextMenuItem
+                      onClick={() => {
+                        if (!editor) return;
+                        addCustomSpellWord(contextSpellData.word);
+                        editor.view.dispatch(
+                          editor.state.tr.setMeta(spellCheckPluginKey, { recompute: true })
+                        );
+                        setContextSpellData(null);
+                      }}
+                      className="gap-2.5 text-xs text-muted-foreground"
+                    >
+                      <Plus className="h-3.5 w-3.5 shrink-0" />
+                      <span>{t("editor.addToDictionary")}</span>
+                    </ContextMenuItem>
                     <ContextMenuSeparator />
                   </>
                 )}
@@ -18845,7 +16059,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Undo2 className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.undo") || "Undo"}</span>
+                  <span className="whitespace-nowrap">{t("editor.undo")}</span>
                   <ContextMenuShortcut>Ctrl+Z</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18855,7 +16069,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Redo2 className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.redo") || "Redo"}</span>
+                  <span className="whitespace-nowrap">{t("editor.redo")}</span>
                   <ContextMenuShortcut>Ctrl+Y</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18875,7 +16089,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Scissors className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.cut") || "Cut"}</span>
+                  <span className="whitespace-nowrap">{t("editor.cut")}</span>
                   <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18892,7 +16106,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <Copy className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.copy") || "Copy"}</span>
+                  <span className="whitespace-nowrap">{t("editor.copy")}</span>
                   <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18947,7 +16161,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <ClipboardList className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.paste") || "Paste"}</span>
+                  <span className="whitespace-nowrap">{t("editor.paste")}</span>
                   <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18958,7 +16172,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   className="gap-2.5"
                 >
                   <FileText className="h-4 w-4" />
-                  <span className="whitespace-nowrap">{t("editor.selectAll") || "Select All"}</span>
+                  <span className="whitespace-nowrap">{t("editor.selectAll")}</span>
                   <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
                 </ContextMenuItem>
 
@@ -18981,7 +16195,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       className="gap-2.5"
                     >
                       <Eraser className="h-4 w-4" />
-                      <span className="whitespace-nowrap">{t("editor.clearFormatting") || "Clear Formatting"}</span>
+                      <span className="whitespace-nowrap">{t("editor.clearFormatting")}</span>
                       <ContextMenuShortcut>Ctrl+Shift+N</ContextMenuShortcut>
                     </ContextMenuItem>
                     <ContextMenuItem
@@ -18989,14 +16203,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       className="gap-2.5"
                     >
                       <Languages className="h-4 w-4" />
-                      <span className="whitespace-nowrap">{t("editor.translateSelection") || "Translate"}</span>
+                      <span className="whitespace-nowrap">{t("editor.translateSelection")}</span>
                     </ContextMenuItem>
                     <ContextMenuItem
                       onClick={handleFixLanguage}
                       className="gap-2.5"
                     >
                       <Wrench className="h-4 w-4" />
-                      <span className="whitespace-nowrap">{t("editor.fixLanguage") || "Fix Language (TH/EN)"}</span>
+                      <span className="whitespace-nowrap">{t("editor.fixLanguage")}</span>
                     </ContextMenuItem>
                   </>
                 )}
@@ -19020,7 +16234,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.imageDimensions") || "Dimensions"}: {imageDimensions ? `${imageDimensions.width} × ${imageDimensions.height} px` : "—"}
+                      {t("editor.imageDimensions")}: {imageDimensions ? `${imageDimensions.width} × ${imageDimensions.height} px` : "—"}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19035,7 +16249,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                          {t("editor.fileSize")}: {formatFileSize(activeFileSize)}
                         </TooltipContent>
                       </Tooltip>
 
@@ -19050,7 +16264,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
+                      {t("editor.imageFormat")}: {getFileFormatLabel(note)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19066,11 +16280,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       >
                         <ZoomOut className="h-3.5 w-3.5" />
-                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                        <span className="sr-only">{t("editor.zoomOut")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomOut") || "Zoom Out"}
+                      {t("editor.zoomOut")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19082,11 +16296,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         onClick={handleToggleZoomFit}
                         className="tabular-nums font-normal text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                       >
-                        {imageZoomMode === "fit" ? (t("editor.fitToWindow") || "Fit") : `${imageCustomZoom}%`}
+                        {imageZoomMode === "fit" ? (t("editor.fitToWindow")) : `${imageCustomZoom}%`}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {imageZoomMode === "fit" ? (t("editor.actualSize") || "Actual size (100%)") : (t("editor.fitToWindow") || "Fit to Window")}
+                      {imageZoomMode === "fit" ? (t("editor.actualSize")) : (t("editor.fitToWindow"))}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19099,11 +16313,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       >
                         <ZoomIn className="h-3.5 w-3.5" />
-                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
+                        <span className="sr-only">{t("editor.zoomIn")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomIn") || "Zoom In"}
+                      {t("editor.zoomIn")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19117,11 +16331,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                       >
                         <ExternalLink className="h-3 w-3" />
-                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                        <span>{t("editor.openInDefaultApp")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                      {t("editor.openInDefaultApp")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19139,7 +16353,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.videoDimensions") || "Dimensions"}: {`${videoDimensions.width} × ${videoDimensions.height} px`}
+                          {t("editor.videoDimensions")}: {`${videoDimensions.width} × ${videoDimensions.height} px`}
                         </TooltipContent>
                       </Tooltip>
                       <div className="h-3 w-[1px] bg-border/60" />
@@ -19155,7 +16369,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.videoDuration") || "Duration"}: {formatVideoDuration(videoDuration)}
+                          {t("editor.videoDuration")}: {formatVideoDuration(videoDuration)}
                         </TooltipContent>
                       </Tooltip>
                       <div className="h-3 w-[1px] bg-border/60" />
@@ -19171,7 +16385,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                          {t("editor.fileSize")}: {formatFileSize(activeFileSize)}
                         </TooltipContent>
                       </Tooltip>
                       <div className="h-3 w-[1px] bg-border/60" />
@@ -19185,7 +16399,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.videoFormat") || "Format"}: {getFileFormatLabel(note)}
+                      {t("editor.videoFormat")}: {getFileFormatLabel(note)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19200,11 +16414,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                       >
                         <ExternalLink className="h-3 w-3" />
-                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                        <span>{t("editor.openInDefaultApp")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                      {t("editor.openInDefaultApp")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19226,12 +16440,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               <ChevronLeft className="h-3.5 w-3.5" />
                               <span className="sr-only">
-                                {lang === "th" ? "หน้าก่อนหน้า" : "Previous Page"}
+                                {t("editor.previousPage")}
                               </span>
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="top">
-                            {lang === "th" ? "หน้าก่อนหน้า" : "Previous Page"}
+                            {t("editor.previousPage")}
                           </TooltipContent>
                         </Tooltip>
 
@@ -19251,16 +16465,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                   type="button"
                                   className="tabular-nums text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                                 >
-                                  {lang === "th"
-                                    ? `หน้า ${pdfViewerState.currentPage} / ${pdfViewerState.totalPages}`
-                                    : `Page ${pdfViewerState.currentPage} / ${pdfViewerState.totalPages}`}
+                                  {t("editor.page2", { v0: pdfViewerState.currentPage, v1: pdfViewerState.totalPages })}
                                 </button>
                               </PopoverTrigger>
                             </TooltipTrigger>
                             <TooltipContent side="top">
-                              {lang === "th"
-                                ? "คลิกเพื่อข้ามไปยังหน้าที่ต้องการ"
-                                : "Click to jump to page"}
+                              {t("editor.clickToJumpToPage")}
                             </TooltipContent>
                           </Tooltip>
                           <PopoverContent
@@ -19302,7 +16512,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                                 size="sm"
                                 className="h-7 px-2.5 rounded-lg text-xs shrink-0"
                               >
-                                {lang === "th" ? "ไป" : "Go"}
+                                {t("editor.go")}
                               </Button>
                             </form>
                           </PopoverContent>
@@ -19318,12 +16528,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             >
                               <ChevronRight className="h-3.5 w-3.5" />
                               <span className="sr-only">
-                                {lang === "th" ? "หน้าถัดไป" : "Next Page"}
+                                {t("editor.nextPage")}
                               </span>
                             </button>
                           </TooltipTrigger>
                           <TooltipContent side="top">
-                            {lang === "th" ? "หน้าถัดไป" : "Next Page"}
+                            {t("editor.nextPage")}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -19341,7 +16551,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                          {t("editor.fileSize")}: {formatFileSize(activeFileSize)}
                         </TooltipContent>
                       </Tooltip>
 
@@ -19356,7 +16566,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
+                      {t("editor.imageFormat")}: {getFileFormatLabel(note)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19385,11 +16595,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           const ZoomOutIconComp = getToolbarIcon("zoomOut", settings.iconPack);
                           return <ZoomOutIconComp className="h-3.5 w-3.5" />;
                         })()}
-                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                        <span className="sr-only">{t("editor.zoomOut")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomOut") || "Zoom Out"}
+                      {t("editor.zoomOut")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19407,7 +16617,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         </DropdownMenuTrigger>
                       </TooltipTrigger>
                       <TooltipContent side="top">
-                        {lang === "th" ? "ปรับขนาดการซูม" : "Zoom Options"}
+                        {t("editor.zoomOptions")}
                       </TooltipContent>
                     </Tooltip>
                     <DropdownMenuContent
@@ -19419,7 +16629,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         onClick={() => pdfEditorRef.current?.sendCommand("fitWidth")}
                         className="cursor-pointer py-1.5 px-2.5 rounded-lg text-xs flex items-center justify-between"
                       >
-                        <span>{lang === "th" ? "พอดีความกว้าง" : "Fit to Width"}</span>
+                        <span>{t("editor.fitToWidth")}</span>
                       </DropdownMenuItem>
                       <div className="my-1 h-px bg-border/60" />
                       {[50, 75, 100, 125, 150, 200].map((pct) => {
@@ -19445,7 +16655,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                             }}
                             className={`cursor-pointer py-1 px-2.5 rounded-lg text-xs tabular-nums flex items-center justify-between ${
                               isPctActive
-                                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
+                                ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
                                 : ""
                             }`}
                           >
@@ -19481,11 +16691,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           const ZoomInIconComp = getToolbarIcon("zoomIn", settings.iconPack);
                           return <ZoomInIconComp className="h-3.5 w-3.5" />;
                         })()}
-                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
+                        <span className="sr-only">{t("editor.zoomIn")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomIn") || "Zoom In"}
+                      {t("editor.zoomIn")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19502,11 +16712,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           const ExtIconComp = getToolbarIcon("externalLink", settings.iconPack);
                           return <ExtIconComp className="h-3 w-3" />;
                         })()}
-                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                        <span>{t("editor.openInDefaultApp")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                      {t("editor.openInDefaultApp")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19524,7 +16734,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top">
-                          {t("editor.fileSize") || "File Size"}: {formatFileSize(activeFileSize)}
+                          {t("editor.fileSize")}: {formatFileSize(activeFileSize)}
                         </TooltipContent>
                       </Tooltip>
 
@@ -19539,7 +16749,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.imageFormat") || "Format"}: {getFileFormatLabel(note)}
+                      {t("editor.imageFormat")}: {getFileFormatLabel(note)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19554,11 +16764,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded px-1.5 py-0.5 hover:bg-muted/60"
                       >
                         <ExternalLink className="h-3 w-3" />
-                        <span>{t("editor.openInDefaultApp") || "Open in App"}</span>
+                        <span>{t("editor.openInDefaultApp")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.openInDefaultApp") || "Open in Default App"}
+                      {t("editor.openInDefaultApp")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -19570,7 +16780,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="font-normal text-muted-foreground cursor-default hover:text-foreground transition-colors">
-                        {t("editor.lineCol", { line: editorStats.line, col: editorStats.col }) || `Ln ${editorStats.line}, Col ${editorStats.col}`}
+                        {t("editor.lineCol", { line: editorStats.line, col: editorStats.col })}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">
@@ -19641,11 +16851,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       >
                         <ZoomOut className="h-3.5 w-3.5" />
-                        <span className="sr-only">{t("editor.zoomOut") || "Zoom Out"}</span>
+                        <span className="sr-only">{t("editor.zoomOut")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomOut") || "Zoom Out"}
+                      {t("editor.zoomOut")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19661,7 +16871,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomReset") || "Reset Zoom (100%)"}
+                      {t("editor.zoomReset")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19674,11 +16884,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
                       >
                         <ZoomIn className="h-3.5 w-3.5" />
-                        <span className="sr-only">{t("editor.zoomIn") || "Zoom In"}</span>
+                        <span className="sr-only">{t("editor.zoomIn")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top">
-                      {t("editor.zoomIn") || "Zoom In"}
+                      {t("editor.zoomIn")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -19720,22 +16930,16 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                         className="flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground select-none font-normal leading-none cursor-default"
                       >
                         <span>
-                          {settings.language === "th"
-                            ? keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"
-                            : keyboardLanguage === "th" ? "TH" : "EN"}
+                          {t(keyboardLanguage === "th" ? "editor.keyboardLangTh" : "editor.keyboardLangEn")}
                         </span>
                       </div>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
                       <p className="font-semibold">
-                        {settings.language === "th"
-                          ? `แป้นพิมพ์: ${keyboardLanguage === "th" ? "ไทย" : "อังกฤษ"}`
-                          : `Keyboard: ${keyboardLanguage === "th" ? "TH" : "EN"}`}
+                        {t("editor.keyboardStatus", { lang: t(keyboardLanguage === "th" ? "editor.keyboardLangTh" : "editor.keyboardLangEn") })}
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {settings.language === "th"
-                          ? "สลับภาษา: Win+Spacebar"
-                          : "Switch: Win+Spacebar"}
+                        {t("editor.switchWinSpacebar")}
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -19870,28 +17074,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         </AnimatePresence>
       </div>
 
-      <FloatingCalculator
-        isOpen={calculatorOpen}
-        onClose={() => setCalculatorOpen(false)}
-        zIndex={calculatorZIndex}
-        onFocusWindow={bringCalculatorToFront}
-      />
 
-      <FloatingClock
-        isOpen={clockOpen}
-        onClose={() => setClockOpen(false)}
-        zIndex={clockZIndex}
-        onFocusWindow={bringClockToFront}
-      />
-
-      <FloatingTranslator
-        isOpen={translatorOpen}
-        onClose={() => setTranslatorOpen(false)}
-        initialText={translatorInitialText}
-        onInsertTranslation={handleInsertTranslation}
-        zIndex={translatorZIndex}
-        onFocusWindow={bringTranslatorToFront}
-      />
 
 
 
@@ -19962,7 +17145,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             position: "fixed",
             top: Math.min(Math.max(12, footnotePopoverState.coords.top), window.innerHeight - 80),
             left: Math.min(Math.max(12, footnotePopoverState.coords.left), window.innerWidth - 300),
-            zIndex: 9999,
+            zIndex: 60,
           }}
           className="w-64 sm:w-72 p-2 rounded-2xl shadow-xl border border-border/80 bg-popover/95 backdrop-blur-md select-text animate-in fade-in-0 zoom-in-95 duration-150"
         >
@@ -19981,7 +17164,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   setFootnotePopoverState({ open: false, coords: null });
                 }
               }}
-              placeholder={t("editor.footnotePlaceholder") || (settings.language === "th" ? "ข้อความอ้างอิง..." : "Footnote reference...")}
+              placeholder={t("editor.footnotePlaceholder")}
               className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
               autoFocus
             />
@@ -20006,11 +17189,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                   }`}
                 >
                   <CornerDownLeft className="h-3.5 w-3.5" />
-                  <span className="sr-only">{settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}</span>
+                  <span className="sr-only">{t("editor.pressEnterToInsert")}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                {settings.language === "th" ? "กด Enter เพื่อแทรก" : "Press Enter to insert"}
+                {t("editor.pressEnterToInsert")}
               </TooltipContent>
             </Tooltip>
           </div>
@@ -20018,7 +17201,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       )}
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl overflow-hidden">
+        <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle>{t("editor.link")}</DialogTitle>
             <DialogDescription>{t("editor.linkDescription")}</DialogDescription>
@@ -20031,7 +17214,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => setLinkTab("workspace")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 linkTab === "workspace"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -20043,7 +17226,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => setLinkTab("external")}
               className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 linkTab === "external"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -20299,51 +17482,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         } as any)}
       />
 
-      <FloatingAudioRecorder
-        isOpen={audioRecorderOpen}
-        onClose={() => setAudioRecorderOpen(false)}
-        zIndex={audioRecorderZIndex}
-        onFocusWindow={bringAudioRecorderToFront}
-        rootDirHandle={rootDirHandle}
-        onInsertAudio={({ src, title, relativeSrc }) => {
-          if (!editor) return;
-          const targetTitle = title || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-          const targetRel = relativeSrc || `attachments/${targetTitle.endsWith(".webm") || targetTitle.endsWith(".mp3") ? targetTitle : `${targetTitle}.webm`}`;
-          let decodedRel = targetRel;
-          try {
-            decodedRel = decodeURIComponent(targetRel);
-          } catch {}
 
-          if (src) {
-            assetBlobUrlMap.current.set(targetRel, src);
-            assetBlobUrlMap.current.set(decodedRel, src);
-            assetBlobUrlMap.current.set(src, targetRel);
-            audioLocalCache.set(targetRel, src);
-            audioLocalCache.set(decodedRel, src);
-          }
-
-          insertAudioToEditor({
-            src,
-            title: targetTitle,
-            "data-relative-src": targetRel,
-          });
-        }}
-      />
 
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("sidebar.deleteFileAction")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {settings.language === "th"
-                ? `แน่ใจไหมที่จะย้ายไฟล์ "${note?.fileName || note?.title || t("editor.untitled")}" ไปที่ถังขยะ?`
-                : `Are you sure you want to move "${note?.fileName || note?.title || "Untitled"}" to trash?`}
+              {t("editor.moveSingleFileToTrashConfirm", { name: note?.fileName || note?.title || t("editor.untitled") })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
                 void handleDeleteNote();
               }}
@@ -20419,7 +17571,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         <div
           role="menu"
           data-slash-menu="true"
-          className="fixed z-50 w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
+          className="fixed z-[60] w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
           style={{
             top: `${Math.min(slashMenuState.coords.top + 6, window.innerHeight - 300)}px`,
             left: `${Math.min(slashMenuState.coords.left, window.innerWidth - 240)}px`,
@@ -20478,8 +17630,8 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                       }}
                       className={`flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none [&>span>svg]:h-4 [&>span>svg]:w-4 [&>span>svg]:shrink-0 [&>span>svg]:text-muted-foreground ${
                         isSelected
-                          ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
-                          : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                          ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/[0.08] hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                          : "text-foreground font-normal hover:bg-primary/[0.08] hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
                       }`}
                       onClick={() => {
                         if (editor) {
@@ -20512,50 +17664,48 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       )}
 
       {/* Share Dialog 1: Ask user if they want to sync workspace to Google Drive for sharing */}
-      <Dialog open={shareSyncDialogOpen} onOpenChange={setShareSyncDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
+      <AlertDialog open={shareSyncDialogOpen} onOpenChange={setShareSyncDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
               <GoogleDriveIcon className="h-5 w-5 shrink-0" />
-              <span>{t("shareDialog.syncRequiredTitle") || "Sync to Google Drive Required"}</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground pt-1.5 leading-relaxed">
-              {t("shareDialog.syncRequiredDesc") ||
-                "This note is currently stored locally on this machine. To generate a shareable link, this workspace needs to be synced to Google Drive. Would you like to sync it now?"}
-            </DialogDescription>
-          </DialogHeader>
+              <span>{t("shareDialog.syncRequiredTitle")}</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("shareDialog.syncRequiredDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-          <DialogFooter className="gap-2 sm:gap-0 pt-2">
-            <Button
-              type="button"
-              variant="outline"
+          <AlertDialogFooter>
+            <AlertDialogCancel
               disabled={isSharingLoading}
               onClick={() => setShareSyncDialogOpen(false)}
-              className="rounded-xl text-xs cursor-pointer"
             >
-              {t("common.cancel") || "Cancel"}
-            </Button>
-            <Button
-              type="button"
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
               disabled={isSharingLoading}
-              onClick={handleConfirmSyncAndShare}
-              className="rounded-xl text-xs gap-1.5 cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmSyncAndShare();
+              }}
+              className="gap-1.5"
             >
               {isSharingLoading ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>{t("shareDialog.syncing") || "Syncing to Drive..."}</span>
+                  <span>{t("shareDialog.syncing")}</span>
                 </>
               ) : (
                 <>
                   <GoogleDriveIcon className="h-3.5 w-3.5" />
-                  <span>{t("shareDialog.syncAndShareBtn") || "Sync & Share Note"}</span>
+                  <span>{t("shareDialog.syncAndShareBtn")}</span>
                 </>
               )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Share Dialog 2: Share link generated successfully */}
       <Dialog open={shareSuccessDialogOpen} onOpenChange={setShareSuccessDialogOpen}>
@@ -20563,10 +17713,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <GoogleDriveIcon className="h-5 w-5 shrink-0" />
-              <span>{t("shareDialog.shareLinkTitle") || "Google Drive Share Link"}</span>
+              <span>{t("shareDialog.shareLinkTitle")}</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              {t("shareDialog.shareLinkDesc") || "Anyone with this link can view this document on Google Drive."}
+              {t("shareDialog.shareLinkDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -20589,12 +17739,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               {copiedShareLink ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-white stroke-[2.5]" />
-                  <span>{t("common.copied") || "Copied"}</span>
+                  <span>{t("common.copied")}</span>
                 </>
               ) : (
                 <>
                   <Copy className="h-3.5 w-3.5" />
-                  <span>{t("shareDialog.copyLink") || "Copy Link"}</span>
+                  <span>{t("shareDialog.copyLink")}</span>
                 </>
               )}
             </Button>
@@ -20607,7 +17757,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               onClick={() => setShareSuccessDialogOpen(false)}
               className="rounded-xl text-xs cursor-pointer"
             >
-              {t("common.close") || "Close"}
+              {t("common.close")}
             </Button>
 
             <div className="flex items-center gap-2">
@@ -20621,12 +17771,12 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 {isRevokingShare ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>{t("shareDialog.revoking") || "Stopping share..."}</span>
+                    <span>{t("shareDialog.revoking")}</span>
                   </>
                 ) : (
                   <>
                     <GlobeOff className="h-3.5 w-3.5" />
-                    <span>{t("shareDialog.revokeShare") || "Stop Sharing"}</span>
+                    <span>{t("shareDialog.revokeShare")}</span>
                   </>
                 )}
               </Button>
@@ -20643,7 +17793,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                 className="rounded-xl text-xs gap-1.5 cursor-pointer"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                <span>{t("shareDialog.openDrive") || "Open in Google Drive"}</span>
+                <span>{t("shareDialog.openDrive")}</span>
               </Button>
             </div>
           </DialogFooter>
@@ -20684,7 +17834,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             position: "fixed",
             top: Math.min(slashEmojiState.coords.top, window.innerHeight - 280),
             left: Math.min(Math.max(12, slashEmojiState.coords.left), window.innerWidth - 300),
-            zIndex: 9999,
+            zIndex: 60,
           }}
           className="w-72 rounded-xl p-2.5 shadow-xl border border-border/80 bg-popover text-popover-foreground animate-in fade-in-0 zoom-in-95"
         >
@@ -20696,7 +17846,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               <button
                 key={`${emoji}-${index}`}
                 type="button"
-                className="h-8 w-8 text-lg rounded-lg hover:bg-primary/8 focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
+                className="h-8 w-8 text-lg rounded-lg hover:bg-primary/[0.08] focus:bg-primary/15 hover:text-primary focus:text-primary flex items-center justify-center transition-colors cursor-pointer"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (editor) {
@@ -20725,14 +17875,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <Dialog open={Boolean(fontToRename)} onOpenChange={(open) => !open && setFontToRename(null)}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>{t("settings.renameFont") || "Rename Font"}</DialogTitle>
+            <DialogTitle>{t("settings.renameFont")}</DialogTitle>
             <DialogDescription>
               {fontToRename?.fileName}
             </DialogDescription>
           </DialogHeader>
           <div className="py-1">
             <label htmlFor="rename-font-name" className="mb-2 block text-sm font-medium text-foreground">
-              {t("sidebar.fileNameLabel") || "Font Name"}
+              {t("sidebar.fileNameLabel")}
             </label>
             <input
               id="rename-font-name"
@@ -20752,10 +17902,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setFontToRename(null)}>
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </Button>
             <Button type="button" onClick={() => void handleConfirmFontRename()} disabled={!fontRenameValue.trim()}>
-              {t("sidebar.renameAction") || t("common.save") || "Rename"}
+              {t("sidebar.renameAction")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -20765,20 +17915,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       <AlertDialog open={Boolean(fontToDelete)} onOpenChange={(open) => !open && setFontToDelete(null)}>
         <AlertDialogContent className="sm:max-w-md rounded-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.deleteFont") || "Delete Font"}</AlertDialogTitle>
+            <AlertDialogTitle>{t("settings.deleteFont")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {(t("settings.deleteFontConfirm") || 'Are you sure you want to delete font "{name}"?').replace("{name}", fontToDelete?.name || "")}
+              {(t("settings.deleteFontConfirm")).replace("{name}", fontToDelete?.name || "")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setFontToDelete(null)}>
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void handleConfirmFontDelete()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t("settings.deleteFont") || "Delete"}
+              {t("settings.deleteFont")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

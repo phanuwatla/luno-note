@@ -324,6 +324,22 @@ export function updateFrontmatterTags(markdown: string, newTags: string[]): stri
   return newFrontmatter + parsed.bodyContent;
 }
 
+function replaceInlineTagsOutsideCode(
+  body: string,
+  tagRegex: RegExp,
+  replacer: (fullMatch: string, prefix: string) => string
+): string {
+  const codeOrTagPattern = new RegExp(
+    "(```[\\s\\S]*?```|~~~[\\s\\S]*?~~~|<pre\\b[^>]*>[\\s\\S]*?<\\/pre>|<code\\b[^>]*>[\\s\\S]*?<\\/code>|`[^`\\n]+`)|" +
+      tagRegex.source,
+    "gi"
+  );
+  return body.replace(codeOrTagPattern, (fullMatch, protectedBlock, prefix) => {
+    if (protectedBlock) return protectedBlock;
+    return replacer(fullMatch, prefix || "");
+  });
+}
+
 /**
  * Renames a tag across Frontmatter and inline body tags in Markdown text.
  */
@@ -339,13 +355,22 @@ export function renameTagInMarkdown(markdown: string, oldTag: string, newTag: st
     t.toLowerCase() === normOld.toLowerCase() ? normNew : t
   );
 
-  let updatedContent = updateFrontmatterTags(markdown, updatedFrontmatterTags);
+  const updatedContent = updateFrontmatterTags(markdown, updatedFrontmatterTags);
+  const reParsed = parseFrontmatterAndTags(updatedContent);
 
-  // Replace inline tags in body
-  const inlineTagRegex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normOld)}(?=$|[\\s)\\]},.!?:;])`, "gi");
-  updatedContent = updatedContent.replace(inlineTagRegex, `$1#${normNew}`);
+  // Replace inline tags in body only (protecting code blocks and frontmatter)
+  const inlineTagRegex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normOld)}(?=$|[\\s)\\]},.!?:;\\r\\n])`, "gi");
+  const updatedBody = replaceInlineTagsOutsideCode(
+    reParsed.bodyContent,
+    inlineTagRegex,
+    (_full, prefix) => `${prefix}#${normNew}`
+  );
 
-  return updatedContent;
+  if (reParsed.hasFrontmatter && reParsed.frontmatterRaw) {
+    const sep = updatedContent.slice(reParsed.frontmatterRaw.length).match(/^\r?\n/)?.[0] || "\n";
+    return `${reParsed.frontmatterRaw}${sep}${updatedBody}`;
+  }
+  return updatedBody;
 }
 
 /**
@@ -360,15 +385,24 @@ export function removeTagFromMarkdown(markdown: string, tagToRemove: string): st
     (t) => t.toLowerCase() !== normTarget.toLowerCase()
   );
 
-  let updatedContent = parsed.hasFrontmatter
+  const updatedContent = parsed.hasFrontmatter
     ? updateFrontmatterTags(markdown, updatedFrontmatterTags)
     : markdown;
+  const reParsed = parseFrontmatterAndTags(updatedContent);
 
-  // Remove inline tags in body
+  // Remove inline tags in body only (protecting code blocks and frontmatter)
   const inlineTagRegex = new RegExp(`(^|[\\s(\\[{])#${escapeRegExp(normTarget)}(?:[ \\t]+|(?=$|[\\s)\\]},.!?:;\\r\\n]))`, "gi");
-  updatedContent = updatedContent.replace(inlineTagRegex, "$1");
+  const updatedBody = replaceInlineTagsOutsideCode(
+    reParsed.bodyContent,
+    inlineTagRegex,
+    (_full, prefix) => prefix
+  );
 
-  return updatedContent;
+  if (reParsed.hasFrontmatter && reParsed.frontmatterRaw) {
+    const sep = updatedContent.slice(reParsed.frontmatterRaw.length).match(/^\r?\n/)?.[0] || "\n";
+    return `${reParsed.frontmatterRaw}${sep}${updatedBody}`;
+  }
+  return updatedBody;
 }
 
 /**

@@ -23,7 +23,7 @@ import type { AiActionType } from "@/components/Editor";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { renderLunoAiMarkdown } from "@/lib/lunoAiMarkdown";
 import { formatModelName } from "@/lib/geminiApi";
-import { copyToClipboard } from "@/lib/clipboardUtils";
+import { useMarkdownCodeCopyTooltip, MarkdownFloatingTooltip } from "@/components/shared/useMarkdownCodeCopyTooltip";
 
 export interface AiDiffState {
   from: number;
@@ -80,73 +80,15 @@ export default function AiAssistantPanel({
   const { t } = useTranslation();
   const { settings } = useAppSettings();
 
-  const [markdownTooltip, setMarkdownTooltip] = useState<{
-    text: string;
-    x: number;
-    y: number;
-    side: "top" | "bottom";
-  } | null>(null);
-
-  const handleContentMouseOver = (e: React.MouseEvent<HTMLElement>) => {
-    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tooltip]");
-    if (target) {
-      const text = target.getAttribute("data-tooltip");
-      if (text) {
-        const rect = target.getBoundingClientRect();
-        const placeAbove = rect.top > 36;
-        setMarkdownTooltip({
-          text,
-          x: rect.left + rect.width / 2,
-          y: placeAbove ? rect.top - 6 : rect.bottom + 6,
-          side: placeAbove ? "top" : "bottom",
-        });
-        return;
-      }
-    }
-    setMarkdownTooltip(null);
-  };
-
-  const handleContentMouseOut = (e: React.MouseEvent<HTMLElement>) => {
-    const related = e.relatedTarget as HTMLElement | null;
-    if (!related || !related.closest("[data-tooltip]")) {
-      setMarkdownTooltip(null);
-    }
-  };
-
-  const handleContentClick = async (e: React.MouseEvent<HTMLDivElement>) => {
-    const copyBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-copy-code]");
-    if (copyBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const encoded = copyBtn.getAttribute("data-code");
-      if (encoded) {
-        const codeText = decodeURIComponent(encoded);
-        await copyToClipboard(codeText);
-        const originalTooltip = copyBtn.getAttribute("data-tooltip") || "";
-        const originalSvg = copyBtn.querySelector("svg")?.outerHTML || "";
-        const copiedText = t("lunoAi.copied") || "Copied!";
-
-        copyBtn.setAttribute("data-tooltip", copiedText);
-        copyBtn.setAttribute("aria-label", copiedText);
-        setMarkdownTooltip((prev) => (prev ? { ...prev, text: copiedText } : null));
-
-        const svg = copyBtn.querySelector("svg");
-        if (svg) {
-          svg.outerHTML = `<svg class="h-3.5 w-3.5 text-primary shrink-0" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        }
-
-        setTimeout(() => {
-          copyBtn.setAttribute("data-tooltip", originalTooltip || t("lunoAi.copyCode") || "Copy");
-          copyBtn.setAttribute("aria-label", originalTooltip || t("lunoAi.copyCode") || "Copy");
-          setMarkdownTooltip((prev) => (prev ? { ...prev, text: originalTooltip || t("lunoAi.copyCode") || "Copy" } : null));
-          const currentSvg = copyBtn.querySelector("svg");
-          if (currentSvg && originalSvg) {
-            currentSvg.outerHTML = originalSvg;
-          }
-        }, 2000);
-      }
-    }
-  };
+  const {
+    markdownTooltip,
+    handleContentMouseOver,
+    handleContentMouseOut,
+    handleContentClick,
+  } = useMarkdownCodeCopyTooltip({
+    copiedLabel: t("lunoAi.copied"),
+    copyLabel: t("lunoAi.copyCode"),
+  });
 
   if (!isOpen || !diffState) return null;
 
@@ -180,7 +122,7 @@ export default function AiAssistantPanel({
               <X className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("rightPanel.closePanel") || "Close panel"}</TooltipContent>
+          <TooltipContent>{t("rightPanel.closePanel")}</TooltipContent>
         </Tooltip>
       </div>
 
@@ -222,7 +164,7 @@ export default function AiAssistantPanel({
                 __html: renderLunoAiMarkdown(diffState.originalText, {
                   showCodeLineNumbers: settings.showCodeLineNumbers,
                   accentHeadings: false,
-                  copyButtonText: t("lunoAi.copyCode") || "Copy",
+                  copyButtonText: t("lunoAi.copyCode"),
                 }),
               }}
             />
@@ -245,7 +187,7 @@ export default function AiAssistantPanel({
                 __html: renderLunoAiMarkdown(diffState.proposedText, {
                   showCodeLineNumbers: settings.showCodeLineNumbers,
                   accentHeadings: settings.accentHeadings,
-                  copyButtonText: t("lunoAi.copyCode") || "Copy",
+                  copyButtonText: t("lunoAi.copyCode"),
                 }),
               }}
             />
@@ -283,20 +225,7 @@ export default function AiAssistantPanel({
         </Button>
       </div>
 
-      {/* Floating Markdown Tooltip matching Radix Tooltip UI 1:1 */}
-      {markdownTooltip && (
-        <div
-          role="tooltip"
-          className="fixed z-[9999] pointer-events-none select-none rounded-md border border-border bg-popover px-2.5 py-1 text-[11px] font-medium text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
-          style={{
-            left: `${markdownTooltip.x}px`,
-            top: `${markdownTooltip.y}px`,
-            transform: markdownTooltip.side === "top" ? "translate(-50%, -100%)" : "translate(-50%, 0)",
-          }}
-        >
-          {markdownTooltip.text}
-        </div>
-      )}
+      <MarkdownFloatingTooltip tooltip={markdownTooltip} />
     </motion.aside>
   );
 }

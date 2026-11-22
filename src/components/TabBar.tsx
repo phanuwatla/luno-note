@@ -36,7 +36,8 @@ import {
 } from "@/components/ui/context-menu";
 import WindowControls from "@/components/WindowControls";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
-import { getNoteDefaultIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
+import { isSystemTab as checkIsSystemTab, isWebViewerTab } from "@/lib/systemTabs";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { toast } from "@/hooks/use-toast";
 import { APP_VERSION } from "@/lib/appVersion";
@@ -89,7 +90,7 @@ function WebFaviconIcon({ note, isActive }: { note: Note; isActive: boolean }) {
             setCandidateIndex((prev) => prev + 1);
           }
         }}
-        className="h-3.5 w-3.5 shrink-0 rounded-xs object-contain"
+        className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain"
       />
     );
   }
@@ -97,64 +98,17 @@ function WebFaviconIcon({ note, isActive }: { note: Note; isActive: boolean }) {
   return <Globe className={cls} />;
 }
 
-function NoteIcon({ note, isActive, pack, settings }: { note: Note; isActive: boolean; pack: any; settings: any }) {
-  const cls = `h-3.5 w-3.5 shrink-0 transition-colors ${isActive ? "text-primary" : "text-muted-foreground/70"}`;
-  if (note.id === "home" || note.id.startsWith("home:") || note.fileType === "home") {
-    const HomeIcon = getToolbarIcon("home", pack);
-    return <HomeIcon className={cls} />;
-  }
-  if (note.id === "trash" || note.id.startsWith("trash:") || note.fileType === "trash") {
-    const TrashIcon = getToolbarIcon("trash", pack);
-    return <TrashIcon className={cls} />;
-  }
-  if (note.id === "settings" || note.id.startsWith("settings:") || note.fileType === "settings") {
-    const SettingsIcon = getToolbarIcon("settings", pack);
-    return <SettingsIcon className={cls} />;
-  }
-  if (note.id === "help" || note.id.startsWith("help:") || note.fileType === "help") {
-    const HelpIcon = getToolbarIcon("helpCircle", pack);
-    return <HelpIcon className={cls} />;
-  }
-  if (note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new") {
-    return <img src={lunoLogo} alt="Luno" className="h-3.5 w-3.5 object-contain select-none shrink-0 luno-app-logo" />;
-  }
-  if (note.id === "luno-ai" || note.id.startsWith("luno-ai:") || note.fileType === "luno-ai") {
-    const SparklesIconComp = getToolbarIcon("sparkles", pack);
-    return <SparklesIconComp className={cls} />;
-  }
-  if (note.id === "templates" || note.id.startsWith("templates:") || note.fileType === "templates") {
-    const TemplatesIcon = getToolbarIcon("templates", pack);
-    return <TemplatesIcon className={cls} />;
-  }
-  if (note.id === "relations" || note.id.startsWith("relations:") || note.fileType === "relations") {
-    const RelationsIcon = getToolbarIcon("relations", pack);
-    return <RelationsIcon className={cls} />;
-  }
-  if (note.id === "favorites" || note.id.startsWith("favorites:") || note.fileType === "favorites") {
-    const StarIcon = getToolbarIcon("star", pack);
-    return <StarIcon className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-amber-500 fill-amber-500" : "text-amber-500/70"}`} />;
-  }
-  if (note.id === "tags" || note.id.startsWith("tags:") || note.fileType === "tags") {
-    const TagIcon = getToolbarIcon("tag", pack);
-    return <TagIcon className={cls} />;
-  }
-  if (note.fileType === "web-viewer" || note.id.startsWith("web:")) return <WebFaviconIcon note={note} isActive={isActive} />;
-
-  if (settings?.showFileIcons === false) {
-    return null;
-  }
-
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, cls, { color: customColor });
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
-
-  const defaultKey = getNoteDefaultIconKey(note);
-  const IconComp = getToolbarIcon(defaultKey, pack);
-  return <IconComp className={cls} />;
+function NoteIcon({ note, isActive, pack }: { note: Note; isActive: boolean; pack: any; settings?: any }) {
+  return (
+    <SharedNoteIcon
+      note={note}
+      className="h-3.5 w-3.5 transition-colors"
+      active={isActive}
+      colorClassName={isActive ? "text-primary" : "text-muted-foreground/70"}
+      iconPack={pack}
+      webIcon={<WebFaviconIcon note={note} isActive={isActive} />}
+    />
+  );
 }
 
 interface TabItemProps {
@@ -208,38 +162,8 @@ const TabItem = React.memo(function TabItem({
   onDragEnd,
   t,
 }: TabItemProps) {
-  const isWebViewer = note.fileType === "web-viewer" || note.id.startsWith("web:");
-  const isSystemTab =
-    note.id === "home" ||
-    note.id.startsWith("home:") ||
-    note.fileType === "home" ||
-    note.id === "trash" ||
-    note.id.startsWith("trash:") ||
-    note.fileType === "trash" ||
-    note.id === "settings" ||
-    note.id.startsWith("settings:") ||
-    note.fileType === "settings" ||
-    note.id === "help" ||
-    note.id.startsWith("help:") ||
-    note.fileType === "help" ||
-    note.id === "luno-ai" ||
-    note.id.startsWith("luno-ai:") ||
-    note.fileType === "luno-ai" ||
-    note.id === "templates" ||
-    note.id.startsWith("templates:") ||
-    note.fileType === "templates" ||
-    note.id === "relations" ||
-    note.id.startsWith("relations:") ||
-    note.fileType === "relations" ||
-    note.id === "favorites" ||
-    note.id.startsWith("favorites:") ||
-    note.fileType === "favorites" ||
-    note.id === "tags" ||
-    note.id.startsWith("tags:") ||
-    note.fileType === "tags" ||
-    note.id === "whats-new" ||
-    note.id.startsWith("whats-new:") ||
-    note.fileType === "whats-new";
+  const isWebViewer = isWebViewerTab(note);
+  const isSystemTab = checkIsSystemTab(note);
 
   const handleReload = useCallback(() => {
     window.dispatchEvent(new CustomEvent("luno:reload-web-tab", { detail: { tabId: note.id } }));
@@ -251,7 +175,7 @@ const TabItem = React.memo(function TabItem({
     if (url) {
       void copyToClipboard(url);
       toast({
-        title: t("common.copied") || "Copied",
+        title: t("common.copied"),
         description: url,
       });
     }
@@ -263,7 +187,7 @@ const TabItem = React.memo(function TabItem({
     if (path) {
       await copyToClipboard(path);
       toast({
-        title: t("editor.copiedRelativePath") || "คัดลอกพาธสัมพัทธ์แล้ว",
+        title: t("editor.copiedRelativePath"),
         description: path,
       });
     }
@@ -277,7 +201,7 @@ const TabItem = React.memo(function TabItem({
       try {
         const saved = await electronAPI.getSavedWorkspace();
         ws = (saved?.folderPath || saved?.path || "") as string;
-      } catch {}
+      } catch { /* ignore */ }
     }
     const rel = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
     const cleanWs = ws.replace(/[\\/]+$/, "");
@@ -285,7 +209,7 @@ const TabItem = React.memo(function TabItem({
     if (full) {
       await copyToClipboard(full);
       toast({
-        title: t("editor.copiedAbsolutePath") || "คัดลอกพาธแบบเต็มแล้ว",
+        title: t("editor.copiedAbsolutePath"),
         description: full,
       });
     }
@@ -314,7 +238,7 @@ const TabItem = React.memo(function TabItem({
             isDragging ? "opacity-40 scale-[0.98] bg-muted/60" : ""
           } ${
             isActive
-              ? "bg-background text-foreground shadow-xs border-t border-x border-border/40 font-semibold"
+              ? "bg-background text-foreground shadow-sm border-t border-x border-border/40 font-semibold"
               : "text-muted-foreground/80 hover:text-foreground hover:bg-background/40 font-medium"
           }`}
           onClick={() => onSelectTab(note.id)}
@@ -374,7 +298,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onNewTab()}
           >
             <Plus className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.newTab") || "New tab"}</span>
+            <span className="flex-1">{t("editor.newTab")}</span>
             <ContextMenuShortcut>Ctrl+N</ContextMenuShortcut>
           </ContextMenuItem>
         )}
@@ -385,7 +309,7 @@ const TabItem = React.memo(function TabItem({
             onClick={handleReload}
           >
             <RotateCw className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.reloadTab") || "Reload"}</span>
+            <span className="flex-1">{t("editor.reloadTab")}</span>
             <ContextMenuShortcut>Ctrl+R</ContextMenuShortcut>
           </ContextMenuItem>
         )}
@@ -396,7 +320,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onDuplicateTab(note)}
           >
             <Copy className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.duplicateTab") || "Duplicate"}</span>
+            <span className="flex-1">{t("editor.duplicateTab")}</span>
           </ContextMenuItem>
         )}
 
@@ -406,7 +330,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onSplitTab(note.id)}
           >
             <Columns2Icon className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.splitTab") || "Split tab"}</span>
+            <span className="flex-1">{t("editor.splitTab")}</span>
           </ContextMenuItem>
         )}
 
@@ -419,7 +343,7 @@ const TabItem = React.memo(function TabItem({
               onClick={handleCopyUrl}
             >
               <Globe className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1">{t("editor.copyUrl") || "Copy URL"}</span>
+              <span className="flex-1">{t("editor.copyUrl")}</span>
             </ContextMenuItem>
           </>
         ) : (!isSystemTab && note.fileName) ? (
@@ -428,7 +352,7 @@ const TabItem = React.memo(function TabItem({
             <ContextMenuSub>
               <ContextMenuSubTrigger className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer">
                 <LinkIcon className="h-4 w-4 text-muted-foreground" />
-                <span className="flex-1">{t("sidebar.copyPath") || "Copy Path"}</span>
+                <span className="flex-1">{t("sidebar.copyPath")}</span>
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-48 rounded-xl">
                 <ContextMenuItem
@@ -436,14 +360,14 @@ const TabItem = React.memo(function TabItem({
                   onClick={handleCopyRelativePath}
                 >
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1">{t("editor.copyRelativePath") || "Copy Relative Path"}</span>
+                  <span className="flex-1">{t("editor.copyRelativePath")}</span>
                 </ContextMenuItem>
                 <ContextMenuItem
                   className="px-3 py-1.5 text-[13px] gap-2.5 rounded-lg cursor-pointer"
                   onClick={() => void handleCopyAbsolutePath()}
                 >
                   <Folder className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1">{t("editor.copyAbsolutePath") || "Copy Full Path"}</span>
+                  <span className="flex-1">{t("editor.copyAbsolutePath")}</span>
                 </ContextMenuItem>
               </ContextMenuSubContent>
             </ContextMenuSub>
@@ -458,7 +382,7 @@ const TabItem = React.memo(function TabItem({
           onClick={() => onCloseTab(note.id)}
         >
           <X className="h-4 w-4 text-muted-foreground" />
-          <span className="flex-1">{t("editor.closeTab") || "Close tab"}</span>
+          <span className="flex-1">{t("editor.closeTab")}</span>
           <ContextMenuShortcut>Ctrl+W</ContextMenuShortcut>
         </ContextMenuItem>
 
@@ -469,7 +393,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onCloseOtherTabs(note.id)}
           >
             <Layers className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.closeOtherTabs") || "Close other tabs"}</span>
+            <span className="flex-1">{t("editor.closeOtherTabs")}</span>
           </ContextMenuItem>
         )}
 
@@ -480,7 +404,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onCloseTabsToRight(note.id)}
           >
             <ArrowRightToLine className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.closeTabsToRight") || "Close tabs to the right"}</span>
+            <span className="flex-1">{t("editor.closeTabsToRight")}</span>
           </ContextMenuItem>
         )}
 
@@ -490,7 +414,7 @@ const TabItem = React.memo(function TabItem({
             onClick={() => onCloseAllTabs()}
           >
             <X className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("editor.closeAllTabs") || "Close all tabs"}</span>
+            <span className="flex-1">{t("editor.closeAllTabs")}</span>
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -568,7 +492,7 @@ function TabBarComponent({
           {tabs.length === 0 ? (
             <div
               style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-              className="group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 bg-background text-foreground shadow-xs border-t border-x border-border/40 font-semibold"
+              className="group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-2 rounded-t-xl px-3 py-2 text-xs transition-all duration-150 bg-background text-foreground shadow-sm border-t border-x border-border/40 font-semibold"
             >
               <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="min-w-0 flex-1 truncate">{(t as any)("editor.newTab") || "New tab"}</span>
@@ -588,25 +512,25 @@ function TabBarComponent({
               const isWhatsNew = note.id === "whats-new" || note.id.startsWith("whats-new:") || note.fileType === "whats-new";
               const isWebViewer = note.fileType === "web-viewer" || note.id.startsWith("web:");
               const label = isHome
-                ? (t("sidebar.home") || "Home")
+                ? (t("sidebar.home"))
                 : isTrash
-                ? (t("trash.title") || "Trash")
+                ? (t("trash.title"))
                 : isSettings
-                ? (t("settings.title") || "Settings")
+                ? (t("settings.title"))
                 : isHelp
-                ? (t("sidebar.help") || (settings?.language === "th" ? "ช่วยเหลือ" : "Help"))
+                ? (t("sidebar.help"))
                 : isWhatsNew
                 ? (note.title || note.fileName || `Luno Note v${APP_VERSION}`)
                 : isLunoAi
                 ? "Luno AI"
                 : isTemplates
-                ? (t("sidebar.templates") || (settings?.language === "th" ? "เทมเพลต" : "Templates"))
+                ? (t("sidebar.templates"))
                 : isRelations
-                ? (t("relations.title") || (settings?.language === "th" ? "ความสัมพันธ์" : "Relations"))
+                ? (t("relations.title"))
                 : isFavorites
-                ? (t("sidebar.favorites") || (settings?.language === "th" ? "ที่ติดดาว" : "Favorites"))
+                ? (t("sidebar.favorites"))
                 : isTags
-                ? (t("sidebar.tags") || (settings?.language === "th" ? "แท็ก" : "Tags"))
+                ? (t("sidebar.tags"))
                 : isWebViewer
                 ? (note.title || note.fileName || t("webViewer.title") || "Web Viewer")
                 : (note.fileName || note.title?.trim() || t("editor.untitled"));

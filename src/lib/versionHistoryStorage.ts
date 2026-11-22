@@ -1,3 +1,4 @@
+import { translate } from "@/translation/translate";
 /**
  * Persistent Version History Storage
  * Manages snapshots and historical versions of notes with auto-trimming, throttling, deduplication,
@@ -56,7 +57,8 @@ export function getNoteRelativePath(
   note: Pick<Note, "fileName" | "folderPath"> | null | undefined
 ): string | null {
   if (!note || !note.fileName) return null;
-  return note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+  const raw = note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName;
+  return raw.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
 /**
@@ -96,7 +98,8 @@ export function getStorageKey(noteId: string): string {
 }
 
 export function getPathStorageKey(relPath: string): string {
-  return `${PATH_PREFIX}${encodeURIComponent(relPath)}`;
+  const normalized = (relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return `${PATH_PREFIX}${encodeURIComponent(normalized)}`;
 }
 
 /**
@@ -405,7 +408,7 @@ export function clearNoteHistory(
   if (!noteOrId && !explicitRelPath) return;
 
   const noteId = typeof noteOrId === "object" ? noteOrId.id : (noteOrId || "");
-  let relPath = explicitRelPath || (typeof noteOrId === "object" ? getNoteRelativePath(noteOrId) : null);
+  const relPath = explicitRelPath || (typeof noteOrId === "object" ? getNoteRelativePath(noteOrId) : null);
 
   // Cancel any pending debounced timers
   if (relPath) {
@@ -505,9 +508,11 @@ export function hashHistoryPath(str: string): string {
  * 4. Deterministic 64-bit hash suffix ensures uniqueness and collision resistance.
  */
 export function getHistoryDiskFilename(relPath: string): string {
-  if (!relPath) return `note_${hashHistoryPath("")}.json`;
+  const normalized = (relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!normalized) return `note_${hashHistoryPath("")}.json`;
 
-  const sanitized = relPath
+  const sanitized = normalized
+    // eslint-disable-next-line no-control-regex
     .replace(/[\\/:*?"<>|\x00-\x1F]/g, "_")
     .replace(/\s+/g, " ")
     .replace(/_+/g, "_")
@@ -515,7 +520,7 @@ export function getHistoryDiskFilename(relPath: string): string {
     .replace(/^_+|_+$/g, "");
 
   const safePrefix = sanitized.slice(0, 60).trim().replace(/\.+$/, "") || "note";
-  const hash = hashHistoryPath(relPath);
+  const hash = hashHistoryPath(normalized);
   return `${safePrefix}_${hash}.json`;
 }
 
@@ -538,7 +543,7 @@ export async function saveWorkspaceHistoryToDisk(
     return;
   }
 
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   const jsonStr = JSON.stringify(history, null, 2);
   const filename = getHistoryDiskFilename(relPath);
 
@@ -574,7 +579,7 @@ export async function deleteWorkspaceHistoryFromDisk(
   relPath: string
 ): Promise<void> {
   if (!relPath) return;
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   const safeFilename = getHistoryDiskFilename(relPath);
   const legacyFilename = getLegacyHistoryDiskFilename(relPath);
 
@@ -602,11 +607,11 @@ export async function deleteWorkspaceHistoryFromDisk(
     const historyDir = await metaDir.getDirectoryHandle("history", { create: false });
     try {
       await historyDir.removeEntry(safeFilename);
-    } catch {}
+    } catch { /* ignore */ }
     if (legacyFilename !== safeFilename) {
       try {
         await historyDir.removeEntry(legacyFilename);
-      } catch {}
+      } catch { /* ignore */ }
     }
   } catch {
     // ignore
@@ -682,7 +687,7 @@ export async function loadWorkspaceHistoryFromDisk(
   rootDirHandle: FileSystemDirectoryHandle | null,
   relPath: string
 ): Promise<NoteVersionSnapshot[] | null> {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   const safeFilename = getHistoryDiskFilename(relPath);
   const legacyFilename = getLegacyHistoryDiskFilename(relPath);
 
@@ -705,7 +710,7 @@ export async function loadWorkspaceHistoryFromDisk(
           if (Array.isArray(list)) return list;
         }
       }
-    } catch {}
+    } catch { /* ignore */ }
   }
 
   if (!rootDirHandle) return null;
@@ -723,7 +728,7 @@ export async function loadWorkspaceHistoryFromDisk(
       if (legacyFilename !== safeFilename) {
         try {
           fileHandle = await historyDir.getFileHandle(legacyFilename, { create: false });
-        } catch {}
+        } catch { /* ignore */ }
       }
     }
 
@@ -735,7 +740,7 @@ export async function loadWorkspaceHistoryFromDisk(
         if (Array.isArray(list)) return list;
       }
     }
-  } catch {}
+  } catch { /* ignore */ }
 
   return null;
 }
@@ -777,11 +782,11 @@ export function groupVersionSnapshots(
   const thirtyDaysAgo = todayStart - 29 * 86400000;
 
   const isTh = language === "th";
-  const labelToday = translations?.today || (isTh ? "วันนี้" : "Today");
-  const labelYesterday = translations?.yesterday || (isTh ? "เมื่อวาน" : "Yesterday");
-  const labelLastWeek = translations?.lastWeek || (isTh ? "สัปดาห์ที่แล้ว" : "Last week");
-  const labelLastMonth = translations?.lastMonth || (isTh ? "เดือนที่แล้ว" : "Last month");
-  const labelOlder = translations?.older || (isTh ? "เก่ากว่านี้" : "Older");
+  const labelToday = translations?.today || (translate(isTh ? "th" : "en", "webViewer.today"));
+  const labelYesterday = translations?.yesterday || (translate(isTh ? "th" : "en", "webViewer.yesterday"));
+  const labelLastWeek = translations?.lastWeek || (translate(isTh ? "th" : "en", "versionHistoryPanel.lastWeek"));
+  const labelLastMonth = translations?.lastMonth || (translate(isTh ? "th" : "en", "versionHistoryPanel.lastMonth"));
+  const labelOlder = translations?.older || (translate(isTh ? "th" : "en", "versionHistoryPanel.older"));
 
   const groupMap = new Map<string, HistoryDateGroup>();
   const groupOrder: string[] = [];

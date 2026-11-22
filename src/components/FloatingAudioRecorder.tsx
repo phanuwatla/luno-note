@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { FloatingWindow } from "@/components/shared/FloatingWindow";
 import { Mic, Square, Play, Pause, RotateCcw, Check, X, GripHorizontal, AlertCircle, Minus, Maximize2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
+import { formatTime as formatAppTime } from "@/lib/dateTimeFormatter";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatDateTime } from "@/lib/dateTimeFormatter";
 import { dataUrlToBlobUrl } from "@/components/editor/ImageNodeView";
@@ -108,7 +109,7 @@ export default function FloatingAudioRecorder({
   const pendingSavePromiseRef = useRef<Promise<void> | null>(null);
 
   const loadClipsFromWorkspace = useCallback(async () => {
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     // 1. Electron Desktop mode
     if (electronAPI?.getSavedWorkspace && electronAPI?.readDirectoryFiles && (electronAPI?.readFileBuffer || electronAPI?.readFileBase64)) {
@@ -136,7 +137,7 @@ export default function FloatingAudioRecorder({
                           const blob = new Blob([buf], { type: mime });
                           objectUrl = URL.createObjectURL(blob);
                         }
-                      } catch {}
+                      } catch { /* ignore */ }
                     }
 
                     if (!objectUrl && electronAPI.readFileBase64) {
@@ -222,11 +223,13 @@ export default function FloatingAudioRecorder({
     setRecordedClips([]);
   }, [rootDirHandle]);
 
+  const prevIsOpenRef = useRef(false);
+
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       const now = new Date();
       const formattedNow = formatDateTime(now, settings.dateFormat, settings.timeFormat, settings.language);
-      setAudioTitle(`Voice Note - ${formattedNow}`);
+      setAudioTitle(`${t("uiMisc.voiceNotePrefix")} - ${formattedNow}`);
       setRecordingState("idle");
       setRecordDuration(0);
       setAudioBlob(null);
@@ -239,10 +242,13 @@ export default function FloatingAudioRecorder({
       accumulatedMsRef.current = 0;
       recordStartTimeRef.current = 0;
       void loadClipsFromWorkspace();
-    } else {
+    } else if (isOpen) {
+      void loadClipsFromWorkspace();
+    } else if (!isOpen && prevIsOpenRef.current) {
       cleanupResources();
     }
-  }, [isOpen, loadClipsFromWorkspace]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, loadClipsFromWorkspace, settings.dateFormat, settings.timeFormat, settings.language, t]);
 
   const cleanupResources = () => {
     if (timerRef.current) {
@@ -256,7 +262,7 @@ export default function FloatingAudioRecorder({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try {
         mediaRecorderRef.current.stop();
-      } catch {}
+      } catch { /* ignore */ }
       mediaRecorderRef.current = null;
     }
   };
@@ -310,15 +316,16 @@ export default function FloatingAudioRecorder({
         setAudioUrl(url);
         setRecordingState("preview");
 
-        const clipTitle = audioTitle.trim() || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        const clipTitle = audioTitle.trim() || `${t("uiMisc.voiceNotePrefix")} - ${formatAppTime(Date.now(), settings.timeFormat)}`;
         const sanitizedTitle = clipTitle.replace(/[\\/:*?"<>|]/g, "_");
-        const targetName = `${sanitizedTitle}.webm`;
+        const ext = mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "m4a" : "webm";
+        const targetName = `${sanitizedTitle}.${ext}`;
         lastRecordedTitleRef.current = clipTitle;
         lastRecordedTargetNameRef.current = targetName;
         audioLocalCache.set(`attachments/${targetName}`, url);
 
         const savePromise = (async () => {
-          const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+          const electronAPI = window.electronAPI;
 
           // 1. Electron Desktop mode
           if (electronAPI?.getSavedWorkspace && (electronAPI?.writeFileBuffer || electronAPI?.writeFileBase64)) {
@@ -395,8 +402,8 @@ export default function FloatingAudioRecorder({
       console.error("Microphone error:", err);
       setErrorMessage(
         err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
-          ? (t("editor.micPermissionDenied") || "Microphone access denied.")
-          : (t("editor.micUnavailable") || "Microphone unavailable.")
+          ? (t("editor.micPermissionDenied"))
+          : (t("editor.micUnavailable"))
       );
       setRecordingState("idle");
     }
@@ -494,7 +501,7 @@ export default function FloatingAudioRecorder({
       setPlayingClipId(null);
     }
     const clipToDelete = recordedClips.find((c) => c.id === id);
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder && clipToDelete?.fileName) {
       try {
@@ -526,7 +533,7 @@ export default function FloatingAudioRecorder({
       clipAudioRef.current.pause();
       setPlayingClipId(null);
     }
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
 
     if (electronAPI?.getSavedWorkspace && electronAPI?.deleteFileOrFolder) {
       try {
@@ -537,13 +544,13 @@ export default function FloatingAudioRecorder({
             if (clip.fileName) {
               try {
                 await electronAPI.deleteFileOrFolder(`${workspacePath}/attachments/${clip.fileName}`);
-              } catch {}
+              } catch { /* ignore */ }
             }
           }
           await loadClipsFromWorkspace();
           return;
         }
-      } catch {}
+      } catch { /* ignore */ }
     } else if (rootDirHandle) {
       try {
         const attachmentsDir = await rootDirHandle.getDirectoryHandle("attachments", { create: false });
@@ -551,12 +558,12 @@ export default function FloatingAudioRecorder({
           if (clip.fileName) {
             try {
               await attachmentsDir.removeEntry(clip.fileName);
-            } catch {}
+            } catch { /* ignore */ }
           }
         }
         await loadClipsFromWorkspace();
         return;
-      } catch {}
+      } catch { /* ignore */ }
     }
     setRecordedClips([]);
   };
@@ -573,7 +580,7 @@ export default function FloatingAudioRecorder({
     setEditingClipId(null);
 
     if (trimmed && clipToRename && trimmed !== clipToRename.title) {
-      const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+      const electronAPI = window.electronAPI;
 
       if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && clipToRename?.fileName) {
         try {
@@ -694,7 +701,7 @@ export default function FloatingAudioRecorder({
       if (pendingSavePromiseRef.current) {
         await pendingSavePromiseRef.current;
       }
-      const clipTitle = audioTitle.trim() || lastRecordedTitleRef.current || `Voice Note - ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const clipTitle = audioTitle.trim() || lastRecordedTitleRef.current || `${t("uiMisc.voiceNotePrefix")} - ${formatAppTime(Date.now(), settings.timeFormat)}`;
       const sanitizedTitle = clipTitle.replace(/[\\/:*?"<>|]/g, "_");
       const targetName = lastRecordedTargetNameRef.current || `${sanitizedTitle}.webm`;
       const relativeSrc = `attachments/${targetName}`;
@@ -715,203 +722,106 @@ export default function FloatingAudioRecorder({
     }
   };
 
-  if (!isOpen) return null;
-
-  // MINIMIZED MODE (Exact match with FloatingClock styling & dimensions)
-  if (isMinimized) {
-    return (
-      <TooltipProvider delayDuration={150}>
-        <motion.div
-          drag
-          dragMomentum={false}
-          dragElastic={0}
-          onPointerDown={onFocusWindow}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.15 }}
-          className="fixed rounded-full border border-border/60 bg-card/95 px-3 py-1.5 shadow-md backdrop-blur-md select-none text-foreground flex items-center gap-2"
-          data-floating-pill="true"
-          style={{ top: "18%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-        >
-          <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground opacity-60 cursor-grab active:cursor-grabbing shrink-0" />
-
-          {/* Clickable Status Display to Expand */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setIsMinimized(false)}
-                className="flex items-center gap-1.5 text-xs font-bold text-foreground hover:text-primary transition-colors cursor-pointer"
-              >
-                {recordingState === "recording" && (
-                  <span className="relative flex h-2.5 w-2.5 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-destructive"></span>
-                  </span>
-                )}
-                {recordingState === "paused" && (
-                  <span className="h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0"></span>
-                )}
-                {recordingState === "idle" && (
-                  <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
-                )}
-                {recordingState === "preview" && (
-                  <Play className="h-3.5 w-3.5 text-primary fill-current shrink-0" />
-                )}
-
-                <span className="tabular-nums">
-                  {(recordingState === "recording" || recordingState === "paused") && formatTime(recordDuration)}
-                  {recordingState === "preview" && formatTime(remainingSeconds)}
-                  {recordingState === "idle" && (t("editor.recordAudio") || "Record")}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.expand") || "Expand"}</TooltipContent>
-          </Tooltip>
-
-          <div className="h-3 w-px bg-border/60 mx-0.5" />
-
-          {/* Quick Controls & Window Actions in Minimized Mode */}
-          <div className="flex items-center gap-0.5">
-            {recordingState === "recording" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={pauseRecording}
-                    className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    <Pause className="h-3 w-3" strokeWidth={2.2} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.recordingPaused") || "Pause"}</TooltipContent>
-              </Tooltip>
-            )}
-            {recordingState === "paused" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={resumeRecording}
-                    className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    <Play className="h-3 w-3 fill-current" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.resumeRecording") || "Resume"}</TooltipContent>
-              </Tooltip>
-            )}
-            {(recordingState === "recording" || recordingState === "paused") && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    className="rounded-md p-1 text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                  >
-                    <Square className="h-3 w-3 fill-current" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.finishRecording") || "Done"}</TooltipContent>
-              </Tooltip>
-            )}
-            {recordingState === "idle" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={startRecording}
-                    className="rounded-md p-1 text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                  >
-                    <div className="h-2.5 w-2.5 rounded-full bg-destructive" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("editor.startRecording") || "Start Recording"}</TooltipContent>
-              </Tooltip>
-            )}
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(false)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.expand") || "Expand"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || "Close"}</TooltipContent>
-            </Tooltip>
-          </div>
-        </motion.div>
-      </TooltipProvider>
-    );
-  }
-
   return (
-    <TooltipProvider delayDuration={200}>
-      <motion.div
-        drag
-        dragMomentum={false}
-        dragElastic={0}
-        onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 16 }}
-        transition={{ type: "spring", damping: 25, stiffness: 350 }}
-        className="fixed w-[320px] rounded-2xl border border-border/80 bg-card/95 p-3.5 shadow-2xl backdrop-blur-md select-none text-foreground z-50"
-        data-floating-window="true"
-        style={{ top: "18%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-      >
-        {/* Header with Grip and Minimize/Close Buttons */}
-        <div className="flex items-center justify-between pb-2 mb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <GripHorizontal className="h-3.5 w-3.5 opacity-60" />
-            <span>{t("editor.recordAudio") || "Voice Recorder"}</span>
-          </div>
-          <div className="flex items-center gap-0.5">
+    <FloatingWindow
+      isOpen={isOpen}
+      isMinimized={isMinimized}
+      onToggleMinimize={() => setIsMinimized((prev) => !prev)}
+      onClose={onClose}
+      zIndex={zIndex}
+      onFocusWindow={onFocusWindow}
+      title={t("editor.recordAudio")}
+      defaultPosition={{ top: "14%", right: "24%" }}
+      widthClassName="w-[320px]"
+      minimizeTooltip={t("editor.minimize")}
+      expandTooltip={t("editor.expand")}
+      closeTooltip={t("editor.close")}
+      minimizedContent={
+        <>
+          {recordingState === "recording" && (
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-destructive"></span>
+            </span>
+          )}
+          {recordingState === "paused" && (
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0"></span>
+          )}
+          {recordingState === "idle" && (
+            <Mic className="h-3.5 w-3.5 text-primary shrink-0" />
+          )}
+          {recordingState === "preview" && (
+            <Play className="h-3.5 w-3.5 text-primary fill-current shrink-0" />
+          )}
+          <span className="tabular-nums">
+            {(recordingState === "recording" || recordingState === "paused") && formatTime(recordDuration)}
+            {recordingState === "preview" && formatTime(remainingSeconds)}
+            {recordingState === "idle" && (t("editor.recordAudio"))}
+          </span>
+        </>
+      }
+      minimizedExtra={
+        <>
+          {recordingState === "recording" && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setIsMinimized(true)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  onClick={pauseRecording}
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
                 >
-                  <Minus className="h-3.5 w-3.5" />
+                  <Pause className="h-3 w-3" strokeWidth={2.2} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("editor.minimize") || "Minimize"}</TooltipContent>
+              <TooltipContent side="bottom">{t("editor.recordingPaused")}</TooltipContent>
             </Tooltip>
-
+          )}
+          {recordingState === "paused" && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  onClick={resumeRecording}
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <Play className="h-3 w-3 fill-current" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || "Close"}</TooltipContent>
+              <TooltipContent side="bottom">{t("editor.resumeRecording")}</TooltipContent>
             </Tooltip>
-          </div>
-        </div>
-
+          )}
+          {(recordingState === "recording" || recordingState === "paused") && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={stopRecording}
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("editor.finishRecording")}</TooltipContent>
+            </Tooltip>
+          )}
+          {recordingState === "idle" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                >
+                  <div className="h-2.5 w-2.5 rounded-full bg-destructive" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("editor.startRecording")}</TooltipContent>
+            </Tooltip>
+          )}
+        </>
+      }
+    >
+      <div className="pt-2">
         {errorMessage && (
           <div className="mb-2 flex items-center gap-1.5 rounded-xl border border-destructive/30 bg-destructive/10 p-2 text-[10.5px] text-destructive leading-tight">
             <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -932,10 +842,10 @@ export default function FloatingAudioRecorder({
                   <div className="h-8 w-8 rounded-full bg-destructive group-hover:bg-white transition-all" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("editor.startRecording") || "Start Recording"}</TooltipContent>
+              <TooltipContent>{t("editor.startRecording")}</TooltipContent>
             </Tooltip>
             <span className="text-[11.5px] font-medium text-muted-foreground">
-              {t("editor.readyToRecord") || "Tap to record"}
+              {t("editor.readyToRecord")}
             </span>
           </div>
         )}
@@ -999,7 +909,7 @@ export default function FloatingAudioRecorder({
                       <Pause className="h-4 w-4" strokeWidth={2.2} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("editor.recordingPaused") || "Pause"}</TooltipContent>
+                  <TooltipContent>{t("editor.recordingPaused")}</TooltipContent>
                 </Tooltip>
               ) : (
                 <Tooltip>
@@ -1012,7 +922,7 @@ export default function FloatingAudioRecorder({
                       <Play className="h-4 w-4 fill-current ml-0.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("editor.resumeRecording") || "Resume"}</TooltipContent>
+                  <TooltipContent>{t("editor.resumeRecording")}</TooltipContent>
                 </Tooltip>
               )}
 
@@ -1021,12 +931,12 @@ export default function FloatingAudioRecorder({
                   <button
                     type="button"
                     onClick={stopRecording}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive text-white hover:bg-destructive/90 transition-all shadow-xs cursor-pointer active:scale-95"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive text-white hover:bg-destructive/90 transition-all shadow-sm cursor-pointer active:scale-95"
                   >
                     <Square className="h-3.5 w-3.5 fill-current" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.finishRecording") || "Done"}</TooltipContent>
+                <TooltipContent>{t("editor.finishRecording")}</TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -1113,7 +1023,7 @@ export default function FloatingAudioRecorder({
                     </svg>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.seekAudio") || "Click or drag to seek"}</TooltipContent>
+                <TooltipContent>{t("editor.seekAudio")}</TooltipContent>
               </Tooltip>
 
               {/* Countdown Remaining Time */}
@@ -1130,10 +1040,10 @@ export default function FloatingAudioRecorder({
                 size="sm"
                 onClick={handleInsert}
                 disabled={isProcessing}
-                className="h-8 gap-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold px-4 cursor-pointer shadow-xs"
+                className="h-8 gap-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold px-4 cursor-pointer shadow-sm"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span>{t("editor.insertAudioAction") || "Insert"}</span>
+                <span>{t("editor.insertAudioAction")}</span>
               </Button>
 
               <Tooltip>
@@ -1148,7 +1058,7 @@ export default function FloatingAudioRecorder({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.reRecord") || "Record again"}</TooltipContent>
+                <TooltipContent>{t("editor.reRecord")}</TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -1189,14 +1099,14 @@ export default function FloatingAudioRecorder({
           <div className="mt-3 pt-2.5 border-t border-border/50 flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-0.5">
               <span>
-                {t("editor.recordedClips") || "Recordings"} ({recordedClips.length})
+                {t("editor.recordedClips")} ({recordedClips.length})
               </span>
               <button
                 type="button"
                 onClick={clearAllClips}
                 className="text-[11px] text-muted-foreground/60 hover:text-destructive transition-colors cursor-pointer font-normal"
               >
-                {t("editor.clearAll") || "Clear all"}
+                {t("editor.clearAll")}
               </button>
             </div>
 
@@ -1214,7 +1124,7 @@ export default function FloatingAudioRecorder({
                           type="button"
                           size="icon"
                           onClick={() => togglePlayClip(clip)}
-                          className="h-8 w-8 shrink-0 rounded-full bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 transition-transform active:scale-95 cursor-pointer"
+                          className="h-8 w-8 shrink-0 rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-transform active:scale-95 cursor-pointer"
                         >
                           {playingClipId === clip.id ? (
                             <Pause className="h-3.5 w-3.5 fill-current" />
@@ -1246,7 +1156,7 @@ export default function FloatingAudioRecorder({
                           onBlur={() => handleSaveRename(clip.id)}
                           onClick={(e) => e.stopPropagation()}
                           onDoubleClick={(e) => e.stopPropagation()}
-                          className="w-full bg-background border border-primary rounded-md px-1.5 py-0.5 text-xs font-bold text-foreground outline-none shadow-xs focus:ring-1 focus:ring-primary"
+                          className="w-full bg-background border border-primary rounded-md px-1.5 py-0.5 text-xs font-bold text-foreground outline-none shadow-sm focus:ring-1 focus:ring-primary"
                         />
                       ) : (
                         <Tooltip>
@@ -1258,9 +1168,9 @@ export default function FloatingAudioRecorder({
                               {clip.title}
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent side="top" align="start" className="max-w-[260px] break-words z-[99999]">
+                          <TooltipContent side="top" align="start" className="max-w-[260px] break-words z-[70]">
                             <p className="font-semibold text-xs">{clip.title}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">{t("editor.doubleClickToRename") || "Double-click to rename"}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{t("editor.doubleClickToRename")}</p>
                           </TooltipContent>
                         </Tooltip>
                       )}
@@ -1283,7 +1193,7 @@ export default function FloatingAudioRecorder({
                           <Plus className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{t("editor.insertClip") || "Insert into note"}</TooltipContent>
+                      <TooltipContent>{t("editor.insertClip")}</TooltipContent>
                     </Tooltip>
 
                     <Tooltip>
@@ -1296,7 +1206,7 @@ export default function FloatingAudioRecorder({
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{t("editor.deleteClip") || "Delete recording"}</TooltipContent>
+                      <TooltipContent>{t("editor.deleteClip")}</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -1304,7 +1214,7 @@ export default function FloatingAudioRecorder({
             </div>
           </div>
         )}
-      </motion.div>
-    </TooltipProvider>
+      </div>
+    </FloatingWindow>
   );
 }

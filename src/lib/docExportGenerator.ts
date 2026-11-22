@@ -1,6 +1,7 @@
 import { type AppTheme } from "@/hooks/useAppSettings";
 import { getTagColorClass } from "@/lib/tagColors";
 import { escapeHtml, formatInlineTagsInHtml } from "./pdfExportGenerator";
+import { sanitizeHtml } from "./sanitizeHtml";
 
 export interface GenerateDocHtmlOptions {
   title?: string;
@@ -119,7 +120,10 @@ const THEME_PRIMARY_COLORS: Record<string, string> = {
 
 function getPrimaryColor(theme?: string, customAccentColor?: string): string {
   if (customAccentColor && customAccentColor.trim()) {
-    return customAccentColor.trim();
+    const trimmed = customAccentColor.trim();
+    if (/^(#[0-9a-fA-F]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s/+-]+\))$/.test(trimmed)) {
+      return trimmed;
+    }
   }
   if (theme && THEME_PRIMARY_COLORS[theme]) {
     return THEME_PRIMARY_COLORS[theme];
@@ -204,18 +208,20 @@ export function generateDocHtml(options: GenerateDocHtmlOptions): string {
   const docTitle = title?.trim() || "Untitled";
   const primaryColor = getPrimaryColor(theme, customAccentColor);
 
+  const safeFontFamily = String(editorFontFamily || "inter").replace(/['";{}<>\\]/g, "");
   const fontConfig =
     WORD_FONT_FAMILY_MAP[editorFontFamily] || {
-      css: `'${editorFontFamily}', 'Leelawadee UI', 'Tahoma', sans-serif`,
-      msoAscii: editorFontFamily,
+      css: `'${safeFontFamily}', 'Leelawadee UI', 'Tahoma', sans-serif`,
+      msoAscii: safeFontFamily,
       msoBidi: "Leelawadee UI",
     };
 
   const parsedFontSize = typeof editorFontSize === "number" ? editorFontSize : 15;
   const parsedLineHeight = typeof lineHeight === "number" ? lineHeight : parseFloat(String(lineHeight)) || 1.6;
 
-  // Format any unwrapped inline hashtags into styled badges
-  let processedHtml = formatInlineTagsInHtml(bodyHtml, theme, tagColorStyle, customAccentColor);
+  // Sanitize bodyHtml and format any unwrapped inline hashtags into styled badges
+  const safeBodyHtml = sanitizeHtml(bodyHtml || "");
+  let processedHtml = formatInlineTagsInHtml(safeBodyHtml, theme, tagColorStyle, customAccentColor);
 
   // Format task list checkboxes for Word
   processedHtml = formatTaskListsForWord(processedHtml, primaryColor);
@@ -670,7 +676,7 @@ export function generateDocHtml(options: GenerateDocHtmlOptions): string {
     .border-neutral-500\\/30 { border-color: rgba(115, 115, 115, 0.30) !important; }
 
     .bg-\\[hsl\\(var\\(--accent\\)\\)\\]\\/15 { background-color: ${primaryColor}26 !important; }
-    .text-\\[hsl\\(var\\(--accent\\)\\] { color: ${primaryColor} !important; }
+    .text-\\[hsl\\(var\\(--accent\\)\\)\\] { color: ${primaryColor} !important; }
     .border-\\[hsl\\(var\\(--accent\\)\\)\\]\\/25 { border-color: ${primaryColor}40 !important; }
 
     /* Hide leftover control handles */

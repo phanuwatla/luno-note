@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { FloatingWindow } from "@/components/shared/FloatingWindow";
 import { X, GripHorizontal, Copy, Check, Minus, Maximize2, Calculator } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -145,6 +145,18 @@ export default function FloatingCalculator({
     if (!isOpen || isMinimized) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper]')) {
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable || target?.closest?.('[contenteditable="true"], .ProseMirror, .cm-editor'));
+      if (isEditable) return;
+
       if (e.key >= "0" && e.key <= "9") {
         handleDigit(e.key);
       } else if (e.key === ".") {
@@ -172,149 +184,59 @@ export default function FloatingCalculator({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, isMinimized, handleDigit, handleDot, handleOperator, handleEquals, handleBackspace, onClose]);
 
-  if (!isOpen) return null;
-
-  if (isMinimized) {
-    return (
-      <TooltipProvider delayDuration={150}>
-        <motion.div
-          drag
-          dragMomentum={false}
-          dragElastic={0}
-          onPointerDown={onFocusWindow}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.15 }}
-          className="fixed rounded-full border border-border/60 bg-card/95 px-3 py-1.5 shadow-md backdrop-blur-md select-none text-foreground flex items-center gap-2"
-          data-floating-pill="true"
-          style={{ top: "15%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-        >
-          <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground opacity-60 cursor-grab active:cursor-grabbing shrink-0" />
-
-          {/* Clickable calculator display to expand */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setIsMinimized(false)}
-                className="flex items-center gap-1.5 text-xs font-bold text-foreground hover:text-primary transition-colors cursor-pointer"
-              >
-                <Calculator className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="tabular-nums font-semibold">{display || "0"}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.expand") || (isTh ? "ขยาย" : "Expand")}</TooltipContent>
-          </Tooltip>
-
-          <div className="h-3 w-px bg-border/60 mx-0.5" />
-
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{copied ? (isTh ? "คัดลอกแล้ว!" : "Copied!") : (isTh ? "คัดลอกผลลัพธ์" : "Copy result")}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(false)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.expand") || (isTh ? "ขยาย" : "Expand")}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || (isTh ? "ปิด" : "Close")}</TooltipContent>
-            </Tooltip>
-          </div>
-        </motion.div>
-      </TooltipProvider>
-    );
-  }
-
   return (
-    <TooltipProvider delayDuration={150}>
-      <motion.div
-        drag
-        dragMomentum={false}
-        dragElastic={0}
-        onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 16 }}
-        transition={{ type: "spring", damping: 25, stiffness: 350 }}
-        className="fixed w-[240px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
-        data-floating-window="true"
-        style={{ top: "15%", right: "12%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-      >
-        {/* Window Header */}
-        <div className="flex items-center justify-between pb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <GripHorizontal className="h-4 w-4 opacity-60" />
-            <span>{t("editor.calculator") || "Calculator"}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{copied ? (isTh ? "คัดลอกแล้ว!" : "Copied!") : (isTh ? "คัดลอกผลลัพธ์" : "Copy result")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(true)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.minimize") || (isTh ? "ย่อหน้าต่าง" : "Minimize")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || (isTh ? "ปิด" : "Close")}</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
+    <FloatingWindow
+      isOpen={isOpen}
+      isMinimized={isMinimized}
+      onToggleMinimize={() => setIsMinimized((prev) => !prev)}
+      onClose={onClose}
+      zIndex={zIndex}
+      onFocusWindow={onFocusWindow}
+      title={t("editor.calculator")}
+      defaultPosition={{ top: "12%", right: "6%" }}
+      widthClassName="w-[240px]"
+      minimizeTooltip={t("editor.minimize")}
+      expandTooltip={t("editor.expand")}
+      closeTooltip={t("editor.close")}
+      minimizedContent={
+        <>
+          <Calculator className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="tabular-nums font-semibold">{display || "0"}</span>
+        </>
+      }
+      minimizedExtra={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+            >
+              {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {copied ? (t("lunoAi.copied")) : (t("calculator.copyResult"))}
+          </TooltipContent>
+        </Tooltip>
+      }
+      headerExtra={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {copied ? (t("lunoAi.copied")) : (t("calculator.copyResult"))}
+          </TooltipContent>
+        </Tooltip>
+      }
+    >
         {/* Screen Display */}
         <div className="py-3 px-2 flex flex-col justify-end text-right min-h-[72px]">
           <div className="text-xs text-primary/80 tracking-tight overflow-x-auto no-scrollbar min-h-[1.25rem]">
@@ -465,12 +387,11 @@ export default function FloatingCalculator({
         <button
           type="button"
           onClick={handleEquals}
-          className="h-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-base shadow-xs transition-all cursor-pointer active:scale-95"
+          className="h-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 font-bold text-base shadow-sm transition-all cursor-pointer active:scale-95"
         >
           =
         </button>
       </div>
-    </motion.div>
-  </TooltipProvider>
+    </FloatingWindow>
   );
 }

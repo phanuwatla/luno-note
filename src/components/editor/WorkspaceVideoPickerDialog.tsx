@@ -1,3 +1,4 @@
+import { WorkspaceMediaPickerShell } from "./WorkspaceMediaPickerShell";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
@@ -223,7 +224,7 @@ export const VideoItemThumbnail: React.FC<{
                 currentPoster = blobUrl;
                 setPosterSrc(blobUrl);
               }
-            } catch {}
+            } catch { /* ignore */ }
           } else if (item.companionImageFullPath) {
             const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
             if (electronAPI) {
@@ -239,7 +240,7 @@ export const VideoItemThumbnail: React.FC<{
                     currentPoster = blobUrl;
                     setPosterSrc(blobUrl);
                   }
-                } catch {}
+                } catch { /* ignore */ }
               }
               if (!currentPoster && electronAPI.readImageDataUrl) {
                 try {
@@ -250,7 +251,7 @@ export const VideoItemThumbnail: React.FC<{
                     currentPoster = blobUrl;
                     setPosterSrc(blobUrl);
                   }
-                } catch {}
+                } catch { /* ignore */ }
               }
             }
           }
@@ -277,7 +278,7 @@ export const VideoItemThumbnail: React.FC<{
                 setVideoSrc(blobUrl);
                 onResolved?.(item.id, blobUrl);
               }
-            } catch {}
+            } catch { /* ignore */ }
           } else {
             const electronAPI = (window as unknown as { electronAPI?: Record<string, any> }).electronAPI;
             if (electronAPI) {
@@ -302,7 +303,7 @@ export const VideoItemThumbnail: React.FC<{
                       setVideoSrc(blobUrl);
                       onResolved?.(item.id, blobUrl);
                     }
-                  } catch {}
+                  } catch { /* ignore */ }
                 }
 
                 if (!currentVideo && electronAPI.readImageDataUrl) {
@@ -316,7 +317,7 @@ export const VideoItemThumbnail: React.FC<{
                       setVideoSrc(blobUrl);
                       onResolved?.(item.id, blobUrl);
                     }
-                  } catch {}
+                  } catch { /* ignore */ }
                 }
               }
             }
@@ -434,7 +435,7 @@ export const VideoItemThumbnail: React.FC<{
         <div
           className={`${
             isListMode ? "h-5 w-5" : "h-7 w-7"
-          } rounded-full bg-black/60 backdrop-blur-xs flex items-center justify-center text-white shadow-xs group-hover:scale-110 transition-transform`}
+          } rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white shadow-sm group-hover:scale-110 transition-transform`}
         >
           <Play className={`${isListMode ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} fill-current ml-0.5`} />
         </div>
@@ -461,7 +462,7 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
   const getFolderDisplay = useCallback(
     (folderPath?: string): string => {
       if (!folderPath || folderPath.trim() === "" || folderPath === "/" || folderPath === "\\") {
-        return isTh ? "หน้าหลัก" : "Root";
+        return t("trash.root");
       }
       return folderPath;
     },
@@ -906,232 +907,46 @@ export const WorkspaceVideoPickerDialog: React.FC<WorkspaceVideoPickerDialogProp
   );
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-md rounded-2xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>{t("editor.workspaceVideosTitle") || "Workspace Videos"}</DialogTitle>
-          <DialogDescription>
-            {t("editor.workspaceVideosDescription") ||
-              "Select a video from attachments or workspace folders to insert into your note."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3 py-1 min-w-0">
-          {/* Search bar & View Mode Switcher */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="relative flex-1 min-w-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder={t("editor.searchVideosPlaceholder") || "Search videos by name or folder..."}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    const target = displayedItems.find((i) => i.id === selectedItemId) || displayedItems[0];
-                    if (target) handleSelectAndInsert(target);
-                  }
-                }}
-                className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors min-w-0"
-              />
-            </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setViewMode((prev) => (prev === "list" ? "grid" : "list"))}
-                  className="p-2.5 rounded-xl border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer shrink-0"
-                >
-                  {viewMode === "list" ? (
-                    <LayoutGrid className="h-4 w-4" />
-                  ) : (
-                    <List className="h-4 w-4" />
-                  )}
-                  <span className="sr-only">
-                    {viewMode === "list"
-                      ? t("launcher.gridView") || "Grid view"
-                      : t("launcher.listView") || "List view"}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {viewMode === "list"
-                  ? t("launcher.gridView") || "Grid view"
-                  : t("launcher.listView") || "List view"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-
-          {/* Segmented Pill Toggle Switcher */}
-          <div className="flex rounded-xl bg-muted/60 p-1 text-xs font-semibold select-none border border-border/40 min-w-0">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("attachments");
-                setSelectedItemId(null);
-              }}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
-                activeTab === "attachments"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Paperclip className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">
-                {t("editor.tabAttachments")} ({attachmentItems.length})
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("all");
-                setSelectedItemId(null);
-              }}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
-                activeTab === "all"
-                  ? "bg-background text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Video className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">
-                {t("editor.tabAllWorkspaceVideos") || "All Workspace Videos"} ({workspaceOnlyItems.length})
-              </span>
-            </button>
-          </div>
-
-          {/* Video Grid / List Container */}
-          <div className="max-h-[260px] min-h-[140px] overflow-y-auto rounded-xl border border-border bg-muted/10 p-2 min-w-0">
-            {isLoading && scannedItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-2">
-                <Loader2 className="h-5 w-5 animate-spin opacity-50" />
-                <p className="text-xs">{t("common.loading") || "Scanning..."}</p>
-              </div>
-            ) : displayedItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-1.5">
-                <VideoOff className="h-6 w-6 opacity-40" />
-                <p className="text-xs">
-                  {activeTab === "attachments"
-                    ? t("editor.noAttachmentsVideosFound") || "No videos found in attachments folder."
-                    : t("editor.noWorkspaceVideosFound") || "No videos found in workspace."}
-                </p>
-              </div>
-            ) : viewMode === "grid" ? (
-              <div className="grid grid-cols-3 gap-2 min-w-0">
-                {displayedItems.map((item) => {
-                  const preview = item.src || previewUrls[item.id];
-                  const isSelected = selectedItemId === item.id;
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedItemId(item.id)}
-                      onDoubleClick={() => handleSelectAndInsert(item)}
-                      className={`group relative flex flex-col rounded-xl border p-1.5 text-left cursor-pointer transition-all duration-150 min-w-0 ${
-                        isSelected
-                          ? "border-primary bg-primary/10 shadow-xs"
-                          : "border-border/60 bg-card hover:border-border hover:bg-muted/40"
-                      }`}
-                    >
-                      {/* Video Thumbnail / Preview */}
-                      <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-muted/30 border border-border/30 flex items-center justify-center group-hover:border-primary/40 transition-colors">
-                        <VideoItemThumbnail
-                          item={item}
-                          previewUrl={item.src || previewUrls[item.id]}
-                          onResolved={(id, url) => {
-                            setPreviewUrls((prev) => (prev[id] === url ? prev : { ...prev, [id]: url }));
-                          }}
-                        />
-                      </div>
-
-                      {/* Details */}
-                      <div className="mt-1 space-y-0.5 min-w-0">
-                        <p className="text-xs font-semibold text-foreground truncate leading-tight group-hover:text-primary transition-colors min-w-0">
-                          {item.fileName}
-                        </p>
-                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate leading-none min-w-0">
-                          <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                          <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="space-y-1 min-w-0">
-                {displayedItems.map((item) => {
-                  const isSelected = selectedItemId === item.id;
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedItemId(item.id)}
-                      onDoubleClick={() => handleSelectAndInsert(item)}
-                      className={`group flex items-center justify-between gap-2.5 p-2 rounded-xl border transition-all duration-150 cursor-pointer min-w-0 ${
-                        isSelected
-                          ? "border-primary bg-primary/10 shadow-xs"
-                          : "border-border/60 bg-card hover:border-border hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
-                        {/* Thumbnail */}
-                        <div className="h-9 w-9 rounded-lg overflow-hidden bg-muted/30 border border-border/30 shrink-0 flex items-center justify-center relative">
-                          <VideoItemThumbnail
-                            item={item}
-                            previewUrl={item.src || previewUrls[item.id]}
-                            isListMode
-                            onResolved={(id, url) => {
-                              setPreviewUrls((prev) => (prev[id] === url ? prev : { ...prev, [id]: url }));
-                            }}
-                          />
-                        </div>
-
-                        {/* Text */}
-                        <div className="space-y-0.5 min-w-0 flex-1 pr-2 overflow-hidden">
-                          <p className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors min-w-0">
-                            {item.fileName}
-                          </p>
-                          <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate min-w-0">
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-muted text-muted-foreground border border-border/60 min-w-0 truncate">
-                              <Folder className="h-2.5 w-2.5 shrink-0 opacity-70" />
-                              <span className="truncate min-w-0">{getFolderDisplay(item.folderPath)}</span>
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {!isSelected && (
-                        <span className="text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                          {t("editor.insertVideo") || "Select"}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Standard Modal Footer */}
-        <DialogFooter className="gap-2 sm:justify-end pt-1">
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            type="button"
-            disabled={!selectedItemId}
-            onClick={() => {
-              const target = displayedItems.find((i) => i.id === selectedItemId);
-              if (target) handleSelectAndInsert(target);
-            }}
-          >
-            {t("editor.insertVideo") || "Insert video"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <WorkspaceMediaPickerShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t("editor.workspaceVideosTitle")}
+      description={t("editor.workspaceVideosDescription")}
+      searchPlaceholder={t("editor.searchVideosPlaceholder")}
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      viewMode={viewMode}
+      onToggleViewMode={() => setViewMode((prev) => (prev === "list" ? "grid" : "list"))}
+      activeTab={activeTab}
+      onChangeTab={(tab) => {
+        setActiveTab(tab);
+        setSelectedItemId(null);
+      }}
+      attachmentsCount={attachmentItems.length}
+      workspaceCount={workspaceOnlyItems.length}
+      allTabIcon={<Video className="h-3.5 w-3.5 shrink-0" />}
+      allTabLabel={t("editor.tabAllWorkspaceVideos")}
+      isLoading={isLoading}
+      hasAnyScanned={scannedItems.length > 0}
+      displayedItems={displayedItems}
+      selectedItemId={selectedItemId}
+      onSelectItem={setSelectedItemId}
+      onConfirmItem={handleSelectAndInsert}
+      emptyIcon={<VideoOff className="h-6 w-6 opacity-40" />}
+      emptyAttachmentsLabel={t("editor.noAttachmentsVideosFound")}
+      emptyWorkspaceLabel={t("editor.noWorkspaceVideosFound")}
+      confirmLabel={t("editor.insertVideo")}
+      getFolderDisplay={getFolderDisplay}
+      renderThumbnail={(item, isListMode) => (
+        <VideoItemThumbnail
+          item={item}
+          previewUrl={item.src || previewUrls[item.id]}
+          isListMode={isListMode}
+          onResolved={(id, url) => {
+            setPreviewUrls((prev) => (prev[id] === url ? prev : { ...prev, [id]: url }));
+          }}
+        />
+      )}
+    />
   );
 };

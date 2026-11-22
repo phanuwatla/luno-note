@@ -742,9 +742,12 @@ export interface AppSettings {
   highlightInlineCode: boolean;
   spellCheck: boolean;
   wrongLanguageSuggestion: boolean;
+  globalFixLanguage: boolean;
+  backgroundFixLanguageHelper: boolean;
   smartTypography: boolean;
   enableSlashCommand: boolean;
   toggleHeading: boolean;
+  readingModeLivePreview: boolean;
   toolbarItemsOrder: string[];
   hiddenToolbarItems: string[];
 
@@ -848,7 +851,7 @@ function detectSystemLanguage(): "th" | "en" {
         return "th";
       }
     }
-  } catch {}
+  } catch { /* ignore */ }
   return "en";
 }
 
@@ -908,9 +911,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   highlightInlineCode: false,
   spellCheck: true,
   wrongLanguageSuggestion: true,
+  globalFixLanguage: true,
+  backgroundFixLanguageHelper: true,
   smartTypography: true,
   enableSlashCommand: true,
   toggleHeading: true,
+  readingModeLivePreview: false,
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
@@ -1134,9 +1140,12 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     highlightInlineCode,
     spellCheck: raw?.spellCheck !== undefined ? Boolean(raw.spellCheck) : DEFAULT_SETTINGS.spellCheck,
     wrongLanguageSuggestion: raw?.wrongLanguageSuggestion !== undefined ? Boolean(raw.wrongLanguageSuggestion) : DEFAULT_SETTINGS.wrongLanguageSuggestion,
+    globalFixLanguage: raw?.globalFixLanguage !== undefined ? Boolean(raw.globalFixLanguage) : DEFAULT_SETTINGS.globalFixLanguage,
+    backgroundFixLanguageHelper: raw?.backgroundFixLanguageHelper !== undefined ? Boolean(raw.backgroundFixLanguageHelper) : DEFAULT_SETTINGS.backgroundFixLanguageHelper,
     smartTypography: raw?.smartTypography !== undefined ? Boolean(raw.smartTypography) : DEFAULT_SETTINGS.smartTypography,
     enableSlashCommand: raw?.enableSlashCommand !== undefined ? Boolean(raw.enableSlashCommand) : DEFAULT_SETTINGS.enableSlashCommand,
     toggleHeading: raw?.toggleHeading !== undefined ? Boolean(raw.toggleHeading) : ((raw as any)?.foldHeading !== undefined ? Boolean((raw as any).foldHeading) : DEFAULT_SETTINGS.toggleHeading),
+    readingModeLivePreview: raw?.readingModeLivePreview !== undefined ? Boolean(raw.readingModeLivePreview) : ((raw as any)?.livePreviewInReadingMode !== undefined ? Boolean((raw as any).livePreviewInReadingMode) : DEFAULT_SETTINGS.readingModeLivePreview),
     toolbarItemsOrder,
     hiddenToolbarItems,
     geminiApiKey,
@@ -1167,6 +1176,8 @@ function saveSettings(settings: AppSettings) {
 export function sanitizeWorkspaceSettingsPayload(settings: Partial<AppSettings>): Record<string, any> {
   const payload = { ...settings };
   delete (payload as any).userName;
+  delete (payload as any).geminiApiKey;
+  delete (payload as any).googleDriveClientId;
   return payload;
 }
 
@@ -1179,8 +1190,12 @@ export function parseWorkspaceSettings(jsonString: string): Partial<AppSettings>
     const parsed = JSON.parse(jsonString);
     if (!parsed || typeof parsed !== "object") return null;
     delete parsed.userName;
+    delete parsed.geminiApiKey;
+    delete parsed.googleDriveClientId;
     const normalized = normalizeSettings(parsed);
     delete (normalized as Partial<AppSettings>).userName;
+    delete (normalized as Partial<AppSettings>).geminiApiKey;
+    delete (normalized as Partial<AppSettings>).googleDriveClientId;
     return normalized;
   } catch {
     return null;
@@ -1188,7 +1203,7 @@ export function parseWorkspaceSettings(jsonString: string): Partial<AppSettings>
 }
 
 export async function saveWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle | null, settings: AppSettings) {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   const workspaceSettings = sanitizeWorkspaceSettingsPayload(settings);
 
   if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
@@ -1218,7 +1233,7 @@ export async function saveWorkspaceSettings(rootDirHandle: FileSystemDirectoryHa
 }
 
 export async function loadWorkspaceSettings(rootDirHandle: FileSystemDirectoryHandle | null): Promise<Partial<AppSettings> | null> {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -1254,20 +1269,24 @@ interface AppSettingsContextValue {
   setFolderIcon: (folderPath: string, icon: string, color?: string) => void;
   removeFolderIcon: (folderPath: string) => void;
   moveFolderIcons: (oldFolderPath: string, newFolderPath: string) => void;
+  copyFolderIcons: (sourceFolderPath: string, targetFolderPath: string) => void;
   removeFolderIconsTree: (folderPath: string) => void;
   setFileIcon: (filePath: string, icon: string, color?: string) => void;
   removeFileIcon: (filePath: string) => void;
   applyAppearanceStyle: (styleId: AppearanceStyle) => void;
   resetSettings: () => void;
+}
+
+export interface KeyboardLanguageContextValue {
   keyboardLanguage: "th" | "en";
   setKeyboardLanguage: (lang: "th" | "en") => void;
   toggleKeyboardLanguage: () => void;
 }
 
 const AppSettingsContext = createContext<AppSettingsContextValue | undefined>(undefined);
+const KeyboardLanguageContext = createContext<KeyboardLanguageContextValue | undefined>(undefined);
 
-export function AppSettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<AppSettings>(loadSettings);
+function KeyboardLanguageProvider({ children }: { children: ReactNode }) {
   const [keyboardLanguage, setKeyboardLanguageState] = useState<"th" | "en">(() => {
     return detectSystemLanguage() === "th" ? "th" : "en";
   });
@@ -1290,15 +1309,23 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     };
 
     const handleSwitchKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+
       // 1. ตัวหนอน (Grave Accent / Backquote / ~ / ` / KeyCode 192 / Windows IME toggle)
       if (
-        e.code === "Backquote" ||
-        e.key === "`" ||
-        e.key === "~" ||
-        e.keyCode === 192 ||
-        (e as any).which === 192 ||
-        (e.code === "Backquote" && (e.key === "Process" || e.key === "Unidentified" || e.key === "Dead"))
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (e.code === "Backquote" ||
+          e.key === "`" ||
+          e.key === "~" ||
+          e.keyCode === 192 ||
+          (e as any).which === 192 ||
+          (e.code === "Backquote" && (e.key === "Process" || e.key === "Unidentified" || e.key === "Dead")))
       ) {
+        if (e.type === "keyup" && e.key !== "Process" && e.key !== "Unidentified" && e.key !== "Dead") {
+          return;
+        }
         triggerToggle();
         return;
       }
@@ -1332,7 +1359,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       if (data && data.length > 0) {
         if (/[\u0E00-\u0E7F]/.test(data)) {
           setKeyboardLanguageState("th");
-        } else if (/[A-Za-z]/.test(data)) {
+        } else if (/[A-Za-z`~]/.test(data)) {
           setKeyboardLanguageState("en");
         }
       }
@@ -1343,7 +1370,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     window.addEventListener("beforeinput", handleInputChar, true);
     window.addEventListener("input", handleInputChar, true);
 
-    const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+    const electronAPI = window.electronAPI;
     let unsubNative: (() => void) | undefined;
     if (electronAPI?.onNativeKeyboardLanguageChanged) {
       unsubNative = electronAPI.onNativeKeyboardLanguageChanged((lang: string) => {
@@ -1379,6 +1406,21 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       }
     };
   }, []);
+
+  const kbValue = useMemo(
+    () => ({
+      keyboardLanguage,
+      setKeyboardLanguage,
+      toggleKeyboardLanguage,
+    }),
+    [keyboardLanguage, setKeyboardLanguage, toggleKeyboardLanguage],
+  );
+
+  return createElement(KeyboardLanguageContext.Provider, { value: kbValue }, children);
+}
+
+export function AppSettingsProvider({ children }: { children: ReactNode }) {
+  const [settings, setSettings] = useState<AppSettings>(loadSettings);
 
   const updateSetting = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => {
@@ -1456,6 +1498,46 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         ...prev,
         folderIcons: nextFolderIcons,
         fileIcons: nextFileIcons,
+      });
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const copyFolderIcons = useCallback((sourceFolderPath: string, targetFolderPath: string) => {
+    if (!sourceFolderPath || !targetFolderPath || sourceFolderPath === targetFolderPath) return;
+    setSettings((prev) => {
+      const currentFolderIcons = { ...(prev.folderIcons || {}) };
+      const currentFileIcons = { ...(prev.fileIcons || {}) };
+      let changed = false;
+
+      // Copy folder icons for this folder and all nested subfolders
+      for (const [path, val] of Object.entries(prev.folderIcons || {})) {
+        if (path === sourceFolderPath) {
+          currentFolderIcons[targetFolderPath] = { ...val };
+          changed = true;
+        } else if (path.startsWith(`${sourceFolderPath}/`)) {
+          const suffix = path.slice(sourceFolderPath.length);
+          currentFolderIcons[`${targetFolderPath}${suffix}`] = { ...val };
+          changed = true;
+        }
+      }
+
+      // Copy file icons inside the duplicated folder
+      for (const [path, val] of Object.entries(prev.fileIcons || {})) {
+        if (path.startsWith(`${sourceFolderPath}/`)) {
+          const suffix = path.slice(sourceFolderPath.length);
+          currentFileIcons[`${targetFolderPath}${suffix}`] = { ...val };
+          changed = true;
+        }
+      }
+
+      if (!changed) return prev;
+
+      const next = normalizeSettings({
+        ...prev,
+        folderIcons: currentFolderIcons,
+        fileIcons: currentFileIcons,
       });
       saveSettings(next);
       return next;
@@ -1600,7 +1682,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       document.documentElement.style.removeProperty("--hl-number");
       document.documentElement.style.removeProperty("--hl-punct");
     }
-  }, [settings.theme, settings.customAccentColor, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily, settings.colorScheme]);
+  }, [settings.theme, settings.customAccentColor, settings.appearanceStyle, settings.fontFamily, settings.editorFontFamily, settings.colorScheme, settings.language]);
 
   // Dynamically update document favicon to match theme accent color
   useEffect(() => {
@@ -1628,7 +1710,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           // ignore canvas environment issues (e.g. headless/jsdom)
         }
       };
-    } catch {}
+    } catch { /* ignore */ }
   }, [settings.theme, settings.customAccentColor]);
 
   useEffect(() => {
@@ -1704,30 +1786,44 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       setFolderIcon,
       removeFolderIcon,
       moveFolderIcons,
+      copyFolderIcons,
       removeFolderIconsTree,
       setFileIcon,
       removeFileIcon,
       applyAppearanceStyle,
       resetSettings,
-      keyboardLanguage,
-      setKeyboardLanguage,
-      toggleKeyboardLanguage,
     }),
-    [settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon, applyAppearanceStyle, resetSettings, keyboardLanguage, setKeyboardLanguage, toggleKeyboardLanguage],
+    [settings, updateSetting, updateSettings, setFolderIcon, removeFolderIcon, moveFolderIcons, copyFolderIcons, removeFolderIconsTree, setFileIcon, removeFileIcon, applyAppearanceStyle, resetSettings],
   );
 
   return createElement(
     AppSettingsContext.Provider,
     { value },
     createElement(
-      MotionConfig,
-      {
-        reducedMotion: settings.enableAnimations !== false ? "never" : "always",
-        transition: settings.enableAnimations === false ? { duration: 0 } : undefined,
-      },
-      children
+      KeyboardLanguageProvider,
+      null,
+      createElement(
+        MotionConfig,
+        {
+          reducedMotion: settings.enableAnimations !== false ? "never" : "always",
+          transition: settings.enableAnimations === false ? { duration: 0 } : undefined,
+        },
+        children
+      )
     )
   );
+}
+
+export function useKeyboardLanguage(): KeyboardLanguageContextValue {
+  const context = useContext(KeyboardLanguageContext);
+  if (!context) {
+    return {
+      keyboardLanguage: detectSystemLanguage() === "th" ? "th" : "en",
+      setKeyboardLanguage: () => {},
+      toggleKeyboardLanguage: () => {},
+    };
+  }
+  return context;
 }
 
 export function useAppSettings() {

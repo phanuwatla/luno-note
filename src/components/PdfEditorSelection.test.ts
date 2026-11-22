@@ -320,14 +320,13 @@ describe('Universal PDF Editor Tools, Interactions & Luno UI Consistency', () =>
 
     // 7. Bookmark UI: plain muted page label (no container border/bg), trash icon, and no active icon fill
     expect(editorSrc).toContain('className="text-[11px] font-medium text-muted-foreground tracking-wide tabular-nums select-none shrink-0"');
-    expect(editorSrc).toContain('lang === "th" ? `หน้า ${currentPageNum}` : `Page ${currentPageNum}`');
+    expect(editorSrc).toContain('t("editor.page", { currentPageNum })');
     expect(editorSrc).toContain('<Trash2 className="h-3 w-3" />');
     expect(editorSrc).not.toContain('text-primary fill-primary/30');
 
     // 8. Unsaved PDF confirmation modal on tab close and app exit
     expect(indexSrc).toContain('pendingPdfCloseRequest');
-    expect(indexSrc).toContain('บันทึกการเปลี่ยนแปลงก่อนปิดหรือไม่?');
-    expect(indexSrc).toContain('Save changes before closing?');
+    expect(indexSrc).toContain('workspace.saveChangesBeforeClosing');
     expect(indexSrc).toContain('finalizePdfTabSession');
     expect(windowControlsSrc).toContain('luno:request-app-close');
     expect(windowControlsSrc).toContain('finalizeAllOpenPdfSessions');

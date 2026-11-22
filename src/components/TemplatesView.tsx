@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "@/hooks/useTranslation";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import {
   type NoteTemplateType,
@@ -53,6 +54,7 @@ export default function TemplatesView({
   notes,
 }: TemplatesViewProps) {
   const { settings } = useAppSettings();
+  const { t } = useTranslation();
   const isTh = settings.language === "th";
   const pack = settings?.iconPack || "lucide";
 
@@ -209,15 +211,15 @@ export default function TemplatesView({
 
   const categories = useMemo(
     () => [
-      { id: "all", label: isTh ? "ทั้งหมด" : "All" },
+      { id: "all", label: t("favorites.all") },
       { id: "md", label: "Markdown" },
       { id: "html", label: "HTML" },
-      { id: "txt", label: isTh ? "ข้อความ" : "Text" },
-      { id: "study", label: isTh ? "การเรียน & วิจัย" : "Study & Research" },
-      { id: "dev", label: isTh ? "พัฒนาโปรแกรม & IT" : "Dev & Tech" },
-      { id: "work", label: isTh ? "งาน & ธุรกิจ" : "Work & Business" },
-      { id: "daily", label: isTh ? "สุขภาพ & ส่วนตัว" : "Daily & Wellness" },
-      { id: "web", label: isTh ? "เว็บไซต์ & โค้ด" : "Web & UI" },
+      { id: "txt", label: t("favorites.text") },
+      { id: "study", label: t("templates.studyResearch") },
+      { id: "dev", label: t("templates.devTech") },
+      { id: "work", label: t("templates.workBusiness") },
+      { id: "daily", label: t("templates.dailyWellness") },
+      { id: "web", label: t("templates.webUi") },
     ],
     [isTh]
   );
@@ -391,8 +393,8 @@ export default function TemplatesView({
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
       toast({
-        title: isTh ? "คัดลอกแล้ว" : "Copied to clipboard",
-        description: isTh ? "คัดลอกเนื้อหาเทมเพลตลงในคลิปบอร์ดแล้ว" : "Template content copied to clipboard",
+        title: t("templates.copiedToClipboard"),
+        description: t("templates.templateContentCopiedToClipboard"),
       });
       setTimeout(() => setCopied(false), 2000);
     });
@@ -484,7 +486,7 @@ export default function TemplatesView({
             handleSelectTemplate(tmpl);
           }
         }}
-        className={`flex flex-col text-left p-3.5 rounded-xl bg-card border-[1.5px] transition-all group shadow-2xs cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none relative ${
+        className={`flex flex-col text-left p-3.5 rounded-xl bg-card border-[1.5px] transition-all group shadow-sm cursor-pointer focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 outline-none relative ${
           isCurrentPreview
             ? "border-primary bg-primary/10"
             : "border-border/70 hover:border-primary/60 hover:bg-muted/50"
@@ -527,7 +529,7 @@ export default function TemplatesView({
               <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden py-1">
                 {settings.appLayout === "compact" ? (
                   <span className="font-normal truncate text-muted-foreground/90 px-1 py-0.5 select-none">
-                    {isTh ? "เทมเพลต" : "Templates"}
+                    {t("sidebar.templatesLabel")}
                   </span>
                 ) : (
                   <Tooltip>
@@ -548,11 +550,11 @@ export default function TemplatesView({
                           const ArrowLeftIcon = getToolbarIcon("arrowLeft", pack);
                           return <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />;
                         })()}
-                        <span className="font-normal truncate">{isTh ? "เทมเพลต" : "Templates"}</span>
+                        <span className="font-normal truncate">{t("sidebar.templatesLabel")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      {isTh ? "ย้อนกลับไปยังเทมเพลตทั้งหมด" : "Back to all templates"}
+                      {t("templates.backToAllTemplates")}
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -581,7 +583,7 @@ export default function TemplatesView({
                         onClick={() => setPreviewTab("rendered")}
                         className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                           previewTab === "rendered"
-                            ? "bg-background text-foreground shadow-xs font-semibold"
+                            ? "bg-background text-foreground shadow-sm font-semibold"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
@@ -591,19 +593,19 @@ export default function TemplatesView({
                         })()}
                         <span className="hidden sm:inline">
                           {previewItem.format === "html"
-                            ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
+                            ? t("templates.liveWebsite")
                             : previewItem.format === "markdown"
-                            ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
-                            : isTh ? "ข้อความ" : "Text"}
+                            ? t("templates.formattedDoc")
+                            : t("favorites.text")}
                         </span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
                       {previewItem.format === "html"
-                        ? isTh ? "ดูหน้าเว็บจริง" : "Live Website"
+                        ? t("templates.liveWebsite")
                         : previewItem.format === "markdown"
-                        ? isTh ? "เอกสารมาร์กดาวน์" : "Formatted Doc"
-                        : isTh ? "ข้อความ" : "Text"}
+                        ? t("templates.formattedDoc")
+                        : t("favorites.text")}
                     </TooltipContent>
                   </Tooltip>
 
@@ -614,7 +616,7 @@ export default function TemplatesView({
                         onClick={() => setPreviewTab("code")}
                         className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all cursor-pointer ${
                           previewTab === "code"
-                            ? "bg-background text-foreground shadow-xs font-semibold"
+                            ? "bg-background text-foreground shadow-sm font-semibold"
                             : "text-muted-foreground hover:text-foreground"
                         }`}
                       >
@@ -622,11 +624,11 @@ export default function TemplatesView({
                           const CodeIcon = getToolbarIcon("code", pack);
                           return <CodeIcon className="h-3 w-3" />;
                         })()}
-                        <span className="hidden sm:inline">{isTh ? "โค้ดต้นฉบับ" : "Source Code"}</span>
+                        <span className="hidden sm:inline">{t("templates.sourceCode")}</span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      {isTh ? "ดูโค้ดต้นฉบับ" : "View Source Code"}
+                      {t("templates.viewSourceCode")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -641,7 +643,7 @@ export default function TemplatesView({
                           onClick={() => setDeviceMode("desktop")}
                           className={`p-1 rounded-md transition-all cursor-pointer ${
                             deviceMode === "desktop"
-                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              ? "bg-background text-foreground shadow-sm font-semibold"
                               : "text-muted-foreground hover:text-foreground"
                           }`}
                           aria-label="Desktop (100%)"
@@ -653,7 +655,7 @@ export default function TemplatesView({
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" sideOffset={4}>
-                        {isTh ? "เดสก์ท็อป (100%)" : "Desktop (100%)"}
+                        {t("templates.desktop100")}
                       </TooltipContent>
                     </Tooltip>
 
@@ -664,7 +666,7 @@ export default function TemplatesView({
                           onClick={() => setDeviceMode("tablet")}
                           className={`p-1 rounded-md transition-all cursor-pointer ${
                             deviceMode === "tablet"
-                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              ? "bg-background text-foreground shadow-sm font-semibold"
                               : "text-muted-foreground hover:text-foreground"
                           }`}
                           aria-label="Tablet (768px)"
@@ -676,7 +678,7 @@ export default function TemplatesView({
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" sideOffset={4}>
-                        {isTh ? "แท็บเล็ต (768px)" : "Tablet (768px)"}
+                        {t("templates.tablet768px")}
                       </TooltipContent>
                     </Tooltip>
 
@@ -687,7 +689,7 @@ export default function TemplatesView({
                           onClick={() => setDeviceMode("mobile")}
                           className={`p-1 rounded-md transition-all cursor-pointer ${
                             deviceMode === "mobile"
-                              ? "bg-background text-foreground shadow-xs font-semibold"
+                              ? "bg-background text-foreground shadow-sm font-semibold"
                               : "text-muted-foreground hover:text-foreground"
                           }`}
                           aria-label="Mobile (375px)"
@@ -699,7 +701,7 @@ export default function TemplatesView({
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" sideOffset={4}>
-                        {isTh ? "มือถือ (375px)" : "Mobile (375px)"}
+                        {t("templates.mobile375px")}
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -727,12 +729,12 @@ export default function TemplatesView({
                         })()
                       )}
                       <span className="sr-only">
-                        {copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}
+                        {copied ? (t("common.copied")) : (t("lunoAi.copyCode"))}
                       </span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {copied ? (isTh ? "คัดลอกแล้ว" : "Copied") : (isTh ? "คัดลอกโค้ด" : "Copy code")}
+                    {copied ? (t("common.copied")) : (t("lunoAi.copyCode"))}
                   </TooltipContent>
                 </Tooltip>
 
@@ -746,17 +748,17 @@ export default function TemplatesView({
                         const colorVal = NOTE_TEMPLATE_METADATA[previewItem.type]?.iconColor || previewItem.color;
                         onCreateWithTemplate(previewItem.type, previewItem.format, iconVal, colorVal);
                       }}
-                      className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-2xs cursor-pointer shrink-0"
+                      className="h-7 px-3 rounded-[10px] text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm cursor-pointer shrink-0"
                     >
                       {(() => {
                         const PlusIcon = getToolbarIcon("plus", pack);
                         return <PlusIcon className="h-3.5 w-3.5" />;
                       })()}
-                      <span>{isTh ? "ใช้เทมเพลตนี้" : "Use this template"}</span>
+                      <span>{t("home.useTemplate")}</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={4}>
-                    {isTh ? "ใช้เทมเพลตนี้" : "Use this template"}
+                    {t("home.useTemplate")}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -788,7 +790,7 @@ export default function TemplatesView({
               </div>
 
             {/* Main Preview Container */}
-            <div className="h-[520px] lg:h-[600px] rounded-xl border border-border/60 bg-background overflow-hidden flex flex-col relative shadow-xs shrink-0">
+            <div className="h-[520px] lg:h-[600px] rounded-xl border border-border/60 bg-background overflow-hidden flex flex-col relative shadow-sm shrink-0">
               {previewTab === "rendered" ? (
                 previewItem.format === "html" ? (
                   // Live HTML Webpage Preview with Simulated Browser Bar & Device Viewport
@@ -801,7 +803,7 @@ export default function TemplatesView({
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/80 inline-block" />
                       </div>
 
-                      <div className="flex items-center gap-2 bg-background/80 border border-border/60 rounded-lg px-3 py-0.5 text-[11px] text-muted-foreground max-w-sm w-full mx-4 justify-center shadow-2xs font-mono">
+                      <div className="flex items-center gap-2 bg-background/80 border border-border/60 rounded-lg px-3 py-0.5 text-[11px] text-muted-foreground max-w-sm w-full mx-4 justify-center shadow-sm font-mono">
                         <span>https://preview.luno.local/{previewItem.type}.html</span>
                       </div>
 
@@ -813,11 +815,11 @@ export default function TemplatesView({
                             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                           >
                             <RotateCcw className="h-3 w-3" />
-                            <span className="sr-only">{isTh ? "โหลดใหม่" : "Reload"}</span>
+                            <span className="sr-only">{t("webViewer.reload")}</span>
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" sideOffset={4}>
-                          {isTh ? "โหลดใหม่" : "Reload"}
+                          {t("webViewer.reload")}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -892,10 +894,10 @@ export default function TemplatesView({
               <div className="space-y-3 pt-2 pb-8 shrink-0">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-foreground">
-                    {isTh ? "เทมเพลตที่เกี่ยวข้อง" : "Related Templates"}
+                    {t("templates.relatedTemplates")}
                   </h2>
                   <span className="text-[11px] text-muted-foreground font-medium">
-                    {relatedTemplates.length} {isTh ? "เทมเพลต" : "templates"}
+                    {relatedTemplates.length} {t("templates.templates")}
                   </span>
                 </div>
 
@@ -916,13 +918,11 @@ export default function TemplatesView({
                 <div className="flex items-center gap-2">
                   <LayoutTemplate className="h-6 w-6 text-primary shrink-0" />
                   <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                    {isTh ? "เทมเพลตทั้งหมด" : "All Templates"}
+                    {t("templates.allTemplates")}
                   </h1>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {isTh
-                    ? "เลือกเทมเพลตสำเร็จรูปเพื่อเริ่มต้นเขียนโน้ต ออกแบบหน้าเว็บ หรือจัดระเบียบงานได้ทันที"
-                    : "Choose pre-built templates to start writing notes, building web pages, or organizing tasks."}
+                  {t("templates.choosePreBuiltTemplatesTo")}
                 </p>
               </div>
 
@@ -933,7 +933,7 @@ export default function TemplatesView({
                   ref={searchInputRef}
                   data-templates-search="true"
                   type="text"
-                  placeholder={isTh ? "ค้นหาเทมเพลต..." : "Search templates..."}
+                  placeholder={t("templates.searchTemplates")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -952,7 +952,7 @@ export default function TemplatesView({
                       searchInputRef.current?.focus();
                     }}
                     className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                    aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                    aria-label={t("home.clearSearch")}
                   >
                     {renderIcon("x", "h-3 w-3")}
                   </button>
@@ -979,7 +979,7 @@ export default function TemplatesView({
                     onClick={() => setSelectedCategory(cat.id)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
                       isSelected
-                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm"
                         : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
                     }`}
                   >
@@ -992,19 +992,13 @@ export default function TemplatesView({
             {/* 3. Main Templates Showcase */}
             <div className={`space-y-5 ${allFiltered.length === 0 ? "flex-1 flex flex-col items-center justify-center min-h-[360px]" : ""}`}>
               {allFiltered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center text-center space-y-3">
-                  <div className="h-12 w-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground">
-                    {renderIcon("search", "h-6 w-6 opacity-40")}
-                  </div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {isTh ? "ไม่พบเทมเพลตที่ตรงกับการค้นหา" : "No templates found"}
-                  </p>
-                  <p className="text-xs text-muted-foreground max-w-sm">
-                    {isTh
-                      ? "ลองเปลี่ยนคำค้นหาหรือเลือกหมวดหมู่อื่นเพื่อดูเทมเพลตทั้งหมด"
-                      : "Try changing your search keywords or switch category filter to see all templates."}
-                  </p>
-                </div>
+                <EmptyState
+                  icon={renderIcon("search", "h-6 w-6")}
+                  title={t("templates.noTemplatesFound")}
+                  description={
+                    t("templates.tryChangingYourSearchKeywords")
+                  }
+                />
               ) : selectedCategory === "all" && !searchQuery ? (
                 // Grouped Sections (Markdown, HTML, Text)
                 <>
@@ -1012,10 +1006,10 @@ export default function TemplatesView({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h2 className="text-xs font-semibold text-foreground">
-                        <span>{isTh ? "เอกสารมาร์กดาวน์ (Markdown .md)" : "Markdown Documents (.md)"}</span>
+                        <span>{t("templates.markdownDocumentsMd")}</span>
                       </h2>
                       <span className="text-[11px] text-muted-foreground font-medium">
-                        {mdGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                        {mdGroup.length} {t("templates.templates")}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1027,10 +1021,10 @@ export default function TemplatesView({
                   <div className="space-y-3 pt-1">
                     <div className="flex items-center justify-between">
                       <h2 className="text-xs font-semibold text-foreground">
-                        <span>{isTh ? "เทมเพลตหน้าเว็บ (HTML .html)" : "Web Page Templates (.html)"}</span>
+                        <span>{t("templates.webPageTemplatesHtml")}</span>
                       </h2>
                       <span className="text-[11px] text-muted-foreground font-medium">
-                        {htmlGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                        {htmlGroup.length} {t("templates.templates")}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1042,10 +1036,10 @@ export default function TemplatesView({
                   <div className="space-y-3 pt-1">
                     <div className="flex items-center justify-between">
                       <h2 className="text-xs font-semibold text-foreground">
-                        <span>{isTh ? "ไฟล์ข้อความธรรมดา (Plain Text .txt)" : "Plain Text Documents (.txt)"}</span>
+                        <span>{t("templates.plainTextDocumentsTxt")}</span>
                       </h2>
                       <span className="text-[11px] text-muted-foreground font-medium">
-                        {txtGroup.length} {isTh ? "เทมเพลต" : "templates"}
+                        {txtGroup.length} {t("templates.templates")}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1060,8 +1054,8 @@ export default function TemplatesView({
                     <h2 className="text-xs font-semibold text-foreground">
                       <span>
                         {searchQuery
-                          ? isTh ? `ผลการค้นหา (${allFiltered.length})` : `Search Results (${allFiltered.length})`
-                          : isTh ? `เทมเพลตที่เลือก (${allFiltered.length})` : `Selected Templates (${allFiltered.length})`}
+                          ? t("templates.searchResults", { v0: allFiltered.length })
+                          : t("templates.selectedTemplates", { v0: allFiltered.length })}
                       </span>
                     </h2>
                   </div>

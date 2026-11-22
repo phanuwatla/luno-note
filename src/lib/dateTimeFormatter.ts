@@ -1,3 +1,4 @@
+import { translate } from "@/translation/translate";
 /**
  * Centralized Date & Time Formatter honoring user settings:
  * - dateFormat: "YYYY-MM-DD" | "DD/MM/YYYY" | "MM/DD/YYYY"
@@ -83,10 +84,10 @@ export function formatRelativeDateTime(
   const timeStr = formatTime(date, timeFormat, language);
 
   if (isToday) {
-    return `${isTh ? "วันนี้" : "Today"} ${timeStr}`;
+    return `${translate(isTh ? "th" : "en", "webViewer.today")} ${timeStr}`;
   }
   if (isYesterday) {
-    return `${isTh ? "เมื่อวาน" : "Yesterday"} ${timeStr}`;
+    return `${translate(isTh ? "th" : "en", "webViewer.yesterday")} ${timeStr}`;
   }
 
   const datePart = formatDate(date, dateFormat, language);

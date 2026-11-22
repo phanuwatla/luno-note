@@ -18,7 +18,7 @@ export async function saveWorkspaceFavorites(
   };
   const jsonStr = JSON.stringify(data, null, 2);
 
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -48,7 +48,7 @@ export async function saveWorkspaceFavorites(
 export async function loadWorkspaceFavorites(
   rootDirHandle: FileSystemDirectoryHandle | null
 ): Promise<string[]> {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();

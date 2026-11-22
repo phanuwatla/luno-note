@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
+import { FloatingWindow } from "@/components/shared/FloatingWindow";
 import {
   X,
   GripHorizontal,
@@ -150,14 +151,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
   useEffect(() => {
     if (timerRunning) {
       timerRef.current = setInterval(() => {
-        setTimerLeft((prev) => {
-          if (prev <= 1) {
-            setTimerRunning(false);
-            playChime();
-            return 0;
-          }
-          return prev - 1;
-        });
+        setTimerLeft((prev) => (prev <= 1 ? 0 : prev - 1));
       }, 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -165,7 +159,14 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [timerRunning, playChime]);
+  }, [timerRunning]);
+
+  useEffect(() => {
+    if (timerRunning && timerLeft === 0) {
+      setTimerRunning(false);
+      playChime();
+    }
+  }, [timerRunning, timerLeft, playChime]);
 
   const setPresetTimer = (secs: number) => {
     setTimerRunning(false);
@@ -212,6 +213,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
   const [newAlarmLabel, setNewAlarmLabel] = useState("");
   const [showAddAlarm, setShowAddAlarm] = useState(false);
   const [currentTimeStr, setCurrentTimeStr] = useState("");
+  const lastTriggeredAlarmMinuteRef = useRef<string>("");
 
   useEffect(() => {
     const updateTime = () => {
@@ -222,12 +224,12 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
       const nowHm = `${h}:${m}`;
       setCurrentTimeStr(`${h}:${m}:${s}`);
 
-      if (s === "00") {
-        alarms.forEach((a) => {
-          if (a.enabled && a.time === nowHm) {
-            playChime();
-          }
-        });
+      if (s === "00" && lastTriggeredAlarmMinuteRef.current !== nowHm) {
+        const hasTriggered = alarms.some((a) => a.enabled && a.time === nowHm);
+        if (hasTriggered) {
+          lastTriggeredAlarmMinuteRef.current = nowHm;
+          playChime();
+        }
       }
     };
     updateTime();
@@ -242,7 +244,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
       {
         id: Date.now().toString(),
         time: timeStr,
-        label: newAlarmLabel || (t("editor.alarm") || "Alarm"),
+        label: newAlarmLabel || (t("editor.alarm")),
         enabled: true,
       },
     ]);
@@ -290,27 +292,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
   useEffect(() => {
     if (pomoRunning) {
       pomoRef.current = setInterval(() => {
-        setPomoTimeLeft((prev) => {
-          if (prev <= 1) {
-            setPomoRunning(false);
-            playChime();
-            if (pomoMode === "work") {
-              const nextSessions = pomoSessions + 1;
-              setPomoSessions(nextSessions);
-              if (nextSessions % 4 === 0) {
-                setPomoMode("longBreak");
-                return 15 * 60;
-              } else {
-                setPomoMode("shortBreak");
-                return 5 * 60;
-              }
-            } else {
-              setPomoMode("work");
-              return 25 * 60;
-            }
-          }
-          return prev - 1;
-        });
+        setPomoTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
       }, 1000);
     } else if (pomoRef.current) {
       clearInterval(pomoRef.current);
@@ -318,162 +300,90 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
     return () => {
       if (pomoRef.current) clearInterval(pomoRef.current);
     };
-  }, [pomoRunning, pomoMode, pomoSessions, playChime]);
+  }, [pomoRunning]);
 
-  if (!isOpen) return null;
-
-  if (isMinimized) {
-    return (
-      <TooltipProvider delayDuration={150}>
-        <motion.div
-          drag
-          dragMomentum={false}
-          dragElastic={0}
-          onPointerDown={onFocusWindow}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.15 }}
-          className="fixed rounded-full border border-border/60 bg-card/95 px-3 py-1.5 shadow-md backdrop-blur-md select-none text-foreground flex items-center gap-2"
-          data-floating-pill="true"
-          style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-        >
-          <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground opacity-60 cursor-grab active:cursor-grabbing shrink-0" />
-          
-          {/* Clickable time display to expand */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setIsMinimized(false)}
-                className="flex items-center gap-1.5 text-xs font-bold text-foreground hover:text-primary transition-colors cursor-pointer"
-              >
-                {activeTab === "stopwatch" && <TimerIcon className="h-3.5 w-3.5 text-primary shrink-0" />}
-                {activeTab === "timer" && <Hourglass className="h-3.5 w-3.5 text-primary shrink-0" />}
-                {activeTab === "alarm" && <Bell className="h-3.5 w-3.5 text-primary shrink-0" />}
-                {activeTab === "pomodoro" && <Target className="h-3.5 w-3.5 text-primary shrink-0" />}
-                
-                <span className="tabular-nums">
-                  {activeTab === "stopwatch" && formatSwTime(swTime)}
-                  {activeTab === "timer" && formatTimer(timerLeft)}
-                  {activeTab === "alarm" && (currentTimeStr || "00:00:00")}
-                  {activeTab === "pomodoro" && formatTimer(pomoTimeLeft)}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("editor.expand") || "Expand"}</TooltipContent>
-          </Tooltip>
-
-          <div className="h-3 w-px bg-border/60 mx-0.5" />
-
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  {soundEnabled ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3 opacity-40" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{soundEnabled ? (t("editor.muteSound") || "Mute sound") : (t("editor.enableSound") || "Enable sound")}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(false)}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.expand") || "Expand"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || "Close"}</TooltipContent>
-            </Tooltip>
-          </div>
-        </motion.div>
-      </TooltipProvider>
-    );
-  }
+  useEffect(() => {
+    if (pomoRunning && pomoTimeLeft === 0) {
+      setPomoRunning(false);
+      playChime();
+      if (pomoMode === "work") {
+        const nextSessions = pomoSessions + 1;
+        setPomoSessions(nextSessions);
+        if (nextSessions % 4 === 0) {
+          setPomoMode("longBreak");
+          setPomoTimeLeft(15 * 60);
+        } else {
+          setPomoMode("shortBreak");
+          setPomoTimeLeft(5 * 60);
+        }
+      } else {
+        setPomoMode("work");
+        setPomoTimeLeft(25 * 60);
+      }
+    }
+  }, [pomoRunning, pomoTimeLeft, pomoMode, pomoSessions, playChime]);
 
   return (
-    <TooltipProvider delayDuration={150}>
-      <motion.div
-        drag
-        dragMomentum={false}
-        dragElastic={0}
-        onPointerDown={onFocusWindow}
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 16 }}
-        transition={{ type: "spring", damping: 25, stiffness: 350 }}
-        className="fixed w-[320px] rounded-2xl border border-border/60 bg-card/95 p-3.5 shadow-md backdrop-blur-md select-none text-foreground"
-        data-floating-window="true"
-        style={{ top: "15%", right: "20%", zIndex: zIndex ?? 50, fontFamily: "var(--app-font-family, inherit)" }}
-      >
-        {/* Window Header */}
-        <div className="flex items-center justify-between pb-2 border-b border-border/40 cursor-grab active:cursor-grabbing">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <GripHorizontal className="h-4 w-4 opacity-60" />
-            <span>{t("editor.clock") || "Clock & Timers"}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  {soundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5 opacity-40" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{soundEnabled ? (t("editor.muteSound") || "Mute sound") : (t("editor.enableSound") || "Enable sound")}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setIsMinimized(true)}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.minimize") || "Minimize"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editor.close") || "Close"}</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-
+    <FloatingWindow
+      isOpen={isOpen}
+      isMinimized={isMinimized}
+      onToggleMinimize={() => setIsMinimized((prev) => !prev)}
+      onClose={onClose}
+      zIndex={zIndex}
+      onFocusWindow={onFocusWindow}
+      title={t("editor.clock")}
+      defaultPosition={{ top: "16%", right: "12%" }}
+      widthClassName="w-[320px]"
+      minimizeTooltip={t("editor.minimize")}
+      expandTooltip={t("editor.expand")}
+      closeTooltip={t("editor.close")}
+      minimizedContent={
+        <>
+          {activeTab === "stopwatch" && <TimerIcon className="h-3.5 w-3.5 text-primary shrink-0" />}
+          {activeTab === "timer" && <Hourglass className="h-3.5 w-3.5 text-primary shrink-0" />}
+          {activeTab === "alarm" && <Bell className="h-3.5 w-3.5 text-primary shrink-0" />}
+          {activeTab === "pomodoro" && <Target className="h-3.5 w-3.5 text-primary shrink-0" />}
+          <span className="tabular-nums">
+            {activeTab === "stopwatch" && formatSwTime(swTime)}
+            {activeTab === "timer" && formatTimer(timerLeft)}
+            {activeTab === "alarm" && (currentTimeStr || "00:00:00")}
+            {activeTab === "pomodoro" && formatTimer(pomoTimeLeft)}
+          </span>
+        </>
+      }
+      minimizedExtra={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+            >
+              {soundEnabled ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3 opacity-40" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {soundEnabled ? (t("editor.muteSound")) : (t("editor.enableSound"))}
+          </TooltipContent>
+        </Tooltip>
+      }
+      headerExtra={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-colors cursor-pointer"
+            >
+              {soundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5 opacity-40" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {soundEnabled ? (t("editor.muteSound")) : (t("editor.enableSound"))}
+          </TooltipContent>
+        </Tooltip>
+      }
+    >
         {/* Tabs Navigation (Underline Style matching Image 2) */}
         <div className="flex items-center justify-between border-b border-border/40 mt-2 mb-3 px-0.5 pb-1.5 text-xs font-medium relative">
           <Tooltip>
@@ -488,7 +398,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 }`}
               >
                 <TimerIcon className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap">{t("editor.stopwatch") || "Stopwatch"}</span>
+                <span className="whitespace-nowrap">{t("editor.stopwatch")}</span>
                 {activeTab === "stopwatch" && (
                   <motion.div
                     layoutId="clockTabUnderline"
@@ -497,7 +407,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t("editor.stopwatch") || "Stopwatch"}</TooltipContent>
+            <TooltipContent>{t("editor.stopwatch")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -512,7 +422,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 }`}
               >
                 <Hourglass className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap">{t("editor.timer") || "Timer"}</span>
+                <span className="whitespace-nowrap">{t("editor.timer")}</span>
                 {activeTab === "timer" && (
                   <motion.div
                     layoutId="clockTabUnderline"
@@ -521,7 +431,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t("editor.timer") || "Timer"}</TooltipContent>
+            <TooltipContent>{t("editor.timer")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -536,7 +446,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 }`}
               >
                 <Bell className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap">{t("editor.alarm") || "Alarm"}</span>
+                <span className="whitespace-nowrap">{t("editor.alarm")}</span>
                 {activeTab === "alarm" && (
                   <motion.div
                     layoutId="clockTabUnderline"
@@ -545,7 +455,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t("editor.alarm") || "Alarm"}</TooltipContent>
+            <TooltipContent>{t("editor.alarm")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -560,7 +470,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 }`}
               >
                 <Target className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap">{t("editor.pomodoro") || "Pomodoro"}</span>
+                <span className="whitespace-nowrap">{t("editor.pomodoro")}</span>
                 {activeTab === "pomodoro" && (
                   <motion.div
                     layoutId="clockTabUnderline"
@@ -569,7 +479,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t("editor.pomodoro") || "Pomodoro"}</TooltipContent>
+            <TooltipContent>{t("editor.pomodoro")}</TooltipContent>
           </Tooltip>
         </div>
 
@@ -588,14 +498,14 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 variant={swRunning ? "secondary" : "default"}
                 size="sm"
                 onClick={() => setSwRunning(!swRunning)}
-                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-sm ${
                   swRunning
                     ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
                     : ""
                 }`}
               >
                 {swRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
-                <span>{swRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
+                <span>{swRunning ? (t("editor.pause")) : (t("editor.start"))}</span>
               </Button>
 
               <Button
@@ -607,7 +517,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 className="h-8 px-3 rounded-xl border-border/70 text-foreground disabled:opacity-40 flex items-center gap-1 text-xs font-medium cursor-pointer active:scale-95"
               >
                 <Flag className="h-3 w-3" />
-                <span>{t("editor.lap") || "Lap"}</span>
+                <span>{t("editor.lap")}</span>
               </Button>
 
               <Tooltip>
@@ -622,7 +532,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
+                <TooltipContent>{t("editor.reset")}</TooltipContent>
               </Tooltip>
             </div>
 
@@ -631,7 +541,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
               <div className="w-full max-h-24 overflow-y-auto no-scrollbar border-t border-border/40 pt-2 mt-0.5 flex flex-col gap-1 text-[11px]">
                 {swLaps.map((lap, idx) => (
                   <div key={idx} className="flex justify-between items-center px-2 py-0.5 rounded-md bg-foreground/[0.02]">
-                    <span className="text-muted-foreground">{t("editor.lap") || "Lap"} {swLaps.length - idx}</span>
+                    <span className="text-muted-foreground">{t("editor.lap")} {swLaps.length - idx}</span>
                     <span className="font-semibold">{formatSwTime(lap)}</span>
                   </div>
                 ))}
@@ -656,7 +566,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                   onClick={() => setPresetTimer(secs)}
                   className={`py-1 px-1 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
                     timerInitial === secs
-                      ? "bg-card text-foreground font-semibold shadow-xs"
+                      ? "bg-card text-foreground font-semibold shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -671,14 +581,14 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 variant={timerRunning ? "secondary" : "default"}
                 size="sm"
                 onClick={() => setTimerRunning(!timerRunning)}
-                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-sm ${
                   timerRunning
                     ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
                     : ""
                 }`}
               >
                 {timerRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
-                <span>{timerRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
+                <span>{timerRunning ? (t("editor.pause")) : (t("editor.start"))}</span>
               </Button>
 
               <Tooltip>
@@ -696,7 +606,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
+                <TooltipContent>{t("editor.reset")}</TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -716,7 +626,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 onClick={() => setShowAddAlarm(!showAddAlarm)}
                 className="h-7 px-2.5 rounded-xl border-border/70 text-foreground flex items-center gap-1 text-xs font-medium cursor-pointer"
               >
-                <Plus className="h-3.5 w-3.5" /> {t("editor.add") || "Add"}
+                <Plus className="h-3.5 w-3.5" /> {t("editor.add")}
               </Button>
             </div>
 
@@ -725,7 +635,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 {/* System Select Dropdowns (Hours & Minutes matching system font dropdown) */}
                 <div className="flex items-center justify-center gap-3 py-1">
                   <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs text-muted-foreground font-semibold">{t("editor.hour") || "Hour"}</span>
+                    <span className="text-xs text-muted-foreground font-semibold">{t("editor.hour")}</span>
                     <Select value={alarmHour} onValueChange={setAlarmHour}>
                       <SelectTrigger className="w-[84px] h-9 font-bold text-base bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl justify-between px-3">
                         <SelectValue placeholder="07" />
@@ -743,7 +653,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                   <span className="font-bold text-xl text-muted-foreground/70 mt-4">:</span>
 
                   <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs text-muted-foreground font-semibold">{t("editor.minute") || "Minute"}</span>
+                    <span className="text-xs text-muted-foreground font-semibold">{t("editor.minute")}</span>
                     <Select value={alarmMinute} onValueChange={setAlarmMinute}>
                       <SelectTrigger className="w-[84px] h-9 font-bold text-base bg-foreground/[0.04] hover:bg-foreground/[0.08] border-border/50 rounded-xl justify-between px-3">
                         <SelectValue placeholder="00" />
@@ -761,7 +671,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
 
                 <input
                   type="text"
-                  placeholder={t("editor.alarmLabelPlaceholder") || "Alarm label (optional)"}
+                  placeholder={t("editor.alarmLabelPlaceholder")}
                   value={newAlarmLabel}
                   onChange={(e) => setNewAlarmLabel(e.target.value)}
                   className="bg-foreground/[0.04] border border-border/50 rounded-xl px-3 py-2 outline-none text-foreground text-xs hover:border-primary/50 focus:border-primary focus:ring-0 shadow-none transition-all placeholder:text-muted-foreground/50"
@@ -775,7 +685,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                     onClick={() => setShowAddAlarm(false)}
                     className="h-9 flex-1 rounded-xl text-xs font-semibold cursor-pointer"
                   >
-                    {t("editor.cancel") || "Cancel"}
+                    {t("editor.cancel")}
                   </Button>
                   <Button
                     type="button"
@@ -784,7 +694,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                     onClick={handleAddAlarm}
                     className="h-9 flex-1 rounded-xl text-xs font-semibold cursor-pointer"
                   >
-                    {t("editor.saveAlarm") || "Save Alarm"}
+                    {t("editor.saveAlarm")}
                   </Button>
                 </div>
               </div>
@@ -793,7 +703,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             <div className="flex flex-col gap-2 max-h-40 overflow-y-auto no-scrollbar pt-0.5">
               {alarms.length === 0 ? (
                 <div className="text-center py-4 text-xs text-muted-foreground/60">
-                  {t("editor.noAlarms") || "No alarms set"}
+                  {t("editor.noAlarms")}
                 </div>
               ) : (
                 alarms.map((a) => (
@@ -826,7 +736,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t("editor.deleteAlarm") || "Delete alarm"}</TooltipContent>
+                        <TooltipContent>{t("editor.deleteAlarm")}</TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
@@ -844,28 +754,28 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 type="button"
                 onClick={() => switchPomoMode("work")}
                 className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
-                  pomoMode === "work" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  pomoMode === "work" ? "bg-card text-foreground font-semibold shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {t("editor.focus25m") || "Focus 25m"}
+                {t("editor.focus25m")}
               </button>
               <button
                 type="button"
                 onClick={() => switchPomoMode("shortBreak")}
                 className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
-                  pomoMode === "shortBreak" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  pomoMode === "shortBreak" ? "bg-card text-foreground font-semibold shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {t("editor.break5m") || "Break 5m"}
+                {t("editor.break5m")}
               </button>
               <button
                 type="button"
                 onClick={() => switchPomoMode("longBreak")}
                 className={`py-1 px-1.5 rounded-lg text-center flex items-center justify-center transition-all cursor-pointer ${
-                  pomoMode === "longBreak" ? "bg-card text-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  pomoMode === "longBreak" ? "bg-card text-foreground font-semibold shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {t("editor.longBreak15m") || "Long 15m"}
+                {t("editor.longBreak15m")}
               </button>
             </div>
 
@@ -874,7 +784,7 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
             </div>
 
             <div className="text-[11px] text-muted-foreground font-medium my-0.5">
-              {t("editor.completedSessions") || "Completed sessions:"} <span className="font-bold text-foreground">{pomoSessions}</span>
+              {t("editor.completedSessions")} <span className="font-bold text-foreground">{pomoSessions}</span>
             </div>
 
             <div className="flex items-center gap-2 my-0.5">
@@ -883,14 +793,14 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                 variant={pomoRunning ? "secondary" : "default"}
                 size="sm"
                 onClick={() => setPomoRunning(!pomoRunning)}
-                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-xs ${
+                className={`h-8 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold cursor-pointer active:scale-95 shadow-sm ${
                   pomoRunning
                     ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 border-0"
                     : ""
                 }`}
               >
                 {pomoRunning ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 fill-current" />}
-                <span>{pomoRunning ? (t("editor.pause") || "Pause") : (t("editor.start") || "Start")}</span>
+                <span>{pomoRunning ? (t("editor.pause")) : (t("editor.start"))}</span>
               </Button>
 
               <Tooltip>
@@ -908,13 +818,12 @@ export default function FloatingClock({ isOpen, onClose, zIndex, onFocusWindow }
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{t("editor.reset") || "Reset"}</TooltipContent>
+                <TooltipContent>{t("editor.reset")}</TooltipContent>
               </Tooltip>
             </div>
           </div>
         )}
       </div>
-    </motion.div>
-  </TooltipProvider>
+    </FloatingWindow>
   );
 }

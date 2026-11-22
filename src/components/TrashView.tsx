@@ -28,8 +28,9 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { TrashedNote, formatByteSize } from "@/hooks/useTrash";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
-import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
-import { formatDate } from "@/lib/dateTimeFormatter";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { formatDate, formatTime } from "@/lib/dateTimeFormatter";
 import { getTagColorClass } from "@/lib/tagColors";
 import { stripHtmlAndMarkdown } from "@/lib/snippetUtils";
 import { isEncryptedNote } from "@/lib/noteCrypto";
@@ -42,8 +43,8 @@ interface TrashViewProps {
   onOpenSettings?: () => void;
 }
 
-export { EditorCheckbox } from "@/components/ui/EditorCheckbox";
-import { EditorCheckbox } from "@/components/ui/EditorCheckbox";
+export { EditorCheckbox } from "@/components/shared/EditorCheckbox";
+import { EditorCheckbox } from "@/components/shared/EditorCheckbox";
 
 export type TrashSortBy =
   | "name-asc"
@@ -110,13 +111,28 @@ export default function TrashView({
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Global Ctrl+F / Ctrl+K handler to focus search input
+  // Global Ctrl+F / Ctrl+K handler to focus search input when not typing in an editor or modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "f" || e.key.toLowerCase() === "k" || e.code === "KeyF" || e.code === "KeyK" || e.key === "า" || e.key === "ด")) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === "f" || e.key.toLowerCase() === "k" || e.code === "KeyF" || e.code === "KeyK" || e.key === "า" || e.key === "ด")
+      ) {
+        const target = e.target as HTMLElement | null;
+        if (
+          target !== searchInputRef.current &&
+          (target?.isContentEditable ||
+            target?.tagName === "INPUT" ||
+            target?.tagName === "TEXTAREA" ||
+            target?.closest?.('[role="dialog"], [role="alertdialog"], .ProseMirror, .cm-editor'))
+        ) {
+          return;
+        }
+        if (searchInputRef.current && searchInputRef.current.offsetParent !== null) {
+          e.preventDefault();
+          searchInputRef.current.focus();
+          searchInputRef.current.select();
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -128,7 +144,7 @@ export default function TrashView({
   // Compute expiration days remaining for a given trashed item
   const getExpirationInfo = (deletedAt: number) => {
     if (retentionDays <= 0) {
-      return { days: -1, text: isTh ? "ไม่ลบอัตโนมัติ" : "Never", colorClass: "text-muted-foreground" };
+      return { days: -1, text: t("trash.never"), colorClass: "text-muted-foreground" };
     }
     const msPassed = Date.now() - (deletedAt || Date.now());
     const totalMs = retentionDays * 24 * 60 * 60 * 1000;
@@ -136,15 +152,15 @@ export default function TrashView({
     const daysRemaining = Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
 
     if (daysRemaining === 0) {
-      return { days: 0, text: isTh ? "หมดอายุแล้ว" : "Expired", colorClass: "text-rose-600 dark:text-rose-400 font-medium" };
+      return { days: 0, text: t("trash.expired"), colorClass: "text-rose-600 dark:text-rose-400 font-medium" };
     }
     if (daysRemaining <= 5) {
-      return { days: daysRemaining, text: isTh ? `${daysRemaining} วัน` : `${daysRemaining} days`, colorClass: "text-rose-600 dark:text-rose-400 font-medium" };
+      return { days: daysRemaining, text: t("trash.days", { daysRemaining }), colorClass: "text-rose-600 dark:text-rose-400 font-medium" };
     }
     if (daysRemaining <= 10) {
-      return { days: daysRemaining, text: isTh ? `${daysRemaining} วัน` : `${daysRemaining} days`, colorClass: "text-amber-600 dark:text-amber-400 font-medium" };
+      return { days: daysRemaining, text: t("trash.days", { daysRemaining }), colorClass: "text-amber-600 dark:text-amber-400 font-medium" };
     }
-    return { days: daysRemaining, text: isTh ? `${daysRemaining} วัน` : `${daysRemaining} days`, colorClass: "text-emerald-600 dark:text-emerald-400 font-medium" };
+    return { days: daysRemaining, text: t("trash.days", { daysRemaining }), colorClass: "text-emerald-600 dark:text-emerald-400 font-medium" };
   };
 
   // Format relative deleted timestamp (e.g. Today 10:24, Yesterday 16:40, 2 days ago)
@@ -158,21 +174,21 @@ export default function TrashView({
     yesterday.setDate(now.getDate() - 1);
     const isYesterday = yesterday.toDateString() === date.toDateString();
 
-    const timeStr = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    const timeStr = formatTime(date, settings.timeFormat, settings.language);
 
     if (isToday) {
-      return isTh ? `วันนี้ ${timeStr}` : `Today ${timeStr}`;
+      return t("trash.today2", { timeStr });
     }
     if (isYesterday) {
-      return isTh ? `เมื่อวาน ${timeStr}` : `Yesterday ${timeStr}`;
+      return t("trash.yesterday2", { timeStr });
     }
 
     const diffDays = Math.floor((now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000));
     if (diffDays > 0 && diffDays < 30) {
-      return isTh ? `${diffDays} วันที่แล้ว` : `${diffDays} days ago`;
+      return t("trash.daysAgo", { diffDays });
     }
 
-    return `${formatDate(date, settings.dateFormat)} ${timeStr}`;
+    return `${formatDate(date, settings.dateFormat, settings.language)} ${timeStr}`;
   };
 
   // Filter, search and sort notes/files
@@ -291,20 +307,13 @@ export default function TrashView({
     setDeletePermanentDialogOpen(false);
   };
 
-  const renderNoteIcon = (note: TrashedNote, cls = "h-4 w-4 shrink-0") => {
-    if (settings.showFileIcons === false) return null;
-    if (note.icon) {
-      const custom = renderCustomIcon(note.icon, cls, { color: note.iconColor });
-      if (custom) return custom;
-    }
-    const defaultKey = getDefaultFileIconKey(note.fileName, note.fileType);
-    const IconComp = getToolbarIcon(defaultKey, settings.iconPack);
-    return <IconComp className={`${cls} text-muted-foreground/80`} />;
-  };
+  const renderNoteIcon = (note: TrashedNote, cls = "h-4 w-4") => (
+    <SharedNoteIcon note={note} className={cls} colorClassName="text-muted-foreground/80" />
+  );
 
   const getNoteSnippet = (content?: string, isLocked?: boolean) => {
     if (isLocked || isEncryptedNote(content)) {
-      return t("trash.lockedContent") || (isTh ? "เนื้อหานี้ถูกล็อกไว้" : "This content is locked");
+      return t("trash.lockedContent");
     }
     if (!content) return "";
     return stripHtmlAndMarkdown(content).slice(0, 90);
@@ -320,17 +329,13 @@ export default function TrashView({
               <div className="flex items-center gap-2">
                 <Trash2 className="h-6 w-6 text-primary shrink-0" />
                 <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">
-                  {t("trash.title") || (isTh ? "ถังขยะ" : "Trash")}
+                  {t("trash.title")}
                 </h1>
               </div>
               <p className="text-xs text-muted-foreground truncate">
                 {retentionDays > 0
-                  ? (isTh
-                      ? `ไฟล์ในถังขยะจะถูกลบถาวรโดยอัตโนมัติหลังจาก ${retentionDays} วัน`
-                      : `Files in trash are permanently deleted after ${retentionDays} days.`)
-                  : (isTh
-                      ? "ไฟล์ในถังขยะจะถูกเก็บไว้จนกว่าคุณจะลบด้วยตัวเอง"
-                      : "Files in trash will be kept until manually deleted.")}
+                  ? (t("trash.filesInTrashArePermanently", { retentionDays }))
+                  : (t("trash.filesInTrashWillBe"))}
               </p>
             </div>
 
@@ -342,7 +347,7 @@ export default function TrashView({
                   ref={searchInputRef}
                   data-trash-search="true"
                   type="text"
-                  placeholder={t("trash.searchPlaceholder") || (isTh ? "ค้นหาในถังขยะ..." : "Search in trash...")}
+                  placeholder={t("trash.searchPlaceholder")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
@@ -379,63 +384,63 @@ export default function TrashView({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                    <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       onClick={() => setFilterType("all")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        filterType === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        filterType === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {filterType === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
+                      <span>{t("trash.filterAll")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("md")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        filterType === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        filterType === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {filterType === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
+                      <span>{t("trash.filterMd")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("txt")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        filterType === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        filterType === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {filterType === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
+                      <span>{t("trash.filterTxt")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("html")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        filterType === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        filterType === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {filterType === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
+                      <span>{t("trash.filterHtml")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setFilterType("other")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        filterType === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        filterType === "other" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {filterType === "other" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterOther") || (isTh ? "ไฟล์อื่นๆ" : "Other files")}</span>
+                      <span>{t("trash.filterOther")}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -455,18 +460,18 @@ export default function TrashView({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("sidebar.sort") || (isTh ? "เรียงลำดับ" : "Sort by")}</TooltipContent>
+                    <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       onClick={() => handleSortChange("name-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <ArrowDownAZ className="h-4 w-4" />
-                        <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+                        <span>{t("sidebar.sortNameAsc")}</span>
                       </div>
                       {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -474,12 +479,12 @@ export default function TrashView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("name-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <ArrowUpAZ className="h-4 w-4" />
-                        <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+                        <span>{t("sidebar.sortNameDesc")}</span>
                       </div>
                       {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -487,12 +492,12 @@ export default function TrashView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("modified-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Clock className="h-4 w-4" />
-                        <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+                        <span>{t("sidebar.sortModifiedDesc")}</span>
                       </div>
                       {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -500,12 +505,12 @@ export default function TrashView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("modified-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Clock className="h-4 w-4 opacity-60" />
-                        <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+                        <span>{t("sidebar.sortModifiedAsc")}</span>
                       </div>
                       {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -513,12 +518,12 @@ export default function TrashView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("created-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Calendar className="h-4 w-4" />
-                        <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+                        <span>{t("sidebar.sortCreatedDesc")}</span>
                       </div>
                       {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -526,12 +531,12 @@ export default function TrashView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("created-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Calendar className="h-4 w-4 opacity-60" />
-                        <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+                        <span>{t("sidebar.sortCreatedAsc")}</span>
                       </div>
                       {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -553,7 +558,7 @@ export default function TrashView({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("trash.moreOptions") || (isTh ? "ตัวเลือกเพิ่มเติม" : "More options")}</TooltipContent>
+                    <TooltipContent>{t("trash.moreOptions")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
@@ -562,7 +567,7 @@ export default function TrashView({
                       className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                     >
                       <RotateCcw className="h-4 w-4" />
-                      <span>{isTh ? "กู้คืนไฟล์ทั้งหมด" : "Restore all files"}</span>
+                      <span>{t("trash.restoreAllFiles")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       variant="destructive"
@@ -571,7 +576,7 @@ export default function TrashView({
                       className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
-                      <span>{t("trash.emptyTrash") || (isTh ? "ล้างถังขยะ" : "Empty trash")}</span>
+                      <span>{t("trash.emptyTrash")}</span>
                     </DropdownMenuItem>
                     {onOpenSettings && (
                       <>
@@ -581,7 +586,7 @@ export default function TrashView({
                           className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                         >
                           <Settings className="h-4 w-4 text-muted-foreground" />
-                          <span>{isTh ? "ตั้งค่าถังขยะ" : "Settings"}</span>
+                          <span>{t("trash.settings")}</span>
                         </DropdownMenuItem>
                       </>
                     )}
@@ -594,38 +599,38 @@ export default function TrashView({
           {/* 2. Metric Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
             {/* Card 1: Files in Trash */}
-            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-2xs hover:border-primary/60 hover:bg-muted/50 transition-all">
+            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-sm hover:border-primary/60 hover:bg-muted/50 transition-all">
               <Files className="h-5 w-5 text-foreground/80 shrink-0 stroke-[1.8]" />
               <div className="min-w-0 truncate">
                 <div className="text-sm font-bold text-foreground leading-tight truncate">{trashedNotes.length}</div>
-                <div className="text-xs text-muted-foreground mt-0.5 truncate">{isTh ? "ไฟล์ในถังขยะ" : "Files in trash"}</div>
+                <div className="text-xs text-muted-foreground mt-0.5 truncate">{t("trash.filesInTrash")}</div>
               </div>
             </div>
 
             {/* Card 2: Auto Delete Duration */}
-            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-2xs hover:border-primary/60 hover:bg-muted/50 transition-all">
+            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-sm hover:border-primary/60 hover:bg-muted/50 transition-all">
               <Clock className="h-5 w-5 text-foreground/80 shrink-0 stroke-[1.8]" />
               <div className="min-w-0 truncate">
                 <div className="text-sm font-bold text-foreground leading-tight truncate">
-                  {retentionDays > 0 ? (isTh ? `${retentionDays} วัน` : `${retentionDays} days`) : (isTh ? "ไม่ลบอัตโนมัติ" : "Never")}
+                  {retentionDays > 0 ? (t("trash.days2", { retentionDays })) : (t("trash.never"))}
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5 truncate">{isTh ? "ลบอัตโนมัติ" : "Auto delete"}</div>
+                <div className="text-xs text-muted-foreground mt-0.5 truncate">{t("trash.autoDelete")}</div>
               </div>
             </div>
 
             {/* Card 3: Storage Used */}
-            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-2xs hover:border-primary/60 hover:bg-muted/50 transition-all">
+            <div className="flex items-center gap-3.5 rounded-xl border border-border/70 bg-card p-3.5 shadow-sm hover:border-primary/60 hover:bg-muted/50 transition-all">
               <PieChart className="h-5 w-5 text-foreground/80 shrink-0 stroke-[1.8]" />
               <div className="min-w-0 truncate">
                 <div className="text-sm font-bold text-foreground leading-tight truncate">{formatByteSize(totalStorageBytes)}</div>
-                <div className="text-xs text-muted-foreground mt-0.5 truncate">{isTh ? "พื้นที่ที่ใช้" : "Storage used"}</div>
+                <div className="text-xs text-muted-foreground mt-0.5 truncate">{t("trash.storageUsed")}</div>
               </div>
             </div>
           </div>
 
           {/* 3. Table Container (Full Width) */}
           <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden w-full">
-            <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-2xs overflow-hidden min-w-0">
+            <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden min-w-0">
               {/* Table Header with Grayish Background (like Editor table) */}
               <div className="flex items-center px-4 py-2.5 bg-muted/60 dark:bg-muted/40 border-b border-border/50 text-xs font-semibold text-foreground shrink-0 select-none min-w-0">
                 <div className="w-6 flex items-center justify-center shrink-0">
@@ -634,33 +639,32 @@ export default function TrashView({
                     onChange={handleToggleSelectAll}
                   />
                 </div>
-                <div className="flex-1 min-w-[140px] px-2 truncate">{isTh ? "ไฟล์" : "File"}</div>
-                <div className="w-44 lg:w-56 hidden md:block px-2 shrink-0 truncate">{isTh ? "ตำแหน่งเดิม" : "Original Location"}</div>
-                <div className="w-28 hidden sm:block px-2 shrink-0 truncate">{isTh ? "วันที่ลบ" : "Deleted"}</div>
-                <div className="w-24 hidden lg:block px-2 shrink-0 truncate">{isTh ? "ขนาด" : "Size"}</div>
-                <div className="w-24 px-2 text-right sm:text-left shrink-0">{isTh ? "หมดอายุใน" : "Expires in"}</div>
+                <div className="flex-1 min-w-[140px] px-2 truncate">{t("trash.file")}</div>
+                <div className="w-44 lg:w-56 hidden md:block px-2 shrink-0 truncate">{t("trash.colOriginalLocation")}</div>
+                <div className="w-28 hidden sm:block px-2 shrink-0 truncate">{t("trash.deleted2")}</div>
+                <div className="w-24 hidden lg:block px-2 shrink-0 truncate">{t("trash.colSize")}</div>
+                <div className="w-24 px-2 text-right sm:text-left shrink-0">{t("trash.colExpiresIn")}</div>
               </div>
 
               {/* Table Body (Scrollable rows) */}
               <div className="no-scrollbar flex-1 overflow-y-auto divide-y divide-border/20 min-w-0">
                 {filteredNotes.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
-                    <Trash2 className="h-8 w-8 text-muted-foreground/40 mb-2 stroke-[1.5]" />
-                    <p className="text-xs font-semibold text-foreground">
-                      {trashedNotes.length === 0 ? (isTh ? "ถังขยะว่างเปล่า" : "Trash is empty") : (isTh ? "ไม่พบไฟล์ที่ค้นหา" : "No files found")}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground/75 mt-0.5 max-w-xs">
-                      {trashedNotes.length === 0
-                        ? (isTh ? "ไฟล์ที่ถูกลบจะปรากฏที่นี่ก่อนถูกลบถาวร" : "Deleted files will appear here before being permanently removed.")
-                        : (isTh ? "ลองค้นหาด้วยคำค้นหาอื่นหรือรีเซ็ตตัวกรอง" : "Try searching with a different keyword or clearing filters.")}
-                    </p>
-                  </div>
+                  <EmptyState
+                    className="h-full"
+                    icon={<Trash2 />}
+                    title={trashedNotes.length === 0 ? (t("trash.emptyTrashEmpty")) : (t("trash.noFilesFound"))}
+                    description={
+                      trashedNotes.length === 0
+                        ? (t("trash.deletedFilesWillAppearHere"))
+                        : (t("trash.trySearchingWithADifferent"))
+                    }
+                  />
                 ) : (
                   filteredNotes.map((note) => {
                     const isSelected = selectedIds.includes(note.id);
                     const exp = getExpirationInfo(note.deletedAt);
                     const snippet = getNoteSnippet(note.content, note.isLocked);
-                    const originalLoc = note.originalFolderPath || note.folderPath || (isTh ? "หน้าหลัก" : "Root");
+                    const originalLoc = note.originalFolderPath || note.folderPath || (t("trash.root"));
 
                     return (
                       <div
@@ -690,13 +694,13 @@ export default function TrashView({
                           <div className="min-w-0 flex-1 overflow-hidden">
                             <div className="flex items-center gap-1.5 truncate">
                               <span className="font-semibold text-foreground text-xs truncate">
-                                {note.title || note.fileName || (isTh ? "ไม่มีชื่อ" : "Untitled")}
+                                {note.title || note.fileName || (t("editor.untitled"))}
                               </span>
                               {note.tags && note.tags.length > 0 && (
                                 note.tags.slice(0, 3).map((tag, idx) => (
                                   <span
                                     key={tag}
-                                    className={`shrink-0 text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
+                                    className={`shrink-0 text-[9.5px] px-1.5 py-0.5 rounded font-medium border ${getTagColorClass(
                                       tag,
                                       settings.theme,
                                       idx,
@@ -757,7 +761,7 @@ export default function TrashView({
               <div className="flex items-center justify-between px-4 min-h-[52px] border-t border-border/50 text-xs text-muted-foreground shrink-0 min-w-0 bg-card">
                 <div className="flex items-center gap-3 min-w-0 truncate">
                   <span className="font-medium text-foreground shrink-0">
-                    {isTh ? `เลือก ${selectedIds.length} รายการ` : `${selectedIds.length} selected`}
+                    {t("trash.selected", { v0: selectedIds.length })}
                   </span>
 
                   {selectedIds.length > 0 && (
@@ -765,26 +769,26 @@ export default function TrashView({
                       <button
                         type="button"
                         onClick={handleRestoreSelected}
-                        className="px-4 py-2 rounded-[10px] border border-border/80 bg-background hover:bg-accent hover:text-white text-foreground text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
+                        className="px-4 py-2 rounded-[10px] border border-border/80 bg-background hover:bg-accent hover:text-white text-foreground text-xs font-semibold flex items-center gap-2 shadow-sm cursor-pointer transition-all shrink-0"
                       >
                         <RotateCcw className="h-4 w-4" />
-                        <span>{isTh ? "กู้คืน" : "Restore"}</span>
+                        <span>{t("trash.restore")}</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={handlePromptDeleteSelected}
-                        className="px-4 py-2 rounded-[10px] bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all shrink-0"
+                        className="px-4 py-2 rounded-[10px] bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold flex items-center gap-2 shadow-sm cursor-pointer transition-all shrink-0"
                       >
                         <Trash2 className="h-4 w-4" />
-                        <span>{isTh ? "ลบถาวร" : "Delete permanently"}</span>
+                        <span>{t("trash.deletePermanently")}</span>
                       </button>
                     </div>
                   )}
                 </div>
 
                 <div className="text-xs text-muted-foreground shrink-0">
-                  {isTh ? `ทั้งหมด ${filteredNotes.length} รายการ` : `${filteredNotes.length} items`}
+                  {t("trash.items", { v0: filteredNotes.length })}
                 </div>
               </div>
             </div>
@@ -796,7 +800,7 @@ export default function TrashView({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {t("trash.deletePermanentTitle") || (isTh ? "ลบไฟล์อย่างถาวรหรือไม่?" : "Delete file permanently?")}
+                {t("trash.deletePermanentTitle")}
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {pendingDeleteIds.length === 1
@@ -804,21 +808,19 @@ export default function TrashView({
                       const note = trashedNotes.find((n) => n.id === pendingDeleteIds[0]);
                       const name = note?.fileName || note?.title;
                       return name
-                        ? (t("trash.deletePermanentDesc", { file: name }) || (isTh ? `ไฟล์ "${name}" จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก` : `The file "${name}" will be permanently deleted and cannot be recovered.`))
-                        : (isTh ? "ไฟล์นี้จะถูกลบออกจากเครื่องอย่างถาวร และไม่สามารถกู้คืนได้อีก" : "This file will be permanently deleted and cannot be recovered.");
+                        ? (t("trash.deletePermanentDesc", { file: name }))
+                        : (t("trash.thisFileWillBePermanently"));
                     })()
-                  : (t("trash.deletePermanentBatchDesc", { count: pendingDeleteIds.length }) || (isTh
-                      ? `ไฟล์ที่เลือกจำนวน ${pendingDeleteIds.length} รายการจะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
-                      : `These ${pendingDeleteIds.length} files will be permanently deleted and cannot be recovered.`))}
+                  : (t("trash.deletePermanentBatchDesc", { count: pendingDeleteIds.length }))}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}</AlertDialogCancel>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
               <AlertDialogAction
-                className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={handleConfirmPermanentDelete}
               >
-                {t("trash.deletePermanently") || (isTh ? "ลบถาวร" : "Delete permanently")}
+                {t("trash.deletePermanently")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -829,25 +831,23 @@ export default function TrashView({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {t("trash.emptyTrashTitle") || (isTh ? "แน่ใจใช่ไหมที่จะล้างถังขยะทั้งหมด?" : "Are you sure you want to empty all trash?")}
+                {t("trash.emptyTrashTitle")}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {t("trash.emptyTrashDesc", { count: trashedNotes.length }) || (isTh
-                  ? `ไฟล์ทั้งหมดที่อยู่ในถังขยะ (${trashedNotes.length} รายการ) จะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้อีก`
-                  : `All ${trashedNotes.length} files in the trash will be permanently deleted. This action cannot be undone.`)}
+                {t("trash.emptyTrashDesc", { count: trashedNotes.length })}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t("common.cancel") || (isTh ? "ยกเลิก" : "Cancel")}</AlertDialogCancel>
+              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
               <AlertDialogAction
-                className="bg-red-600 text-white hover:bg-red-700 focus:ring-red-600"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 onClick={() => {
                   onEmptyTrash();
                   setSelectedIds([]);
                   setEmptyTrashDialogOpen(false);
                 }}
               >
-                {t("trash.emptyTrash") || (isTh ? "ล้างถังขยะทั้งหมด" : "Empty Trash")}
+                {t("trash.emptyTrash")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

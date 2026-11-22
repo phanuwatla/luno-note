@@ -39,6 +39,10 @@ import {
   Briefcase,
   CheckCheck,
   Square,
+  Image as ImageIcon,
+  ImageOff,
+  Download,
+  Settings,
 } from "lucide-react";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import { WandSparklesIcon as Wand2 } from "@/components/icons/WandSparklesIcon";
@@ -46,15 +50,28 @@ import { PencilIcon as Pencil } from "@/components/icons/PencilIcon";
 import { renderLunoAiMarkdown } from "@/lib/lunoAiMarkdown";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { copyToClipboard } from "@/lib/clipboardUtils";
+import { useMarkdownCodeCopyTooltip, MarkdownFloatingTooltip } from "@/components/shared/useMarkdownCodeCopyTooltip";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
+import { MediaLightbox } from "@/components/shared/MediaLightbox";
+import { copyImageToClipboard, downloadMediaFile } from "@/components/editor/mediaContextMenuUtils";
+import { saveImageToIndexedDb, getImageFromIndexedDb, deleteImageFromIndexedDb } from "@/lib/imageStore";
+import { saveAiImageToWorkspaceAttachment, dataUrlToBlob, blobToDataUrl } from "@/lib/aiImageAttachment";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
-import { runGeminiChatHistory, transcribeAudioWithGemini, cleanVoiceTranscription } from "@/lib/geminiApi";
+import {
+  runGeminiChatHistory,
+  transcribeAudioWithGemini,
+  cleanVoiceTranscription,
+  generateImageWithGemini,
+  formatModelName,
+  GeminiFreeTierImageError,
+  type ImageAspectRatio,
+} from "@/lib/geminiApi";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import type { Note } from "@/hooks/useNotes";
@@ -92,6 +109,20 @@ function extractDefaultFileName(content: string): string {
   return `Luno_Note_${Date.now().toString().slice(-4)}.md`;
 }
 
+export interface GeneratedMessageImage {
+  id: string;
+  mimeType: string;
+  alt?: string;
+  aspectRatio?: ImageAspectRatio;
+  dataUrl?: string;
+}
+
+export interface LunoAiInsertImagePayload {
+  images: Array<{ src: string; alt?: string; relativeSrc?: string }>;
+  captionText?: string;
+  htmlContent?: string;
+}
+
 export interface MessageItem {
   id: string;
   role: "user" | "assistant";
@@ -99,6 +130,9 @@ export interface MessageItem {
   timestamp: number;
   modelUsed?: string;
   attachedFileNames?: string[];
+  generatedImages?: GeneratedMessageImage[];
+  isImageGeneration?: boolean;
+  imageAspectRatio?: ImageAspectRatio;
 }
 
 export interface ChatSession {
@@ -128,12 +162,40 @@ interface LunoAiViewProps {
   notes?: Note[];
   activeNote?: Note | null;
   openedFolderName?: string | null;
-  onInsertToActiveNote?: (text: string) => void;
-  onInsertToSelectedNote?: (noteId: string, text: string) => void;
+  onInsertToActiveNote?: (text: string, imagePayload?: LunoAiInsertImagePayload) => void;
+  onInsertToSelectedNote?: (noteId: string, text: string, imagePayload?: LunoAiInsertImagePayload) => void;
   onCreateNewNote?: (fileName: string, content: string, folderPath?: string) => void;
   onOpenSettings?: (category?: string) => void;
   onOpenWebTab?: (url: string) => void;
   isSidebar?: boolean;
+}
+
+const ASPECT_RATIO_OPTIONS: Array<{ value: ImageAspectRatio; labelKey: string }> = [
+  { value: "1:1", labelKey: "lunoAi.aspectRatioSquare" },
+  { value: "16:9", labelKey: "lunoAi.aspectRatioLandscape" },
+  { value: "9:16", labelKey: "lunoAi.aspectRatioPortrait" },
+  { value: "4:3", labelKey: "lunoAi.aspectRatioStandard" },
+  { value: "3:4", labelKey: "lunoAi.aspectRatioVertical" },
+];
+
+function serializeSessionsForStorage(sessionsToSave: ChatSession[]): ChatSession[] {
+  const canUseIdb = typeof indexedDB !== "undefined";
+  return sessionsToSave.map((session) => ({
+    ...session,
+    messages: (session.messages || []).map((msg) => {
+      if (!msg.generatedImages || msg.generatedImages.length === 0) return msg;
+      return {
+        ...msg,
+        generatedImages: msg.generatedImages.map((img) => ({
+          id: img.id,
+          mimeType: img.mimeType,
+          alt: img.alt,
+          aspectRatio: img.aspectRatio,
+          ...(canUseIdb ? {} : { dataUrl: img.dataUrl }),
+        })),
+      };
+    }),
+  }));
 }
 
 const CHAT_SESSIONS_STORAGE_KEY = "luno-ai-chat-sessions-v2";
@@ -215,28 +277,7 @@ export function WorkspaceNoteIcon({
   note: Note;
   className?: string;
 }) {
-  const { settings } = useAppSettings();
-  if (settings?.showFileIcons === false) {
-    return null;
-  }
-  const pack = settings?.iconPack || "lucide";
-  const relPath = note.fileName ? (note.folderPath ? `${note.folderPath}/${note.fileName}` : note.fileName) : "";
-  const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-  const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-
-  if (customIcon) {
-    const custom = renderCustomIcon(customIcon, className, { color: customColor });
-    if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-  }
-
-  if (note.isLocked) {
-    const LockIcon = getToolbarIcon("lock", pack);
-    return <LockIcon className={className} />;
-  }
-
-  const defaultKey = getNoteDefaultIconKey(note);
-  const IconComp = getToolbarIcon(defaultKey, pack);
-  return <IconComp className={className} />;
+  return <SharedNoteIcon note={note} className={className} colorClassName="" />;
 }
 
 export function WorkspaceFolderIcon({
@@ -638,6 +679,14 @@ const AI_TOOLS: AiToolItem[] = [
     prefixEn: "Rewrite with fresh phrasing: ",
     prefixTh: "เรียบเรียงข้อความใหม่: ",
   },
+  {
+    id: "generate_image",
+    icon: <ImageIcon className="h-4 w-4 shrink-0" />,
+    labelEn: "Generate Image",
+    labelTh: "สร้างภาพด้วย AI",
+    prefixEn: "",
+    prefixTh: "",
+  },
 ];
 
 export default function LunoAiView({
@@ -657,14 +706,29 @@ export default function LunoAiView({
 
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<"smart" | "fast" | "creative">("smart");
+  const [isImageMode, setIsImageMode] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("1:1");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [showFreeTierImageNotice, setShowFreeTierImageNotice] = useState(false);
+  const [resolvedImageUrls, setResolvedImageUrls] = useState<Record<string, string>>({});
+  const [loadingImageIds, setLoadingImageIds] = useState<Record<string, boolean>>({});
+  const [lightboxImage, setLightboxImage] = useState<{
+    src: string;
+    alt: string;
+    fileName: string;
+    message: MessageItem;
+  } | null>(null);
 
   const [createNoteContent, setCreateNoteContent] = useState("");
+  const [createNoteImages, setCreateNoteImages] = useState<GeneratedMessageImage[] | undefined>(undefined);
   const [createNoteFileName, setCreateNoteFileName] = useState("");
   const [createNoteFileExt, setCreateNoteFileExt] = useState<"md" | "html" | "txt">("md");
   const [isCreateNoteModalOpen, setIsCreateNoteModalOpen] = useState(false);
 
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
   const [insertTextContent, setInsertTextContent] = useState("");
+  const [insertImagesPayload, setInsertImagesPayload] = useState<GeneratedMessageImage[] | undefined>(undefined);
+  const [isPreparingInsert, setIsPreparingInsert] = useState(false);
   const [searchInsertNoteQuery, setSearchInsertNoteQuery] = useState("");
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -717,12 +781,25 @@ export default function LunoAiView({
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [markdownTooltip, setMarkdownTooltip] = useState<{
-    text: string;
-    x: number;
-    y: number;
-    side: "top" | "bottom";
-  } | null>(null);
+  const {
+    markdownTooltip,
+    handleContentMouseOver,
+    handleContentMouseOut,
+    handleContentClick,
+  } = useMarkdownCodeCopyTooltip({
+    copiedLabel: t("lunoAi.copied"),
+    copyLabel: t("lunoAi.copyCode"),
+    onOpenExternalLink: (href) => {
+      if (onOpenWebTab) onOpenWebTab(href);
+      else window.open(href, "_blank", "noopener,noreferrer");
+    },
+    onCopied: () => {
+      toast({
+        title: t("common.copiedToClipboard"),
+        description: t("lunoAi.codeCopied"),
+      });
+    },
+  });
   const [attachedFiles, setAttachedFiles] = useState<{ name: string; content: string; dataUrl?: string }[]>([]);
   const [editingUserMsgId, setEditingUserMsgId] = useState<string | null>(null);
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
@@ -861,48 +938,49 @@ export default function LunoAiView({
   };
 
   const dynamicPlaceholder = useMemo(() => {
-    if (!activePrefix) return t("lunoAi.inputPlaceholder") || "Ask anything or type / for commands";
+    if (isImageMode) return t("lunoAi.placeholderGenerateImage");
+    if (!activePrefix) return t("lunoAi.inputPlaceholder");
     if (activePrefix.includes("Translate") || activePrefix.includes("แปล")) {
-      return t("lunoAi.placeholderTranslate") || "Text to translate...";
+      return t("lunoAi.placeholderTranslate");
     }
     if (activePrefix.includes("Summarize") || activePrefix.includes("สรุป")) {
-      return t("lunoAi.placeholderSummarize") || "Text or topic to summarize...";
+      return t("lunoAi.placeholderSummarize");
     }
     if (activePrefix.includes("Fix") || activePrefix.includes("ไวยากรณ์")) {
-      return t("lunoAi.placeholderFixGrammar") || "Text to check spelling and grammar...";
+      return t("lunoAi.placeholderFixGrammar");
     }
     if (activePrefix.includes("shorter") || activePrefix.includes("กระชับ")) {
-      return t("lunoAi.placeholderMakeShorter") || "Text to make shorter and concise...";
+      return t("lunoAi.placeholderMakeShorter");
     }
     if (activePrefix.includes("longer") || activePrefix.includes("ขยายความ")) {
-      return t("lunoAi.placeholderMakeLonger") || "Text or topic to elaborate...";
+      return t("lunoAi.placeholderMakeLonger");
     }
     if (activePrefix.includes("Simplify") || activePrefix.includes("อ่านง่าย")) {
-      return t("lunoAi.placeholderSimplify") || "Text to simplify and make easy to read...";
+      return t("lunoAi.placeholderSimplify");
     }
     if (activePrefix.includes("formal") || activePrefix.includes("ทางการ")) {
-      return t("lunoAi.placeholderFormalize") || "Text to formalize into professional tone...";
+      return t("lunoAi.placeholderFormalize");
     }
     if (activePrefix.includes("casual") || activePrefix.includes("เป็นกันเอง")) {
-      return t("lunoAi.placeholderMakeCasual") || "Text to make casual and friendly...";
+      return t("lunoAi.placeholderMakeCasual");
     }
     if (activePrefix.includes("Continue") || activePrefix.includes("เขียนเนื้อหาต่อ")) {
-      return t("lunoAi.placeholderContinueWriting") || "Context or topic to continue writing...";
+      return t("lunoAi.placeholderContinueWriting");
     }
     if (activePrefix.includes("Rewrite") || activePrefix.includes("เรียบเรียง")) {
-      return t("lunoAi.placeholderRewrite") || "Text to rewrite with fresh phrasing...";
+      return t("lunoAi.placeholderRewrite");
     }
     if (activePrefix.includes("Improve") || activePrefix.includes("ปรับแต่ง")) {
-      return t("lunoAi.placeholderImprove") || "Text to improve or rewrite...";
+      return t("lunoAi.placeholderImprove");
     }
     if (activePrefix.includes("Brainstorm") || activePrefix.includes("ระดมความคิด")) {
-      return t("lunoAi.placeholderBrainstorm") || "Topic to brainstorm ideas...";
+      return t("lunoAi.placeholderBrainstorm");
     }
     if (activePrefix.includes("outline") || activePrefix.includes("Outline") || activePrefix.includes("โครงร่าง")) {
-      return t("lunoAi.placeholderOutline") || "Topic to create outline...";
+      return t("lunoAi.placeholderOutline");
     }
-    return t("lunoAi.inputPlaceholder") || "Ask anything or type / for commands";
-  }, [activePrefix, t]);
+    return t("lunoAi.inputPlaceholder");
+  }, [activePrefix, isImageMode, t]);
 
   const filteredTools = useMemo(() => {
     if (!slashQuery.trim()) return AI_TOOLS;
@@ -917,6 +995,18 @@ export default function LunoAiView({
   }, [slashQuery]);
 
   const applySlashTool = (tool: AiToolItem) => {
+    if (tool.id === "generate_image") {
+      setIsImageMode(true);
+      setActivePrefix(null);
+      setPrompt("");
+      setIsSlashMenuOpen(false);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        chatInputRef.current?.focus();
+      }, 50);
+      return;
+    }
+    setIsImageMode(false);
     const prefix = lang === "th" ? tool.prefixTh : tool.prefixEn;
     setActivePrefix(prefix);
     setPrompt("");
@@ -989,14 +1079,10 @@ export default function LunoAiView({
       currentP.startsWith("แปล");
 
     if (isTranslate) {
-      return lang === "th"
-        ? "แปลสิ่งที่ผู้พูดพูดในคลิปเสียงนี้เป็นภาษาตามที่ต้องการโดยตรงอย่างถูกต้องและเป็นธรรมชาติ (หากพูดภาษาไทยให้แปลเป็นภาษาอังกฤษ หากพูดภาษาอื่นให้แปลเป็นภาษาไทย) ตอบเฉพาะผลลัพธ์ที่แปลได้เท่านั้น ห้ามตอบเป็นบทสนทนา ห้ามกล่าวขอโทษ ห้ามพูดว่าไม่ได้ยินหรือขอให้พูดใหม่ (ห้ามตอบ 'I'm sorry, I didn't catch that') ห้ามใส่ตัวเลขเวลา timestamp เช่น 00:00 ใดๆ ทั้งสิ้น หากไม่มีเสียงพูดให้ตอบเป็นข้อความว่าง"
-        : "Translate this spoken audio directly into the requested target language (if Thai translate to English, if other translate to Thai). Output ONLY the translated text. Do NOT output conversational replies (NEVER apologize or say 'I didn't catch that'). Do not add quotes or timestamps. If no speech is detected, output an empty string.";
+      return t("lunoAi.translateThisSpokenAudioDirectly");
     }
 
-    return lang === "th"
-      ? "คุณคือระบบถอดความเสียงพูด (Speech-to-Text) โปรดถอดความสิ่งที่ผู้พูดพูดในคลิปเสียงนี้เป็นข้อความภาษาไทยหรือภาษาอังกฤษตามที่พูดจริงอย่างถูกต้อง ตอบเฉพาะข้อความที่ถอดความได้เท่านั้น ห้ามตอบเป็นบทสนทนา ห้ามกล่าวขอโทษ ห้ามพูดว่าไม่ได้ยินหรือขอให้พูดใหม่ (ห้ามตอบ 'I'm sorry, I didn't catch that') ห้ามใส่ตัวเลขเวลา timestamp หรือ timecode เช่น 00:00 ใดๆ ทั้งสิ้น หากไม่มีเสียงพูดหรือมีแต่เสียงเงียบ ให้ตอบเป็นข้อความว่างเท่านั้น"
-      : "You are a speech-to-text transcriber. Accurately transcribe the spoken audio verbatim. Output ONLY the transcribed text. Do NOT output conversational replies (NEVER say 'I'm sorry, I didn't catch that', 'Please repeat', or apologize). Do not add quotes, commentary, markdown formatting, or timestamps/timecodes like 00:00. If there is no speech or only silence, output an empty string.";
+    return t("lunoAi.youAreASpeechTo");
   };
 
   const cleanupMediaResources = () => {
@@ -1026,7 +1112,7 @@ export default function LunoAiView({
     if (audioContextRef.current) {
       try {
         audioContextRef.current.close();
-      } catch {}
+      } catch { /* ignore */ }
       audioContextRef.current = null;
     }
     if (analyserRef.current) {
@@ -1076,7 +1162,7 @@ export default function LunoAiView({
     if (recorder && recorder.state !== "inactive") {
       try {
         recorder.requestData();
-      } catch {}
+      } catch { /* ignore */ }
 
       await new Promise<void>((resolve) => {
         recorder.onstop = () => resolve();
@@ -1091,7 +1177,7 @@ export default function LunoAiView({
     if (audioContextRef.current) {
       try {
         audioContextRef.current.close();
-      } catch {}
+      } catch { /* ignore */ }
       audioContextRef.current = null;
     }
     if (analyserRef.current) {
@@ -1100,7 +1186,7 @@ export default function LunoAiView({
     if (mediaStreamRef.current) {
       try {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      } catch {}
+      } catch { /* ignore */ }
       mediaStreamRef.current = null;
     }
 
@@ -1148,9 +1234,9 @@ export default function LunoAiView({
         } catch (err: any) {
           console.error("Final voice transcription error:", err);
           toast({
-            title: t("lunoAi.voiceErrorTitle") || "เกิดข้อผิดพลาดในการแปลงเสียง",
+            title: t("lunoAi.voiceErrorTitle"),
             description:
-              err?.message || (t("lunoAi.voiceErrorDesc") || "ไม่สามารถแปลงเสียงเป็นข้อความได้"),
+              err?.message || (t("lunoAi.voiceErrorDesc")),
           });
         }
       }
@@ -1163,10 +1249,9 @@ export default function LunoAiView({
   const startVoiceRecording = async () => {
     if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
       toast({
-        title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
+        title: t("lunoAi.apiKeyRequiredTitle"),
         description:
-          t("lunoAi.voiceApiKeyRequired") ||
-          "Gemini API Key is required for voice input. Please set it in Settings.",
+          t("lunoAi.voiceApiKeyRequired"),
       });
       if (onOpenSettings) {
         onOpenSettings();
@@ -1313,10 +1398,9 @@ export default function LunoAiView({
       }, 120000);
 
       toast({
-        title: t("lunoAi.voiceListeningTitle") || "กำลังฟังเสียง...",
+        title: t("lunoAi.voiceListeningTitle"),
         description:
-          t("lunoAi.voiceListeningDesc") ||
-          "พูดคำสั่งเสียงได้เลย ข้อความจะขึ้นในกล่องทันทีขณะพูด",
+          t("lunoAi.voiceListeningDesc"),
       });
     } catch (err: any) {
       console.error("Microphone access error:", err);
@@ -1326,12 +1410,11 @@ export default function LunoAiView({
       const isDenied =
         err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError";
       toast({
-        title: t("lunoAi.voiceErrorTitle") || "เกิดข้อผิดพลาดจากไมโครโฟน",
+        title: t("lunoAi.voiceErrorTitle"),
         description: isDenied
-          ? t("lunoAi.voiceNotAllowed") ||
-            "ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน กรุณาอนุญาตสิทธิ์การเข้าถึงไมโครโฟน"
+          ? t("lunoAi.voiceNotAllowed")
           : err?.message ||
-            (t("lunoAi.voiceErrorDesc") || "ไม่สามารถเปิดไมโครโฟนได้"),
+            (t("lunoAi.voiceErrorDesc")),
       });
     }
   };
@@ -1344,14 +1427,64 @@ export default function LunoAiView({
     }
   };
 
-  // Save sessions to localStorage
+  // Save sessions to localStorage (stripping raw image dataUrls when IndexedDB is available)
   useEffect(() => {
     try {
-      localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+      const safeSessions = serializeSessionsForStorage(sessions);
+      localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(safeSessions));
     } catch {
       /* ignore */
     }
   }, [sessions]);
+
+  // Hydrate persisted generated images from IndexedDB for current messages
+  useEffect(() => {
+    let cancelled = false;
+    const toLoad: GeneratedMessageImage[] = [];
+    for (const msg of messages) {
+      if (!msg.generatedImages) continue;
+      for (const img of msg.generatedImages) {
+        if (!img.dataUrl && !resolvedImageUrls[img.id]) {
+          toLoad.push(img);
+        }
+      }
+    }
+    if (toLoad.length === 0) return;
+
+    setLoadingImageIds((prev) => {
+      const next = { ...prev };
+      for (const img of toLoad) next[img.id] = true;
+      return next;
+    });
+
+    void (async () => {
+      for (const img of toLoad) {
+        try {
+          const blob = await getImageFromIndexedDb(img.id);
+          if (!cancelled && blob) {
+            const dataUrl = await blobToDataUrl(blob);
+            if (!cancelled && dataUrl) {
+              setResolvedImageUrls((prev) => ({ ...prev, [img.id]: dataUrl }));
+            }
+          }
+        } catch {
+          /* ignore */
+        } finally {
+          if (!cancelled) {
+            setLoadingImageIds((prev) => {
+              const next = { ...prev };
+              delete next[img.id];
+              return next;
+            });
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, resolvedImageUrls]);
 
   // Sync current active session ID to localStorage
   useEffect(() => {
@@ -1466,6 +1599,7 @@ export default function LunoAiView({
     setCurrentSessionId(null);
     setMessages([]);
     setAttachedFiles([]);
+    setShowFreeTierImageNotice(false);
     try {
       localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
     } catch {
@@ -1478,6 +1612,7 @@ export default function LunoAiView({
     setCurrentSessionId(session.id);
     setMessages(session.messages);
     setAttachedFiles([]);
+    setShowFreeTierImageNotice(false);
     try {
       localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, session.id);
     } catch {
@@ -1487,6 +1622,14 @@ export default function LunoAiView({
 
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const targetSession = sessions.find((s) => s.id === sessionId);
+    if (targetSession && typeof indexedDB !== "undefined") {
+      for (const m of targetSession.messages || []) {
+        for (const img of m.generatedImages || []) {
+          void deleteImageFromIndexedDb(img.id);
+        }
+      }
+    }
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== sessionId);
       if (currentSessionId === sessionId) {
@@ -1513,9 +1656,19 @@ export default function LunoAiView({
   };
 
   const handleClearAllHistory = () => {
+    if (typeof indexedDB !== "undefined") {
+      for (const s of sessions) {
+        for (const m of s.messages || []) {
+          for (const img of m.generatedImages || []) {
+            void deleteImageFromIndexedDb(img.id);
+          }
+        }
+      }
+    }
     setSessions([]);
     setCurrentSessionId(null);
     setMessages([]);
+    setResolvedImageUrls({});
     try {
       localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY);
       localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, "new");
@@ -1523,8 +1676,8 @@ export default function LunoAiView({
       /* ignore */
     }
     toast({
-      title: t("lunoAi.clearAllSuccessTitle") || "History cleared",
-      description: t("lunoAi.clearAllSuccessDesc") || "All previous chat history has been deleted.",
+      title: t("lunoAi.clearAllSuccessTitle"),
+      description: t("lunoAi.clearAllSuccessDesc"),
     });
   };
 
@@ -1565,8 +1718,8 @@ export default function LunoAiView({
     });
     setIsWorkspacePickerOpen(false);
     toast({
-      title: t("lunoAi.attachedTitle") || "Note Attached",
-      description: t("lunoAi.attachedSuccess", { name: fileName }) || `Attached ${fileName} to context`,
+      title: t("lunoAi.attachedTitle"),
+      description: t("lunoAi.attachedSuccess", { name: fileName }),
     });
   };
 
@@ -1575,6 +1728,218 @@ export default function LunoAiView({
       chatBottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
     }
   }, [messages, isGenerating]);
+
+  const persistGeneratedImages = async (generatedImages: GeneratedMessageImage[]) => {
+    const urlUpdates: Record<string, string> = {};
+    const canUseIdb = typeof indexedDB !== "undefined";
+    for (const img of generatedImages) {
+      if (img.dataUrl) {
+        urlUpdates[img.id] = img.dataUrl;
+        if (canUseIdb) {
+          const blob = dataUrlToBlob(img.dataUrl);
+          if (blob) {
+            void saveImageToIndexedDb(img.id, blob);
+          }
+        }
+      }
+    }
+    if (Object.keys(urlUpdates).length > 0) {
+      setResolvedImageUrls((prev) => ({ ...prev, ...urlUpdates }));
+    }
+  };
+
+  const resolveMessageImageSrc = (img: GeneratedMessageImage): string | null => {
+    return img.dataUrl || resolvedImageUrls[img.id] || null;
+  };
+
+  const resolveImageDataUrlAsync = async (img: GeneratedMessageImage): Promise<string | null> => {
+    const immediate = resolveMessageImageSrc(img);
+    if (immediate) return immediate;
+    try {
+      const blob = await getImageFromIndexedDb(img.id);
+      if (blob) {
+        const dataUrl = await blobToDataUrl(blob);
+        setResolvedImageUrls((prev) => ({ ...prev, [img.id]: dataUrl }));
+        return dataUrl;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  };
+
+  const prepareImagesForNote = async (
+    images: GeneratedMessageImage[],
+    captionText: string,
+    targetFolderPath?: string
+  ): Promise<{ markdown: string; htmlContent: string; imagePayload: LunoAiInsertImagePayload } | null> => {
+    const savedItems = [];
+    for (const img of images) {
+      const dataUrl = await resolveImageDataUrlAsync(img);
+      if (!dataUrl) continue;
+      const saved = await saveAiImageToWorkspaceAttachment({
+        dataUrl,
+        prompt: img.alt,
+        mimeType: img.mimeType,
+        targetFolderPath,
+      });
+      savedItems.push(saved);
+    }
+    if (savedItems.length === 0) return null;
+
+    const trimmedCaption = captionText.trim();
+    const markdownBlocks = savedItems.map((s) => s.markdown).join("\n\n");
+    const htmlBlocks = savedItems.map((s) => s.htmlTag).join("\n");
+    const fullMarkdown = trimmedCaption ? `${markdownBlocks}\n\n${trimmedCaption}` : markdownBlocks;
+    const fullHtml = trimmedCaption ? `${htmlBlocks}\n<p>${trimmedCaption}</p>` : htmlBlocks;
+
+    return {
+      markdown: fullMarkdown,
+      htmlContent: fullHtml,
+      imagePayload: {
+        images: savedItems.map((s) => ({
+          src: s.src,
+          alt: s.alt,
+          relativeSrc: s.relativeSrc,
+        })),
+        captionText: trimmedCaption || undefined,
+        htmlContent: fullHtml,
+      },
+    };
+  };
+
+  const handleOpenInsertModalForMessage = (msg: MessageItem) => {
+    setInsertTextContent(msg.content || "");
+    setInsertImagesPayload(msg.generatedImages && msg.generatedImages.length > 0 ? msg.generatedImages : undefined);
+    setSearchInsertNoteQuery("");
+    setIsInsertModalOpen(true);
+  };
+
+  const handleOpenCreateNoteModalForMessage = (msg: MessageItem) => {
+    const hasImages = Boolean(msg.generatedImages && msg.generatedImages.length > 0);
+    const seedText = msg.content || msg.generatedImages?.[0]?.alt || "AI_Generated_Image";
+    const fullDefaultName = extractDefaultFileName(seedText);
+    const baseName = fullDefaultName.replace(/\.(md|html|txt)$/i, "");
+    setCreateNoteContent(msg.content || "");
+    setCreateNoteImages(hasImages ? msg.generatedImages : undefined);
+    setCreateNoteFileName(baseName || "Untitled");
+    setCreateNoteFileExt("md");
+    setIsCreateNoteModalOpen(true);
+  };
+
+  const handleConfirmInsertToNote = async (targetNote: Note) => {
+    if (isPreparingInsert) return;
+    if (insertImagesPayload && insertImagesPayload.length > 0) {
+      setIsPreparingInsert(true);
+      try {
+        const prepared = await prepareImagesForNote(insertImagesPayload, insertTextContent, targetNote.folderPath);
+        if (!prepared) {
+          toast({
+            title: t("common.error"),
+            description: t("lunoAi.imageInsertError"),
+          });
+          return;
+        }
+        if (onInsertToSelectedNote) {
+          onInsertToSelectedNote(targetNote.id, prepared.markdown, prepared.imagePayload);
+        } else if (onInsertToActiveNote) {
+          onInsertToActiveNote(prepared.markdown, prepared.imagePayload);
+        }
+        setIsInsertModalOpen(false);
+        setInsertImagesPayload(undefined);
+      } finally {
+        setIsPreparingInsert(false);
+      }
+      return;
+    }
+
+    if (onInsertToSelectedNote) {
+      onInsertToSelectedNote(targetNote.id, insertTextContent);
+    } else if (onInsertToActiveNote) {
+      onInsertToActiveNote(insertTextContent);
+    }
+    setIsInsertModalOpen(false);
+  };
+
+  const handleConfirmCreateNewNote = async () => {
+    if (!onCreateNewNote || isPreparingInsert) return;
+    const cleanName = createNoteFileName.trim() || "Untitled";
+    const baseName = cleanName.replace(/\.(md|html|txt)$/i, "");
+    const fullFileName = `${baseName}.${createNoteFileExt}`;
+
+    if (createNoteImages && createNoteImages.length > 0) {
+      setIsPreparingInsert(true);
+      try {
+        const prepared = await prepareImagesForNote(createNoteImages, createNoteContent, "");
+        if (!prepared) {
+          toast({
+            title: t("common.error"),
+            description: t("lunoAi.imageInsertError"),
+          });
+          return;
+        }
+        const finalContent = createNoteFileExt === "html" ? prepared.htmlContent : prepared.markdown;
+        onCreateNewNote(fullFileName, finalContent);
+        setIsCreateNoteModalOpen(false);
+        setCreateNoteImages(undefined);
+      } finally {
+        setIsPreparingInsert(false);
+      }
+      return;
+    }
+
+    onCreateNewNote(fullFileName, createNoteContent);
+    setIsCreateNoteModalOpen(false);
+  };
+
+  const handleCopyGeneratedImage = async (msgId: string, img: GeneratedMessageImage) => {
+    const src = await resolveImageDataUrlAsync(img);
+    if (!src) {
+      toast({
+        title: t("common.error"),
+        description: t("common.copyFailed"),
+      });
+      return;
+    }
+    const ok = await copyImageToClipboard(src);
+    if (ok) {
+      setCopiedId(msgId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } else {
+      toast({
+        title: t("common.error"),
+        description: t("common.copyFailed"),
+      });
+    }
+  };
+
+  const handleDownloadGeneratedImage = async (img: GeneratedMessageImage) => {
+    const src = await resolveImageDataUrlAsync(img);
+    if (!src) return;
+    const ext = img.mimeType?.includes("jpeg") ? "jpg" : img.mimeType?.includes("webp") ? "webp" : "png";
+    const slug = (img.alt || "luno-ai-image")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\u0E00-\u0E7F_-]+/g, "_")
+      .slice(0, 32) || "luno-ai-image";
+    downloadMediaFile(src, `${slug}.${ext}`);
+  };
+
+  const handleAiErrorNotification = (error: unknown, fallbackMessage: string) => {
+    if (error instanceof GeminiFreeTierImageError) {
+      setShowFreeTierImageNotice(true);
+      toast({
+        title: t("lunoAi.imageFreeTierTitle"),
+        description: t("lunoAi.imageFreeTierToastDesc"),
+      });
+      return;
+    }
+    const errorMsg = error instanceof Error ? error.message : fallbackMessage;
+    toast({
+      title: t("lunoAi.generationErrorTitle"),
+      description: errorMsg,
+    });
+  };
 
   const handleSendPrompt = async (customPrompt?: string) => {
     if (isListening) {
@@ -1586,20 +1951,27 @@ export default function LunoAiView({
 
     if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
       toast({
-        title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
-        description: t("lunoAi.apiKeyRequired") || "Please set up your Gemini API key in Settings.",
+        title: t("lunoAi.apiKeyRequiredTitle"),
+        description: t("lunoAi.apiKeyRequired"),
       });
       onOpenSettings?.("ai");
       return;
     }
 
+    setShowFreeTierImageNotice(false);
+
     const currentAttachedFiles = [...attachedFiles];
     const attachedFileNames = currentAttachedFiles.length > 0 ? currentAttachedFiles.map((f) => f.name) : undefined;
+    const referenceImages = currentAttachedFiles
+      .filter((f) => Boolean(f.dataUrl && f.dataUrl.startsWith("data:image/")))
+      .map((f) => ({ dataUrl: f.dataUrl!, name: f.name }));
     const fileContexts = currentAttachedFiles.length > 0
       ? currentAttachedFiles.map((f) => `--- File: ${f.name} ---\n${f.content}`).join("\n\n")
       : undefined;
 
     const editIdx = editingUserMsgId ? messages.findIndex((m) => m.id === editingUserMsgId) : -1;
+    const runImageMode = isImageMode;
+    const selectedAspect = imageAspectRatio;
 
     if (editIdx !== -1) {
       // In-place Replace Mode: Truncate messages after editIdx, replace user prompt, generate new AI response
@@ -1610,6 +1982,7 @@ export default function LunoAiView({
         content: textToSend,
         timestamp: Date.now(),
         attachedFileNames,
+        ...(runImageMode ? { isImageGeneration: true, imageAspectRatio: selectedAspect } : {}),
       };
 
       setMessages([...historyForApi, updatedUserMessage]);
@@ -1617,35 +1990,60 @@ export default function LunoAiView({
       setAttachedFiles([]);
       setEditingUserMsgId(null);
       setIsGenerating(true);
+      setIsGeneratingImage(runImageMode);
 
       try {
-        const { result, modelUsed } = await runGeminiChatHistory(
-          settings.geminiApiKey,
-          historyForApi,
-          textToSend,
-          fileContexts,
-          model,
-          lang,
-          settings.aiModel
-        );
+        if (runImageMode) {
+          const { images, text, modelUsed } = await generateImageWithGemini(
+            settings.geminiApiKey,
+            textToSend,
+            {
+              aspectRatio: selectedAspect,
+              referenceImages,
+              lang,
+            }
+          );
 
-        const assistantMsg: MessageItem = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: result,
-          timestamp: Date.now(),
-          modelUsed,
-        };
+          await persistGeneratedImages(images);
 
-        setMessages([...historyForApi, updatedUserMessage, assistantMsg]);
+          const assistantMsg: MessageItem = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: text || "",
+            timestamp: Date.now(),
+            modelUsed,
+            generatedImages: images,
+            isImageGeneration: true,
+            imageAspectRatio: selectedAspect,
+          };
+
+          setMessages([...historyForApi, updatedUserMessage, assistantMsg]);
+        } else {
+          const { result, modelUsed } = await runGeminiChatHistory(
+            settings.geminiApiKey,
+            historyForApi,
+            textToSend,
+            fileContexts,
+            model,
+            lang,
+            settings.aiModel
+          );
+
+          const assistantMsg: MessageItem = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: result,
+            timestamp: Date.now(),
+            modelUsed,
+          };
+
+          setMessages([...historyForApi, updatedUserMessage, assistantMsg]);
+        }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : "Failed to generate AI response";
-        toast({
-          title: t("lunoAi.generationErrorTitle") || "AI Generation Error",
-          description: errorMsg,
-        });
+        handleAiErrorNotification(error, "Failed to generate AI response");
       } finally {
         setIsGenerating(false);
+        setIsGeneratingImage(false);
       }
     } else {
       // Normal Mode: Append new prompt at bottom
@@ -1656,6 +2054,7 @@ export default function LunoAiView({
         content: textToSend,
         timestamp: Date.now(),
         attachedFileNames,
+        ...(runImageMode ? { isImageGeneration: true, imageAspectRatio: selectedAspect } : {}),
       };
 
       setMessages((prev) => [...prev, userMessage]);
@@ -1665,42 +2064,74 @@ export default function LunoAiView({
       }
       setAttachedFiles([]);
       setIsGenerating(true);
+      setIsGeneratingImage(runImageMode);
 
       try {
-        const { result, modelUsed } = await runGeminiChatHistory(
-          settings.geminiApiKey,
-          messages,
-          textToSend,
-          fileContexts,
-          model,
-          lang,
-          settings.aiModel
-        );
+        if (runImageMode) {
+          const { images, text, modelUsed } = await generateImageWithGemini(
+            settings.geminiApiKey,
+            textToSend,
+            {
+              aspectRatio: selectedAspect,
+              referenceImages,
+              lang,
+            }
+          );
 
-        const assistantMsg: MessageItem = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: result,
-          timestamp: Date.now(),
-          modelUsed,
-        };
+          await persistGeneratedImages(images);
 
-        setMessages((prev) => [...prev, assistantMsg]);
+          const assistantMsg: MessageItem = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: text || "",
+            timestamp: Date.now(),
+            modelUsed,
+            generatedImages: images,
+            isImageGeneration: true,
+            imageAspectRatio: selectedAspect,
+          };
+
+          setMessages((prev) => [...prev, assistantMsg]);
+        } else {
+          const { result, modelUsed } = await runGeminiChatHistory(
+            settings.geminiApiKey,
+            messages,
+            textToSend,
+            fileContexts,
+            model,
+            lang,
+            settings.aiModel
+          );
+
+          const assistantMsg: MessageItem = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: result,
+            timestamp: Date.now(),
+            modelUsed,
+          };
+
+          setMessages((prev) => [...prev, assistantMsg]);
+        }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : "Failed to generate AI response";
-        toast({
-          title: t("lunoAi.generationErrorTitle") || "AI Generation Error",
-          description: errorMsg,
-        });
+        handleAiErrorNotification(error, "Failed to generate AI response");
       } finally {
         setIsGenerating(false);
+        setIsGeneratingImage(false);
       }
     }
   };
 
-  const handleEditUserPrompt = (userMsgId: string, text: string = "") => {
+  const handleEditUserPrompt = (userMsgId: string, text: string = "", originalMsg?: MessageItem) => {
     const safeText = text || "";
     setEditingUserMsgId(userMsgId);
+    setActivePrefix(null);
+    if (originalMsg?.isImageGeneration) {
+      setIsImageMode(true);
+      if (originalMsg.imageAspectRatio) {
+        setImageAspectRatio(originalMsg.imageAspectRatio);
+      }
+    }
     setPrompt(safeText);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -1712,8 +2143,8 @@ export default function LunoAiView({
       }
     }, 50);
     toast({
-      title: t("lunoAi.editPromptTitle") || "Edit prompt",
-      description: t("lunoAi.editPromptDesc") || "Prompt loaded into input box for editing.",
+      title: t("lunoAi.editPromptTitle"),
+      description: t("lunoAi.editPromptDesc"),
     });
   };
 
@@ -1721,8 +2152,8 @@ export default function LunoAiView({
     if (isGenerating) return;
     if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
       toast({
-        title: t("lunoAi.apiKeyRequiredTitle") || "Gemini API Key Required",
-        description: t("lunoAi.apiKeyRequired") || "Please set up your Gemini API key in Settings.",
+        title: t("lunoAi.apiKeyRequiredTitle"),
+        description: t("lunoAi.apiKeyRequired"),
       });
       onOpenSettings?.("ai");
       return;
@@ -1731,6 +2162,7 @@ export default function LunoAiView({
     const msgIndex = messages.findIndex((m) => m.id === assistantMsgId);
     if (msgIndex === -1) return;
 
+    const targetAssistantMsg = messages[msgIndex];
     let userMsgIndex = -1;
     for (let i = msgIndex - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
@@ -1743,46 +2175,95 @@ export default function LunoAiView({
 
     const targetUserMsg = messages[userMsgIndex];
     const historyForApi = messages.slice(0, userMsgIndex);
+    const shouldGenerateImage = Boolean(
+      targetAssistantMsg.isImageGeneration ||
+        (targetAssistantMsg.generatedImages && targetAssistantMsg.generatedImages.length > 0) ||
+        targetUserMsg.isImageGeneration
+    );
+    const aspectForRegen: ImageAspectRatio =
+      targetAssistantMsg.imageAspectRatio || targetUserMsg.imageAspectRatio || imageAspectRatio;
 
     setMessages((prev) => prev.slice(0, userMsgIndex + 1));
+    setShowFreeTierImageNotice(false);
     setIsGenerating(true);
+    setIsGeneratingImage(shouldGenerateImage);
 
     try {
-      const { result, modelUsed } = await runGeminiChatHistory(
-        settings.geminiApiKey,
-        historyForApi,
-        targetUserMsg.content,
-        undefined,
-        model,
-        lang,
-        settings.aiModel
-      );
+      if (shouldGenerateImage) {
+        const { images, text, modelUsed } = await generateImageWithGemini(
+          settings.geminiApiKey,
+          targetUserMsg.content,
+          {
+            aspectRatio: aspectForRegen,
+            lang,
+          }
+        );
 
-      const newAssistantMsg: MessageItem = {
-        id: Date.now().toString(),
-        role: "assistant",
-        content: result,
-        timestamp: Date.now(),
-        modelUsed,
-      };
+        await persistGeneratedImages(images);
 
-      setMessages((prev) => [...prev, newAssistantMsg]);
-      toast({
-        title: t("lunoAi.regenerateSuccessTitle") || "Response Regenerated",
-        description: t("lunoAi.regenerateSuccessDesc") || "AI response has been updated.",
-      });
+        const newAssistantMsg: MessageItem = {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: text || "",
+          timestamp: Date.now(),
+          modelUsed,
+          generatedImages: images,
+          isImageGeneration: true,
+          imageAspectRatio: aspectForRegen,
+        };
+
+        setMessages((prev) => [...prev, newAssistantMsg]);
+        toast({
+          title: t("lunoAi.imageRegenerateSuccessTitle"),
+          description: t("lunoAi.imageRegenerateSuccessDesc"),
+        });
+      } else {
+        const { result, modelUsed } = await runGeminiChatHistory(
+          settings.geminiApiKey,
+          historyForApi,
+          targetUserMsg.content,
+          undefined,
+          model,
+          lang,
+          settings.aiModel
+        );
+
+        const newAssistantMsg: MessageItem = {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: result,
+          timestamp: Date.now(),
+          modelUsed,
+        };
+
+        setMessages((prev) => [...prev, newAssistantMsg]);
+        toast({
+          title: t("lunoAi.regenerateSuccessTitle"),
+          description: t("lunoAi.regenerateSuccessDesc"),
+        });
+      }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Failed to regenerate AI response";
-      toast({
-        title: t("lunoAi.generationErrorTitle") || "AI Generation Error",
-        description: errorMsg,
-      });
+      handleAiErrorNotification(error, "Failed to regenerate AI response");
     } finally {
       setIsGenerating(false);
+      setIsGeneratingImage(false);
     }
   };
 
-  const handleQuickAction = (actionKey: "summarize" | "improve" | "brainstorm" | "outline" | "translate") => {
+  const handleQuickAction = (
+    actionKey: "summarize" | "improve" | "brainstorm" | "outline" | "translate" | "generate_image"
+  ) => {
+    if (actionKey === "generate_image") {
+      setIsImageMode(true);
+      setActivePrefix(null);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        chatInputRef.current?.focus();
+      }, 50);
+      return;
+    }
+
+    setIsImageMode(false);
     let prefixText = "";
     if (lang === "th") {
       if (actionKey === "summarize") {
@@ -1823,100 +2304,22 @@ export default function LunoAiView({
       setCopiedId(id);
       toast({
         title: isUserMessage
-          ? (t("lunoAi.copyPromptTitle") || t("lunoAi.copyTitle") || "Copied to Clipboard")
-          : (t("lunoAi.copyTitle") || "Copied to Clipboard"),
+          ? (t("lunoAi.copyPromptTitle"))
+          : (t("lunoAi.copyTitle")),
         description: isUserMessage
-          ? (t("lunoAi.copyPromptDesc") || "Message content copied successfully.")
-          : (t("lunoAi.copyDesc") || "Response content copied successfully."),
+          ? (t("lunoAi.copyPromptDesc"))
+          : (t("lunoAi.copyDesc")),
       });
       setTimeout(() => setCopiedId(null), 2000);
     } else {
       toast({
-        title: t("common.error") || "Error",
-        description: t("common.copyFailed") || "Failed to copy to clipboard.",
+        title: t("common.error"),
+        description: t("common.copyFailed"),
       });
     }
   };
 
-  const handleContentMouseOver = (e: React.MouseEvent<HTMLElement>) => {
-    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tooltip]");
-    if (target) {
-      const text = target.getAttribute("data-tooltip");
-      if (text) {
-        const rect = target.getBoundingClientRect();
-        const placeAbove = rect.top > 36;
-        setMarkdownTooltip({
-          text,
-          x: rect.left + rect.width / 2,
-          y: placeAbove ? rect.top - 6 : rect.bottom + 6,
-          side: placeAbove ? "top" : "bottom",
-        });
-        return;
-      }
-    }
-    setMarkdownTooltip(null);
-  };
-
-  const handleContentMouseOut = (e: React.MouseEvent<HTMLElement>) => {
-    const related = e.relatedTarget as HTMLElement | null;
-    if (!related || !related.closest("[data-tooltip]")) {
-      setMarkdownTooltip(null);
-    }
-  };
-
-  const handleContentClick = async (e: React.MouseEvent<HTMLDivElement>) => {
-    // 1. Link click handling
-    const target = (e.target as HTMLElement).closest("a");
-    if (target) {
-      const href = target.getAttribute("href");
-      if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-        e.preventDefault();
-        if (onOpenWebTab) onOpenWebTab(href);
-        else window.open(href, "_blank", "noopener,noreferrer");
-        return;
-      }
-    }
-
-    // 2. Copy code block button handling
-    const copyBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-copy-code]");
-    if (copyBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const encoded = copyBtn.getAttribute("data-code");
-      if (encoded) {
-        const codeText = decodeURIComponent(encoded);
-        await copyToClipboard(codeText);
-        const originalTooltip = copyBtn.getAttribute("data-tooltip") || "";
-        const originalSvg = copyBtn.querySelector("svg")?.outerHTML || "";
-        const copiedText = t("lunoAi.copied") || "Copied!";
-
-        copyBtn.setAttribute("data-tooltip", copiedText);
-        copyBtn.setAttribute("aria-label", copiedText);
-        setMarkdownTooltip((prev) => (prev ? { ...prev, text: copiedText } : null));
-
-        const svg = copyBtn.querySelector("svg");
-        if (svg) {
-          svg.outerHTML = `<svg class="h-3.5 w-3.5 text-primary shrink-0" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        }
-
-        toast({
-          title: t("common.copiedToClipboard") || "Copied to clipboard",
-          description: t("lunoAi.codeCopied") || "Code block content copied.",
-        });
-
-        setTimeout(() => {
-          copyBtn.setAttribute("data-tooltip", originalTooltip || t("lunoAi.copyCode") || "Copy code");
-          copyBtn.setAttribute("aria-label", originalTooltip || t("lunoAi.copyCode") || "Copy code");
-          setMarkdownTooltip((prev) => (prev ? { ...prev, text: originalTooltip || t("lunoAi.copyCode") || "Copy code" } : null));
-          const currentSvg = copyBtn.querySelector("svg");
-          if (currentSvg && originalSvg) {
-            currentSvg.outerHTML = originalSvg;
-          }
-        }, 2000);
-      }
-      return;
-    }
-  };
+  // Markdown tooltip & copy handlers provided by useMarkdownCodeCopyTooltip
 
   const handleProcessFiles = (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
@@ -1950,9 +2353,9 @@ export default function LunoAiView({
   };
 
   const modelLabels = {
-    smart: t("lunoAi.modelSmart") || "Smart",
-    fast: t("lunoAi.modelFast") || "Fast",
-    creative: t("lunoAi.modelCreative") || "Creative",
+    smart: t("lunoAi.modelSmart"),
+    fast: t("lunoAi.modelFast"),
+    creative: t("lunoAi.modelCreative"),
   };
 
   const filteredSessions = useMemo(() => {
@@ -1966,6 +2369,99 @@ export default function LunoAiView({
       })
       .sort((a, b) => getSessionLastModified(b) - getSessionLastModified(a));
   }, [sessions, searchHistoryQuery]);
+
+  const getSessionPreviewText = (session: ChatSession): string => {
+    const msgs = session.messages || [];
+    const lastWithText = [...msgs].reverse().find((m) => (m?.content || "").trim());
+    if (lastWithText?.content) {
+      return stripMarkdownSyntax(lastWithText.content) || t("lunoAi.imageHistoryPreview");
+    }
+    const hasGeneratedImg = msgs.some((m) => Boolean(m?.generatedImages && m.generatedImages.length > 0));
+    if (hasGeneratedImg) {
+      return t("lunoAi.imageHistoryPreview");
+    }
+    return "No messages";
+  };
+
+  const renderImageModeControls = () => (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t("lunoAi.generateImage")}
+            aria-pressed={isImageMode}
+            data-luno-ai-image-mode-toggle="true"
+            onClick={() => {
+              setIsImageMode((prev) => {
+                const next = !prev;
+                if (next) setActivePrefix(null);
+                return next;
+              });
+              setTimeout(() => {
+                textareaRef.current?.focus();
+                chatInputRef.current?.focus();
+              }, 30);
+            }}
+            className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium transition-all border flex items-center gap-1.5 cursor-pointer ${
+              isImageMode
+                ? "bg-primary/10 text-primary border-primary/40 font-semibold"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/70 border-border/60"
+            }`}
+          >
+            <ImageIcon className="h-3.5 w-3.5 text-primary shrink-0" />
+            {!isSidebar && <span>{t("lunoAi.generateImage")}</span>}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {isImageMode ? t("lunoAi.exitImageMode") : t("lunoAi.generateImage")}
+        </TooltipContent>
+      </Tooltip>
+
+      {isImageMode && (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("lunoAi.aspectRatio")}
+                  data-luno-ai-aspect-ratio="true"
+                  className="h-8 px-2.5 rounded-xl bg-primary/[0.08] hover:bg-primary/[0.12] text-xs font-semibold text-primary transition-all border border-primary/30 flex items-center gap-1 cursor-pointer outline-none"
+                >
+                  <span>{imageAspectRatio}</span>
+                  <ChevronDown className="h-3 w-3 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>{t("lunoAi.aspectRatio")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent
+            align="start"
+            className="w-44 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]"
+          >
+            {ASPECT_RATIO_OPTIONS.map((opt) => {
+              const isSelected = imageAspectRatio === opt.value;
+              return (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onClick={() => setImageAspectRatio(opt.value)}
+                  className={`flex items-center justify-between text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
+                      : "text-foreground hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
+                  }`}
+                >
+                  <span>{t(opt.labelKey as any)}</span>
+                  {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0 ml-1.5" />}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </>
+  );
 
   return (
     <div data-luno-ai-view="true" className="w-full flex-1 flex h-full overflow-hidden bg-background text-foreground">
@@ -1981,7 +2477,7 @@ export default function LunoAiView({
                 type="text"
                 value={searchHistoryQuery}
                 onChange={(e) => setSearchHistoryQuery(e.target.value)}
-                placeholder={t("lunoAi.searchHistory") || "Search chat history..."}
+                placeholder={t("lunoAi.searchHistory")}
                 className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
               />
               {searchHistoryQuery && (
@@ -1997,7 +2493,7 @@ export default function LunoAiView({
 
             {sessions.length > 0 && (
               <div className="flex items-center justify-between px-0.5 pt-0.5 text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider select-none">
-                <span>{t("lunoAi.recentChats") || "Recent Chats"}</span>
+                <span>{t("lunoAi.recentChats")}</span>
               </div>
             )}
           </div>
@@ -2007,7 +2503,7 @@ export default function LunoAiView({
             {filteredSessions.length === 0 ? (
               <div className="py-12 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
                 <Clock className="h-6 w-6 opacity-40 text-muted-foreground" />
-                <span>{t("lunoAi.noHistory") || "No chat history yet"}</span>
+                <span>{t("lunoAi.noHistory")}</span>
               </div>
             ) : (
               filteredSessions.map((session) => {
@@ -2018,8 +2514,7 @@ export default function LunoAiView({
                   settings.timeFormat,
                   settings.language
                 );
-                const lastMsgContent = [...(session.messages || [])].reverse().find((m) => (m?.content || "").trim())?.content || "";
-                const previewText = stripMarkdownSyntax(lastMsgContent) || "No messages";
+                const previewText = getSessionPreviewText(session);
 
                 return (
                   <div
@@ -2038,7 +2533,7 @@ export default function LunoAiView({
                     }}
                     className={`group relative rounded-xl border p-2.5 transition-all cursor-pointer select-none outline-none ${
                       isActive
-                        ? "bg-primary/10 border-primary/40 text-primary shadow-2xs"
+                        ? "bg-primary/10 border-primary/40 text-primary shadow-sm"
                         : "border-border/40 hover:border-primary/40 hover:bg-sidebar-accent/50 text-foreground"
                     }`}
                   >
@@ -2082,7 +2577,7 @@ export default function LunoAiView({
                             <Trash2 className="h-3 w-3" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{t("lunoAi.deleteChat") || "Delete chat"}</TooltipContent>
+                        <TooltipContent>{t("lunoAi.deleteChat")}</TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
@@ -2118,10 +2613,10 @@ export default function LunoAiView({
                       }`}
                     >
                       <History className="h-3.5 w-3.5" />
-                      <span>{t("lunoAi.chatHistory") || "History"}</span>
+                      <span>{t("lunoAi.chatHistory")}</span>
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("lunoAi.chatHistory") || "Chat History"}</TooltipContent>
+                  <TooltipContent>{t("lunoAi.chatHistory")}</TooltipContent>
                 </Tooltip>
 
                 {messages.length > 0 && (
@@ -2133,10 +2628,10 @@ export default function LunoAiView({
                         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-muted font-medium outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
                       >
                         <Plus className="h-3.5 w-3.5" />
-                        <span>{t("lunoAi.newChat") || "New chat"}</span>
+                        <span>{t("lunoAi.newChat")}</span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("lunoAi.newChat") || "New Chat"}</TooltipContent>
+                    <TooltipContent>{t("lunoAi.newChat")}</TooltipContent>
                   </Tooltip>
                 )}
               </div>
@@ -2159,17 +2654,17 @@ export default function LunoAiView({
                     Luno AI
                   </h1>
                   <p className="text-xs text-muted-foreground max-w-sm text-center px-2">
-                    {t("lunoAi.subtitle") || "Ask anything. Get ideas. Write better."}
+                    {t("lunoAi.subtitle")}
                   </p>
                 </motion.div>
 
                 {/* Main Input Box Card in Hero Mode - Bottom Docked */}
                 <div className={`w-full ${isSidebar ? "shrink-0 space-y-2" : "space-y-3"}`}>
                   {editingUserMsgId && (
-                    <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-2xs text-foreground font-medium">
+                    <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-sm text-foreground font-medium">
                       <div className="flex items-center gap-2">
                         <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
+                        <span className="text-foreground">{t("lunoAi.editingPrompt")}</span>
                       </div>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -2196,7 +2691,7 @@ export default function LunoAiView({
                       {attachedFiles.map((file, idx) => (
                         <Tooltip key={idx}>
                           <TooltipTrigger asChild>
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-sm">
                               <AttachedFileChipIcon fileName={file.name} dataUrl={file.dataUrl} notes={notes} />
                               <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                               <button
@@ -2214,7 +2709,7 @@ export default function LunoAiView({
                     </div>
                   )}
 
-                  <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
+                  <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-sm focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
                     <div className="flex flex-wrap items-baseline gap-1 min-h-[44px] max-h-[160px]">
                       {activePrefix && (
                         <Tooltip>
@@ -2288,11 +2783,11 @@ export default function LunoAiView({
                                 className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer`}
                               >
                                 <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
-                                {!isSidebar && <span>{t("lunoAi.attachFile") || "Attach file"}</span>}
+                                {!isSidebar && <span>{t("lunoAi.attachFile")}</span>}
                               </button>
                             </DropdownMenuTrigger>
                           </TooltipTrigger>
-                          <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                          <TooltipContent>{t("lunoAi.attachFile")}</TooltipContent>
                         </Tooltip>
                           <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
                             <DropdownMenuItem
@@ -2303,11 +2798,11 @@ export default function LunoAiView({
                               className="whitespace-nowrap"
                             >
                               <Folder className="h-4 w-4 text-primary shrink-0" />
-                              <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                              <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace")}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
                               <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-                              <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                              <span className="whitespace-nowrap">{t("lunoAi.uploadComputer")}</span>
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -2336,22 +2831,24 @@ export default function LunoAiView({
                               {!isSidebar && (
                                 <span>
                                   {isListening
-                                    ? (t("lunoAi.stopListening") || "Stop listening")
+                                    ? (t("lunoAi.stopListening"))
                                     : isTranscribing
-                                    ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                                    : (t("lunoAi.voiceInput") || "Voice input")}
+                                    ? (t("lunoAi.voiceTranscribing"))
+                                    : (t("lunoAi.voiceInput"))}
                                 </span>
                               )}
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>
                             {isListening
-                              ? (t("lunoAi.stopListening") || "Stop listening")
+                              ? (t("lunoAi.stopListening"))
                               : isTranscribing
-                              ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                              : (t("lunoAi.voiceInput") || "Voice input")}
+                              ? (t("lunoAi.voiceTranscribing"))
+                              : (t("lunoAi.voiceInput"))}
                           </TooltipContent>
                         </Tooltip>
+
+                        {renderImageModeControls()}
                       </div>
 
                       <div className="flex items-center gap-1.5">
@@ -2359,14 +2856,14 @@ export default function LunoAiView({
                           <DropdownMenuTrigger asChild>
                             <button
                               type="button"
-                              className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-2xs`}
+                              className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-sm`}
                             >
                               {renderModelIcon(model)}
                               {!isSidebar && <span>{modelLabels[model]}</span>}
                               <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                          <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
                             {(["smart", "fast", "creative"] as const).map((mKey) => {
                               const isSelected = model === mKey;
                               return (
@@ -2375,8 +2872,8 @@ export default function LunoAiView({
                                   onClick={() => setModel(mKey)}
                                   className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
                                     isSelected
-                                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
-                                      : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
+                                      : "text-foreground hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                                   }`}
                                 >
                                   <div className="flex items-center gap-2.5">
@@ -2396,88 +2893,102 @@ export default function LunoAiView({
                               type="button"
                               disabled={!prompt.trim() || isGenerating}
                               onClick={() => void handleSendPrompt()}
-                              className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer`}
+                              className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer`}
                             >
-                              {!isSidebar && <span>{t("lunoAi.send") || "Send"}</span>}
+                              {!isSidebar && <span>{t("lunoAi.send")}</span>}
                               <Send className="h-3.5 w-3.5" />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                          <TooltipContent>{t("lunoAi.send")}</TooltipContent>
                         </Tooltip>
                       </div>
                     </div>
                   </div>
 
-                  {/* 5 Quick Action Cards Grid (Only in full tab mode, hidden in sidebar mode) */}
+                  {/* 6 Quick Action Cards Grid (Only in full tab mode, hidden in sidebar mode) */}
                   {!isSidebar && (
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 w-full pt-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 w-full pt-1">
                       <button
                         type="button"
                         onClick={() => handleQuickAction("summarize")}
-                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
                       >
                         <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                         <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                          {t("lunoAi.summarizeTitle") || "Summarize"}
+                          {t("lunoAi.summarizeTitle")}
                         </span>
                         <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                          {t("lunoAi.summarizeDesc") || "Summarize this note"}
+                          {t("lunoAi.summarizeDesc")}
                         </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleQuickAction("improve")}
-                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
                       >
                         <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                         <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                          {t("lunoAi.improveTitle") || "Improve writing"}
+                          {t("lunoAi.improveTitle")}
                         </span>
                         <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                          {t("lunoAi.improveDesc") || "Make this better"}
+                          {t("lunoAi.improveDesc")}
                         </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleQuickAction("brainstorm")}
-                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
                       >
                         <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                         <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                          {t("lunoAi.brainstormTitle") || "Brainstorm"}
+                          {t("lunoAi.brainstormTitle")}
                         </span>
                         <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                          {t("lunoAi.brainstormDesc") || "Give me ideas"}
+                          {t("lunoAi.brainstormDesc")}
                         </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleQuickAction("outline")}
-                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
                       >
                         <ListOrdered className="h-4 w-4 text-blue-600 dark:text-blue-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                         <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                          {t("lunoAi.outlineTitle") || "Create outline"}
+                          {t("lunoAi.outlineTitle")}
                         </span>
                         <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                          {t("lunoAi.outlineDesc") || "Make an outline"}
+                          {t("lunoAi.outlineDesc")}
                         </span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleQuickAction("translate")}
-                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-2xs cursor-pointer"
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
                       >
                         <Languages className="h-4 w-4 text-teal-600 dark:text-teal-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
                         <span className="text-[11.5px] font-semibold text-foreground transition-colors">
-                          {t("lunoAi.translateTitle") || "Translate"}
+                          {t("lunoAi.translateTitle")}
                         </span>
                         <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
-                          {t("lunoAi.translateDesc") || "Translate to English"}
+                          {t("lunoAi.translateDesc")}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAction("generate_image")}
+                        className="flex flex-col text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-primary/40 hover:bg-muted/50 transition-all group shadow-sm cursor-pointer"
+                      >
+                        <ImageIcon className="h-4 w-4 text-rose-600 dark:text-rose-400 mb-1.5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-[11.5px] font-semibold text-foreground transition-colors">
+                          {t("lunoAi.generateImageTitle")}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground leading-tight mt-0.5 line-clamp-1">
+                          {t("lunoAi.generateImageDesc")}
                         </span>
                       </button>
                     </div>
@@ -2503,7 +3014,7 @@ export default function LunoAiView({
                             {msg.attachedFileNames.map((name, i) => (
                               <div
                                 key={i}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-foreground font-medium text-xs shadow-2xs"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-foreground font-medium text-xs shadow-sm"
                               >
                                 <AttachedFileChipIcon fileName={name} notes={notes} />
                                 <span className="truncate max-w-[200px] text-xs font-medium text-foreground">{name}</span>
@@ -2513,7 +3024,16 @@ export default function LunoAiView({
                         )}
 
                         {/* Text Prompt Bubble */}
-                        <div className="bg-primary/10 text-foreground font-medium px-4 py-2.5 rounded-2xl border border-primary/15 text-xs sm:text-sm leading-relaxed shadow-2xs">
+                        <div className="bg-primary/10 text-foreground font-medium px-4 py-2.5 rounded-2xl border border-primary/15 text-xs sm:text-sm leading-relaxed shadow-sm space-y-1">
+                          {msg.isImageGeneration && (
+                            <div className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-primary">
+                              <ImageIcon className="h-3 w-3 shrink-0" />
+                              <span>{t("lunoAi.generateImage")}</span>
+                              {msg.imageAspectRatio && (
+                                <span className="opacity-75">({msg.imageAspectRatio})</span>
+                              )}
+                            </div>
+                          )}
                           <div className="whitespace-pre-wrap">{msg.content}</div>
                         </div>
 
@@ -2523,58 +3043,164 @@ export default function LunoAiView({
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                aria-label={t("lunoAi.copyPrompt") || "Copy message"}
+                                aria-label={t("lunoAi.copyPrompt")}
                                 onClick={() => void handleCopy(msg.id, msg.content, true)}
                                 className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
                               >
                                 {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied") || "Copied!") : (t("lunoAi.copyPrompt") || t("common.copy") || "Copy")}</TooltipContent>
+                            <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied")) : (t("lunoAi.copyPrompt"))}</TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
-                                onClick={() => handleEditUserPrompt(msg.id, msg.content)}
+                                aria-label={t("common.edit")}
+                                onClick={() => handleEditUserPrompt(msg.id, msg.content, msg)}
                                 className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{t("common.edit") || "Edit"}</TooltipContent>
+                            <TooltipContent>{t("common.edit")}</TooltipContent>
                           </Tooltip>
                         </div>
                       </div>
                     ) : (
                       /* AI Output */
                       <div className="w-full space-y-2 py-1">
-                        <div
-                          className="editor-markdown-content text-xs sm:text-sm leading-relaxed text-foreground"
-                          data-accent-headings={settings?.accentHeadings ? "true" : undefined}
-                          onClick={handleContentClick}
-                          onMouseOver={handleContentMouseOver}
-                          onMouseOut={handleContentMouseOut}
-                          dangerouslySetInnerHTML={{
-                            __html: renderLunoAiMarkdown(msg.content, {
-                              showCodeLineNumbers: settings?.showCodeLineNumbers,
-                              accentHeadings: settings?.accentHeadings,
-                              copyButtonText: t("lunoAi.copyCode") || "Copy code",
-                            }),
-                          }}
-                        />
+                        {msg.generatedImages && msg.generatedImages.length > 0 && (
+                          <div
+                            data-luno-ai-generated-images="true"
+                            className={`grid gap-3 ${msg.generatedImages.length > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}
+                          >
+                            {msg.generatedImages.map((imgItem, imgIdx) => {
+                              const imgSrc = resolveMessageImageSrc(imgItem);
+                              const isImgLoading = Boolean(loadingImageIds[imgItem.id]);
+                              const ext = imgItem.mimeType?.includes("jpeg")
+                                ? "jpg"
+                                : imgItem.mimeType?.includes("webp")
+                                ? "webp"
+                                : "png";
+                              const downloadName = `${(imgItem.alt || "luno-ai-image").slice(0, 32)}.${ext}`;
+
+                              if (!imgSrc) {
+                                return (
+                                  <div
+                                    key={imgItem.id || imgIdx}
+                                    className="max-w-md rounded-2xl border border-dashed border-border/80 bg-muted/40 px-4 py-8 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground"
+                                  >
+                                    {isImgLoading ? (
+                                      <>
+                                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                        <span>{t("lunoAi.imageRestoring")}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ImageOff className="h-5 w-5 opacity-60" />
+                                        <span>{t("lunoAi.imageUnavailable")}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div
+                                  key={imgItem.id || imgIdx}
+                                  className="group/gen-img relative inline-block max-w-md w-fit rounded-2xl overflow-hidden border border-border/80 bg-card shadow-sm"
+                                >
+                                  <img
+                                    src={imgSrc}
+                                    alt={imgItem.alt || t("lunoAi.generatedImagePreview")}
+                                    onClick={() =>
+                                      setLightboxImage({
+                                        src: imgSrc,
+                                        alt: imgItem.alt || t("lunoAi.generatedImagePreview"),
+                                        fileName: downloadName,
+                                        message: msg,
+                                      })
+                                    }
+                                    className="block max-h-[420px] w-auto max-w-full object-contain cursor-zoom-in transition-transform duration-200"
+                                  />
+                                  <div className="absolute top-2 right-2 flex items-center gap-1.5 opacity-0 group-hover/gen-img:opacity-100 focus-within:opacity-100 transition-opacity z-10">
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <button
+                                          type="button"
+                                          aria-label={t("lunoAi.viewFullImage")}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setLightboxImage({
+                                              src: imgSrc,
+                                              alt: imgItem.alt || t("lunoAi.generatedImagePreview"),
+                                              fileName: downloadName,
+                                              message: msg,
+                                            });
+                                          }}
+                                          className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all cursor-pointer flex items-center justify-center"
+                                        >
+                                          <Maximize2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left">{t("lunoAi.viewFullImage")}</TooltipContent>
+                                    </Tooltip>
+
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <button
+                                          type="button"
+                                          aria-label={t("lunoAi.downloadImage")}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void handleDownloadGeneratedImage(imgItem);
+                                          }}
+                                          className="p-1.5 rounded-lg bg-background/90 text-muted-foreground hover:text-foreground border border-border/80 shadow-sm backdrop-blur-sm transition-all cursor-pointer flex items-center justify-center"
+                                        >
+                                          <Download className="h-3.5 w-3.5" />
+                                        </button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left">{t("lunoAi.downloadImage")}</TooltipContent>
+                                    </Tooltip>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {msg.content && (
+                          <div
+                            className="editor-markdown-content text-xs sm:text-sm leading-relaxed text-foreground"
+                            data-accent-headings={settings?.accentHeadings ? "true" : undefined}
+                            onClick={handleContentClick}
+                            onMouseOver={handleContentMouseOver}
+                            onMouseOut={handleContentMouseOut}
+                            dangerouslySetInnerHTML={{
+                              __html: renderLunoAiMarkdown(msg.content, {
+                                showCodeLineNumbers: settings?.showCodeLineNumbers,
+                                accentHeadings: settings?.accentHeadings,
+                                copyButtonText: t("lunoAi.copyCode"),
+                              }),
+                            }}
+                          />
+                        )}
 
                         {/* Action Toolbar under AI Output (Icon-only with Tooltips) */}
-                        <div className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1 pt-1 text-xs text-muted-foreground flex-wrap">
                           <span className="text-[10.5px] opacity-60 mr-1">
-                            {msg.modelUsed ? `Model: ${msg.modelUsed}` : "Luno AI"}
+                            {msg.modelUsed
+                              ? `Model: ${msg.isImageGeneration ? formatModelName(msg.modelUsed) : msg.modelUsed}`
+                              : "Luno AI"}
                           </span>
 
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <button
                                 type="button"
+                                aria-label={t("lunoAi.regenerate")}
                                 disabled={isGenerating}
                                 onClick={() => handleRegenerateResponse(msg.id)}
                                 className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
@@ -2582,39 +3208,76 @@ export default function LunoAiView({
                                 <RotateCcw className={`h-3.5 w-3.5 ${isGenerating ? "animate-spin" : ""}`} />
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{t("lunoAi.regenerate") || "Regenerate"}</TooltipContent>
+                            <TooltipContent>{t("lunoAi.regenerate")}</TooltipContent>
                           </Tooltip>
 
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                aria-label={t("lunoAi.copyResponse") || "Copy response"}
-                                onClick={() => void handleCopy(msg.id, msg.content, false)}
-                                className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
-                              >
-                                {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied") || "Copied!") : (t("lunoAi.copyResponse") || "Copy response")}</TooltipContent>
-                          </Tooltip>
+                          {msg.generatedImages && msg.generatedImages.length > 0 ? (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label={t("lunoAi.copyImage")}
+                                    onClick={() => void handleCopyGeneratedImage(msg.id, msg.generatedImages![0])}
+                                    className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
+                                  >
+                                    {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{copiedId === msg.id ? t("lunoAi.copied") : t("lunoAi.copyImage")}</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label={t("lunoAi.downloadImage")}
+                                    onClick={() => void handleDownloadGeneratedImage(msg.generatedImages![0])}
+                                    className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t("lunoAi.downloadImage")}</TooltipContent>
+                              </Tooltip>
+                            </>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label={t("lunoAi.copyResponse")}
+                                  onClick={() => void handleCopy(msg.id, msg.content, false)}
+                                  className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all flex items-center justify-center cursor-pointer"
+                                >
+                                  {copiedId === msg.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>{copiedId === msg.id ? (t("lunoAi.copied")) : (t("lunoAi.copyResponse"))}</TooltipContent>
+                            </Tooltip>
+                          )}
 
                           {(onInsertToSelectedNote || onInsertToActiveNote) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setInsertTextContent(msg.content);
-                                    setSearchInsertNoteQuery("");
-                                    setIsInsertModalOpen(true);
-                                  }}
+                                  aria-label={
+                                    msg.generatedImages && msg.generatedImages.length > 0
+                                      ? t("lunoAi.insertImageToNote")
+                                      : t("lunoAi.insertToNote")
+                                  }
+                                  onClick={() => handleOpenInsertModalForMessage(msg)}
                                   className="h-7 w-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all flex items-center justify-center cursor-pointer"
                                 >
                                   <Plus className="h-3.5 w-3.5" />
                                 </button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.insertToNote") || "Insert into note"}</TooltipContent>
+                              <TooltipContent>
+                                {msg.generatedImages && msg.generatedImages.length > 0
+                                  ? t("lunoAi.insertImageToNote")
+                                  : t("lunoAi.insertToNote")}
+                              </TooltipContent>
                             </Tooltip>
                           )}
 
@@ -2623,20 +3286,14 @@ export default function LunoAiView({
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    const fullDefaultName = extractDefaultFileName(msg.content);
-                                    const baseName = fullDefaultName.replace(/\.(md|html|txt)$/i, "");
-                                    setCreateNoteContent(msg.content);
-                                    setCreateNoteFileName(baseName || "Untitled");
-                                    setCreateNoteFileExt("md");
-                                    setIsCreateNoteModalOpen(true);
-                                  }}
+                                  aria-label={t("lunoAi.createAsNewNote")}
+                                  onClick={() => handleOpenCreateNoteModalForMessage(msg)}
                                   className="h-7 w-7 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all flex items-center justify-center cursor-pointer"
                                 >
                                   <FilePlus className="h-3.5 w-3.5" />
                                 </button>
                               </TooltipTrigger>
-                              <TooltipContent>{t("lunoAi.createAsNewNote") || "Create as new note"}</TooltipContent>
+                              <TooltipContent>{t("lunoAi.createAsNewNote")}</TooltipContent>
                             </Tooltip>
                           )}
                         </div>
@@ -2652,7 +3309,47 @@ export default function LunoAiView({
                     className="flex items-center gap-2 py-2 text-xs text-muted-foreground/70 font-medium"
                   >
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/70" />
-                    <span>{t("lunoAi.thinking") || "Thinking..."}</span>
+                    <span>{isGeneratingImage ? t("lunoAi.generatingImage") : t("lunoAi.thinking")}</span>
+                  </motion.div>
+                )}
+
+                {showFreeTierImageNotice && !isGenerating && (
+                  <motion.div
+                    data-luno-ai-free-tier-notice="true"
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`rounded-2xl border border-border/60 bg-card ${isSidebar ? "p-3" : "p-4"} shadow-sm`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="text-xs font-semibold text-foreground leading-snug">
+                          {t("lunoAi.imageFreeTierTitle")}
+                        </h4>
+                        <button
+                          type="button"
+                          aria-label={t("common.close")}
+                          onClick={() => setShowFreeTierImageNotice(false)}
+                          className="h-6 w-6 -mt-0.5 -mr-1 shrink-0 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors cursor-pointer"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed mt-1">
+                        {t("lunoAi.imageFreeTierNoticeDesc")}
+                      </p>
+                      {onOpenSettings && (
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenSettings("ai")}
+                            className="h-8 px-3 rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground text-xs font-medium inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          >
+                            <Settings className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span>{t("lunoAi.openAiSettings")}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 )}
 
@@ -2665,7 +3362,7 @@ export default function LunoAiView({
           {messages.length === 0 && (
             <div className={`w-full shrink-0 ${isSidebar ? "px-2 py-1 text-[10px]" : "py-2.5 text-[10.5px]"} text-center flex items-center justify-center gap-1.5 text-muted-foreground select-none overflow-hidden`}>
               <Lock className={`${isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} shrink-0 opacity-70`} />
-              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
+              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer")}</span>
             </div>
           )}
         </div>
@@ -2675,10 +3372,10 @@ export default function LunoAiView({
           <div className="w-full shrink-0 border-t border-border/40 bg-background/95 backdrop-blur-md p-3 pb-2 space-y-2">
             <div className="w-full max-w-3xl mx-auto space-y-2">
               {editingUserMsgId && (
-                <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-2xs text-foreground font-medium">
+                <div className="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-card border border-border/70 shadow-sm text-foreground font-medium">
                   <div className="flex items-center gap-2">
                     <Pencil className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="text-foreground">{t("lunoAi.editingPrompt") || "Editing prompt"}</span>
+                    <span className="text-foreground">{t("lunoAi.editingPrompt")}</span>
                   </div>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2705,7 +3402,7 @@ export default function LunoAiView({
                   {attachedFiles.map((file, idx) => (
                     <Tooltip key={idx}>
                       <TooltipTrigger asChild>
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-2xs">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card text-xs font-medium text-foreground transition-all shadow-sm">
                           <AttachedFileChipIcon fileName={file.name} dataUrl={file.dataUrl} notes={notes} />
                           <span className="max-w-[180px] truncate text-xs font-medium text-foreground">{file.name}</span>
                           <button
@@ -2723,7 +3420,7 @@ export default function LunoAiView({
                 </div>
               )}
 
-              <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-xs focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
+              <div className={`relative w-full rounded-2xl border border-border/80 bg-card ${isSidebar ? "p-2.5 space-y-2" : "p-3.5 space-y-2.5"} shadow-sm focus-within:border-primary focus-within:ring-0 shadow-none transition-all`}>
                 <div className="flex flex-wrap items-baseline gap-1 min-h-[44px] max-h-[160px]">
                   {activePrefix && (
                     <Tooltip>
@@ -2797,11 +3494,11 @@ export default function LunoAiView({
                               className={`h-8 ${isSidebar ? "w-8 px-0 justify-center" : "px-3"} rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all border border-border/60 flex items-center gap-1.5 cursor-pointer`}
                             >
                               <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
-                              {!isSidebar && <span>{t("lunoAi.attachFile") || "Attach file"}</span>}
+                              {!isSidebar && <span>{t("lunoAi.attachFile")}</span>}
                             </button>
                           </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <TooltipContent>{t("lunoAi.attachFile") || "Attach file"}</TooltipContent>
+                        <TooltipContent>{t("lunoAi.attachFile")}</TooltipContent>
                       </Tooltip>
                       <DropdownMenuContent align="start" className="w-auto min-w-[240px]">
                         <DropdownMenuItem
@@ -2812,11 +3509,11 @@ export default function LunoAiView({
                           className="whitespace-nowrap"
                         >
                           <Folder className="h-4 w-4 text-primary shrink-0" />
-                          <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace") || "Attach note from workspace"}</span>
+                          <span className="whitespace-nowrap">{t("lunoAi.attachFromWorkspace")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="whitespace-nowrap">
                           <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="whitespace-nowrap">{t("lunoAi.uploadComputer") || "Upload from computer"}</span>
+                          <span className="whitespace-nowrap">{t("lunoAi.uploadComputer")}</span>
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -2845,22 +3542,24 @@ export default function LunoAiView({
                           {!isSidebar && (
                             <span>
                               {isListening
-                                ? (t("lunoAi.stopListening") || "Stop listening")
+                                ? (t("lunoAi.stopListening"))
                                 : isTranscribing
-                                ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                                : (t("lunoAi.voiceInput") || "Voice input")}
+                                ? (t("lunoAi.voiceTranscribing"))
+                                : (t("lunoAi.voiceInput"))}
                             </span>
                           )}
                         </button>
                       </TooltipTrigger>
                       <TooltipContent>
                         {isListening
-                          ? (t("lunoAi.stopListening") || "Stop listening")
+                          ? (t("lunoAi.stopListening"))
                           : isTranscribing
-                          ? (t("lunoAi.voiceTranscribing") || "Transcribing...")
-                          : (t("lunoAi.voiceInput") || "Voice input")}
+                          ? (t("lunoAi.voiceTranscribing"))
+                          : (t("lunoAi.voiceInput"))}
                       </TooltipContent>
                     </Tooltip>
+
+                    {renderImageModeControls()}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -2868,14 +3567,14 @@ export default function LunoAiView({
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-2xs`}
+                          className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-sm`}
                         >
                           {renderModelIcon(model)}
                           {!isSidebar && <span>{modelLabels[model]}</span>}
                           <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-50">
+                      <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
                         {(["smart", "fast", "creative"] as const).map((mKey) => {
                           const isSelected = model === mKey;
                           return (
@@ -2884,8 +3583,8 @@ export default function LunoAiView({
                               onClick={() => setModel(mKey)}
                               className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
                                 isSelected
-                                  ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18"
-                                  : "text-foreground hover:bg-primary/8 hover:text-primary focus:bg-primary/8 focus:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                                  ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
+                                  : "text-foreground hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                               }`}
                             >
                               <div className="flex items-center gap-2.5">
@@ -2905,13 +3604,13 @@ export default function LunoAiView({
                           type="button"
                           disabled={!prompt.trim() || isGenerating}
                           onClick={() => void handleSendPrompt()}
-                          className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-2xs disabled:opacity-50 transition-all cursor-pointer`}
+                          className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer`}
                         >
-                          {!isSidebar && <span>{t("lunoAi.send") || "Send"}</span>}
+                          {!isSidebar && <span>{t("lunoAi.send")}</span>}
                           <Send className="h-3.5 w-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{t("lunoAi.send") || "Send"}</TooltipContent>
+                      <TooltipContent>{t("lunoAi.send")}</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -2921,7 +3620,7 @@ export default function LunoAiView({
             {/* Footer Disclaimer in Chat Mode - Below Input Box */}
             <div className={`w-full pt-1 text-center flex items-center justify-center gap-1.5 ${isSidebar ? "px-2 text-[10px]" : "text-[10.5px]"} text-muted-foreground select-none overflow-hidden`}>
               <Lock className={`${isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} shrink-0 opacity-70`} />
-              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer") || "Luno AI may make mistakes. Please check important info."}</span>
+              <span className={isSidebar ? "truncate" : ""}>{t("lunoAi.disclaimer")}</span>
             </div>
           </div>
         )}
@@ -2932,16 +3631,16 @@ export default function LunoAiView({
       <Dialog open={isCreateNoteModalOpen} onOpenChange={setIsCreateNoteModalOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>{t("sidebar.createFileTitle") || "Create new file"}</DialogTitle>
+            <DialogTitle>{t("sidebar.createFileTitle")}</DialogTitle>
             <DialogDescription>
-              {t("sidebar.createFileDescription") || "Set file name and extension before creating."}
+              {t("sidebar.createFileDescription")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div>
               <label htmlFor="luno-create-file-name" className="mb-2 block text-sm font-medium text-foreground">
-                {t("sidebar.fileNameLabel") || "File name"}
+                {t("sidebar.fileNameLabel")}
               </label>
               <input
                 id="luno-create-file-name"
@@ -2951,13 +3650,7 @@ export default function LunoAiView({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    if (onCreateNewNote) {
-                      const cleanName = createNoteFileName.trim() || "Untitled";
-                      const baseName = cleanName.replace(/\.(md|html|txt)$/i, "");
-                      const fullFileName = `${baseName}.${createNoteFileExt}`;
-                      onCreateNewNote(fullFileName, createNoteContent);
-                      setIsCreateNoteModalOpen(false);
-                    }
+                    void handleConfirmCreateNewNote();
                   }
                 }}
                 placeholder="Untitled"
@@ -2967,16 +3660,16 @@ export default function LunoAiView({
 
             <div>
               <label htmlFor="luno-create-file-ext" className="mb-2 block text-sm font-medium text-foreground">
-                {t("sidebar.fileTypeLabel") || "File type"}
+                {t("sidebar.fileTypeLabel")}
               </label>
               <Select value={createNoteFileExt} onValueChange={(v) => setCreateNoteFileExt(v as "md" | "html" | "txt")}>
                 <SelectTrigger id="luno-create-file-ext" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="txt">{t("sidebar.fileTypeTxt") || "Text (.txt)"}</SelectItem>
-                  <SelectItem value="md">{t("sidebar.fileTypeMd") || "Markdown (.md)"}</SelectItem>
-                  <SelectItem value="html">{t("sidebar.fileTypeHtml") || "HTML (.html)"}</SelectItem>
+                  <SelectItem value="txt">{t("sidebar.fileTypeTxt")}</SelectItem>
+                  <SelectItem value="md">{t("sidebar.fileTypeMd")}</SelectItem>
+                  <SelectItem value="html">{t("sidebar.fileTypeHtml")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2984,21 +3677,14 @@ export default function LunoAiView({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsCreateNoteModalOpen(false)}>
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
-              onClick={() => {
-                if (onCreateNewNote) {
-                  const cleanName = createNoteFileName.trim() || "Untitled";
-                  const baseName = cleanName.replace(/\.(md|html|txt)$/i, "");
-                  const fullFileName = `${baseName}.${createNoteFileExt}`;
-                  onCreateNewNote(fullFileName, createNoteContent);
-                  setIsCreateNoteModalOpen(false);
-                }
-              }}
+              disabled={isPreparingInsert}
+              onClick={() => void handleConfirmCreateNewNote()}
             >
-              {t("sidebar.createFileAction") || "Create"}
+              {t("sidebar.createFileAction")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3009,10 +3695,12 @@ export default function LunoAiView({
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle>
-              {t("lunoAi.selectNoteToInsert") || "Select Note to Insert Content"}
+              {t("lunoAi.selectNoteToInsert")}
             </DialogTitle>
             <DialogDescription>
-              {t("lunoAi.selectNoteToInsertDesc") || "Choose a note document to append this AI response."}
+              {insertImagesPayload && insertImagesPayload.length > 0
+                ? t("lunoAi.selectNoteToInsertImageDesc")
+                : t("lunoAi.selectNoteToInsertDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -3023,7 +3711,7 @@ export default function LunoAiView({
               type="text"
               value={searchInsertNoteQuery}
               onChange={(e) => setSearchInsertNoteQuery(e.target.value)}
-              placeholder={t("lunoAi.searchWorkspaceNotes") || "Search workspace notes..."}
+              placeholder={t("lunoAi.searchWorkspaceNotes")}
               className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
             />
             {searchInsertNoteQuery && (
@@ -3046,19 +3734,14 @@ export default function LunoAiView({
               actionType="insert"
               openedFolderName={openedFolderName}
               onSelectNote={(n) => {
-                if (onInsertToSelectedNote) {
-                  onInsertToSelectedNote(n.id, insertTextContent);
-                } else if (onInsertToActiveNote) {
-                  onInsertToActiveNote(insertTextContent);
-                }
-                setIsInsertModalOpen(false);
+                void handleConfirmInsertToNote(n);
               }}
             />
           </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsInsertModalOpen(false)}>
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3069,7 +3752,7 @@ export default function LunoAiView({
         <DialogContent className="max-w-md rounded-2xl p-4 gap-3">
           <DialogHeader className="pb-1">
             <DialogTitle className="text-base font-bold">
-              {t("lunoAi.selectWorkspaceNotes") || "Select note to attach"}
+              {t("lunoAi.selectWorkspaceNotes")}
             </DialogTitle>
           </DialogHeader>
 
@@ -3080,7 +3763,7 @@ export default function LunoAiView({
               type="text"
               value={searchWorkspaceQuery}
               onChange={(e) => setSearchWorkspaceQuery(e.target.value)}
-              placeholder={t("lunoAi.searchWorkspaceNotes") || "Search workspace notes..."}
+              placeholder={t("lunoAi.searchWorkspaceNotes")}
               className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
             />
             {searchWorkspaceQuery && (
@@ -3125,7 +3808,7 @@ export default function LunoAiView({
                   type="button"
                   className="relative pb-2.5 text-foreground font-bold transition-colors cursor-pointer"
                 >
-                  {t("lunoAi.chatHistory") || "History"}
+                  {t("lunoAi.chatHistory")}
                   <motion.div layoutId="rightPanelTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
                 </button>
               </div>
@@ -3142,7 +3825,7 @@ export default function LunoAiView({
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{t("lunoAi.clearAll") || "Clear all history"}</TooltipContent>
+                    <TooltipContent>{t("lunoAi.clearAll")}</TooltipContent>
                   </Tooltip>
                 )}
                 <Tooltip>
@@ -3155,7 +3838,7 @@ export default function LunoAiView({
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("lunoAi.closePanel") || "Close panel"}</TooltipContent>
+                  <TooltipContent>{t("lunoAi.closePanel")}</TooltipContent>
                 </Tooltip>
               </div>
             </div>
@@ -3170,7 +3853,7 @@ export default function LunoAiView({
                   type="text"
                   value={searchHistoryQuery}
                   onChange={(e) => setSearchHistoryQuery(e.target.value)}
-                  placeholder={t("lunoAi.searchHistory") || "Search chat history..."}
+                  placeholder={t("lunoAi.searchHistory")}
                   className="w-full bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground outline-none"
                 />
                 {searchHistoryQuery && (
@@ -3187,7 +3870,7 @@ export default function LunoAiView({
               {/* Section Title */}
               {sessions.length > 0 && (
                 <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider pt-1">
-                  {t("lunoAi.recentChats") || "Recent Chats"}
+                  {t("lunoAi.recentChats")}
                 </div>
               )}
 
@@ -3196,7 +3879,7 @@ export default function LunoAiView({
                 {filteredSessions.length === 0 ? (
                   <div className="py-16 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
                     <Clock className="h-7 w-7 opacity-40 text-muted-foreground" />
-                    <span>{t("lunoAi.noHistory") || "No chat history yet"}</span>
+                    <span>{t("lunoAi.noHistory")}</span>
                   </div>
                 ) : (
                   filteredSessions.map((session) => {
@@ -3209,8 +3892,7 @@ export default function LunoAiView({
                     );
 
                     // Extract preview snippet from messages with all markdown syntax stripped
-                    const lastMsgContent = [...(session.messages || [])].reverse().find((m) => (m?.content || "").trim())?.content || "";
-                    const previewText = stripMarkdownSyntax(lastMsgContent) || "No messages";
+                    const previewText = getSessionPreviewText(session);
 
                     return (
                       <div
@@ -3225,7 +3907,7 @@ export default function LunoAiView({
                         onClick={() => handleSelectSession(session)}
                         className={`group relative rounded-xl border-[1.5px] p-2.5 transition-all cursor-pointer select-none outline-none ${
                           isActive
-                            ? "bg-primary/10 border-primary/50 text-primary shadow-2xs"
+                            ? "bg-primary/10 border-primary/50 text-primary shadow-sm"
                             : "border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 text-foreground/90"
                         }`}
                       >
@@ -3269,7 +3951,7 @@ export default function LunoAiView({
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>{t("lunoAi.deleteChat") || "Delete chat"}</TooltipContent>
+                            <TooltipContent>{t("lunoAi.deleteChat")}</TooltipContent>
                           </Tooltip>
                         </div>
                       </div>
@@ -3287,7 +3969,7 @@ export default function LunoAiView({
         <div
           role="menu"
           data-slash-menu="true"
-          className="fixed z-[9999] w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
+          className="fixed z-[60] w-56 rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl animate-in fade-in-80 zoom-in-95 flex flex-col max-h-72 overflow-hidden text-popover-foreground select-none"
           style={{
             ...(menuCoords.bottom !== undefined ? { bottom: `${menuCoords.bottom}px` } : { top: `${menuCoords.top}px` }),
             left: `${menuCoords.left}px`,
@@ -3295,7 +3977,7 @@ export default function LunoAiView({
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider border-b border-border/40 shrink-0">
-            {t("editor.slashMenuTitle") || (lang === "th" ? "คำสั่ง" : "Commands")}
+            {t("editor.slashMenuTitle")}
           </div>
 
           {canScrollUp && (
@@ -3329,8 +4011,8 @@ export default function LunoAiView({
                   onMouseEnter={() => setSelectedSlashIndex(idx)}
                   className={`flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-[13px] transition-colors select-none gap-2.5 [&>span>svg]:h-4 [&>span>svg]:w-4 [&>span>svg]:shrink-0 [&>span>svg]:text-muted-foreground ${
                     isSelected
-                      ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
-                      : "text-foreground font-normal hover:bg-primary/8 hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                      ? "bg-primary/15 text-primary font-medium [&>span>svg]:text-primary hover:bg-primary/[0.08] hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
+                      : "text-foreground font-normal hover:bg-primary/[0.08] hover:text-primary hover:[&>span>svg]:text-primary hover:[&_svg]:text-primary"
                   }`}
                 >
                   <span className="shrink-0">{tool.icon}</span>
@@ -3357,20 +4039,73 @@ export default function LunoAiView({
         </div>
       )}
 
-      {/* Floating Markdown Tooltip matching Radix Tooltip UI 1:1 */}
-      {markdownTooltip && (
-        <div
-          role="tooltip"
-          className="fixed z-[9999] pointer-events-none select-none rounded-md border border-border bg-popover px-2.5 py-1 text-[11px] font-medium text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
-          style={{
-            left: `${markdownTooltip.x}px`,
-            top: `${markdownTooltip.y}px`,
-            transform: markdownTooltip.side === "top" ? "translate(-50%, -100%)" : "translate(-50%, 0)",
-          }}
-        >
-          {markdownTooltip.text}
-        </div>
-      )}
+      <MediaLightbox
+        open={Boolean(lightboxImage)}
+        onClose={() => setLightboxImage(null)}
+        ariaLabel={lightboxImage?.alt || t("lunoAi.generatedImagePreview")}
+        footer={lightboxImage?.alt}
+        topControls={
+          lightboxImage && (
+            <>
+              {(onInsertToSelectedNote || onInsertToActiveNote) && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={t("lunoAi.insertImageToNote")}
+                      onClick={() => {
+                        const targetMsg = lightboxImage.message;
+                        setLightboxImage(null);
+                        handleOpenInsertModalForMessage(targetMsg);
+                      }}
+                      className="p-2 rounded-xl bg-background/20 hover:bg-background/40 text-white border border-white/20 shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("lunoAi.insertImageToNote")}</TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t("lunoAi.copyImage")}
+                    onClick={() => void copyImageToClipboard(lightboxImage.src)}
+                    className="p-2 rounded-xl bg-background/20 hover:bg-background/40 text-white border border-white/20 shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <Copy className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t("lunoAi.copyImage")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t("lunoAi.downloadImage")}
+                    onClick={() => downloadMediaFile(lightboxImage.src, lightboxImage.fileName)}
+                    className="p-2 rounded-xl bg-background/20 hover:bg-background/40 text-white border border-white/20 shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <Download className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t("lunoAi.downloadImage")}</TooltipContent>
+              </Tooltip>
+            </>
+          )
+        }
+      >
+        {lightboxImage && (
+          <img
+            src={lightboxImage.src}
+            alt={lightboxImage.alt}
+            className="max-w-[92vw] max-h-[82vh] rounded-xl object-contain shadow-2xl"
+          />
+        )}
+      </MediaLightbox>
+
+      <MarkdownFloatingTooltip tooltip={markdownTooltip} />
     </div>
   );
 }

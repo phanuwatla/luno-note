@@ -80,16 +80,55 @@ export function getFontMimeType(format: string): string {
   }
 }
 
+const ALLOWED_FONT_FORMATS = new Set(["truetype", "opentype", "woff", "woff2"]);
+
+function escapeCssSingleQuoted(value: string): string {
+  return String(value || "").replace(/[\\'\r\n\f\0<>]/g, "");
+}
+
+function sanitizeFontDataUrl(dataUrl: string): string {
+  const trimmed = String(dataUrl || "").trim();
+  if (!/^data:(?:font\/[a-z0-9.+-]+|application\/(?:octet-stream|font-[a-z0-9.+-]+|x-font-[a-z0-9.+-]+|vnd\.ms-fontobject));base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) {
+    return "";
+  }
+  return trimmed.replace(/['"\\()\r\n]/g, "");
+}
+
+function buildCustomFontCssRule(font: CustomFont, dataUrl: string): string {
+  const safeName = escapeCssSingleQuoted(font.name);
+  const safeId = escapeCssSingleQuoted(font.id);
+  const safeDataUrl = sanitizeFontDataUrl(dataUrl);
+  const safeFormat = ALLOWED_FONT_FORMATS.has(font.format) ? font.format : "truetype";
+  if (!safeName || !safeId || !safeDataUrl) return "";
+
+  return `
+@font-face {
+  font-family: '${safeName}';
+  src: url('${safeDataUrl}') format('${safeFormat}');
+  font-display: swap;
+}
+:root[data-app-font='${safeId}'] {
+  --app-font-family: '${safeName}', sans-serif;
+  font-family: '${safeName}', sans-serif;
+}
+:root[data-editor-font='${safeId}'] {
+  --editor-font-family: '${safeName}', sans-serif;
+}
+`;
+}
+
 /**
  * Registers @font-face CSS and adds to document.fonts.
  */
 export function registerFontFace(font: CustomFont, dataUrl: string): void {
   if (typeof document === "undefined" || !dataUrl) return;
+  const safeDataUrl = sanitizeFontDataUrl(dataUrl);
+  if (!safeDataUrl) return;
 
   try {
     // 1. Using Browser FontFace API if supported
     if (typeof FontFace !== "undefined" && document.fonts) {
-      const fontFace = new FontFace(font.name, `url("${dataUrl}")`, {
+      const fontFace = new FontFace(font.name, `url("${safeDataUrl}")`, {
         style: "normal",
         weight: "normal",
       });
@@ -111,24 +150,11 @@ export function registerFontFace(font: CustomFont, dataUrl: string): void {
       document.head.appendChild(styleEl);
     }
 
-    const cssRules = `
-/* Custom Font: ${font.name} */
-@font-face {
-  font-family: '${font.name}';
-  src: url('${dataUrl}') format('${font.format}');
-  font-display: swap;
-}
-:root[data-app-font='${font.id}'] {
-  --app-font-family: '${font.name}', sans-serif;
-  font-family: '${font.name}', sans-serif;
-}
-:root[data-editor-font='${font.id}'] {
-  --editor-font-family: '${font.name}', sans-serif;
-}
-`;
+    const safeId = escapeCssSingleQuoted(font.id);
+    const cssRules = buildCustomFontCssRule(font, safeDataUrl);
 
     // Only append if not already present
-    if (!styleEl.textContent?.includes(`data-app-font='${font.id}'`)) {
+    if (cssRules && !styleEl.textContent?.includes(`data-app-font='${safeId}'`)) {
       styleEl.textContent += `\n${cssRules}`;
     }
   } catch (err) {
@@ -152,20 +178,7 @@ export function refreshCustomFontStyles(fonts: CustomFont[]): void {
   let content = "";
   for (const font of fonts) {
     if (font.dataUrl) {
-      content += `
-@font-face {
-  font-family: '${font.name}';
-  src: url('${font.dataUrl}') format('${font.format}');
-  font-display: swap;
-}
-:root[data-app-font='${font.id}'] {
-  --app-font-family: '${font.name}', sans-serif;
-  font-family: '${font.name}', sans-serif;
-}
-:root[data-editor-font='${font.id}'] {
-  --editor-font-family: '${font.name}', sans-serif;
-}
-`;
+      content += buildCustomFontCssRule(font, font.dataUrl);
     }
   }
   styleEl.textContent = content;
@@ -201,7 +214,7 @@ export function getFontDisplayFileSize(font: CustomFont): string {
  * Load all custom fonts from Workspace (.luno/fonts/) and/or IndexedDB fallback.
  */
 export async function loadCustomFonts(): Promise<CustomFont[]> {
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
 
   // 1. Try reading from Electron workspace .luno/fonts.json & font files
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent && electronAPI?.readFileBase64) {
@@ -275,13 +288,13 @@ export async function loadCustomFonts(): Promise<CustomFont[]> {
           };
           registerFontFace(fullFont, dataUrl);
           loadedFonts.push(fullFont);
-        } catch {}
+        } catch { /* ignore */ }
       }
 
       if (loadedFonts.length > 0) {
         return loadedFonts;
       }
-    } catch {}
+    } catch { /* ignore */ }
   }
 
   // 3. Fallback: Read from IndexedDB
@@ -331,7 +344,8 @@ export async function saveCustomFont(
   file: File,
   customName?: string
 ): Promise<CustomFont> {
-  const fileName = file.name;
+  // eslint-disable-next-line no-control-regex
+  const fileName = (file.name || "custom-font.ttf").replace(/[\\/:*?"<>|\x00-\x1F]/g, "_").replace(/^\.+/, "_");
   const format = detectFontFormat(fileName);
   const mime = getFontMimeType(format);
 
@@ -379,7 +393,7 @@ export async function saveCustomFont(
   }
 
   // 3. Persist in Electron workspace .luno/fonts/
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.writeFileBase64 && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -393,7 +407,7 @@ export async function saveCustomFont(
         try {
           const content = await electronAPI.readFileContent(metadataPath);
           if (content) existing = JSON.parse(content);
-        } catch {}
+        } catch { /* ignore */ }
 
         const updated = existing.filter((f) => f.id !== id);
         // Store metadata without heavy dataUrl in JSON file on disk
@@ -427,7 +441,7 @@ export async function saveCustomFont(
         const metaFile = await fontsMetaFile.getFile();
         const metaText = await metaFile.text();
         existing = JSON.parse(metaText);
-      } catch {}
+      } catch { /* ignore */ }
 
       const updated = existing.filter((f) => f.id !== id);
       const metaFont = { ...newFont };
@@ -481,7 +495,7 @@ export async function renameCustomFont(id: string, newName: string): Promise<voi
   }
 
   // 2. Update Electron workspace metadata
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -552,7 +566,7 @@ export async function deleteCustomFont(id: string): Promise<void> {
   }
 
   // 2. Remove from Electron workspace
-  const electronAPI = (window as unknown as { electronAPI?: Record<string, Function> }).electronAPI;
+  const electronAPI = window.electronAPI;
   if (electronAPI?.getSavedWorkspace && electronAPI?.readFileContent && electronAPI?.writeFileContent) {
     try {
       const saved = await electronAPI.getSavedWorkspace();
@@ -569,7 +583,8 @@ export async function deleteCustomFont(id: string): Promise<void> {
             content: JSON.stringify(updated, null, 2),
           });
 
-          if (toDelete?.fileName && electronAPI.deleteFileOrFolder) {
+          const stillUsed = updated.some((f) => f.fileName === toDelete?.fileName);
+          if (toDelete?.fileName && !stillUsed && electronAPI.deleteFileOrFolder) {
             const fontFilePath = `${saved.folderPath}/.luno/fonts/${toDelete.fileName}`;
             await electronAPI.deleteFileOrFolder(fontFilePath);
           }
@@ -595,7 +610,8 @@ export async function deleteCustomFont(id: string): Promise<void> {
       await writable.write(JSON.stringify(updated, null, 2));
       await writable.close();
 
-      if (toDelete?.fileName) {
+      const stillUsed = updated.some((f) => f.fileName === toDelete?.fileName);
+      if (toDelete?.fileName && !stillUsed) {
         const fontsDir = await lunoDir.getDirectoryHandle("fonts", { create: false });
         await fontsDir.removeEntry(toDelete.fileName);
       }

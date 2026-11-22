@@ -17,17 +17,37 @@ export interface QrCodeOptions {
   backgroundColor?: string; // CSS hex color string (e.g. #ffffff or #00000000 for transparent)
 }
 
+const SAFE_CSS_COLOR_RE =
+  /^(?:#[0-9a-fA-F]{3,8}|transparent|[a-zA-Z]{1,20}|(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/+-]+\))$/;
+
+/**
+ * Validates and sanitizes a CSS color string to prevent SVG/HTML attribute injection.
+ */
+function sanitizeCssColor(color?: string, defaultColor = "#000000"): string {
+  if (!color || typeof color !== "string") return defaultColor;
+  const trimmed = color.trim();
+  if (!SAFE_CSS_COLOR_RE.test(trimmed)) {
+    return defaultColor;
+  }
+  return trimmed;
+}
+
 /**
  * Standardize color string for QRCode library
  * Converts transparent/transparent hex to rgba or #00000000
  */
 function normalizeColor(color?: string, defaultColor = "#000000"): string {
-  if (!color) return defaultColor;
-  const trimmed = color.trim().toLowerCase();
-  if (trimmed === "transparent") {
+  const safe = sanitizeCssColor(color, defaultColor);
+  if (safe.toLowerCase() === "transparent") {
     return "#00000000";
   }
-  return color;
+  return safe;
+}
+
+function clampNumericOption(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 /**
@@ -45,14 +65,16 @@ export async function generateQrCodeSvgAsync(
     backgroundColor = "#ffffff",
   } = options;
 
+  const safeMargin = clampNumericOption(margin, 0, 20, 3);
+  const safeSize = clampNumericOption(size, 32, 4096, 300);
   const dark = normalizeColor(foregroundColor, "#000000");
   const light = normalizeColor(backgroundColor, "#ffffff");
 
   return QRCode.toString(text || " ", {
     type: "svg",
     errorCorrectionLevel,
-    margin,
-    width: size,
+    margin: safeMargin,
+    width: safeSize,
     color: {
       dark,
       light,
@@ -72,37 +94,43 @@ export function generateQrCodeSvg(text: string, options: QrCodeOptions = {}): st
     backgroundColor = "#ffffff",
   } = options;
 
+  const safeMargin = clampNumericOption(margin, 0, 20, 3);
+  const safeSize = clampNumericOption(size, 32, 4096, 300);
+
   const qr = QRCode.create(text || " ", {
     errorCorrectionLevel,
   });
 
   const moduleCount = qr.modules.size;
-  const totalCount = moduleCount + margin * 2;
-  const moduleSize = size / totalCount;
+  const totalCount = moduleCount + safeMargin * 2;
+  const moduleSize = safeSize / totalCount;
 
   let pathData = "";
   for (let r = 0; r < moduleCount; r++) {
     for (let c = 0; c < moduleCount; c++) {
       if (qr.modules.get(r, c)) {
-        const x = (c + margin) * moduleSize;
-        const y = (r + margin) * moduleSize;
+        const x = (c + safeMargin) * moduleSize;
+        const y = (r + safeMargin) * moduleSize;
         pathData += `M${x.toFixed(2)},${y.toFixed(2)}h${moduleSize.toFixed(2)}v${moduleSize.toFixed(2)}h-${moduleSize.toFixed(2)}z `;
       }
     }
   }
 
+  const safeForeground = sanitizeCssColor(foregroundColor, "#000000");
+  const safeBackground = sanitizeCssColor(backgroundColor, "#ffffff");
+
   const isTransparent =
-    !backgroundColor ||
-    backgroundColor === "transparent" ||
-    backgroundColor.toLowerCase() === "#00000000";
+    !safeBackground ||
+    safeBackground.toLowerCase() === "transparent" ||
+    safeBackground.toLowerCase() === "#00000000";
 
   const bgRect = isTransparent
     ? ""
-    : `<rect width="${size}" height="${size}" fill="${backgroundColor}" rx="8"/>`;
+    : `<rect width="${safeSize}" height="${safeSize}" fill="${safeBackground}" rx="8"/>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${safeSize} ${safeSize}" width="${safeSize}" height="${safeSize}">
   ${bgRect}
-  <path d="${pathData.trim()}" fill="${foregroundColor}"/>
+  <path d="${pathData.trim()}" fill="${safeForeground}"/>
 </svg>`;
 }
 
@@ -121,13 +149,15 @@ export async function generateQrCodeDataUrl(
     backgroundColor = "#ffffff",
   } = options;
 
+  const safeMargin = clampNumericOption(margin, 0, 20, 3);
+  const safeSize = clampNumericOption(size, 32, 4096, 512);
   const dark = normalizeColor(foregroundColor, "#000000");
   const light = normalizeColor(backgroundColor, "#ffffff");
 
   return QRCode.toDataURL(text || " ", {
     errorCorrectionLevel,
-    margin,
-    width: size,
+    margin: safeMargin,
+    width: safeSize,
     color: {
       dark,
       light,

@@ -137,6 +137,15 @@ export function isEncryptedNote(content?: string | null): boolean {
   return false;
 }
 
+const MIN_PBKDF2_ITERATIONS = 100_000;
+const MAX_PBKDF2_ITERATIONS = 2_000_000;
+
+function clampPbkdf2Iterations(raw: unknown, fallback: number): number {
+  const num = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.min(MAX_PBKDF2_ITERATIONS, Math.max(MIN_PBKDF2_ITERATIONS, Math.floor(num)));
+}
+
 /**
  * Parses the encrypted envelope from raw file content.
  */
@@ -150,10 +159,12 @@ export function parseEncryptedEnvelope(rawContent: string): EncryptedPayload | n
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
       const parsed = JSON.parse(trimmed);
       if (parsed.luno_locked && parsed.salt && parsed.iv && parsed.ciphertext) {
+        const version = parsed.version || 1;
+        const fallbackIter = version >= 2 ? DEFAULT_PBKDF2_ITERATIONS : LEGACY_PBKDF2_ITERATIONS;
         return {
           luno_locked: true,
-          version: parsed.version || 1,
-          iterations: parsed.iterations || (parsed.version >= 2 ? DEFAULT_PBKDF2_ITERATIONS : LEGACY_PBKDF2_ITERATIONS),
+          version,
+          iterations: clampPbkdf2Iterations(parsed.iterations, fallbackIter),
           salt: parsed.salt,
           iv: parsed.iv,
           ciphertext: parsed.ciphertext,
@@ -192,9 +203,10 @@ export function parseEncryptedEnvelope(rawContent: string): EncryptedPayload | n
 
     if (saltMatch && ivMatch && ciphertext) {
       const parsedVersion = versionMatch ? parseInt(versionMatch[1], 10) : 1;
+      const fallbackIter = parsedVersion >= 2 ? DEFAULT_PBKDF2_ITERATIONS : LEGACY_PBKDF2_ITERATIONS;
       const parsedIterations = iterationsMatch
-        ? parseInt(iterationsMatch[1], 10)
-        : (parsedVersion >= 2 ? DEFAULT_PBKDF2_ITERATIONS : LEGACY_PBKDF2_ITERATIONS);
+        ? clampPbkdf2Iterations(parseInt(iterationsMatch[1], 10), fallbackIter)
+        : fallbackIter;
 
       return {
         luno_locked: true,

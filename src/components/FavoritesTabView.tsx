@@ -36,7 +36,22 @@ import { getNotePreviewSnippet } from "@/lib/snippetUtils";
 import { getTagColorClass } from "@/lib/tagColors";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { renderCustomIcon, getToolbarIcon } from "@/lib/iconPacks";
-import { getNoteDefaultIconKey, getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { getDefaultFileIconKey } from "@/lib/fileIconUtils";
+import { NoteIcon as SharedNoteIcon } from "@/components/shared/NoteIcon";
+import { EmptyState } from "@/components/shared/EmptyState";
+import {
+  type NoteCollectionSortBy,
+  type NoteCollectionViewMode,
+  isCollectionMarkdownNote,
+  isCollectionHtmlNote,
+  isCollectionTextNote,
+  isCollectionImageNote,
+  matchesNoteFormatFilter,
+  getNoteFormatBadge,
+  sortNoteCollection,
+  usePersistedCollectionSort,
+  usePersistedCollectionViewMode,
+} from "@/components/shared/NoteCollectionPrimitives";
 import type { Note } from "@/hooks/useNotes";
 
 interface FavoritesTabViewProps {
@@ -46,15 +61,8 @@ interface FavoritesTabViewProps {
   onCreateBlankNote?: () => void;
 }
 
-export type FavoritesSortBy =
-  | "name-asc"
-  | "name-desc"
-  | "modified-desc"
-  | "modified-asc"
-  | "created-desc"
-  | "created-asc";
-
-export type FavoritesViewMode = "list" | "card";
+export type FavoritesSortBy = NoteCollectionSortBy;
+export type FavoritesViewMode = NoteCollectionViewMode;
 
 const FAVORITES_SORT_STORAGE_KEY = "notes-app-favorites-sort";
 const FAVORITES_VIEW_MODE_STORAGE_KEY = "notes-app-favorites-view-mode";
@@ -72,65 +80,8 @@ export default function FavoritesTabView({
 
   const [query, setQuery] = useState("");
   const [selectedFormat, setSelectedFormat] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<FavoritesSortBy>(() => {
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const saved = window.localStorage.getItem(FAVORITES_SORT_STORAGE_KEY) as FavoritesSortBy;
-        if (
-          saved &&
-          [
-            "name-asc",
-            "name-desc",
-            "modified-desc",
-            "modified-asc",
-            "created-desc",
-            "created-asc",
-          ].includes(saved)
-        ) {
-          return saved;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return "name-asc";
-  });
-
-  const handleSortChange = (newSort: FavoritesSortBy) => {
-    setSortBy(newSort);
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        window.localStorage.setItem(FAVORITES_SORT_STORAGE_KEY, newSort);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const [viewMode, setViewMode] = useState<FavoritesViewMode>(() => {
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const saved = window.localStorage.getItem(FAVORITES_VIEW_MODE_STORAGE_KEY) as FavoritesViewMode;
-        if (saved === "list" || saved === "card") {
-          return saved;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return "list";
-  });
-
-  const handleViewModeChange = (newMode: FavoritesViewMode) => {
-    setViewMode(newMode);
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        window.localStorage.setItem(FAVORITES_VIEW_MODE_STORAGE_KEY, newMode);
-      }
-    } catch {
-      // ignore
-    }
-  };
+  const [sortBy, handleSortChange] = usePersistedCollectionSort(FAVORITES_SORT_STORAGE_KEY);
+  const [viewMode, handleViewModeChange] = usePersistedCollectionViewMode(FAVORITES_VIEW_MODE_STORAGE_KEY);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -139,34 +90,9 @@ export default function FavoritesTabView({
     return <IconComp className={cls} />;
   };
 
-  const renderNoteIcon = (note: Note, cls = "h-4 w-4 shrink-0") => {
-    if (settings?.showFileIcons === false) return null;
-    const noteName = note.fileName || note.title || "";
-    const relPath = noteName ? (note.folderPath ? `${note.folderPath}/${noteName}` : noteName) : "";
-    const customIcon = note.icon || (relPath && settings?.fileIcons?.[relPath]?.icon);
-    const customColor = note.iconColor || (relPath && settings?.fileIcons?.[relPath]?.color);
-    if (customIcon) {
-      const custom = renderCustomIcon(customIcon, `${cls} shrink-0`, { color: customColor });
-      if (custom) return <span className="inline-flex items-center justify-center shrink-0">{custom}</span>;
-    }
-    if (note.isLocked) {
-      const LockIcon = getToolbarIcon("lock", pack);
-      return (
-        <LockIcon
-          className={`${cls} shrink-0 ${customColor ? "" : "text-muted-foreground"}`}
-          style={customColor ? { color: customColor } : undefined}
-        />
-      );
-    }
-    const defaultKey = getNoteDefaultIconKey(note);
-    const IconComp = getToolbarIcon(defaultKey, pack);
-    return (
-      <IconComp
-        className={`${cls} shrink-0 ${customColor ? "" : "text-muted-foreground"}`}
-        style={customColor ? { color: customColor } : undefined}
-      />
-    );
-  };
+  const renderNoteIcon = (note: Note, cls = "h-4 w-4") => (
+    <SharedNoteIcon note={note} className={cls} iconPack={pack} />
+  );
 
   const renderFolderIcon = (folderPath?: string, cls = "h-3.5 w-3.5 shrink-0") => {
     if (settings?.showFileIcons === false) return null;
@@ -189,7 +115,7 @@ export default function FavoritesTabView({
     if (tags.length === 0 && isMarkdownNote(note) && note.content) {
       try {
         tags = parseFrontmatterAndTags(note.content).allTags || [];
-      } catch {}
+      } catch { /* ignore */ }
     }
     return tags;
   };
@@ -239,11 +165,11 @@ export default function FavoritesTabView({
 
   const formatCategories = useMemo(
     () => [
-      { id: "all", label: isTh ? "ทั้งหมด" : "All" },
+      { id: "all", label: t("favorites.all") },
       { id: "md", label: "Markdown" },
       { id: "html", label: "HTML" },
-      { id: "txt", label: isTh ? "ข้อความ" : "Text" },
-      { id: "image", label: isTh ? "รูปภาพ" : "Images" },
+      { id: "txt", label: t("favorites.text") },
+      { id: "image", label: t("favorites.images") },
     ],
     [isTh]
   );
@@ -258,16 +184,10 @@ export default function FavoritesTabView({
     };
 
     favoriteNotes.forEach((note) => {
-      const name = note.fileName?.toLowerCase() || "";
-      const isMd = name.endsWith(".md") || name.endsWith(".markdown") || note.contentFormat === "markdown";
-      const isHtml = name.endsWith(".html") || name.endsWith(".htm") || note.contentFormat === "html";
-      const isTxt = name.endsWith(".txt") || note.contentFormat === "plain";
-      const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(name);
-
-      if (isMd) counts.md++;
-      if (isHtml) counts.html++;
-      if (isTxt) counts.txt++;
-      if (isImg) counts.image++;
+      if (isCollectionMarkdownNote(note)) counts.md++;
+      if (isCollectionHtmlNote(note)) counts.html++;
+      if (isCollectionTextNote(note)) counts.txt++;
+      if (isCollectionImageNote(note)) counts.image++;
     });
 
     return counts;
@@ -275,17 +195,7 @@ export default function FavoritesTabView({
 
   const filteredNotes = useMemo(() => {
     const list = favoriteNotes.filter((note) => {
-      const name = note.fileName?.toLowerCase() || "";
-      const isMd = name.endsWith(".md") || name.endsWith(".markdown") || note.contentFormat === "markdown";
-      const isHtml = name.endsWith(".html") || name.endsWith(".htm") || note.contentFormat === "html";
-      const isTxt = name.endsWith(".txt") || note.contentFormat === "plain";
-      const isImg = note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(name);
-
-      if (selectedFormat === "md" && !isMd) return false;
-      if (selectedFormat === "html" && !isHtml) return false;
-      if (selectedFormat === "txt" && !isTxt) return false;
-      if (selectedFormat === "image" && !isImg) return false;
-
+      if (!matchesNoteFormatFilter(note, selectedFormat)) return false;
       if (query.trim()) {
         const q = query.toLowerCase().trim();
         const matchTitle = (note.title || note.fileName || "").toLowerCase().includes(q);
@@ -296,53 +206,14 @@ export default function FavoritesTabView({
       }
       return true;
     });
-
-    return [...list].sort((a, b) => {
-      if (sortBy === "name-asc") {
-        const nameA = a.fileName || a.title || "";
-        const nameB = b.fileName || b.title || "";
-        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: "base" });
-      }
-      if (sortBy === "name-desc") {
-        const nameA = a.fileName || a.title || "";
-        const nameB = b.fileName || b.title || "";
-        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: "base" });
-      }
-      if (sortBy === "modified-desc") {
-        const modA = a.updatedAt || a.createdAt || 0;
-        const modB = b.updatedAt || b.createdAt || 0;
-        return modB - modA;
-      }
-      if (sortBy === "modified-asc") {
-        const modA = a.updatedAt || a.createdAt || 0;
-        const modB = b.updatedAt || b.createdAt || 0;
-        return modA - modB;
-      }
-      if (sortBy === "created-desc") {
-        const creA = a.createdAt || 0;
-        const creB = b.createdAt || 0;
-        return creB - creA;
-      }
-      if (sortBy === "created-asc") {
-        const creA = a.createdAt || 0;
-        const creB = b.createdAt || 0;
-        return creA - creB;
-      }
-      return 0;
-    });
+    return sortNoteCollection(list, sortBy);
   }, [favoriteNotes, selectedFormat, query, sortBy]);
 
   const getCleanSnippet = (note: Note) => {
     return getNotePreviewSnippet(note, 160, isTh);
   };
 
-  const getFormatBadge = (note: Note) => {
-    const name = note.fileName?.toLowerCase() || "";
-    if (note.fileType === "image" || /\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return "IMG";
-    if (name.endsWith(".html") || note.contentFormat === "html") return "HTML";
-    if (name.endsWith(".txt") || note.contentFormat === "plain") return "TXT";
-    return "MD";
-  };
+  const getFormatBadge = (note: Note) => getNoteFormatBadge(note);
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -354,13 +225,11 @@ export default function FavoritesTabView({
               <div className="flex items-center gap-2">
                 <Star className="h-6 w-6 text-amber-500 fill-amber-500 shrink-0" />
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                  {isTh ? "โน้ตที่ติดดาว" : "Favorites"}
+                  {t("favorites.favorites")}
                 </h1>
               </div>
               <p className="text-xs text-muted-foreground">
-                {isTh
-                  ? "เข้าถึงโน้ตและไฟล์สำคัญที่คุณติดดาวไว้ได้อย่างรวดเร็วในที่เดียว"
-                  : "Quickly access your pinned and starred notes in one place."}
+                {t("favorites.quicklyAccessYourPinnedAnd")}
               </p>
             </div>
 
@@ -372,7 +241,7 @@ export default function FavoritesTabView({
                   ref={searchInputRef}
                   data-favorites-search="true"
                   type="text"
-                  placeholder={isTh ? "ค้นหาในรายการโปรด..." : "Search favorites..."}
+                  placeholder={t("favorites.searchFavorites")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -391,7 +260,7 @@ export default function FavoritesTabView({
                       searchInputRef.current?.focus();
                     }}
                     className="p-0.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                    aria-label={isTh ? "ล้างข้อความ" : "Clear search"}
+                    aria-label={t("home.clearSearch")}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -419,63 +288,63 @@ export default function FavoritesTabView({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("trash.filterTooltip") || (isTh ? "กรองตามประเภท" : "Filter files")}</TooltipContent>
+                    <TooltipContent>{t("trash.filterTooltip")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       onClick={() => setSelectedFormat("all")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        selectedFormat === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        selectedFormat === "all" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {selectedFormat === "all" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterAll") || (isTh ? "ไฟล์ทั้งหมด" : "All items")}</span>
+                      <span>{t("trash.filterAll")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setSelectedFormat("md")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        selectedFormat === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        selectedFormat === "md" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {selectedFormat === "md" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterMd") || "Markdown (.md)"}</span>
+                      <span>{t("trash.filterMd")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setSelectedFormat("txt")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        selectedFormat === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        selectedFormat === "txt" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {selectedFormat === "txt" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterTxt") || (isTh ? "ข้อความ (.txt)" : "Text (.txt)")}</span>
+                      <span>{t("trash.filterTxt")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setSelectedFormat("html")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        selectedFormat === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        selectedFormat === "html" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {selectedFormat === "html" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{t("trash.filterHtml") || "HTML (.html)"}</span>
+                      <span>{t("trash.filterHtml")}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setSelectedFormat("image")}
                       className={`py-1.5 px-3 rounded-lg flex items-center gap-2.5 cursor-pointer text-[13px] ${
-                        selectedFormat === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : "text-foreground hover:bg-primary/8 hover:text-primary data-[highlighted]:bg-primary/8 data-[highlighted]:text-primary"
+                        selectedFormat === "image" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : "text-foreground hover:bg-primary/[0.08] hover:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
                       }`}
                     >
                       <span className="w-4 h-4 flex items-center justify-center shrink-0">
                         {selectedFormat === "image" && <Check className="h-4 w-4 text-primary stroke-[2.5]" />}
                       </span>
-                      <span>{isTh ? "รูปภาพ" : "Images"}</span>
+                      <span>{t("favorites.images")}</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -495,18 +364,18 @@ export default function FavoritesTabView({
                         </Button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>{t("sidebar.sort") || (isTh ? "เรียงลำดับ" : "Sort by")}</TooltipContent>
+                    <TooltipContent>{t("sidebar.sort")}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5 shadow-md">
                     <DropdownMenuItem
                       onClick={() => handleSortChange("name-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "name-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <ArrowDownAZ className="h-4 w-4" />
-                        <span>{t("sidebar.sortNameAsc") || "Name (A to Z)"}</span>
+                        <span>{t("sidebar.sortNameAsc")}</span>
                       </div>
                       {sortBy === "name-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -514,12 +383,12 @@ export default function FavoritesTabView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("name-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "name-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <ArrowUpAZ className="h-4 w-4" />
-                        <span>{t("sidebar.sortNameDesc") || "Name (Z to A)"}</span>
+                        <span>{t("sidebar.sortNameDesc")}</span>
                       </div>
                       {sortBy === "name-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -527,12 +396,12 @@ export default function FavoritesTabView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("modified-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "modified-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Clock className="h-4 w-4" />
-                        <span>{t("sidebar.sortModifiedDesc") || "Date modified (Newest)"}</span>
+                        <span>{t("sidebar.sortModifiedDesc")}</span>
                       </div>
                       {sortBy === "modified-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -540,12 +409,12 @@ export default function FavoritesTabView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("modified-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "modified-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Clock className="h-4 w-4 opacity-60" />
-                        <span>{t("sidebar.sortModifiedAsc") || "Date modified (Oldest)"}</span>
+                        <span>{t("sidebar.sortModifiedAsc")}</span>
                       </div>
                       {sortBy === "modified-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -553,12 +422,12 @@ export default function FavoritesTabView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("created-desc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "created-desc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Calendar className="h-4 w-4" />
-                        <span>{t("sidebar.sortCreatedDesc") || "Date created (Newest)"}</span>
+                        <span>{t("sidebar.sortCreatedDesc")}</span>
                       </div>
                       {sortBy === "created-desc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -566,12 +435,12 @@ export default function FavoritesTabView({
                     <DropdownMenuItem
                       onClick={() => handleSortChange("created-asc")}
                       className={`gap-2.5 cursor-pointer py-1.5 px-3 rounded-lg text-[13px] flex items-center justify-between ${
-                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/18 hover:bg-primary/18" : ""
+                        sortBy === "created-asc" ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Calendar className="h-4 w-4 opacity-60" />
-                        <span>{t("sidebar.sortCreatedAsc") || "Date created (Oldest)"}</span>
+                        <span>{t("sidebar.sortCreatedAsc")}</span>
                       </div>
                       {sortBy === "created-asc" && <Check className="h-4 w-4 stroke-[2.5] text-primary shrink-0" />}
                     </DropdownMenuItem>
@@ -589,8 +458,8 @@ export default function FavoritesTabView({
                       className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent bg-transparent focus:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:bg-transparent shrink-0 transition-colors"
                       aria-label={
                         viewMode === "list"
-                          ? (isTh ? "เปลี่ยนเป็นมุมมองการ์ด" : "Switch to card view")
-                          : (isTh ? "เปลี่ยนเป็นมุมมองรายการ" : "Switch to list view")
+                          ? (t("favorites.switchToCardView"))
+                          : (t("favorites.switchToListView"))
                       }
                     >
                       {viewMode === "list" ? (
@@ -602,8 +471,8 @@ export default function FavoritesTabView({
                   </TooltipTrigger>
                   <TooltipContent>
                     {viewMode === "list"
-                      ? (isTh ? "เปลี่ยนเป็นมุมมองการ์ด" : "Switch to card view")
-                      : (isTh ? "เปลี่ยนเป็นมุมมองรายการ" : "Switch to list view")}
+                      ? (t("favorites.switchToCardView"))
+                      : (t("favorites.switchToListView"))}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -629,7 +498,7 @@ export default function FavoritesTabView({
                   onClick={() => setSelectedFormat(cat.id)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
                     isSelected
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
+                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm"
                       : "border-border bg-card/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-muted/40"
                   }`}
                 >
@@ -642,49 +511,36 @@ export default function FavoritesTabView({
           {/* 3. Favorite Notes Grid / List View / Empty State */}
           <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden w-full">
             {viewMode === "list" ? (
-              <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-2xs overflow-hidden min-w-0">
+              <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden min-w-0">
                 {/* Table Header with Grayish Background (matching TrashView) */}
                 <div className="flex items-center px-4 py-2.5 bg-muted/60 dark:bg-muted/40 border-b border-border/50 text-xs font-semibold text-foreground shrink-0 select-none min-w-0">
                   <div className="w-8 flex items-center justify-center shrink-0">
                     <Star className="h-3.5 w-3.5 text-muted-foreground/60" />
                   </div>
-                  <div className="flex-1 min-w-[140px] px-2 truncate">{isTh ? "ไฟล์" : "File"}</div>
-                  <div className="w-44 lg:w-56 hidden md:block px-2 shrink-0 truncate">{isTh ? "ตำแหน่ง" : "Location"}</div>
-                  <div className="w-32 hidden sm:block px-2 shrink-0 truncate">{isTh ? "แก้ไขล่าสุด" : "Modified"}</div>
-                  <div className="w-20 hidden lg:block px-2 shrink-0 truncate">{isTh ? "ประเภท" : "Type"}</div>
+                  <div className="flex-1 min-w-[140px] px-2 truncate">{t("trash.file")}</div>
+                  <div className="w-44 lg:w-56 hidden md:block px-2 shrink-0 truncate">{t("favorites.location")}</div>
+                  <div className="w-32 hidden sm:block px-2 shrink-0 truncate">{t("favorites.modified")}</div>
+                  <div className="w-20 hidden lg:block px-2 shrink-0 truncate">{t("trash.type")}</div>
                   <div className="w-8 px-1 shrink-0"></div>
                 </div>
 
                 {/* Table Body (Scrollable rows matching TrashView) */}
                 <div className="no-scrollbar flex-1 overflow-y-auto divide-y divide-border/20 min-w-0">
                   {filteredNotes.length === 0 ? (
-                    <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
-                      {favoriteNotes.length === 0 ? (
-                        <>
-                          <Star className="h-8 w-8 text-muted-foreground/40 mb-2 stroke-[1.5]" />
-                          <p className="text-xs font-semibold text-foreground">
-                            {isTh ? "ยังไม่มีโน้ตที่ติดดาว" : "No favorite notes yet"}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground/75 mt-0.5 max-w-xs">
-                            {isTh
-                              ? "กดที่ไอคอนดาวบนโน้ตหรือการ์ดเพื่อเพิ่มเข้ามาในรายการโปรดสำหรับการเข้าถึงด่วน"
-                              : "Click the star icon on any note or card to add it to your favorites for quick access."}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <Search className="h-8 w-8 text-muted-foreground/40 mb-2 stroke-[1.5]" />
-                          <p className="text-xs font-semibold text-foreground">
-                            {isTh ? "ไม่พบโน้ตที่ตรงกับการค้นหา" : "No matching favorite notes"}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground/75 mt-0.5 max-w-xs">
-                            {isTh
-                              ? "ลองเปลี่ยนคำค้นหาหรือเลือกหมวดหมู่อื่นเพื่อดูโน้ตที่ติดดาวทั้งหมด"
-                              : "Try changing search terms or switch category filter to see all favorites."}
-                          </p>
-                        </>
-                      )}
-                    </div>
+                    <EmptyState
+                      className="h-full"
+                      icon={favoriteNotes.length === 0 ? <Star /> : <Search />}
+                      title={
+                        favoriteNotes.length === 0
+                          ? (t("favorites.noFavoriteNotesYet"))
+                          : (t("favorites.noMatchingFavoriteNotes"))
+                      }
+                      description={
+                        favoriteNotes.length === 0
+                          ? (t("favorites.clickTheStarIconOn"))
+                          : (t("favorites.tryChangingSearchTermsOr"))
+                      }
+                    />
                   ) : (
                     filteredNotes.map((note) => {
                       const snippet = getCleanSnippet(note);
@@ -692,11 +548,11 @@ export default function FavoritesTabView({
                       const displayTags = getNoteTags(note);
                       const dateFormatted = formatRelativeDateTime(
                         note.updatedAt || note.createdAt || Date.now(),
-                        settings.language,
                         settings.dateFormat,
-                        settings.timeFormat
+                        settings.timeFormat,
+                        settings.language
                       );
-                      const location = note.folderPath || (isTh ? "หน้าหลัก" : "Root");
+                      const location = note.folderPath || (t("trash.root"));
 
                       return (
                         <div
@@ -715,13 +571,13 @@ export default function FavoritesTabView({
                                     onToggleFavorite(note.id);
                                   }}
                                   className="p-1 rounded-md text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 transition-colors cursor-pointer"
-                                  aria-label={isTh ? "ยกเลิกการติดดาว" : "Remove from favorites"}
+                                  aria-label={t("favorites.removeFromFavorites")}
                                 >
                                   <Star className="h-3.5 w-3.5 fill-amber-500" />
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="top" sideOffset={4}>
-                                {isTh ? "ยกเลิกการติดดาว" : "Unstar"}
+                                {t("favorites.unstar")}
                               </TooltipContent>
                             </Tooltip>
                           </div>
@@ -738,7 +594,7 @@ export default function FavoritesTabView({
                                   displayTags.slice(0, 3).map((tag, idx) => (
                                     <span
                                       key={tag}
-                                      className={`shrink-0 text-[9.5px] px-1.5 py-0.2 rounded font-medium border ${getTagColorClass(
+                                      className={`shrink-0 text-[9.5px] px-1.5 py-0.5 rounded font-medium border ${getTagColorClass(
                                         tag,
                                         settings.theme,
                                         idx,
@@ -802,51 +658,39 @@ export default function FavoritesTabView({
                 {/* Table Footer */}
                 <div className="flex items-center justify-between px-4 py-2.5 border-t border-border/50 text-xs text-muted-foreground shrink-0 min-w-0 bg-card">
                   <span className="text-[11.5px] text-muted-foreground font-medium">
-                    {isTh ? `ทั้งหมด ${filteredNotes.length} รายการ` : `${filteredNotes.length} items`}
+                    {t("trash.items", { v0: filteredNotes.length })}
                   </span>
                 </div>
               </div>
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto w-full pr-1">
                 {filteredNotes.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center p-8 text-center space-y-3">
-                    {favoriteNotes.length === 0 ? (
-                      <>
-                        <Star className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
-                        <p className="text-base font-semibold text-foreground">
-                          {isTh ? "ยังไม่มีโน้ตที่ติดดาว" : "No favorite notes yet"}
-                        </p>
-                        <p className="text-xs text-muted-foreground max-w-sm">
-                          {isTh
-                            ? "กดที่ไอคอนดาวบนโน้ตหรือการ์ดเพื่อเพิ่มเข้ามาในรายการโปรดสำหรับการเข้าถึงด่วน"
-                            : "Click the star icon on any note or card to add it to your favorites for quick access."}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <Search className="h-10 w-10 text-muted-foreground/40 stroke-1 mb-1" />
-                        <p className="text-sm font-semibold text-foreground">
-                          {isTh ? "ไม่พบโน้ตที่ตรงกับการค้นหา" : "No matching favorite notes"}
-                        </p>
-                        <p className="text-xs text-muted-foreground max-w-sm">
-                          {isTh
-                            ? "ลองเปลี่ยนคำค้นหาหรือเลือกหมวดหมู่อื่นเพื่อดูโน้ตที่ติดดาวทั้งหมด"
-                            : "Try changing search terms or switch category filter to see all favorites."}
-                        </p>
-                      </>
-                    )}
-                  </div>
+                  <EmptyState
+                    className="h-full"
+                    icon={favoriteNotes.length === 0 ? <Star /> : <Search />}
+                    title={
+                      favoriteNotes.length === 0
+                        ? (t("favorites.noFavoriteNotesYet"))
+                        : (t("favorites.noMatchingFavoriteNotes"))
+                    }
+                    description={
+                      favoriteNotes.length === 0
+                        ? (t("favorites.clickTheStarIconOn"))
+                        : (t("favorites.tryChangingSearchTermsOr"))
+                    }
+                  />
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-4">
                     <AnimatePresence mode="popLayout">
                       {filteredNotes.map((note) => {
                         const snippet = getCleanSnippet(note);
                         const formatExt = getFormatBadge(note);
+                        const displayTags = getNoteTags(note);
                         const dateFormatted = formatRelativeDateTime(
                           note.updatedAt || note.createdAt || Date.now(),
-                          settings.language,
                           settings.dateFormat,
-                          settings.timeFormat
+                          settings.timeFormat,
+                          settings.language
                         );
 
                         return (
@@ -859,7 +703,7 @@ export default function FavoritesTabView({
                             whileHover={{ y: -2 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => onOpenNote(note.id)}
-                            className="flex flex-col justify-between p-4 rounded-xl bg-card border-[1.5px] border-border/70 hover:border-primary/60 hover:bg-muted/40 transition-all group shadow-2xs cursor-pointer relative text-left"
+                            className="flex flex-col justify-between p-4 rounded-xl bg-card border-[1.5px] border-border/70 hover:border-primary/60 hover:bg-muted/40 transition-all group shadow-sm cursor-pointer relative text-left"
                           >
                             {/* Top Row: Icon + Title + Format + Star Button */}
                             <div>
@@ -886,13 +730,13 @@ export default function FavoritesTabView({
                                           onToggleFavorite(note.id);
                                         }}
                                         className="p-1 rounded-md text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 transition-colors cursor-pointer"
-                                        aria-label={isTh ? "ยกเลิกการติดดาว" : "Remove from favorites"}
+                                        aria-label={t("favorites.removeFromFavorites")}
                                       >
                                         <Star className="h-3.5 w-3.5 fill-amber-500" />
                                       </button>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" sideOffset={4}>
-                                      {isTh ? "ยกเลิกการติดดาว" : "Unstar"}
+                                      {t("favorites.unstar")}
                                     </TooltipContent>
                                   </Tooltip>
                                 </div>
@@ -909,11 +753,11 @@ export default function FavoritesTabView({
                             {/* Bottom Row: Tags + Folder + Date */}
                             <div className="mt-3 pt-2.5 border-t border-border/40 flex flex-wrap items-center justify-between gap-1.5 text-[10.5px] text-muted-foreground">
                               <div className="flex flex-wrap items-center gap-1 min-w-0 max-w-[65%]">
-                                {note.tags && note.tags.length > 0 ? (
-                                  note.tags.slice(0, 2).map((tag, idx) => (
+                                {displayTags && displayTags.length > 0 ? (
+                                  displayTags.slice(0, 2).map((tag, idx) => (
                                     <span
                                       key={tag}
-                                      className={`px-1.5 py-0.2 rounded-md font-medium border text-[10px] truncate max-w-[100px] ${getTagColorClass(
+                                      className={`px-1.5 py-0.5 rounded-md font-medium border text-[10px] truncate max-w-[100px] ${getTagColorClass(
                                         tag,
                                         settings.theme,
                                         idx,
@@ -929,9 +773,9 @@ export default function FavoritesTabView({
                                     <span className="truncate">{note.folderPath}</span>
                                   </span>
                                 ) : null}
-                                {note.tags && note.tags.length > 2 && (
+                                {displayTags && displayTags.length > 2 && (
                                   <span className="text-[9.5px] text-muted-foreground/70">
-                                    +{note.tags.length - 2}
+                                    +{displayTags.length - 2}
                                   </span>
                                 )}
                               </div>

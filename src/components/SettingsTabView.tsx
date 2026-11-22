@@ -92,6 +92,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { SparklesIcon } from "@/components/icons/SparklesIcon";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -110,8 +111,12 @@ import {
   openExternalUrl,
 } from "@/lib/appVersion";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
+import { ShortcutsSection } from "@/components/shared/ShortcutsSection";
+import { AboutUpdateCard } from "@/components/shared/AboutUpdateCard";
 import { exportWorkspaceBackupZip } from "@/lib/backupExporter";
 import { fetchAvailableModels, clearExhaustedModels, type AvailableModelOption } from "@/lib/geminiApi";
+import { cn } from "@/lib/utils";
+import type { GlobalFixLanguageStatus } from "@/vite-env";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -219,14 +224,14 @@ export default function SettingsTabView({
       const saved = await saveCustomFont(file);
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontUploadedSuccess") || "Font uploaded successfully",
-        description: (t("settings.fontUploadedSuccessDesc") || 'Added font "{name}" to workspace.').replace("{name}", saved.name),
+        title: t("settings.fontUploadedSuccess"),
+        description: (t("settings.fontUploadedSuccessDesc")).replace("{name}", saved.name),
       });
     } catch (err: any) {
       console.error("[CustomFont] Upload error:", err);
       toast({
-        title: t("settings.fontUploadFailed") || "Failed to upload font",
-        description: err?.message || t("settings.fontUploadFailedDesc") || "Could not process font file",
+        title: t("settings.fontUploadFailed"),
+        description: err?.message || t("settings.fontUploadFailedDesc"),
         variant: "destructive",
       });
     } finally {
@@ -244,14 +249,14 @@ export default function SettingsTabView({
       await renameCustomFont(fontToRename.id, newName);
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontRenameSuccess") || "Font renamed successfully",
-        description: (t("settings.fontRenameSuccessDesc") || 'Font renamed to "{name}".').replace("{name}", newName),
+        title: t("settings.fontRenameSuccess"),
+        description: (t("settings.fontRenameSuccessDesc")).replace("{name}", newName),
       });
       setFontToRename(null);
     } catch (err: any) {
       toast({
-        title: t("settings.fontRenameFailed") || "Failed to rename font",
-        description: err?.message || "Could not rename font",
+        title: t("settings.fontRenameFailed"),
+        description: err?.message || t("settings.fontRenameFailedDesc"),
         variant: "destructive",
       });
     }
@@ -270,14 +275,14 @@ export default function SettingsTabView({
       }
       await refreshCustomFonts();
       toast({
-        title: t("settings.fontDeletedSuccess") || "Font removed successfully",
-        description: (t("settings.fontDeletedSuccessDesc") || 'Removed font "{name}" from workspace.').replace("{name}", deletedName),
+        title: t("settings.fontDeletedSuccess"),
+        description: (t("settings.fontDeletedSuccessDesc")).replace("{name}", deletedName),
       });
       setFontToDelete(null);
     } catch (err: any) {
       toast({
-        title: t("settings.fontDeleteFailed") || "Failed to delete font",
-        description: err?.message || "Could not delete font",
+        title: t("settings.fontDeleteFailed"),
+        description: err?.message || t("settings.fontDeleteFailedDesc"),
         variant: "destructive",
       });
     }
@@ -288,7 +293,7 @@ export default function SettingsTabView({
     try {
       const saved = localStorage.getItem("luno_last_settings_category");
       if (isValidSettingsCategory(saved)) return saved;
-    } catch {}
+    } catch { /* ignore */ }
     return isValidSettingsCategory(initialCategory) ? initialCategory : "general";
   });
 
@@ -297,7 +302,7 @@ export default function SettingsTabView({
       setActiveCategory(initialCategory);
       try {
         localStorage.setItem("luno_last_settings_category", initialCategory);
-      } catch {}
+      } catch { /* ignore */ }
     }
   }, [initialCategory]);
 
@@ -306,7 +311,7 @@ export default function SettingsTabView({
     setActiveCategory(catId);
     try {
       localStorage.setItem("luno_last_settings_category", catId);
-    } catch {}
+    } catch { /* ignore */ }
     onCategoryChange?.(catId);
   };
   const [showApiKey, setShowApiKey] = useState(false);
@@ -315,6 +320,60 @@ export default function SettingsTabView({
   const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
   const [osUsername, setOsUsername] = useState<string>("");
   const [userNameValue, setUserNameValue] = useState<string>(() => settings.userName || "");
+  const [globalFixLanguageStatus, setGlobalFixLanguageStatus] = useState<GlobalFixLanguageStatus | null>(null);
+  const [isRestartingFixHelper, setIsRestartingFixHelper] = useState(false);
+
+  const isElectronDesktop = Boolean(window.electronAPI?.configureGlobalFixLanguage);
+  const globalFixLanguageConflict = Boolean(
+    globalFixLanguageStatus?.enabled && !globalFixLanguageStatus?.registered
+  );
+
+  useEffect(() => {
+    const getStatus = window.electronAPI?.getGlobalFixLanguageStatus;
+    if (!getStatus) {
+      setGlobalFixLanguageStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const onStatusEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<GlobalFixLanguageStatus>;
+      if (!cancelled && customEvent.detail) {
+        setGlobalFixLanguageStatus(customEvent.detail);
+      }
+    };
+    window.addEventListener("luno:fix-language-status", onStatusEvent);
+
+    const timer = window.setTimeout(() => {
+      void getStatus()
+        .then((status) => {
+          if (!cancelled) {
+            setGlobalFixLanguageStatus(status);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setGlobalFixLanguageStatus(null);
+        });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("luno:fix-language-status", onStatusEvent);
+    };
+  }, [settings.globalFixLanguage, settings.backgroundFixLanguageHelper, activeCategory]);
+
+  const handleRestartFixLanguageHelper = async () => {
+    const restart = window.electronAPI?.restartGlobalFixLanguageHelper;
+    if (!restart) return;
+    setIsRestartingFixHelper(true);
+    try {
+      const status = await restart();
+      setGlobalFixLanguageStatus(status);
+    } catch (err) {
+      console.warn("Failed restarting Fix Language background helper:", err);
+    } finally {
+      setIsRestartingFixHelper(false);
+    }
+  };
 
   useEffect(() => {
     const electronAPI = (window as unknown as { electronAPI?: { getOsUserInfo?: () => Promise<{ username?: string }> } }).electronAPI;
@@ -411,16 +470,16 @@ export default function SettingsTabView({
     if (!notes || notes.length === 0) {
       toast({
         variant: "destructive",
-        title: t("settings.backupFailedTitle") || "Export Failed",
-        description: "ไม่มีโน้ตใน Workspace สำหรับการส่งออก",
+        title: t("settings.backupFailedTitle"),
+        description: t("uiMisc.noNotesToExport"),
       });
       return;
     }
 
     setIsExportingBackup(true);
     toast({
-      title: t("settings.backupStartedTitle") || "Backup Started",
-      description: t("settings.backupStartedDesc") || "Creating and compressing ZIP archive...",
+      title: t("settings.backupStartedTitle"),
+      description: t("settings.backupStartedDesc"),
     });
 
     try {
@@ -433,21 +492,21 @@ export default function SettingsTabView({
 
       if (result.success) {
         toast({
-          title: t("settings.backupSuccessTitle") || "Backup Exported Successfully",
-          description: t("settings.backupSuccessDesc", { count: result.count }) || `Backup exported (${result.count} files)`,
+          title: t("settings.backupSuccessTitle"),
+          description: t("settings.backupSuccessDesc", { count: result.count }),
         });
       } else if (!result.canceled) {
         toast({
           variant: "destructive",
-          title: t("settings.backupFailedTitle") || "Export Failed",
-          description: result.error || "Failed to create backup archive.",
+          title: t("settings.backupFailedTitle"),
+          description: result.error || t("settings.backupFailedDesc"),
         });
       }
     } catch (err: any) {
       toast({
         variant: "destructive",
-        title: t("settings.backupFailedTitle") || "Export Failed",
-        description: err?.message || "Failed to export backup archive.",
+        title: t("settings.backupFailedTitle"),
+        description: err?.message || t("settings.backupFailedDesc"),
       });
     } finally {
       setIsExportingBackup(false);
@@ -499,15 +558,18 @@ export default function SettingsTabView({
   return (
     <TooltipProvider delayDuration={150}>
       <div className="flex-1 min-h-0 h-full w-full max-h-full flex flex-col bg-background text-foreground overflow-hidden select-none">
-        {/* Main 2-Column Content View */}
-        <div className="flex-1 min-h-0 min-w-0 flex overflow-hidden">
-          {/* Left Navigation Category Column (Matching Screenshot) */}
-          <div className="w-60 border-r border-border/50 bg-card/30 flex flex-col shrink-0 select-none">
-            <div className="px-5 py-4 border-b border-border/40 font-bold text-lg text-foreground flex items-center justify-between">
-              <span>{t("settings.title") || "Settings"}</span>
+        {/* Main 2-Column Responsive Content View */}
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row overflow-hidden">
+          {/* Left Navigation Category Column (Collapses to horizontal scrollable nav below md) */}
+          <nav
+            aria-label={t("settings.title")}
+            className="w-full md:w-60 border-b md:border-b-0 md:border-r border-border/50 bg-card/30 flex flex-col shrink-0 select-none"
+          >
+            <div className="px-4 py-3 md:px-5 md:py-4 border-b border-border/40 font-bold text-base md:text-lg text-foreground flex items-center justify-between">
+              <h1 className="text-base md:text-lg font-bold leading-none">{t("settings.title")}</h1>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-1 no-scrollbar overscroll-contain">
+            <div className="flex flex-row md:flex-col md:flex-1 min-h-0 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto p-2 md:p-2.5 gap-1 md:gap-0 md:space-y-1 no-scrollbar overscroll-contain">
               {categories.map((cat) => {
                 const Icon = getToolbarIcon(cat.iconKey, pack);
                 const isActive = safeActiveCategory === cat.id;
@@ -516,14 +578,15 @@ export default function SettingsTabView({
                   <button
                     key={cat.id}
                     type="button"
+                    aria-current={isActive ? "page" : undefined}
                     onClick={() => handleSelectCategory(cat.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                    className={`shrink-0 md:w-full flex items-center justify-between px-3 py-2 md:py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
                       isActive
-                        ? "bg-primary/10 text-primary font-semibold shadow-2xs"
+                        ? "bg-primary/10 text-primary font-semibold shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]"
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 md:gap-2.5 min-w-0">
                       <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/70"}`} />
                       <span className="truncate">{cat.label}</span>
                     </div>
@@ -531,25 +594,25 @@ export default function SettingsTabView({
                 );
               })}
             </div>
-          </div>
+          </nav>
 
           {/* Right Content Panel View */}
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
+          <main className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
-            <div className="px-8 py-5 border-b border-border/40 bg-card/20 shrink-0">
+            <div className="px-4 py-4 sm:px-6 md:px-8 md:py-5 border-b border-border/40 bg-card/20 shrink-0">
               <div>
-                <h2 className="text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
+                <h2 className="text-lg md:text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">{currentCategory.desc}</p>
               </div>
             </div>
 
             {/* Scrollable Category Options Body */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 no-scrollbar w-full overscroll-contain">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-6 no-scrollbar w-full overscroll-contain">
               {/* 1. GENERAL */}
               {safeActiveCategory === "general" && (
                 <div className="space-y-6">
                   {/* User Profile Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.profileGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -596,7 +659,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Startup Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.startupGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -642,7 +705,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Language Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.languageGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -663,7 +726,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Date & Time Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.dateTimeGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -694,10 +757,10 @@ export default function SettingsTabView({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="24h">
-                            {settings.language === "th" ? "24 ชั่วโมง" : "24-hour"} ({formatTime(new Date(), "24h", settings.language)})
+                            {t("settings.n24Hour")} ({formatTime(new Date(), "24h", settings.language)})
                           </SelectItem>
                           <SelectItem value="12h">
-                            {settings.language === "th" ? "12 ชั่วโมง" : "12-hour"} ({formatTime(new Date(), "12h", settings.language)})
+                            {t("settings.n12Hour")} ({formatTime(new Date(), "12h", settings.language)})
                           </SelectItem>
                         </SelectContent>
                       </Select>
@@ -721,7 +784,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Other Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.otherGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -758,7 +821,7 @@ export default function SettingsTabView({
               {safeActiveCategory === "appearance" && (
                 <div className="space-y-6">
                   {/* Theme & Colors */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.colorSchemeGroup")}</h3>
 
                     {/* Color Scheme Mode */}
@@ -775,7 +838,7 @@ export default function SettingsTabView({
                               onClick={() => updateSetting("colorScheme", scheme)}
                               className={`flex flex-1 h-10 items-center justify-center gap-2 rounded-xl border px-3 text-xs transition-all cursor-pointer ${
                                 settings.colorScheme === scheme
-                                  ? "border-primary bg-primary/10 text-primary font-semibold shadow-2xs"
+                                  ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm"
                                   : "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/30"
                               }`}
                             >
@@ -816,7 +879,7 @@ export default function SettingsTabView({
                               case "default":
                                 return "rounded-sm"; // 3px standard clean
                               case "paper":
-                                return "rounded-xs"; // 2px crisp notebook
+                                return "rounded-sm"; // 2px crisp notebook
                               case "midnight":
                               case "cyberpunk":
                                 return "rounded-none"; // 0px razor-sharp rectangular
@@ -834,7 +897,7 @@ export default function SettingsTabView({
                               onClick={() => applyAppearanceStyle(style.id)}
                               className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
                                 isSelected
-                                  ? "border-primary bg-primary/10 shadow-2xs"
+                                  ? "border-primary bg-primary/10 shadow-sm"
                                   : "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-foreground/[0.02]"
                               }`}
                             >
@@ -913,11 +976,11 @@ export default function SettingsTabView({
                                     </div>
                                   ) : style.id === "paper" ? (
                                     <div
-                                      className="p-1 rounded-xs flex flex-col gap-1 border border-amber-900/15"
+                                      className="p-1 rounded-sm flex flex-col gap-1 border border-amber-900/15"
                                       style={{ background: isDark ? "#161311" : "#f4ede0" }}
                                     >
-                                      <div className="h-1.5 w-2/3 rounded-xs" style={{ backgroundColor: accentColor }} />
-                                      <div className={`h-1 w-full rounded-xs ${isDark ? "bg-white/30" : "bg-black/20"}`} />
+                                      <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: accentColor }} />
+                                      <div className={`h-1 w-full rounded-sm ${isDark ? "bg-white/30" : "bg-black/20"}`} />
                                     </div>
                                   ) : style.id === "nord" ? (
                                     <div
@@ -962,7 +1025,7 @@ export default function SettingsTabView({
                                 onClick={() => updateSetting("theme", th.id)}
                                 className={`h-8 w-8 rounded-full transition-all cursor-pointer ${
                                   settings.theme === th.id
-                                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110 shadow-xs"
+                                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110 shadow-sm"
                                     : "opacity-75 hover:opacity-100 hover:scale-105"
                                 }`}
                               />
@@ -987,7 +1050,7 @@ export default function SettingsTabView({
                                       updateSetting("theme", "custom");
                                     }
                                   }}
-                                  className={`h-8 w-8 rounded-full transition-all cursor-pointer flex items-center justify-center relative shadow-xs ${
+                                  className={`h-8 w-8 rounded-full transition-all cursor-pointer flex items-center justify-center relative shadow-sm ${
                                     settings.theme === "custom"
                                       ? "ring-2 ring-foreground ring-offset-2 ring-offset-background scale-110"
                                       : "opacity-80 hover:opacity-100 hover:scale-105"
@@ -1012,7 +1075,7 @@ export default function SettingsTabView({
                               </div>
 
                               <div className="flex items-center gap-2">
-                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-xs flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
+                                <div className="relative w-10 h-9 rounded-xl overflow-hidden border border-border/70 shadow-sm flex-shrink-0 cursor-pointer transition-colors hover:border-primary/50">
                                   <input
                                     type="color"
                                     value={settings.customAccentColor || "#26A295"}
@@ -1033,7 +1096,7 @@ export default function SettingsTabView({
                                     }
                                   }}
                                   placeholder="#26A295"
-                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-xs focus-visible:ring-1 focus-visible:ring-primary"
+                                  className="h-9 rounded-xl text-xs uppercase tracking-wider border-border/70 bg-background shadow-sm focus-visible:ring-1 focus-visible:ring-primary"
                                   maxLength={7}
                                 />
                               </div>
@@ -1075,7 +1138,7 @@ export default function SettingsTabView({
                                     {t("settings.previewAccentText")}
                                   </span>
                                   <span
-                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-xs transition-colors"
+                                    className="px-2 py-0.5 rounded-lg text-[10px] font-medium text-white shadow-sm transition-colors"
                                     style={{ backgroundColor: settings.customAccentColor || "#26A295" }}
                                   >
                                     {t("settings.previewActive")}
@@ -1114,10 +1177,10 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Icon Pack Selection Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.iconPackGroup") || "Icon Pack"}</h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">{t("settings.iconPackDesc") || "Choose icon theme and styling for app controls, sidebar, and toolbar"}</p>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.iconPackGroup")}</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t("settings.iconPackDesc")}</p>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
@@ -1136,7 +1199,7 @@ export default function SettingsTabView({
                             onClick={() => updateSetting("iconPack", pack.id)}
                             className={`flex flex-col p-3.5 rounded-xl border text-left transition-all cursor-pointer relative ${
                               isSelected
-                                ? "border-primary bg-primary/10 shadow-2xs"
+                                ? "border-primary bg-primary/10 shadow-sm"
                                 : "border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-foreground/[0.02]"
                             }`}
                           >
@@ -1181,7 +1244,7 @@ export default function SettingsTabView({
                   </div>
 
                     {/* Typography */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.typographyGroup")}</h3>
                       <button
@@ -1191,15 +1254,15 @@ export default function SettingsTabView({
                         className="h-8 flex items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-[10px] transition-colors cursor-pointer border border-border/40 disabled:opacity-50"
                       >
                         {isUploadingFont ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                        <span>{t("settings.uploadFont") || "Upload Font"}</span>
+                        <span>{t("settings.uploadFont")}</span>
                       </button>
                     </div>
 
                     {/* Interface Font */}
                     <div className="flex items-center justify-between gap-4">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.interfaceFontFamily") || "Interface Font"}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.interfaceFontFamilyDesc") || "Set typography for sidebar, buttons, and navigation"}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.interfaceFontFamily")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.interfaceFontFamilyDesc")}</p>
                       </div>
                       <Select value={settings.fontFamily} onValueChange={(v) => updateSetting("fontFamily", v as any)}>
                         <SelectTrigger className="w-56 h-10 text-xs font-medium">
@@ -1208,7 +1271,7 @@ export default function SettingsTabView({
                         <SelectContent className="max-h-64">
                           {customFonts && customFonts.length > 0 && (
                             <SelectGroup>
-                              <SelectLabel>{t("settings.customFonts") || "Workspace Fonts"}</SelectLabel>
+                              <SelectLabel>{t("settings.customFonts")}</SelectLabel>
                               {customFonts.map((font) => (
                                 <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
                                   <span style={{ fontFamily: font.css }}>{font.name}</span>
@@ -1218,7 +1281,7 @@ export default function SettingsTabView({
                           )}
                           <SelectGroup>
                             {customFonts && customFonts.length > 0 && (
-                              <SelectLabel>{t("settings.systemFonts") || "System Fonts"}</SelectLabel>
+                              <SelectLabel>{t("settings.systemFonts")}</SelectLabel>
                             )}
                             {FONT_OPTIONS.map((font) => (
                               <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
@@ -1233,8 +1296,8 @@ export default function SettingsTabView({
                     {/* Editor Font */}
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.editorFontFamily") || "Editor Font"}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.editorFontFamilyDesc") || "Set typography for writing and reading notes"}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.editorFontFamily")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.editorFontFamilyDesc")}</p>
                       </div>
                       <Select value={settings.editorFontFamily || settings.fontFamily} onValueChange={(v) => updateSetting("editorFontFamily", v as any)}>
                         <SelectTrigger className="w-56 h-10 text-xs font-medium">
@@ -1243,7 +1306,7 @@ export default function SettingsTabView({
                         <SelectContent className="max-h-64">
                           {customFonts && customFonts.length > 0 && (
                             <SelectGroup>
-                              <SelectLabel>{t("settings.customFonts") || "Workspace Fonts"}</SelectLabel>
+                              <SelectLabel>{t("settings.customFonts")}</SelectLabel>
                               {customFonts.map((font) => (
                                 <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
                                   <span style={{ fontFamily: font.css }}>{font.name}</span>
@@ -1253,7 +1316,7 @@ export default function SettingsTabView({
                           )}
                           <SelectGroup>
                             {customFonts && customFonts.length > 0 && (
-                              <SelectLabel>{t("settings.systemFonts") || "System Fonts"}</SelectLabel>
+                              <SelectLabel>{t("settings.systemFonts")}</SelectLabel>
                             )}
                             {FONT_OPTIONS.map((font) => (
                               <SelectItem key={font.id} value={font.id} style={{ fontFamily: font.css }}>
@@ -1289,8 +1352,8 @@ export default function SettingsTabView({
                       <div className="pt-3 border-t border-border/30 space-y-2.5">
                         <div className="flex items-center justify-between">
                           <div>
-                            <label className="text-xs font-semibold text-foreground">{t("settings.customFonts") || "Workspace Fonts"}</label>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">{t("settings.manageFontsDesc") || "Manage uploaded custom fonts for current workspace"}</p>
+                            <label className="text-xs font-semibold text-foreground">{t("settings.customFonts")}</label>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{t("settings.manageFontsDesc")}</p>
                           </div>
                           <span className="text-xs font-normal text-muted-foreground">
                             {customFonts.length}
@@ -1335,7 +1398,7 @@ export default function SettingsTabView({
                                         className="gap-2.5 py-1.5 px-3 rounded-lg cursor-pointer text-[13px]"
                                       >
                                         <Pencil className="h-4 w-4" />
-                                        <span>{t("settings.renameFont") || "Rename"}</span>
+                                        <span>{t("settings.renameFont")}</span>
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
                                         variant="destructive"
@@ -1343,7 +1406,7 @@ export default function SettingsTabView({
                                         className="gap-2.5 py-1.5 px-3 rounded-lg text-destructive focus:text-destructive cursor-pointer text-[13px]"
                                       >
                                         <Trash2 className="h-4 w-4 text-destructive" />
-                                        <span>{t("settings.deleteFont") || "Delete"}</span>
+                                        <span>{t("settings.deleteFont")}</span>
                                       </DropdownMenuItem>
                                     </DropdownMenuContent>
                                   </DropdownMenu>
@@ -1357,7 +1420,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Layout Density */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.layoutGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
@@ -1372,7 +1435,7 @@ export default function SettingsTabView({
                         <SelectContent>
                           <SelectItem value="80">80%</SelectItem>
                           <SelectItem value="90">90%</SelectItem>
-                          <SelectItem value="100">100% (Default)</SelectItem>
+                          <SelectItem value="100">{t("settings.interfaceScaleDefault")}</SelectItem>
                           <SelectItem value="110">110%</SelectItem>
                           <SelectItem value="125">125%</SelectItem>
                           <SelectItem value="150">150%</SelectItem>
@@ -1432,6 +1495,19 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.showGuideLines")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showGuideLinesDesc")}</p>
+                      </div>
+                      <Switch
+                        data-testid="sidebar-guide-lines-switch"
+                        checked={settings.showGuideLines}
+                        onCheckedChange={(v) => updateSetting("showGuideLines", v)}
+                        className="scale-85 origin-right"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
                         <label className="text-xs font-semibold text-foreground">{t("settings.appLayout")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.appLayoutDesc")}</p>
                       </div>
@@ -1452,7 +1528,7 @@ export default function SettingsTabView({
               {/* 3. EDITOR */}
               {safeActiveCategory === "editor" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.writingBehaviorGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -1489,22 +1565,93 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.spellCheckSetting") || "Spell Check"}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.spellCheckSettingDesc") || "Check and underline misspelled words in Thai and English"}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.spellCheckSetting")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.spellCheckSettingDesc")}</p>
                       </div>
                       <Switch checked={settings.spellCheck !== false} onCheckedChange={(v) => updateSetting("spellCheck", v)} className="scale-85 origin-right" />
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.wrongLanguageSuggestion") || "Wrong language layout suggestion"}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.wrongLanguageSuggestionDesc") || "Show inline ghost text when typing in the wrong layout"}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.wrongLanguageSuggestion")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.wrongLanguageSuggestionDesc")}</p>
                       </div>
                       <Switch checked={settings.wrongLanguageSuggestion !== false} onCheckedChange={(v) => updateSetting("wrongLanguageSuggestion", v)} className="scale-85 origin-right" />
                     </div>
+
+                    {isElectronDesktop && (
+                      <>
+                        <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                          <div>
+                            <label className="text-xs font-semibold text-foreground">{t("settings.globalFixLanguage")}</label>
+                            <p className="text-xs text-muted-foreground mt-0.5">{t("settings.globalFixLanguageDesc")}</p>
+                            {globalFixLanguageConflict && settings.globalFixLanguage !== false && (
+                              <p className="text-xs text-amber-500 mt-1">{t("settings.globalFixLanguageConflict")}</p>
+                            )}
+                          </div>
+                          <Switch
+                            data-testid="global-fix-language-switch"
+                            checked={settings.globalFixLanguage !== false}
+                            onCheckedChange={(v) => updateSetting("globalFixLanguage", v)}
+                            className="scale-85 origin-right"
+                          />
+                        </div>
+
+                        {settings.globalFixLanguage !== false &&
+                          globalFixLanguageStatus?.backgroundHelperSupported && (
+                            <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                              <div className="space-y-1.5">
+                                <div>
+                                  <label className="text-xs font-semibold text-foreground">
+                                    {t("settings.backgroundFixLanguageHelper")}
+                                  </label>
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    {t("settings.backgroundFixLanguageHelperDesc")}
+                                  </p>
+                                </div>
+                                {settings.backgroundFixLanguageHelper !== false && (
+                                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/70 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                      <span
+                                        className={cn(
+                                          "h-1.5 w-1.5 rounded-full",
+                                          globalFixLanguageStatus.backgroundHelperRunning
+                                            ? "bg-emerald-500"
+                                            : "bg-amber-500"
+                                        )}
+                                      />
+                                      {globalFixLanguageStatus.backgroundHelperRunning
+                                        ? t("settings.backgroundFixLanguageRunning")
+                                        : t("settings.backgroundFixLanguageStopped")}
+                                    </span>
+                                    {!globalFixLanguageStatus.backgroundHelperRunning && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={isRestartingFixHelper}
+                                        onClick={() => void handleRestartFixLanguageHelper()}
+                                        className="h-6 rounded-xl px-2.5 text-[11px]"
+                                      >
+                                        {t("settings.backgroundFixLanguageRestart")}
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <Switch
+                                data-testid="background-fix-language-helper-switch"
+                                checked={settings.backgroundFixLanguageHelper !== false}
+                                onCheckedChange={(v) => updateSetting("backgroundFixLanguageHelper", v)}
+                                className="scale-85 origin-right"
+                              />
+                            </div>
+                          )}
+                      </>
+                    )}
                   </div>
 
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.formattingHelpersGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -1517,8 +1664,8 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.enableSlashCommands") || "Slash commands menu (/)"}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.enableSlashCommandsDesc") || "Type / in the editor to open quick command palette"}</p>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.enableSlashCommands")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.enableSlashCommandsDesc")}</p>
                       </div>
                       <Switch checked={settings.enableSlashCommand !== false} onCheckedChange={(v) => updateSetting("enableSlashCommand", v)} className="scale-85 origin-right cursor-pointer" />
                     </div>
@@ -1541,14 +1688,6 @@ export default function SettingsTabView({
 
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
                       <div>
-                        <label className="text-xs font-semibold text-foreground">{t("settings.showGuideLines")}</label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.showGuideLinesHint")}</p>
-                      </div>
-                      <Switch checked={settings.showGuideLines} onCheckedChange={(v) => updateSetting("showGuideLines", v)} className="scale-85 origin-right" />
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
-                      <div>
                         <label className="text-xs font-semibold text-foreground">{t("settings.highlightInlineCode")}</label>
                         <p className="text-xs text-muted-foreground mt-0.5">{t("settings.highlightInlineCodeDesc")}</p>
                       </div>
@@ -1557,7 +1696,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Custom Toolbar */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.customToolbar")}</h3>
@@ -1571,7 +1710,7 @@ export default function SettingsTabView({
                           updateSetting("toolbarConfiguredV3" as any, true);
                           toast({
                             title: t("settings.resetToolbarDefaults"),
-                            description: "Toolbar layout and order restored to defaults",
+                            description: t("settings.resetToolbarDefaultsDesc"),
                           });
                         }}
                         className="h-8 flex items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-[10px] transition-colors cursor-pointer border border-border/40"
@@ -1618,8 +1757,8 @@ export default function SettingsTabView({
                             }}
                             className={`flex items-center justify-start gap-2.5 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer select-none border ${
                               isMatch
-                                ? "bg-primary/10 border-primary/70 text-primary shadow-xs ring-1 ring-primary/20 font-semibold"
-                                : "bg-muted/30 border-border/40 text-foreground/85 hover:text-foreground hover:bg-muted/60 hover:border-border hover:shadow-2xs"
+                                ? "bg-primary/10 border-primary/70 text-primary shadow-sm ring-1 ring-primary/20 font-semibold"
+                                : "bg-muted/30 border-border/40 text-foreground/85 hover:text-foreground hover:bg-muted/60 hover:border-border hover:shadow-sm"
                             }`}
                           >
                             <PresetIcon className="h-4 w-4 shrink-0" />
@@ -1707,7 +1846,7 @@ export default function SettingsTabView({
                                   ? "border-primary bg-primary/10 shadow-sm"
                                   : isHidden
                                   ? "bg-muted/30 border-border/20 opacity-60 text-muted-foreground hover:border-border/60"
-                                  : "bg-background border-border/40 text-foreground hover:border-border shadow-2xs"
+                                  : "bg-background border-border/40 text-foreground hover:border-border shadow-sm"
                               }`}
                             >
                               <div className="flex items-center gap-2.5 min-w-0 pointer-events-none">
@@ -1825,7 +1964,7 @@ export default function SettingsTabView({
               )}
               {safeActiveCategory === "files" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.fileCreationGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -1857,14 +1996,10 @@ export default function SettingsTabView({
                         <SelectContent>
                           <SelectItem value="untitled">{t("settings.optUntitledPattern")}</SelectItem>
                           <SelectItem value="date">
-                            {settings.language === "th"
-                              ? `ตามวันที่ (Note_${getDatePatternLabel(settings.dateFormat)})`
-                              : `Date (Note_${getDatePatternLabel(settings.dateFormat)})`}
+                            {t("settings.dateNote", { v0: getDatePatternLabel(settings.dateFormat) })}
                           </SelectItem>
                           <SelectItem value="daily">
-                            {settings.language === "th"
-                              ? `บันทึกประจำวัน (Daily-${getDatePatternLabel(settings.dateFormat)})`
-                              : `Daily (Daily-${getDatePatternLabel(settings.dateFormat)})`}
+                            {t("settings.dailyDaily", { v0: getDatePatternLabel(settings.dateFormat) })}
                           </SelectItem>
                         </SelectContent>
                       </Select>
@@ -1884,7 +2019,7 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Trash & Deletion Settings */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("trash.title")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -1928,7 +2063,7 @@ export default function SettingsTabView({
               {/* 5. MARKDOWN */}
               {safeActiveCategory === "markdown" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.syntaxGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -1950,6 +2085,19 @@ export default function SettingsTabView({
                         className="scale-85 origin-right cursor-pointer shrink-0"
                       />
                     </div>
+
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.readingModeLivePreview")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.readingModeLivePreviewDesc")}</p>
+                      </div>
+                      <Switch
+                        data-testid="markdown-reading-mode-live-preview-switch"
+                        checked={settings.readingModeLivePreview === true}
+                        onCheckedChange={(val) => updateSetting("readingModeLivePreview", val)}
+                        className="scale-85 origin-right cursor-pointer shrink-0"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1957,7 +2105,7 @@ export default function SettingsTabView({
               {/* 6. TEMPLATES */}
               {safeActiveCategory === "templates" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.templatesGroup")}</h3>
 
                     {/* Markdown (.md) */}
@@ -1979,19 +2127,19 @@ export default function SettingsTabView({
                         <SelectContent>
                           <SelectItem value="blank">{t("settings.optBlankDocument")}</SelectItem>
                           <SelectItem value="daily">{t("settings.optDailyNote")}</SelectItem>
-                          <SelectItem value="weekly-review">{t("settings.optWeeklyReview") || "Weekly Review"}</SelectItem>
+                          <SelectItem value="weekly-review">{t("settings.optWeeklyReview")}</SelectItem>
                           <SelectItem value="todo">{t("settings.optTodoList")}</SelectItem>
                           <SelectItem value="meeting">{t("settings.optMeetingNotes")}</SelectItem>
                           <SelectItem value="project">{t("settings.optProjectPlan")}</SelectItem>
                           <SelectItem value="study">{t("settings.optIdeaBrainstorm")}</SelectItem>
-                          <SelectItem value="book-notes">{t("settings.optBookNotes") || "Book Notes"}</SelectItem>
-                          <SelectItem value="cornell-notes">{t("settings.optCornellNotes") || "Cornell Notes"}</SelectItem>
-                          <SelectItem value="content-planner">{t("settings.optContentPlanner") || "Content & Video Planner"}</SelectItem>
-                          <SelectItem value="api-doc">{t("settings.optApiDoc") || "API Specification"}</SelectItem>
-                          <SelectItem value="bug">{t("settings.optBugReport") || "Bug Report"}</SelectItem>
-                          <SelectItem value="habit-tracker">{t("settings.optHabitTracker") || "Habit & Wellness Tracker"}</SelectItem>
-                          <SelectItem value="monthly-budget">{t("settings.optMonthlyBudget") || "Monthly Budget Planner"}</SelectItem>
-                          <SelectItem value="travel-itinerary">{t("settings.optTravelItinerary") || "Travel Itinerary"}</SelectItem>
+                          <SelectItem value="book-notes">{t("settings.optBookNotes")}</SelectItem>
+                          <SelectItem value="cornell-notes">{t("settings.optCornellNotes")}</SelectItem>
+                          <SelectItem value="content-planner">{t("settings.optContentPlanner")}</SelectItem>
+                          <SelectItem value="api-doc">{t("settings.optApiDoc")}</SelectItem>
+                          <SelectItem value="bug">{t("settings.optBugReport")}</SelectItem>
+                          <SelectItem value="habit-tracker">{t("settings.optHabitTracker")}</SelectItem>
+                          <SelectItem value="monthly-budget">{t("settings.optMonthlyBudget")}</SelectItem>
+                          <SelectItem value="travel-itinerary">{t("settings.optTravelItinerary")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2010,19 +2158,19 @@ export default function SettingsTabView({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="blank">{t("settings.optTxtBlank") || "Blank Text"}</SelectItem>
-                          <SelectItem value="notes">{t("settings.optTxtNotes") || "Notes"}</SelectItem>
-                          <SelectItem value="todo">{t("settings.optTxtTodoList") || "To-Do List"}</SelectItem>
-                          <SelectItem value="meeting">{t("settings.optTxtMeetingNotes") || "Meeting Notes"}</SelectItem>
-                          <SelectItem value="journal">{t("settings.optTxtJournal") || "Journal"}</SelectItem>
-                          <SelectItem value="work-log">{t("settings.optTxtWorkLog") || "Work Log"}</SelectItem>
-                          <SelectItem value="readme">{t("settings.optTxtReadme") || "README"}</SelectItem>
-                          <SelectItem value="changelog">{t("settings.optTxtChangelog") || "Changelog"}</SelectItem>
-                          <SelectItem value="lecture-notes">{t("settings.optTxtLectureNotes") || "Lecture Notes"}</SelectItem>
-                          <SelectItem value="server-config">{t("settings.optTxtServerConfig") || "Server Config"}</SelectItem>
-                          <SelectItem value="incident-report">{t("settings.optTxtIncidentReport") || "Incident Postmortem"}</SelectItem>
-                          <SelectItem value="shopping-list">{t("settings.optTxtShoppingList") || "Shopping List"}</SelectItem>
-                          <SelectItem value="recipe-txt">{t("settings.optTxtRecipe") || "Recipe"}</SelectItem>
+                          <SelectItem value="blank">{t("settings.optTxtBlank")}</SelectItem>
+                          <SelectItem value="notes">{t("settings.optTxtNotes")}</SelectItem>
+                          <SelectItem value="todo">{t("settings.optTxtTodoList")}</SelectItem>
+                          <SelectItem value="meeting">{t("settings.optTxtMeetingNotes")}</SelectItem>
+                          <SelectItem value="journal">{t("settings.optTxtJournal")}</SelectItem>
+                          <SelectItem value="work-log">{t("settings.optTxtWorkLog")}</SelectItem>
+                          <SelectItem value="readme">{t("settings.optTxtReadme")}</SelectItem>
+                          <SelectItem value="changelog">{t("settings.optTxtChangelog")}</SelectItem>
+                          <SelectItem value="lecture-notes">{t("settings.optTxtLectureNotes")}</SelectItem>
+                          <SelectItem value="server-config">{t("settings.optTxtServerConfig")}</SelectItem>
+                          <SelectItem value="incident-report">{t("settings.optTxtIncidentReport")}</SelectItem>
+                          <SelectItem value="shopping-list">{t("settings.optTxtShoppingList")}</SelectItem>
+                          <SelectItem value="recipe-txt">{t("settings.optTxtRecipe")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2041,19 +2189,19 @@ export default function SettingsTabView({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="blank">{t("settings.optHtmlBlank") || "Blank HTML"}</SelectItem>
-                          <SelectItem value="basic-website">{t("settings.optHtmlBasic") || "Basic Website"}</SelectItem>
-                          <SelectItem value="landing-page">{t("settings.optHtmlLanding") || "Landing Page"}</SelectItem>
-                          <SelectItem value="portfolio">{t("settings.optHtmlPortfolio") || "Portfolio"}</SelectItem>
-                          <SelectItem value="blog">{t("settings.optHtmlBlog") || "Blog"}</SelectItem>
-                          <SelectItem value="dashboard">{t("settings.optHtmlDashboard") || "Dashboard"}</SelectItem>
-                          <SelectItem value="documentation">{t("settings.optHtmlDoc") || "Documentation"}</SelectItem>
-                          <SelectItem value="link-tree">{t("settings.optHtmlLinks") || "Link in Bio"}</SelectItem>
-                          <SelectItem value="invoice">{t("settings.optHtmlInvoice") || "Invoice & Receipt"}</SelectItem>
-                          <SelectItem value="pricing-table">{t("settings.optHtmlPricingTable") || "Pricing Plans Table"}</SelectItem>
-                          <SelectItem value="event-invite">{t("settings.optHtmlEventInvite") || "Event Invitation & RSVP"}</SelectItem>
-                          <SelectItem value="restaurant-menu">{t("settings.optHtmlRestaurantMenu") || "Restaurant & Cafe Menu"}</SelectItem>
-                          <SelectItem value="faq-page">{t("settings.optHtmlFaqPage") || "Help Center & FAQ"}</SelectItem>
+                          <SelectItem value="blank">{t("settings.optHtmlBlank")}</SelectItem>
+                          <SelectItem value="basic-website">{t("settings.optHtmlBasic")}</SelectItem>
+                          <SelectItem value="landing-page">{t("settings.optHtmlLanding")}</SelectItem>
+                          <SelectItem value="portfolio">{t("settings.optHtmlPortfolio")}</SelectItem>
+                          <SelectItem value="blog">{t("settings.optHtmlBlog")}</SelectItem>
+                          <SelectItem value="dashboard">{t("settings.optHtmlDashboard")}</SelectItem>
+                          <SelectItem value="documentation">{t("settings.optHtmlDoc")}</SelectItem>
+                          <SelectItem value="link-tree">{t("settings.optHtmlLinks")}</SelectItem>
+                          <SelectItem value="invoice">{t("settings.optHtmlInvoice")}</SelectItem>
+                          <SelectItem value="pricing-table">{t("settings.optHtmlPricingTable")}</SelectItem>
+                          <SelectItem value="event-invite">{t("settings.optHtmlEventInvite")}</SelectItem>
+                          <SelectItem value="restaurant-menu">{t("settings.optHtmlRestaurantMenu")}</SelectItem>
+                          <SelectItem value="faq-page">{t("settings.optHtmlFaqPage")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2064,7 +2212,7 @@ export default function SettingsTabView({
               {/* 7. AI ASSISTANT */}
               {safeActiveCategory === "ai" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div className="flex items-center justify-between">
                       <label className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                         <Key className="h-3.5 w-3.5 text-primary" />
@@ -2104,31 +2252,18 @@ export default function SettingsTabView({
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.aiModelGroup")}</h3>
                       <div className="flex items-center gap-2">
-                        {availableModels.some((m) => m.isExhausted) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              clearExhaustedModels();
-                              void loadAiModels();
-                              toast({
-                                title: t("settings.aiModelResetQuota"),
-                                description: "ล้างสถานะโควตาเรียบร้อยแล้ว ทุกโมเดลกลับมาพร้อมใช้งาน",
-                              });
-                            }}
-                            className="text-[11px] text-primary hover:underline transition-colors cursor-pointer"
-                          >
-                            {t("settings.aiModelResetQuota")}
-                          </button>
-                        )}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
-                              onClick={() => void loadAiModels()}
+                              onClick={() => {
+                                clearExhaustedModels();
+                                void loadAiModels();
+                              }}
                               disabled={isLoadingModels}
                               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
                             >
@@ -2174,77 +2309,18 @@ export default function SettingsTabView({
               )}
 
               {/* 8. SHORTCUTS */}
-              {safeActiveCategory === "shortcuts" && (
-                <div className="space-y-6">
-                  {/* Group 1: General & Navigation */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupGeneral")}</h3>
-                    <div className="divide-y divide-border/30 text-xs">
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbNewNote")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + N</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenFolder")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + O</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSave")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + S</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCloseTab")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + W</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCycleTabs")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Tab / Ctrl + Shift + Tab</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleSidebar")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + \</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenSettings")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + ,</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSearch")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K / Ctrl + F</kbd></div>
-                    </div>
-                  </div>
-
-                  {/* Group 2: Text Formatting */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupFormatting")}</h3>
-                    <div className="divide-y divide-border/30 text-xs">
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBold")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + B</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbItalic")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + I</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbUnderline")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + U</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbStrike")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + X</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbHighlight")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + H</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSuperscript")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + .</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSubscript")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + ,</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInlineCode")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + E / Ctrl + `</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbInsertLink")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + K</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbClearFormatting")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + N</kbd></div>
-                    </div>
-                  </div>
-
-                  {/* Group 3: Lists & Blocks */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupListsAndBlocks")}</h3>
-                    <div className="divide-y divide-border/30 text-xs">
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBulletList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 8</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOrderedList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 7</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbTaskList")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + 9</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbBlockquote")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + Q</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbCodeBlock")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Alt + C</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbIndent")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Tab / Shift + Tab</kbd></div>
-                    </div>
-                  </div>
-
-                  {/* Group 4: Tools & Utilities */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-3 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{t("settings.kbGroupTools")}</h3>
-                    <div className="divide-y divide-border/30 text-xs">
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbFixLang")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + L</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbOpenAi")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + A</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleCalc")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + C</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbToggleClock")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">Ctrl + Shift + T</kbd></div>
-                      <div className="flex justify-between py-2"><span className="text-muted-foreground">{t("settings.kbSlashCommands")}</span><kbd className="px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-semibold">/</kbd></div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {safeActiveCategory === "shortcuts" && <ShortcutsSection />}
 
               {/* 9. STORAGE */}
               {safeActiveCategory === "storage" && (
                 <div className="space-y-6">
                   {/* Local Storage Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.storageGroup") || "Storage Provider"}</h3>
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.storageGroup")}</h3>
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-foreground">{t("settings.localStorageLabel") || "Local Storage"}</div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.localStorageDesc") || "Store notes locally in browser and local disk."}</p>
+                        <div className="text-xs font-semibold text-foreground">{t("settings.localStorageLabel")}</div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.localStorageDesc")}</p>
                       </div>
                       {(() => {
                         let isLocalOk = false;
@@ -2259,12 +2335,12 @@ export default function SettingsTabView({
                         return isLocalOk ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shrink-0">
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            {t("settings.connected") || "Connected"}
+                            {t("settings.connected")}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-semibold shrink-0">
                             <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                            {t("settings.unavailable") || "Unavailable"}
+                            {t("settings.unavailable")}
                           </span>
                         );
                       })()}
@@ -2272,8 +2348,8 @@ export default function SettingsTabView({
                   </div>
 
                   {/* Google Drive Cloud Storage Card */}
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.cloudSyncGroup") || "Cloud Sync"}</h3>
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.cloudSyncGroup")}</h3>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2.5 rounded-xl bg-muted/80 border border-border/60 flex items-center justify-center shrink-0">
@@ -2282,7 +2358,7 @@ export default function SettingsTabView({
                         <div>
                           <div className="text-sm font-bold text-foreground">Google Drive</div>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {t("settings.gdriveDesc") || "Store your Luno files in your Google Drive."}
+                            {t("settings.gdriveDesc")}
                           </p>
                         </div>
                       </div>
@@ -2290,7 +2366,7 @@ export default function SettingsTabView({
                       {isGoogleDriveConnected() ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold shrink-0">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          {t("settings.connected") || "Connected"}
+                          {t("settings.connected")}
                         </span>
                       ) : (
                         <button
@@ -2305,27 +2381,27 @@ export default function SettingsTabView({
                               await syncEngine.initializeSync();
                               triggerSync(notes, onNotesUpdated, folderPaths);
                               toast({
-                                title: t("settings.gdriveConnectedTitle") || "Google Drive Connected",
-                                description: t("settings.gdriveConnectedDesc") || "Luno is now synced with your Google Drive.",
+                                title: t("settings.gdriveConnectedTitle"),
+                                description: t("settings.gdriveConnectedDesc"),
                               });
                             } catch (err: any) {
                               toast({
-                                title: t("settings.gdriveConnectFailed") || "Connection Failed",
-                                description: err.message || "Failed to connect to Google Drive",
+                                title: t("settings.gdriveConnectFailed"),
+                                description: err.message || t("settings.gdriveConnectFailedDesc"),
                                 variant: "destructive",
                               });
                             } finally {
                               setIsConnectingDrive(false);
                             }
                           }}
-                          className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-2 shadow-2xs cursor-pointer transition-all disabled:opacity-50 shrink-0"
+                          className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-2 shadow-sm cursor-pointer transition-all disabled:opacity-50 shrink-0"
                         >
                           {isConnectingDrive ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Plug className="h-4 w-4" />
                           )}
-                          {t("settings.connect") || "Connect"}
+                          {t("settings.connect")}
                         </button>
                       )}
                     </div>
@@ -2334,7 +2410,7 @@ export default function SettingsTabView({
                       <div className="space-y-4 pt-2 border-t border-border/40 text-xs">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
                           <div>
-                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.account") || "Account"}</span>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.account")}</span>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <span className="font-semibold text-foreground truncate block mt-0.5 cursor-default">
@@ -2347,7 +2423,7 @@ export default function SettingsTabView({
                             </Tooltip>
                           </div>
                           <div>
-                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location") || "Location"}</span>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.location")}</span>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
@@ -2359,7 +2435,7 @@ export default function SettingsTabView({
                                       if (token) {
                                         try {
                                           targetId = await ensureWorkspacesRootOnly(token);
-                                        } catch {}
+                                        } catch { /* ignore */ }
                                       }
                                     }
                                     const driveUrl = targetId
@@ -2379,28 +2455,28 @@ export default function SettingsTabView({
                             </Tooltip>
                           </div>
                           <div>
-                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced") || "Last Synced"}</span>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.lastSynced")}</span>
                             <span className="font-semibold text-foreground block mt-0.5">
-                              {lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : (t("settings.justNow") || "Just now")}
+                              {lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : (t("settings.justNow"))}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.syncState") || "Sync State"}</span>
+                            <span className="text-muted-foreground font-medium block text-[11px] uppercase tracking-wider">{t("settings.syncState")}</span>
                             <span className="font-semibold text-primary capitalize block mt-0.5">
                               {syncStatus === "idle"
-                                ? t("settings.syncStatusIdle") || "Idle"
+                                ? t("settings.syncStatusIdle")
                                 : syncStatus === "saving"
-                                ? t("settings.syncStatusSaving") || "Saving..."
+                                ? t("settings.syncStatusSaving")
                                 : syncStatus === "syncing"
-                                ? t("settings.syncStatusSyncing") || "Syncing..."
+                                ? t("settings.syncStatusSyncing")
                                 : syncStatus === "synced"
-                                ? t("settings.syncStatusSynced") || "Synced"
+                                ? t("settings.syncStatusSynced")
                                 : syncStatus === "offline"
-                                ? t("settings.syncStatusOffline") || "Offline"
+                                ? t("settings.syncStatusOffline")
                                 : syncStatus === "error"
-                                ? t("settings.syncStatusError") || "Error"
+                                ? t("settings.syncStatusError")
                                 : syncStatus === "conflict"
-                                ? t("settings.syncStatusConflict") || "Conflict"
+                                ? t("settings.syncStatusConflict")
                                 : syncStatus}
                             </span>
                           </div>
@@ -2408,8 +2484,8 @@ export default function SettingsTabView({
 
                         <div className="flex items-center justify-between gap-4 pt-1">
                           <div>
-                            <label className="text-xs font-semibold text-foreground">{t("settings.cloudSyncActive") || "Enable Cloud Storage Mode"}</label>
-                            <p className="text-xs text-muted-foreground mt-0.5">{t("settings.cloudSyncActiveDesc") || "Sync and save notes to Google Drive as primary storage."}</p>
+                            <label className="text-xs font-semibold text-foreground">{t("settings.cloudSyncActive")}</label>
+                            <p className="text-xs text-muted-foreground mt-0.5">{t("settings.cloudSyncActiveDesc")}</p>
                           </div>
                           <Switch
                             checked={settings.storageMode === "gdrive"}
@@ -2435,7 +2511,7 @@ export default function SettingsTabView({
                             className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            {t("settings.openFolder") || "Open Folder"}
+                            {t("settings.openFolder")}
                           </button>
                           <button
                             type="button"
@@ -2443,22 +2519,22 @@ export default function SettingsTabView({
                             onClick={() => {
                               triggerSync(notes, onNotesUpdated, folderPaths);
                               toast({
-                                title: t("settings.syncState") || "Syncing",
-                                description: t("settings.gdriveConnectedDesc") || "Syncing notes to Google Drive...",
+                                title: t("settings.syncState"),
+                                description: t("settings.gdriveConnectedDesc"),
                               });
                             }}
                             className="px-3.5 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${syncStatus === "syncing" ? "animate-spin" : ""}`} />
-                            {t("settings.syncNow") || "Sync Now"}
+                            {t("settings.syncNow")}
                           </button>
                           <button
                             type="button"
                             onClick={() => setDisconnectModalOpen(true)}
-                            className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                            className="px-3.5 py-2 rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                           >
                             <Unplug className="h-3.5 w-3.5" />
-                            {t("settings.disconnect") || "Disconnect"}
+                            {t("settings.disconnect")}
                           </button>
                         </div>
                       </div>
@@ -2467,26 +2543,21 @@ export default function SettingsTabView({
                 </div>
               )}
 
-              {/* Disconnect Google Drive Modal */}
-              <Dialog open={disconnectModalOpen} onOpenChange={setDisconnectModalOpen}>
-                <DialogContent className="sm:max-w-md rounded-2xl">
-                  <DialogHeader>
-                    <DialogTitle>{t("settings.disconnectModalTitle") || "Disconnect Google Drive"}</DialogTitle>
-                    <DialogDescription className="pt-2 text-xs leading-relaxed">
-                      {t("settings.disconnectModalDesc") || "Disconnecting Google Drive will stop cloud synchronization. Your files will remain in your Google Drive."}
-                    </DialogDescription>
-                  </DialogHeader>
+              {/* Disconnect Google Drive Confirmation */}
+              <AlertDialog open={disconnectModalOpen} onOpenChange={setDisconnectModalOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("settings.disconnectModalTitle")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("settings.disconnectModalDesc")}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
 
-                  <DialogFooter className="gap-2 sm:gap-0 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setDisconnectModalOpen(false)}
-                      className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-xs font-semibold transition-colors cursor-pointer"
-                    >
-                      {t("common.cancel") || "Cancel"}
-                    </button>
-                    <button
-                      type="button"
+                  <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setDisconnectModalOpen(false)}>
+                      {t("common.cancel")}
+                    </AlertDialogCancel>
+                    <AlertDialogAction
                       onClick={async () => {
                         const isPureCloud = isCloudWorkspace === true || (openedFolderName === "Google Drive" && (!folderPaths || folderPaths.length === 0));
                         await disconnectGoogleDrive();
@@ -2499,28 +2570,28 @@ export default function SettingsTabView({
                             onCloseWorkspace();
                           }
                           toast({
-                            title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
-                            description: t("settings.gdriveDisconnectedWorkspaceDesc") || "Cloud workspace closed. Your files remain safe in Google Drive.",
+                            title: t("settings.gdriveDisconnectedTitle"),
+                            description: t("settings.gdriveDisconnectedWorkspaceDesc"),
                           });
                         } else {
                           toast({
-                            title: t("settings.gdriveDisconnectedTitle") || "Google Drive Disconnected",
-                            description: t("settings.gdriveDisconnectedDesc") || "Cloud sync is now disabled. Your local workspace files remain intact.",
+                            title: t("settings.gdriveDisconnectedTitle"),
+                            description: t("settings.gdriveDisconnectedDesc"),
                           });
                         }
                       }}
-                      className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-xs font-semibold transition-colors cursor-pointer"
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                     >
-                      {t("settings.disconnect") || "Disconnect"}
-                    </button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                      {t("settings.disconnect")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
               {/* 10. BACKUP */}
               {safeActiveCategory === "backup" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.backupGroup")}</h3>
 
                     <div className="flex items-center justify-between gap-4">
@@ -2540,7 +2611,7 @@ export default function SettingsTabView({
                           <Download className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
                         <span>
-                          {isExportingBackup ? (t("settings.exportingBackup") || "Creating ZIP...") : t("settings.exportBackupBtn")}
+                          {isExportingBackup ? (t("settings.exportingBackup")) : t("settings.exportBackupBtn")}
                         </span>
                       </button>
                     </div>
@@ -2551,7 +2622,7 @@ export default function SettingsTabView({
               {/* 11. PRIVACY */}
               {safeActiveCategory === "privacy" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-2xs">
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{t("settings.privacyGroup")}</h3>
                     <div className="flex items-center justify-between gap-4">
                       <div>
@@ -2566,119 +2637,16 @@ export default function SettingsTabView({
 
               {/* 12. ABOUT */}
               {safeActiveCategory === "about" && (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-border/60 bg-card p-6 flex flex-col gap-4 shadow-2xs">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                      <div className="space-y-1.5 max-w-xl">
-                        <div>
-                          <h3 className="text-sm font-bold text-foreground">Luno Note</h3>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() => onOpenWhatsNew?.()}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left block mt-0.5 focus:outline-none"
-                              >
-                                Version {APP_VERSION} ({appUpdate.currentAppVersion ? `App v${appUpdate.currentAppVersion}` : "Desktop"})
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {settings.language === "th" ? "ดูรายการอัปเดตเวอร์ชันนี้" : "View release notes for this version"}
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
-                          {t("settings.aboutAppDesc")}
-                        </p>
-                        <p className="text-xs text-muted-foreground pt-1">
-                          <a
-                            href={APP_AUTHOR_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              if (onOpenWebTab) {
-                                onOpenWebTab(APP_AUTHOR_URL, `GitHub - ${APP_AUTHOR}`);
-                              } else {
-                                openExternalUrl(APP_AUTHOR_URL);
-                              }
-                            }}
-                            className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                          >
-                            {APP_ABOUT_CREDIT}
-                          </a>
-                        </p>
-                      </div>
-
-                      {/* Vertically Centered Check for Updates in Middle of Card */}
-                      <div className="flex items-center gap-2 shrink-0 sm:self-center">
-                        {appUpdate.isAvailable && (
-                          <button
-                            type="button"
-                            onClick={appUpdate.downloadUpdate}
-                            disabled={appUpdate.isDownloading}
-                            className="w-48 h-10 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            <span>{t("settings.downloadUpdate") || "Download Update"}</span>
-                          </button>
-                        )}
-
-                        {appUpdate.isDownloaded && (
-                          <button
-                            type="button"
-                            onClick={appUpdate.quitAndInstall}
-                            className="w-48 h-10 px-3 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            <span>{t("settings.installAndRestart") || "Restart & Install"}</span>
-                          </button>
-                        )}
-
-                        {!appUpdate.isAvailable && !appUpdate.isDownloaded && (
-                          <button
-                            type="button"
-                            onClick={() => appUpdate.checkForUpdates(true)}
-                            disabled={appUpdate.isChecking || appUpdate.isDownloading}
-                            className="w-48 h-10 px-3 rounded-xl border border-input bg-card hover:bg-muted text-foreground text-xs font-medium transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                          >
-                            {appUpdate.isChecking ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                            ) : (
-                              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                            )}
-                            <span>
-                              {appUpdate.isChecking
-                                ? (t("settings.checkingForUpdates") || "Checking...")
-                                : (t("settings.checkUpdatesNow") || "Check for Updates")}
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Show download progress if downloading */}
-                    {appUpdate.isDownloading && appUpdate.progress && (
-                      <div className="pt-2 border-t border-border/30 space-y-1.5">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{t("settings.downloadingUpdate") || "Downloading..."}</span>
-                          <span className="font-semibold text-foreground">{appUpdate.progress.percent}%</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-200"
-                            style={{ width: `${appUpdate.progress.percent}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <AboutUpdateCard
+                  onOpenWebTab={onOpenWebTab}
+                  onOpenWhatsNew={onOpenWhatsNew}
+                  appUpdate={appUpdate}
+                />
               )}
             </div>
 
             {/* Bottom Sticky Action Bar (Matching Screenshot) */}
-            <div className="px-8 py-4 border-t border-border/50 bg-card/80 backdrop-blur-xs flex items-center justify-between shrink-0">
+            <div className="px-8 py-4 border-t border-border/50 bg-card/80 backdrop-blur-sm flex items-center justify-between shrink-0">
               <button
                 type="button"
                 onClick={handleReset}
@@ -2694,7 +2662,7 @@ export default function SettingsTabView({
               <button
                 type="button"
                 onClick={handleSave}
-                className="h-10 px-6 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs hover:bg-primary/90 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                className="h-10 px-6 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-sm hover:bg-primary/90 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
               >
                 {savedSuccess ? (
                   (() => {
@@ -2705,7 +2673,7 @@ export default function SettingsTabView({
                 <span>{savedSuccess ? t("settings.savedSuccess") : t("settings.saveChanges")}</span>
               </button>
             </div>
-          </div>
+          </main>
         </div>
       </div>
 
@@ -2723,14 +2691,14 @@ export default function SettingsTabView({
       <Dialog open={Boolean(fontToRename)} onOpenChange={(open) => !open && setFontToRename(null)}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>{t("settings.renameFont") || "Rename Font"}</DialogTitle>
+            <DialogTitle>{t("settings.renameFont")}</DialogTitle>
             <DialogDescription>
               {fontToRename?.fileName}
             </DialogDescription>
           </DialogHeader>
           <div className="py-1">
             <label htmlFor="settings-tab-rename-font-name" className="mb-2 block text-sm font-medium text-foreground">
-              {t("sidebar.fileNameLabel") || "Font Name"}
+              {t("sidebar.fileNameLabel")}
             </label>
             <input
               id="settings-tab-rename-font-name"
@@ -2749,21 +2717,16 @@ export default function SettingsTabView({
             />
           </div>
           <DialogFooter>
-            <button
+            <Button type="button" variant="outline" onClick={() => setFontToRename(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
               type="button"
-              className="h-9 px-4 rounded-xl border border-border/60 hover:bg-foreground/5 text-xs font-semibold transition-all cursor-pointer text-muted-foreground hover:text-foreground"
-              onClick={() => setFontToRename(null)}
-            >
-              {t("common.cancel") || "Cancel"}
-            </button>
-            <button
-              type="button"
-              className="h-9 px-4 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs hover:bg-primary/90 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               onClick={() => void handleConfirmFontRename()}
               disabled={!fontRenameValue.trim()}
             >
-              {t("sidebar.renameAction") || t("common.save") || "Rename"}
-            </button>
+              {t("sidebar.renameAction")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2772,20 +2735,20 @@ export default function SettingsTabView({
       <AlertDialog open={Boolean(fontToDelete)} onOpenChange={(open) => !open && setFontToDelete(null)}>
         <AlertDialogContent className="sm:max-w-md rounded-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.deleteFont") || "Delete Font"}</AlertDialogTitle>
+            <AlertDialogTitle>{t("settings.deleteFont")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {(t("settings.deleteFontConfirm") || 'Are you sure you want to delete font "{name}"?').replace("{name}", fontToDelete?.name || "")}
+              {(t("settings.deleteFontConfirm")).replace("{name}", fontToDelete?.name || "")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setFontToDelete(null)} className="rounded-xl">
-              {t("common.cancel") || "Cancel"}
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void handleConfirmFontDelete()}
               className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t("settings.deleteFont") || "Delete"}
+              {t("settings.deleteFont")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
