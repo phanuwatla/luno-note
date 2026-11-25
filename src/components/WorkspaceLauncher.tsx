@@ -295,7 +295,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
         {showCloudView ? (
           <div
             data-launcher-card="true"
-            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60"
+            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60 luno-section-enter"
           >
             {/* Header with Back button and Refresh */}
             <div className="flex items-center justify-between gap-2 p-3 sm:p-3.5">
@@ -413,7 +413,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
                   {t("launcher.noCloudWorkspaces")}
                 </div>
               ) : layoutMode === "grid" ? (
-                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 gap-2 p-2.5">
+                <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 gap-2 p-2.5 luno-section-enter">
                   {cloudWorkspaces.map((cw) => (
                     <div
                       key={cw.id}
@@ -549,7 +549,7 @@ export const WorkspaceLauncher: React.FC<WorkspaceLauncherProps> = ({
           /* Standard Launcher Card with Dividers */
           <div
             data-launcher-card="true"
-            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60"
+            className="w-full rounded-2xl border border-border/70 bg-card p-2 sm:p-3 shadow-sm divide-y divide-border/60 luno-section-enter"
           >
             {/* Option 1: Create New Workspace */}
             <div className="flex items-center justify-between gap-4 p-3.5 sm:p-4">

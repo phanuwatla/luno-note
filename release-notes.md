@@ -1,3 +1,39 @@
+## Release Notes - Luno Note v1.5.0
+
+### Overview
+Luno Note version 1.5.0 is a major release transforming Luno AI into a **Dual Cloud & Local AI Workspace** powered by both Google Gemini and 100% offline **Ollama**, featuring one-click model setup, live token streaming, automatic quota/offline fallback, built-in Luno Note product knowledge with strict confidentiality guardrails, a unified **System-Wide Motion Design Engine**, and crucial editor typing & rename queue stability upgrades.
+
+### Key Improvements & New Features
+
+#### 1. 100% Offline Local AI via Ollama & One-Click Model Manager
+- **Dual AI Provider Support**: Seamlessly switch between **Gemini (Cloud)** and **Ollama (Local)** right from the Luno AI chat composer dropdown or **Settings > AI Assistant**. Works across multi-turn Luno AI chat and all 10 inline Editor AI writing tools.
+- **One-Click Ollama Installer & Daemon Manager**: Automatically detects local Ollama installations, downloads and silently installs the official Windows runtime on demand, and launches the background service without manual CLI commands.
+- **Recommended Model Catalog & Queue**: Install starter models (`Qwen 2.5 1.5B/3B/7B`, `Gemma 3 1B/4B`, `Llama 3.2 3B`) with live layer-weighted progress bars, serialized download queueing, stall/network-interruption automatic resume retries, Cancel support, and one-click Uninstall.
+- **Silent Model Warm-up**: Preloads the active Ollama model (`keep_alive: "15m"`) when entering Luno AI so your first message responds faster.
+
+#### 2. Live Token Streaming, Stop Control & Gemini → Ollama Auto-Fallback
+- **Live NDJSON Token Streaming**: Watch local Ollama answers stream word-by-word in real time (filtering `<think>` reasoning tags) and stop mid-generation anytime with the new **Stop** button.
+- **Smart Auto-Fallback**: Optional **Auto-fallback to Ollama** toggle keeps Gemini as your default while seamlessly falling back to an installed local Ollama model whenever Gemini hits quota limits (`429`), drops offline, or encounters transient 5xx server failures—accompanied by a clear notification toast and `Fallback` badge.
+
+#### 3. Built-in Luno Product Knowledge & Confidentiality Guardrails
+- **On-Demand Feature Guidance**: Dynamic topic-matched Luno Note feature references help both Gemini and Ollama answer workflow, menu, and shortcut questions accurately without inflating general chat prompts.
+- **Strict Security & SSRF Protections**: Blocks non-HTTP(S) schemes, embedded credentials, redirects, and cloud metadata endpoints (`169.254.169.254`, `*.internal`) on custom Ollama URLs, isolates `ollamaBaseUrl` from shared workspace settings, and guards against prompt-injection or internal implementation disclosure.
+
+#### 4. Unified System-Wide Motion Engine & Tactile Micro-Interactions
+- **Centralized Motion Tokens & Hooks (`src/lib/motion.ts`)**: Shared spring transitions, `useAnimationsEnabled()`, `getScrollBehavior()`, and GPU-composited animations across tabs, views, sidebars, trees, checkboxes, and switches.
+- **Accessible Reduced Motion**: Turning off animations in **Settings > General** cleanly clamps UI transitions and smooth scrolling down to `0.001ms` / `auto` across every component.
+
+#### 5. Editor Typing Stability, Spell-Check Polish & File Rename Hardening
+- **Zero Cursor Jumps in Headings**: Preserved `WidgetType` DOM identity inside collapsible H1–H6 headings and added an inline typing fast-path so rapid typing never resets cursor position.
+- **Deferred Active-Word Spell Underlines**: Defers spell-check red underlines on the active word being typed until moving away or blurring, while integrating Hunspell checks into Wrong-Language detection so valid English words never trigger false Thai suggestions.
+- **Hardened Concurrent File Renames**: Added slash normalization (`/` vs `\`), synchronous state tracking against disk watcher races, queued rename serialization, and async stale guards on H1 auto-renames.
+
+### Installation and Updates
+- **Windows (x64)**: Download `luno-note-setup-1.5.0.exe` below.
+- **In-App Auto-Update**: Existing desktop installations update automatically via **Settings > Check for Updates**.
+
+---
+
 ## Release Notes - Luno Note v1.4.1
 
 ### Overview

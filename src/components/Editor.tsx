@@ -189,7 +189,8 @@ import { generateDocHtml } from "@/lib/docExportGenerator";
 import { swapKeyboardLayout } from "@/lib/thaiKeyboardMapper";
 import { FIX_LANGUAGE_EVENT, type FixLanguageEventDetail } from "@/lib/fixLanguageSystem";
 import { getWrongLanguageCandidate } from "@/lib/wrongLanguageDetector";
-import { runGeminiAction, type AiActionType } from "@/lib/geminiApi";
+import { type AiActionType } from "@/lib/geminiApi";
+import { executeAiAction, isAiProviderConfigured } from "@/lib/aiProvider";
 export type { AiActionType };
 import { EditorContent, ReactNodeViewRenderer, useEditor, Editor as TiptapEditor } from "@tiptap/react";
 import { Extension, mergeAttributes, Node as TiptapNode } from "@tiptap/core";
@@ -2874,6 +2875,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     if (pendingRenameRef.current) {
       const { note: targetNote, firstH1Text, newFileName } = pendingRenameRef.current;
       pendingRenameRef.current = null;
+      // Guard against stale async callbacks when user continues typing in Title H1 after rename is triggered
+      const latestFirstChild = editorInstanceRef.current?.state?.doc?.firstChild;
+      let latestH1Text = firstH1Text;
+      if (latestFirstChild && latestFirstChild.type.name === "heading" && latestFirstChild.attrs?.level === 1) {
+        const rawH1 = latestFirstChild.textContent || "";
+        const isFirstBlockLiveExpanded =
+          editorInstanceRef.current &&
+          livePreviewPluginKey.getState(editorInstanceRef.current.state)?.activeBlock?.blockPos === 0;
+        latestH1Text = (isFirstBlockLiveExpanded ? rawH1.replace(/^#{1,6}\s+/, "") : rawH1).trim();
+      }
+      if (latestH1Text !== firstH1Text && editorActiveNoteIdRef.current === targetNote.id) {
+        return;
+      }
       internalH1RenameRef.current = firstH1Text;
       if (firstH1Text === "") {
         onUpdate(targetNote.id, { title: "" });
@@ -3079,6 +3093,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const tRef = useRef(t);
   const isMobileRef = useRef(isMobile);
   const noteRef = useRef(note);
+  noteRef.current = note;
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
 
   useEffect(() => {
     tRef.current = t;
@@ -4400,18 +4419,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const currentNote = activeNoteRef.current || note;
       const isLocked = Boolean((currentNote?.isLocked && !currentNote?.isDecrypted) || isEncryptedNote(currentNote?.content));
 
-      if (currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isStrictReadingModeRef.current && !syncingFromNote.current) {
+      if ( currentActiveId && currentNote && currentActiveId === currentNote.id && !isLocked && !isStrictReadingModeRef.current && !syncingFromNote.current) {
         noteEditorStateMap.set(currentActiveId, instance.state);
       }
-      if (isLocked || (currentActiveId && note && currentActiveId !== note.id)) return;
-      if (isStrictReadingModeRef.current || !note || syncingFromNote.current || isNoteDeleted(note.id)) return;
-      if (loadingNoteIdRef.current === note.id) return;
+      if (isLocked || (currentActiveId && currentNote && currentActiveId !== currentNote.id)) return;
+      if (isStrictReadingModeRef.current || !currentNote || syncingFromNote.current || isNoteDeleted(currentNote.id)) return;
+      if (loadingNoteIdRef.current === currentNote.id) return;
       if (transaction?.getMeta("isSync")) return;
       if (isLiveToggleOnly) return;
       if (transaction && !transaction.docChanged) return;
       userEditedRef.current = true;
       hasPendingDiskSaveRef.current = true;
-      if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== note.id) return;
+      if (editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== currentNote.id) return;
       const doc = instance.state.doc;
       const firstChild = doc.firstChild;
       let firstH1Text = "";
@@ -4422,18 +4441,18 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         firstH1Text = (isFirstBlockLiveExpanded ? rawH1.replace(/^#{1,6}\s+/, "") : rawH1).trim();
       }
 
-      const currentBaseTitle = getBaseTitle(note);
+      const currentBaseTitle = getBaseTitle(currentNote);
       if (firstH1Text !== currentBaseTitle) {
         if (firstH1Text === "") {
-          pendingRenameRef.current = { note, firstH1Text: "", newFileName: "" };
-        } else if (note.fileName) {
-          const lastDot = note.fileName.lastIndexOf(".");
-          const ext = lastDot > 0 ? note.fileName.slice(lastDot) : ".md";
+          pendingRenameRef.current = { note: currentNote, firstH1Text: "", newFileName: "" };
+        } else if (currentNote.fileName) {
+          const lastDot = currentNote.fileName.lastIndexOf(".");
+          const ext = lastDot > 0 ? currentNote.fileName.slice(lastDot) : ".md";
           const safeName = firstH1Text.replace(/[\\/:*?"<>|]/g, "_").trim();
           if (safeName && !isSystemGeneratedUntitledName(safeName)) {
             const newFileName = `${safeName}${ext}`;
-            if (newFileName !== note.fileName) {
-              pendingRenameRef.current = { note, firstH1Text, newFileName };
+            if (newFileName !== currentNote.fileName) {
+              pendingRenameRef.current = { note: currentNote, firstH1Text, newFileName };
               if (debounceRenameTimeoutRef.current) {
                 clearTimeout(debounceRenameTimeoutRef.current);
               }
@@ -4443,10 +4462,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
               }, 1500);
             }
           } else {
-            pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
+            pendingRenameRef.current = { note: currentNote, firstH1Text, newFileName: "" };
           }
         } else {
-          pendingRenameRef.current = { note, firstH1Text, newFileName: "" };
+          pendingRenameRef.current = { note: currentNote, firstH1Text, newFileName: "" };
         }
       }
 
@@ -4834,16 +4853,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return null;
   }, [rootDirHandle]);
 
+  const performSaveRef = useRef<
+    ((content: string, ext: "md" | "txt" | "html" | "css", isSilent?: boolean, targetNote?: Note) => Promise<void>) | null
+  >(null);
+
   const saveLinkedFileToDisk = useCallback(async (targetNote?: Note) => {
     if (isStrictReadingModeRef.current) return;
     if (!hasPendingDiskSaveRef.current) return;
-    const n = targetNote || activeNoteRef.current || note;
-    if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n) && !isJsFile(n)) || !settings.autoSave) return;
+    const n = targetNote || activeNoteRef.current || noteRef.current;
+    if (!n || (!editor && !isHtmlFile(n) && !isCssFile(n) && !isJsFile(n)) || !settingsRef.current?.autoSave) return;
     if ((n.isLocked && !n.isDecrypted) || isEncryptedNote(n.content)) return;
-    if (!targetNote && editorActiveNoteIdRef.current && editorActiveNoteIdRef.current !== n.id) return;
+    const isCodeFile = isHtmlFile(n) || isCssFile(n) || isJsFile(n);
+    if (!isCodeFile && editorActiveNoteIdRef.current !== n.id) return;
     if (n.fileType === "image" || n.fileType === "binary") return;
     if (deletedNoteIdsRef.current.has(n.id) || isNoteDeleted(n.id)) return;
-    if (Array.isArray(notes) && !notes.some((item) => item.id === n.id)) return;
+    const currentNotesList = notesRef.current;
+    if (Array.isArray(currentNotesList) && !currentNotesList.some((item) => item.id === n.id)) return;
     if (!targetNote && (loadingNoteIdRef.current === n.id || syncingFromNote.current)) return;
 
     const opId = ++saveOpIdRef.current;
@@ -4859,13 +4884,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     try {
       const ext = getPreferredExtension(n) as "md" | "txt" | "html" | "css";
       const content = getContentToSave(ext, n);
-      await performSave(content, ext, true, n);
+      if (performSaveRef.current) {
+        await performSaveRef.current(content, ext, true, n);
+      }
     } catch {
       if (saveOpIdRef.current === opId) {
         setSaveStatus("failed");
       }
     }
-  }, [note, editor, isHtmlFile, isCssFile, isJsFile, settings.autoSave, notes]);
+  }, [editor, isHtmlFile, isCssFile, isJsFile]);
+
+  const flushDebouncedContentSaveRef = useRef(flushDebouncedContentSave);
+  flushDebouncedContentSaveRef.current = flushDebouncedContentSave;
+  const saveLinkedFileToDiskRef = useRef(saveLinkedFileToDisk);
+  saveLinkedFileToDiskRef.current = saveLinkedFileToDisk;
 
   const scheduleAutoSaveDisk = useCallback(() => {
     if (autoSaveDiskTimeoutRef.current) {
@@ -5148,10 +5180,15 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       const target = targetId === note?.id ? note : (notes || []).find((n) => n.id === targetId);
       if (!target) return;
 
+      const isCodeTarget = isHtmlFile(target) || isCssFile(target) || isJsFile(target);
+      if (!isCodeTarget && editorActiveNoteIdRef.current !== targetId) {
+        return;
+      }
+
       if (
         userEditedRef.current ||
         hasPendingDiskSaveRef.current ||
-        ((isHtmlFile(target) || isCssFile(target) || isJsFile(target)) && codeEditorContentMap.has(targetId))
+        (isCodeTarget && codeEditorContentMap.has(targetId))
       ) {
         flushDebouncedContentSave(target);
         if (settings.autoSave) {
@@ -5164,7 +5201,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     return () => {
       window.removeEventListener("luno:flush-note-before-close", handleFlushBeforeClose);
     };
-  }, [note, notes, isHtmlFile, isCssFile, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
+  }, [note, notes, isHtmlFile, isCssFile, isJsFile, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
 
   useEffect(() => {
     const handleInsertToActiveEditor = (e: Event) => {
@@ -5341,14 +5378,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         const firstChild = editor.state.doc.firstChild;
         if (firstChild && firstChild.type.name === "heading" && firstChild.attrs?.level === 1) {
           const currentH1 = (firstChild.textContent || "").trim();
+          const isActivelyEditingTitleH1 =
+            Boolean(debounceRenameTimeoutRef.current) ||
+            Boolean(pendingRenameRef.current && pendingRenameRef.current.note.id === note.id);
           const isInternalRename =
-            internalH1RenameRef.current !== null &&
-            (internalH1RenameRef.current === currentH1 ||
-              internalH1RenameRef.current === baseTitle ||
-              currentH1.startsWith(internalH1RenameRef.current) ||
-              baseTitle.startsWith(internalH1RenameRef.current));
+            isActivelyEditingTitleH1 ||
+            (internalH1RenameRef.current !== null &&
+              (internalH1RenameRef.current === currentH1 ||
+                internalH1RenameRef.current === baseTitle ||
+                currentH1.startsWith(internalH1RenameRef.current) ||
+                baseTitle.startsWith(internalH1RenameRef.current)));
           if (!editor.isFocused && !userEditedRef.current && !isInternalRename && baseTitle && currentH1 !== baseTitle) {
             syncingFromNote.current = true;
+            const wasInFirstChild = editor.state.selection.from <= firstChild.nodeSize;
             const tr = editor.state.tr;
             tr.setMeta("addToHistory", false);
             tr.setMeta("isSync", true);
@@ -5356,11 +5398,20 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             const to = Math.max(1, 1 + firstChild.nodeSize - 2);
             if (from <= to) {
               tr.replaceWith(from, to, editor.schema.text(baseTitle));
+              if (wasInFirstChild) {
+                const endOfTitlePos = Math.min(from + baseTitle.length, tr.doc.content.size);
+                tr.setSelection(TextSelection.create(tr.doc, endOfTitlePos));
+              }
               editor.view.dispatch(tr);
             }
             syncingFromNote.current = false;
           }
-          if (internalH1RenameRef.current !== null && (baseTitle === internalH1RenameRef.current || currentH1 === internalH1RenameRef.current)) {
+          if (
+            internalH1RenameRef.current !== null &&
+            !isActivelyEditingTitleH1 &&
+            baseTitle === currentH1 &&
+            baseTitle === internalH1RenameRef.current
+          ) {
             internalH1RenameRef.current = null;
           }
         }
@@ -5386,10 +5437,10 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         );
       }
       if (userEditedRef.current && prevNote) {
-        flushDebouncedContentSave(prevNote);
+        flushDebouncedContentSaveRef.current(prevNote);
       }
-      if (hasPendingDiskSaveRef.current && prevNote && settings.autoSave) {
-        void saveLinkedFileToDisk(prevNote);
+      if (hasPendingDiskSaveRef.current && prevNote && settingsRef.current?.autoSave) {
+        void saveLinkedFileToDiskRef.current(prevNote);
       }
       if (!closedNoteIds.has(prevId)) {
         if (editor?.state && !isStrictReadingModeRef.current && !isHtmlFile(prevNote) && !isCssFile(prevNote) && !isJsFile(prevNote)) {
@@ -5455,7 +5506,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     // Check if this note already has a preserved editor state (from an open tab)
     const savedState = noteEditorStateMap.get(note.id);
     if (savedState) {
-      if (!isStrictReadingMode && hasReadingModeFootnotesDoc(savedState.doc)) {
+      const isAccidentalEmptyDoc =
+        !isTxtFile(note) &&
+        !isHtmlFile(note) &&
+        savedState.doc.childCount === 1 &&
+        savedState.doc.firstChild?.type.name === "paragraph" &&
+        savedState.doc.textContent === "" &&
+        Boolean((note.content ?? "").trim());
+      if ((!isStrictReadingMode && hasReadingModeFootnotesDoc(savedState.doc)) || isAccidentalEmptyDoc) {
         noteEditorStateMap.delete(note.id);
       } else {
         syncingFromNote.current = true;
@@ -5590,10 +5648,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     syncingFromNote.current = false;
     loadingNoteIdRef.current = null;
     restoreScrollPosition(note.id);
-  }, [editor, note?.id, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave, isVisible]);
+  }, [editor, note?.id, note?.fileName, note?.title, getBaseTitle, restoreScrollPosition, isVisible]);
 
   // Save active note state on unmount or switching note, and flush pending saves
   useEffect(() => {
+    const cleanupNoteId = note?.id ?? null;
     return () => {
       if (typingTickTimeoutRef.current) {
         clearTimeout(typingTickTimeoutRef.current);
@@ -5615,7 +5674,14 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
         clearTimeout(autoSaveDiskTimeoutRef.current);
         autoSaveDiskTimeoutRef.current = null;
       }
-      const target = activeNoteRef.current || noteRef.current;
+      const activeId = editorActiveNoteIdRef.current;
+      const target = activeNoteRef.current;
+      const isSameActiveNote = Boolean(
+        activeId &&
+        target?.id &&
+        target.id === activeId &&
+        (!cleanupNoteId || activeId === cleanupNoteId)
+      );
       if (editor && !editor.isDestroyed && livePreviewPluginKey.getState(editor.state)?.activeBlock) {
         editor.view.dispatch(
           editor.state.tr
@@ -5623,7 +5689,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
             .setMeta("addToHistory", false)
         );
       }
-      if (target?.id && !closedNoteIds.has(target.id)) {
+      if (isSameActiveNote && target && !closedNoteIds.has(target.id) && !syncingFromNote.current && loadingNoteIdRef.current !== target.id) {
         if (editor && !editor.isDestroyed && !isStrictReadingModeRef.current && !isHtmlFile(target) && !isCssFile(target) && !isJsFile(target)) {
           noteEditorStateMap.set(target.id, editor.state);
         }
@@ -5634,22 +5700,22 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
           }
         }
       }
-      if (userEditedRef.current && target) {
-        flushDebouncedContentSave(target);
+      if (isSameActiveNote && userEditedRef.current && target) {
+        flushDebouncedContentSaveRef.current(target);
       } else if (pendingSaveContentRef.current) {
         const pending = pendingSaveContentRef.current;
         pendingSaveContentRef.current = null;
-        if (userEditedRef.current && target && pending.id === target.id) {
-          onUpdate(pending.id, { content: pending.content });
+        if (isSameActiveNote && userEditedRef.current && target && pending.id === target.id) {
+          onUpdateRef.current(pending.id, { content: pending.content });
         }
         userEditedRef.current = false;
       }
-      if (hasPendingDiskSaveRef.current && target && settings.autoSave) {
-        void saveLinkedFileToDisk(target);
+      if (isSameActiveNote && hasPendingDiskSaveRef.current && target && settingsRef.current?.autoSave) {
+        void saveLinkedFileToDiskRef.current(target);
       }
       hasPendingDiskSaveRef.current = false;
     };
-  }, [editor, onUpdate, note?.id, flushDebouncedContentSave, saveLinkedFileToDisk, settings.autoSave]);
+  }, [editor, note?.id]);
 
   useEffect(() => {
     if (!editor) return;
@@ -5721,7 +5787,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (userEditedRef.current && note) {
         flushDebouncedContentSave(note);
       }
-      if (note.id && !hasReadingModeFootnotesDoc(editor.state.doc)) {
+      if (note.id && editorActiveNoteIdRef.current === note.id && !hasReadingModeFootnotesDoc(editor.state.doc)) {
         noteEditorStateMap.set(note.id, editor.state);
       }
       userEditedRef.current = false;
@@ -6899,7 +6965,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   const handleAiAction = async (action: AiActionType) => {
     if (!editor) return;
 
-    if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+    if (!isAiProviderConfigured(settings)) {
       handleOpenAiSettings();
       return;
     }
@@ -6927,9 +6993,19 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
     setAiGenerating(true);
 
     try {
-      const { result, modelUsed } = await runGeminiAction(settings.geminiApiKey, action, trimmedTargetText, lang, settings.aiModel);
+      const { result, modelUsed, fallbackFrom, fallbackReason } = await executeAiAction(settings, action, trimmedTargetText, lang);
       const cleanResult = result.trim();
       setAiOutputText(cleanResult);
+
+      if (fallbackFrom === "gemini") {
+        toast({
+          title: t("lunoAi.fallbackTitle"),
+          description:
+            fallbackReason === "quota"
+              ? t("lunoAi.fallbackQuotaDesc", { model: modelUsed })
+              : t("lunoAi.fallbackOfflineDesc", { model: modelUsed }),
+        });
+      }
 
       setAiDiffState({
         from: selectionFrom,
@@ -8883,7 +8959,11 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
   };
 
   const performSave = async (content: string, ext: "md" | "txt" | "html" | "css", isSilent = false, targetNote?: Note) => {
-    const n = targetNote || activeNoteRef.current || note;
+    const latestFromRef =
+      targetNote && noteRef.current && noteRef.current.id === targetNote.id
+        ? noteRef.current
+        : null;
+    const n = latestFromRef || targetNote || activeNoteRef.current || noteRef.current || note;
     if (!n || isNoteDeleted(n.id) || deletedNoteIdsRef.current.has(n.id)) return;
     if (n.fileType === "image" || n.fileType === "binary") return;
 
@@ -9018,7 +9098,9 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       }
       await setStoredFileHandle(n.id, existingHandle);
       const savedFile = await existingHandle.getFile();
-      updateLinkedMetadata(n.id, savedFile.name);
+      if (!n.fileName || !n.isLinkedFile) {
+        updateLinkedMetadata(n.id, savedFile.name);
+      }
       if (!isSilent) {
         toast({
           title: t("editor.saveToastTitle"),
@@ -9046,6 +9128,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
       if (!isSilent) downloadMarkdown(normalizedContent, ext);
     }
   };
+  performSaveRef.current = performSave;
 
   const performSaveAs = async (customContent?: string, customExt?: "md" | "txt" | "html" | "css") => {
     if (!note || isNoteDeleted(note.id)) return;
@@ -13110,7 +13193,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </Tooltip>
                   );
                 case "aiAssistant":
-                  if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+                  if (!isAiProviderConfigured(settings)) {
                     return (
                       <Tooltip key="aiAssistant">
                         <TooltipTrigger asChild>
@@ -15398,7 +15481,7 @@ export default function Editor(props: EditorProps & { notes?: Note[] }) {
                     </DropdownMenuItem>
                   );
                 case "aiAssistant":
-                  if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+                  if (!isAiProviderConfigured(settings)) {
                     return (
                       <DropdownMenuItem
                         key="aiAssistant"

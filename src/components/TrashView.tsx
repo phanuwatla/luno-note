@@ -765,7 +765,7 @@ export default function TrashView({
                   </span>
 
                   {selectedIds.length > 0 && (
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 luno-bar-enter">
                       <button
                         type="button"
                         onClick={handleRestoreSelected}

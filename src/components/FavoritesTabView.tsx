@@ -511,7 +511,7 @@ export default function FavoritesTabView({
           {/* 3. Favorite Notes Grid / List View / Empty State */}
           <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden w-full">
             {viewMode === "list" ? (
-              <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden min-w-0">
+              <div className="flex flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-sm overflow-hidden min-w-0 luno-section-enter">
                 {/* Table Header with Grayish Background (matching TrashView) */}
                 <div className="flex items-center px-4 py-2.5 bg-muted/60 dark:bg-muted/40 border-b border-border/50 text-xs font-semibold text-foreground shrink-0 select-none min-w-0">
                   <div className="w-8 flex items-center justify-center shrink-0">
@@ -558,7 +558,7 @@ export default function FavoritesTabView({
                         <div
                           key={note.id}
                           onClick={() => onOpenNote(note.id)}
-                          className="group flex items-center px-4 py-2.5 text-xs transition-colors cursor-pointer min-w-0 hover:bg-muted/30 text-foreground/90"
+                          className="group flex items-center px-4 py-2.5 text-xs transition-all duration-150 active:scale-[0.995] cursor-pointer min-w-0 hover:bg-muted/30 text-foreground/90"
                         >
                           {/* Star Toggle Button */}
                           <div className="w-8 flex items-center justify-center shrink-0">

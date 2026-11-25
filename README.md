@@ -6,27 +6,27 @@
 
 ### Modern, High-Performance Note-Taking Application
 
-[![Version](https://img.shields.io/badge/version-1.4.1-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.4.1)
+[![Version](https://img.shields.io/badge/version-1.5.0-26A295.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/tag/v1.5.0)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Desktop%20%7C%20Web-06B6D4.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
-[![Release](https://img.shields.io/badge/release-v1.4.1-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.5.0-14B8A6.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note/releases/latest)
 [![Tests](https://img.shields.io/badge/tests-passing-10B981.svg?labelColor=64748B)](https://github.com/phanuwatla/luno-note)
 [![License](https://img.shields.io/badge/license-MIT-0EA5E9.svg?labelColor=64748B)](LICENSE)
 
-Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, an intelligent Gemini AI assistant with voice dictation capabilities, hierarchical folder organization, visual version history with split-diff comparison, and automated desktop release updates.
+Luno Note is a robust, lightweight, and modern note-taking application engineered for productivity, structured thinking, and knowledge management. It integrates rich-text and Markdown editing, a dual Cloud & Local AI assistant (Google Gemini + offline Ollama), hierarchical folder organization, visual version history with split-diff comparison, interactive PDF annotations, and automated desktop release updates.
 
-[Download Version 1.4.1](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.4.1](#what-is-new-in-version-141) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
+[Download Version 1.5.0](https://github.com/phanuwatla/luno-note/releases/latest) | [Key Features](#key-features) | [What Is New in Version 1.5.0](#what-is-new-in-version-150) | [Automatic Updates](#in-app-automatic-updates) | [Development](#development)
 
 </div>
 
 ---
 
-## What Is New in Version 1.4.1
+## What Is New in Version 1.5.0
 
-- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **System-wide Thai/English Mistyping Fixer (System Fix Language)**: Seamlessly convert mistyped text between Thai (Kedmanee) and English (QWERTY) keyboard layouts across any Windows application with a global hotkey, powered by a high-performance native background helper (`LunoFixLang.exe`) and dictionary heuristics.
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **Multimodal AI Vision & Image Attachments**: Attach and analyze images directly in the Luno AI chat panel using Gemini multimodal vision models for visual explanations, diagram understanding, and OCR assistance.
-- <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Interactive Table Controls (TableInteractiveOverlay)**: Effortless one-click controls to insert, delete, and reorder table rows and columns, toggle header rows, and manage cells directly on the editor surface.
-- <img src="./assets/icons/video.svg" width="16" height="16" align="center" /> **Enhanced Media Players with Hover Volume Control**: Embedded audio and video players feature an intuitive hover volume slider and unified workspace media selection dialogs.
-- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **System Architecture & Standards Compliance**: Full adherence to repository engineering standards, symlink-aware Electron path confinement, credential encryption via `safeStorage`, 15 standard Radix UI primitives, tree-shaken icon registries, and 100% dictionary-driven localization.
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **100% Offline Local AI via Ollama & One-Click Setup**: Run Luno AI chat and all 10 Editor AI writing actions privately on your device with Ollama—complete with one-click Windows installation, daemon startup, serialized model downloads (`Qwen 2.5`, `Gemma 3`, `Llama 3.2`), progress bars, cancel/uninstall controls, and automatic model warm-up.
+- <img src="./assets/icons/refresh.svg" width="16" height="16" align="center" /> **Live Streaming Responses & Gemini → Ollama Auto-Fallback**: Watch Ollama answers stream token-by-token with a Stop button anytime, and optionally let Luno Note automatically fall back to local Ollama whenever Gemini reaches quota limits, loses network access, or hits server errors.
+- <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Built-in Luno Product Knowledge & Confidentiality Guardrails**: Topic-matched product documentation injected cleanly into AI conversations to answer Luno Note usage questions accurately while enforcing strict privacy and SSRF protections.
+- <img src="./assets/icons/eye.svg" width="16" height="16" align="center" /> **Unified System-Wide Motion Design Engine**: Smooth, GPU-composited view/section transitions, tree reveals, rotating folder chevrons, tactile press feedback, and consistent Reduced Motion support across every control.
+- <img src="./assets/icons/check.svg" width="16" height="16" align="center" /> **Editor Typing Stability & Rename Queue Hardening**: Resolved heading cursor jumps when typing in H1–H6, deferred active-word spell underlines during typing, eliminated English false positives in Wrong-Language detection, and hardened file rename queues against disk watcher races.
 
 ---
 
@@ -53,7 +53,7 @@ Download the production installer directly from [GitHub Releases](https://github
 
 | Package | Description | Link |
 | :--- | :--- | :--- |
-| **`luno-note-setup-1.4.1.exe`** | Automated Windows installer with differential update support | [![Download v1.4.1](https://img.shields.io/badge/Download-v1.4.1-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.4.1/luno-note-setup-1.4.1.exe) |
+| **`luno-note-setup-1.5.0.exe`** | Automated Windows installer with differential update support | [![Download v1.5.0](https://img.shields.io/badge/Download-v1.5.0-26A295?style=flat-square&logo=windows&logoColor=white)](https://github.com/phanuwatla/luno-note/releases/download/v1.5.0/luno-note-setup-1.5.0.exe) |
 
 <img src="./assets/callout-note.svg" alt="Note: Users running an earlier desktop installation can apply this update automatically by navigating to Settings > Check for Updates without manual re-installation." width="100%" />
 
@@ -74,7 +74,7 @@ Luno Note Desktop includes integrated update distribution powered by `electron-u
 - <img src="./assets/icons/device-desktop.svg" width="16" height="16" align="center" /> **Desktop Runtime**: [Electron](https://www.electronjs.org/)
 - <img src="./assets/icons/file-text.svg" width="16" height="16" align="center" /> **Rich-Text Engine**: [TipTap](https://tiptap.dev/) Core with Extensions (CodeBlockLowlight, Tables, TaskItems, Image, Link)
 - <img src="./assets/icons/palette.svg" width="16" height="16" align="center" /> **Styling and UI Components**: [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/)
-- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Audio and Text)
+- <img src="./assets/icons/sparkles.svg" width="16" height="16" align="center" /> **AI Integration**: [Google Gemini API](https://ai.google.dev/) (Multimodal Vision, Audio, Image & Text) & [Ollama](https://ollama.com/) (Offline Local AI)
 - <img src="./assets/icons/shield-check.svg" width="16" height="16" align="center" /> **Testing Framework**: [Vitest](https://vitest.dev/) with Testing Library
 
 ---

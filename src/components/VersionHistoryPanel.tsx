@@ -357,7 +357,7 @@ function VersionHistoryPanelComponent({
                         }
                       }}
                       onClick={() => onCompareVersion(ver)}
-                      className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 p-2.5 transition-all cursor-pointer hover:shadow-sm outline-none"
+                      className="group relative rounded-xl border-[1.5px] border-border/40 hover:border-primary/60 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 hover:bg-muted/50 active:scale-[0.99] p-2.5 transition-all duration-150 cursor-pointer hover:shadow-sm outline-none"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 min-w-0">

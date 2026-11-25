@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { closedNoteIds, noteEditorStateMap, clearNoteEditorHistory } from "@/components/Editor";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, act } from "@testing-library/react";
+import Editor, { closedNoteIds, noteEditorStateMap, clearNoteEditorHistory } from "@/components/Editor";
+import { AppSettingsProvider } from "@/hooks/useAppSettings";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { isSystemOrWebTab } from "@/hooks/useTabs";
 import type { Note } from "@/hooks/useNotes";
 
@@ -124,5 +127,117 @@ describe("Reopening closed note - activeEditorNote and history isolation", () =>
 
     // Now activeEditorNote MUST transition to note-2, NOT note-1
     expect(getActiveEditorNote()?.id).toBe("note-2");
+  });
+});
+
+describe("Editor multi-tab switching and tab-close content preservation", () => {
+  beforeEach(() => {
+    noteEditorStateMap.clear();
+    closedNoteIds.clear();
+  });
+
+  const makeNote = (id: string, fileName: string, content: string): Note => ({
+    id,
+    title: fileName.replace(/\.md$/i, ""),
+    fileName,
+    content,
+    contentFormat: "markdown",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  const renderEditorWithNote = (note: Note | null, notes: Note[]) => {
+    const onUpdate = vi.fn();
+    const onDelete = vi.fn();
+    const onCreate = vi.fn();
+    const renderView = (activeNote: Note | null, allNotes: Note[] = notes) => (
+      <AppSettingsProvider>
+        <TooltipProvider>
+          <Editor
+            note={activeNote}
+            notes={allNotes}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            onCreate={onCreate}
+            onOpenSidebar={vi.fn()}
+          />
+        </TooltipProvider>
+      </AppSettingsProvider>
+    );
+    const utils = render(renderView(note, notes));
+    return {
+      ...utils,
+      rerenderNote: (nextNote: Note | null, nextNotes: Note[] = notes) =>
+        utils.rerender(renderView(nextNote, nextNotes)),
+      onUpdate,
+    };
+  };
+
+  it("preserves the remaining tab's content when closing an active tab and focusing the other tab", () => {
+    const reviewNote = makeNote(
+      "note-review",
+      "review.md",
+      "# review\n\nImportant review notes that must never be cleared."
+    );
+    const untitledNote = makeNote("note-untitled", "Untitled.md", "# Untitled\n\n");
+    const allNotes = [reviewNote, untitledNote];
+
+    // 1. Open review.md first (populates noteEditorStateMap for review.md)
+    const { container, rerenderNote, unmount } = renderEditorWithNote(reviewNote, allNotes);
+    expect(container.textContent).toContain("Important review notes that must never be cleared.");
+
+    // 2. Switch to Untitled.md (Tab 2)
+    act(() => {
+      rerenderNote(untitledNote, allNotes);
+    });
+    expect(container.textContent).toContain("Untitled");
+
+    // 3. Close Untitled.md tab (dispatches clearNoteEditorHistory which clears activeNoteRef + editor state)
+    //    and immediately switch focus back to review.md
+    act(() => {
+      clearNoteEditorHistory(untitledNote.id);
+      rerenderNote(reviewNote, [reviewNote]);
+    });
+
+    // 4. review.md MUST retain its full content (never overwritten by empty cleanState)
+    expect(container.textContent).toContain("Important review notes that must never be cleared.");
+    const preservedState = noteEditorStateMap.get(reviewNote.id);
+    expect(preservedState?.doc.textContent).toContain("Important review notes that must never be cleared.");
+
+    unmount();
+  });
+
+  it("preserves an open file's content after creating a new file (including a transient null note) and clicking back", () => {
+    const reviewNote = makeNote(
+      "note-review-2",
+      "review.md",
+      "# review\n\nExisting content before creating a new file."
+    );
+    const newUntitled = makeNote("note-new-untitled", "Untitled.md", "# Untitled\n\n");
+
+    // 1. Start on review.md
+    const { container, rerenderNote, unmount } = renderEditorWithNote(reviewNote, [reviewNote]);
+    expect(container.textContent).toContain("Existing content before creating a new file.");
+
+    // 2. Simulate creating a new file where note briefly transitions through null -> newUntitled
+    act(() => {
+      rerenderNote(null, [reviewNote]);
+    });
+    act(() => {
+      rerenderNote(newUntitled, [reviewNote, newUntitled]);
+    });
+    expect(container.textContent).toContain("Untitled");
+
+    // 3. Click back to review.md
+    act(() => {
+      rerenderNote(reviewNote, [reviewNote, newUntitled]);
+    });
+
+    // 4. review.md MUST retain its full content
+    expect(container.textContent).toContain("Existing content before creating a new file.");
+    const preservedState = noteEditorStateMap.get(reviewNote.id);
+    expect(preservedState?.doc.textContent).toContain("Existing content before creating a new file.");
+
+    unmount();
   });
 });

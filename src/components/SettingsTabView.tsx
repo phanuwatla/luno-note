@@ -19,6 +19,7 @@ import {
   ExternalLink,
   RotateCcw,
   Check,
+  X,
   Download,
   Key,
   Loader2,
@@ -115,8 +116,20 @@ import { ShortcutsSection } from "@/components/shared/ShortcutsSection";
 import { AboutUpdateCard } from "@/components/shared/AboutUpdateCard";
 import { exportWorkspaceBackupZip } from "@/lib/backupExporter";
 import { fetchAvailableModels, clearExhaustedModels, type AvailableModelOption } from "@/lib/geminiApi";
+import {
+  fetchOllamaModels,
+  DEFAULT_OLLAMA_BASE_URL,
+  RECOMMENDED_OLLAMA_MODELS,
+  checkOllamaSystemInstalled,
+  installAndSetupOllama,
+  pullOllamaModel,
+  cancelOllamaModelPull,
+  deleteOllamaModel,
+  getActiveOllamaPulls,
+  type OllamaModelOption,
+} from "@/lib/ollamaApi";
 import { cn } from "@/lib/utils";
-import type { GlobalFixLanguageStatus } from "@/vite-env";
+import type { GlobalFixLanguageStatus, OllamaSetupProgressPayload } from "@/vite-env";
 
 const TOOLBAR_TOOL_DEFS: Record<
   string,
@@ -433,27 +446,298 @@ export default function SettingsTabView({
     { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", isExhausted: false },
   ]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<OllamaModelOption[]>([]);
+  const [ollamaConnected, setOllamaConnected] = useState(false);
+  const [ollamaInstalled, setOllamaInstalled] = useState(false);
+  const [isLoadingOllama, setIsLoadingOllama] = useState(false);
+  const [activeOllamaPulls, setActiveOllamaPulls] = useState<Record<string, OllamaSetupProgressPayload>>({});
+  const [uninstallingOllamaModels, setUninstallingOllamaModels] = useState<Record<string, boolean>>({});
   const [isExportingBackup, setIsExportingBackup] = useState(false);
 
-  const loadAiModels = useCallback(async () => {
+  const loadAiModels = useCallback(async (manualRefresh = false) => {
     setIsLoadingModels(true);
+    const startedAt = Date.now();
     try {
       const models = await fetchAvailableModels(settings.geminiApiKey);
-      if (models && models.length > 0) {
+      if (models && models.length > 0 && isMountedRef.current) {
         setAvailableModels(models);
       }
     } catch {
       // ignore
     } finally {
-      setIsLoadingModels(false);
+      if (manualRefresh && settings.enableAnimations !== false) {
+        const remaining = 500 - (Date.now() - startedAt);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+      }
+      if (isMountedRef.current) {
+        setIsLoadingModels(false);
+      }
     }
-  }, [settings.geminiApiKey]);
+  }, [settings.geminiApiKey, settings.enableAnimations]);
+
+  const isMountedRef = useRef(true);
+  const attachedActivePullsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const loadOllamaModels = useCallback(async (customUrl?: string, manualRefresh = false) => {
+    setIsLoadingOllama(true);
+    const startedAt = Date.now();
+    try {
+      const [status, installed] = await Promise.all([
+        fetchOllamaModels(customUrl ?? settings.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL),
+        checkOllamaSystemInstalled(),
+      ]);
+      if (!isMountedRef.current) return;
+      setOllamaConnected(status.connected);
+      setOllamaModels(status.models);
+      setOllamaInstalled(status.connected || installed);
+    } catch {
+      if (!isMountedRef.current) return;
+      setOllamaConnected(false);
+      setOllamaModels([]);
+    } finally {
+      if (manualRefresh && settings.enableAnimations !== false) {
+        const remaining = 500 - (Date.now() - startedAt);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+      }
+      if (isMountedRef.current) {
+        setIsLoadingOllama(false);
+      }
+    }
+  }, [settings.ollamaBaseUrl, settings.enableAnimations]);
+
+  const handleOneClickOllamaSetup = useCallback(async (requestedModel: string) => {
+    const targetModel = (requestedModel || "qwen2.5:3b").trim();
+    if (activeOllamaPulls[targetModel] || attachedActivePullsRef.current.has(targetModel)) return;
+    const targetUrl = settings.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL;
+    attachedActivePullsRef.current.add(targetModel);
+
+    setActiveOllamaPulls((prev) => ({
+      ...prev,
+      [targetModel]: {
+        stage: ollamaConnected ? "pulling" : ollamaInstalled ? "starting" : "downloading",
+        percent: 0,
+        model: targetModel,
+      },
+    }));
+
+    try {
+      const res = ollamaConnected
+        ? await pullOllamaModel(targetUrl, targetModel)
+        : await installAndSetupOllama(targetUrl, targetModel);
+
+      if (res.canceled || res.error === "CANCELED") {
+        return;
+      }
+
+      if (!res.ok) {
+        const errCode = res.error || "";
+        const lowerErr = errCode.toLowerCase();
+        const isNetworkInterrupted =
+          lowerErr.includes("max retries exceeded") ||
+          lowerErr.includes("context canceled") ||
+          lowerErr.includes("pull_incomplete") ||
+          lowerErr.includes("read tcp") ||
+          lowerErr.includes("wsarecv") ||
+          lowerErr.includes("eof") ||
+          lowerErr.includes("timeout") ||
+          lowerErr.includes("reset");
+        const friendlyError =
+          errCode === "INVALID_URL"
+            ? t("settings.ollamaInvalidUrlError")
+            : isNetworkInterrupted
+            ? t("settings.ollamaNetworkInterruptedDesc", { model: targetModel })
+            : errCode === "CONNECTION_FAILED" || errCode === "START_FAILED" || errCode === "INSTALL_FAILED" || !errCode
+            ? t("settings.ollamaConnectionError", { url: targetUrl })
+            : errCode;
+        toast({
+          variant: "destructive",
+          title: t("settings.ollamaSetupErrorTitle"),
+          description: friendlyError,
+        });
+        return;
+      }
+
+      await loadOllamaModels(targetUrl);
+      updateSetting("ollamaModel", targetModel);
+      updateSetting("aiProvider", "ollama");
+      toast({
+        title: t("settings.ollamaSetupSuccessTitle"),
+        description: t("settings.ollamaSetupSuccessDesc", { model: targetModel }),
+      });
+    } finally {
+      attachedActivePullsRef.current.delete(targetModel);
+      if (isMountedRef.current) {
+        setActiveOllamaPulls((prev) => {
+          const next = { ...prev };
+          delete next[targetModel];
+          return next;
+        });
+      }
+    }
+  }, [
+    activeOllamaPulls,
+    settings.ollamaBaseUrl,
+    ollamaConnected,
+    ollamaInstalled,
+    loadOllamaModels,
+    updateSetting,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (activeCategory !== "ai") return;
+    const applyProgress = (progress: OllamaSetupProgressPayload) => {
+      if (!progress || !isMountedRef.current) return;
+      setActiveOllamaPulls((prev) => {
+        if (progress.model) {
+          const existing = prev[progress.model];
+          if (!existing) return prev;
+          const prevPct = existing.stage === progress.stage ? (existing.percent ?? 0) : 0;
+          const nextPct = Math.max(prevPct, progress.percent ?? 0);
+          return {
+            ...prev,
+            [progress.model]: {
+              ...progress,
+              percent: nextPct,
+            },
+          };
+        }
+        // System-level stage (downloading / installing / starting Ollama itself): only update models not yet in pulling stage
+        const keys = Object.keys(prev);
+        if (keys.length === 0) return prev;
+        let changed = false;
+        const next: Record<string, OllamaSetupProgressPayload> = { ...prev };
+        for (const k of keys) {
+          const cur = prev[k];
+          if (cur.stage === "pulling" || cur.stage === "ready") continue;
+          const prevPct = cur.stage === progress.stage ? (cur.percent ?? 0) : 0;
+          const nextPct = Math.max(prevPct, progress.percent ?? 0);
+          next[k] = {
+            ...cur,
+            stage: progress.stage,
+            percent: nextPct,
+          };
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    };
+
+    const unsubscribeIpc = window.electronAPI?.onOllamaSetupProgress?.(applyProgress);
+    const handleDevProgress = (e: Event) => {
+      const custom = e as CustomEvent<OllamaSetupProgressPayload>;
+      if (custom.detail) {
+        applyProgress(custom.detail);
+      }
+    };
+    window.addEventListener("luno:ollama-setup-progress", handleDevProgress);
+
+    // Restore any in-flight downloads if the user navigated away from AI Settings and returned
+    void getActiveOllamaPulls().then((activeList) => {
+      if (!isMountedRef.current || activeList.length === 0) return;
+      const targetUrl = settings.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL;
+      setActiveOllamaPulls((prev) => {
+        const next = { ...prev };
+        for (const item of activeList) {
+          if (item.model && !next[item.model]) {
+            next[item.model] = item;
+          }
+        }
+        return next;
+      });
+      for (const item of activeList) {
+        const modelId = item.model;
+        if (!modelId || attachedActivePullsRef.current.has(modelId)) continue;
+        attachedActivePullsRef.current.add(modelId);
+        void pullOllamaModel(targetUrl, modelId)
+          .then(async (res) => {
+            if (!isMountedRef.current) return;
+            if (res.ok) {
+              await loadOllamaModels(targetUrl);
+            }
+          })
+          .finally(() => {
+            attachedActivePullsRef.current.delete(modelId);
+            if (!isMountedRef.current) return;
+            setActiveOllamaPulls((cur) => {
+              const updated = { ...cur };
+              delete updated[modelId];
+              return updated;
+            });
+          });
+      }
+    });
+
+    return () => {
+      unsubscribeIpc?.();
+      window.removeEventListener("luno:ollama-setup-progress", handleDevProgress);
+    };
+  }, [activeCategory, settings.ollamaBaseUrl, loadOllamaModels]);
+
+  const handleCancelOllamaPull = useCallback(async (modelId: string) => {
+    attachedActivePullsRef.current.delete(modelId);
+    setActiveOllamaPulls((prev) => {
+      const next = { ...prev };
+      delete next[modelId];
+      return next;
+    });
+    await cancelOllamaModelPull(modelId);
+  }, []);
+
+  const handleDeleteOllamaModel = useCallback(async (modelId: string) => {
+    if (uninstallingOllamaModels[modelId]) return;
+    const targetUrl = settings.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL;
+    setUninstallingOllamaModels((prev) => ({ ...prev, [modelId]: true }));
+    try {
+      const res = await deleteOllamaModel(targetUrl, modelId);
+      if (!res.ok) {
+        toast({
+          variant: "destructive",
+          title: t("settings.ollamaUninstallErrorTitle"),
+          description: res.error || t("settings.ollamaConnectionError", { url: targetUrl }),
+        });
+        return;
+      }
+      await loadOllamaModels(targetUrl);
+      if (settings.ollamaModel === modelId) {
+        updateSetting("ollamaModel", "auto");
+      }
+      toast({
+        title: t("settings.ollamaUninstallSuccessTitle"),
+        description: t("settings.ollamaUninstallSuccessDesc", { model: modelId }),
+      });
+    } finally {
+      setUninstallingOllamaModels((prev) => {
+        const next = { ...prev };
+        delete next[modelId];
+        return next;
+      });
+    }
+  }, [
+    uninstallingOllamaModels,
+    settings.ollamaBaseUrl,
+    settings.ollamaModel,
+    loadOllamaModels,
+    updateSetting,
+    t,
+  ]);
 
   useEffect(() => {
     if (activeCategory === "ai") {
       void loadAiModels();
+      void loadOllamaModels();
     }
-  }, [activeCategory, loadAiModels]);
+  }, [activeCategory, loadAiModels, loadOllamaModels]);
 
   useEffect(() => {
     const handleQuotaChange = () => {
@@ -580,7 +864,7 @@ export default function SettingsTabView({
                     type="button"
                     aria-current={isActive ? "page" : undefined}
                     onClick={() => handleSelectCategory(cat.id)}
-                    className={`shrink-0 md:w-full flex items-center justify-between px-3 py-2 md:py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                    className={`shrink-0 md:w-full flex items-center justify-between px-3 py-2 md:py-2.5 rounded-xl text-xs font-medium transition-all duration-150 active:scale-[0.98] cursor-pointer ${
                       isActive
                         ? "bg-primary/10 text-primary font-semibold shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]"
@@ -600,14 +884,17 @@ export default function SettingsTabView({
           <main className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
             <div className="px-4 py-4 sm:px-6 md:px-8 md:py-5 border-b border-border/40 bg-card/20 shrink-0">
-              <div>
+              <div key={safeActiveCategory} className="luno-section-enter">
                 <h2 className="text-lg md:text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">{currentCategory.desc}</p>
               </div>
             </div>
 
             {/* Scrollable Category Options Body */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-6 no-scrollbar w-full overscroll-contain">
+            <div
+              key={safeActiveCategory}
+              className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-6 no-scrollbar w-full overscroll-contain luno-section-enter"
+            >
               {/* 1. GENERAL */}
               {safeActiveCategory === "general" && (
                 <div className="space-y-6">
@@ -803,16 +1090,7 @@ export default function SettingsTabView({
                       <Switch checked={settings.confirmBeforeExit === true} onCheckedChange={(val) => updateSetting("confirmBeforeExit", val)} className="scale-85 origin-right cursor-pointer shrink-0" />
                     </div>
 
-                    {/* Send anonymous usage data (Temporarily hidden - preserved for future use) */}
-                    {false && (
-                      <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/30">
-                        <div>
-                          <label className="text-xs font-semibold text-foreground">{t("settings.sendUsageData")}</label>
-                          <p className="text-xs text-muted-foreground mt-0.5">{t("settings.sendUsageDataDesc")}</p>
-                        </div>
-                        <Switch checked={settings.sendUsageData === true} onCheckedChange={(val) => updateSetting("sendUsageData", val)} className="scale-85 origin-right" />
-                      </div>
-                    )}
+                    {/* Send anonymous usage data (Temporarily disabled - settings.sendUsageData preserved for future opt-in) */}
                   </div>
                 </div>
               )}
@@ -2212,6 +2490,46 @@ export default function SettingsTabView({
               {/* 7. AI ASSISTANT */}
               {safeActiveCategory === "ai" && (
                 <div className="space-y-6">
+                  {/* Active AI Provider Card */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      {t("settings.aiProviderGroup")}
+                    </h3>
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.aiProviderLabel")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.aiProviderDesc")}</p>
+                      </div>
+                      <Select
+                        value={settings.aiProvider || "gemini"}
+                        onValueChange={(val) => updateSetting("aiProvider", val as "gemini" | "ollama")}
+                      >
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gemini">{t("settings.aiProviderGemini")}</SelectItem>
+                          <SelectItem value="ollama">{t("settings.aiProviderOllama")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {(settings.aiProvider || "gemini") === "gemini" && (
+                      <div className="flex items-center justify-between gap-4 pt-3 border-t border-border/40">
+                        <div>
+                          <label className="text-xs font-semibold text-foreground">{t("settings.aiAutoFallbackLabel")}</label>
+                          <p className="text-xs text-muted-foreground mt-0.5">{t("settings.aiAutoFallbackDesc")}</p>
+                        </div>
+                        <Switch
+                          data-testid="ai-auto-fallback-switch"
+                          checked={settings.autoFallbackToOllama !== false}
+                          onCheckedChange={(val) => updateSetting("autoFallbackToOllama", val)}
+                          className="scale-85 origin-right cursor-pointer shrink-0"
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
                     <div className="flex items-center justify-between">
                       <label className="text-sm font-semibold text-foreground flex items-center gap-1.5">
@@ -2262,7 +2580,7 @@ export default function SettingsTabView({
                               type="button"
                               onClick={() => {
                                 clearExhaustedModels();
-                                void loadAiModels();
+                                void loadAiModels(true);
                               }}
                               disabled={isLoadingModels}
                               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
@@ -2303,6 +2621,210 @@ export default function SettingsTabView({
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                  </div>
+
+                  {/* Ollama (Local AI) Card */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        {t("settings.ollamaGroup")}
+                      </h3>
+
+                      <div className="flex items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => void loadOllamaModels(undefined, true)}
+                              disabled={isLoadingOllama}
+                              aria-label={t("settings.ollamaTestConnection")}
+                              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingOllama ? "animate-spin" : ""}`} />
+                              <span className="sr-only">{t("settings.ollamaTestConnection")}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {t("settings.ollamaTestConnection")}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.ollamaModelLabel")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.ollamaModelDesc")}</p>
+                      </div>
+                      <Select
+                        value={
+                          settings.ollamaModel &&
+                          settings.ollamaModel !== "auto" &&
+                          ollamaModels.some((m) => m.id === settings.ollamaModel)
+                            ? settings.ollamaModel
+                            : settings.ollamaModel || "auto"
+                        }
+                        onValueChange={(val) => updateSetting("ollamaModel", val)}
+                      >
+                        <SelectTrigger className="w-56 h-10 text-xs font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72 w-auto min-w-[var(--radix-select-trigger-width)]">
+                          <SelectItem value="auto">{t("settings.ollamaModelAuto")}</SelectItem>
+                          {settings.ollamaModel &&
+                            settings.ollamaModel !== "auto" &&
+                            !ollamaModels.some((m) => m.id === settings.ollamaModel) && (
+                              <SelectItem value={settings.ollamaModel}>{settings.ollamaModel}</SelectItem>
+                            )}
+                          {ollamaModels.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground">{t("settings.ollamaServerUrl")}</label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("settings.ollamaServerUrlDesc")}</p>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder={DEFAULT_OLLAMA_BASE_URL}
+                        value={settings.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL}
+                        onChange={(e) => updateSetting("ollamaBaseUrl", e.target.value)}
+                        onBlur={(e) => {
+                          const trimmed = e.target.value.trim() || DEFAULT_OLLAMA_BASE_URL;
+                          updateSetting("ollamaBaseUrl", trimmed);
+                          void loadOllamaModels(trimmed);
+                        }}
+                        className="w-full rounded-2xl border border-border/80 bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none transition-all focus:border-primary focus:ring-0 shadow-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* One-Click Model Setup Card (Standalone, no nested card) */}
+                  <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-sm">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        {t("settings.ollamaQuickInstallLabel")}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {t("settings.ollamaQuickInstallDesc")}
+                      </p>
+                    </div>
+
+                    <div className="divide-y divide-border/40">
+                      {RECOMMENDED_OLLAMA_MODELS.map((rec) => {
+                        const isModelInstalled = ollamaModels.some((m) => m.id === rec.id);
+                        const activeProgress = activeOllamaPulls[rec.id];
+                        const isInstallingThis = Boolean(activeProgress);
+                        const isUninstallingThis = Boolean(uninstallingOllamaModels[rec.id]);
+                        const animationsEnabled = settings.enableAnimations !== false;
+                        return (
+                          <div
+                            key={rec.id}
+                            className="py-2.5 first:pt-0.5 last:pb-0.5 space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-xs font-semibold text-foreground truncate">{rec.name}</span>
+                                <span className="text-xs text-muted-foreground shrink-0">({rec.sizeLabel})</span>
+                              </div>
+
+                              {isInstallingThis ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCancelOllamaPull(rec.id)}
+                                  className={`text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 font-medium cursor-pointer shrink-0 ${
+                                    animationsEnabled ? "transition-colors duration-150" : "transition-none"
+                                  }`}
+                                >
+                                  <X className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{t("settings.ollamaCancelInstall")}</span>
+                                </button>
+                              ) : isModelInstalled ? (
+                                <div className="group/ollama-action grid items-center shrink-0">
+                                  {!isUninstallingThis && (
+                                    <span
+                                      className={`col-start-1 row-start-1 justify-self-end flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium ${
+                                        animationsEnabled
+                                          ? "transition-all duration-200 ease-out opacity-100 translate-y-0 scale-100 group-hover/ollama-action:opacity-0 group-hover/ollama-action:-translate-y-1 group-hover/ollama-action:scale-95 group-hover/ollama-action:pointer-events-none group-focus-within/ollama-action:opacity-0 group-focus-within/ollama-action:-translate-y-1 group-focus-within/ollama-action:scale-95 group-focus-within/ollama-action:pointer-events-none"
+                                          : "transition-none opacity-100 group-hover/ollama-action:opacity-0 group-hover/ollama-action:pointer-events-none group-focus-within/ollama-action:opacity-0 group-focus-within/ollama-action:pointer-events-none"
+                                      }`}
+                                    >
+                                      <Check className="h-3.5 w-3.5 shrink-0" />
+                                      <span>{t("settings.ollamaInstalledShort")}</span>
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={isUninstallingThis}
+                                    onClick={() => void handleDeleteOllamaModel(rec.id)}
+                                    className={`col-start-1 row-start-1 justify-self-end flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium cursor-pointer disabled:opacity-50 ${
+                                      isUninstallingThis
+                                        ? "opacity-100 pointer-events-auto"
+                                        : animationsEnabled
+                                        ? "transition-all duration-200 ease-out opacity-0 translate-y-1 scale-95 pointer-events-none group-hover/ollama-action:opacity-100 group-hover/ollama-action:translate-y-0 group-hover/ollama-action:scale-100 group-hover/ollama-action:pointer-events-auto group-focus-within/ollama-action:opacity-100 group-focus-within/ollama-action:translate-y-0 group-focus-within/ollama-action:scale-100 group-focus-within/ollama-action:pointer-events-auto"
+                                        : "transition-none opacity-0 pointer-events-none group-hover/ollama-action:opacity-100 group-hover/ollama-action:pointer-events-auto group-focus-within/ollama-action:opacity-100 group-focus-within/ollama-action:pointer-events-auto"
+                                    }`}
+                                  >
+                                    {isUninstallingThis ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                                    ) : (
+                                      <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                    )}
+                                    <span>{t("settings.ollamaUninstallModel")}</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleOneClickOllamaSetup(rec.id)}
+                                  className={`text-xs text-primary hover:text-primary/80 flex items-center gap-1 font-medium cursor-pointer shrink-0 ${
+                                    animationsEnabled ? "transition-colors duration-150" : "transition-none"
+                                  }`}
+                                >
+                                  <Download className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{t("settings.ollamaInstallShort")}</span>
+                                </button>
+                              )}
+                            </div>
+
+                            {isInstallingThis && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                  <span>
+                                    {activeProgress?.stage === "downloading"
+                                      ? t("settings.ollamaProgressDownloading", {
+                                          percent: activeProgress.percent ?? 0,
+                                        })
+                                      : activeProgress?.stage === "installing"
+                                      ? t("settings.ollamaProgressInstalling")
+                                      : activeProgress?.stage === "starting"
+                                      ? t("settings.ollamaProgressStarting")
+                                      : t("settings.ollamaProgressPulling", {
+                                          model: rec.name,
+                                          percent: activeProgress?.percent ?? 0,
+                                        })}
+                                  </span>
+                                </div>
+                                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                                  <div
+                                    className={`h-full bg-primary rounded-full ${
+                                      animationsEnabled ? "transition-all duration-300 ease-out" : "transition-none"
+                                    }`}
+                                    style={{ width: `${Math.max(0, Math.min(100, activeProgress?.percent ?? 0))}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

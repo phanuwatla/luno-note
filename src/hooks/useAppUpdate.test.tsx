@@ -3,9 +3,18 @@ import { renderHook, act } from "@testing-library/react";
 import { useAppUpdate, resetUpdateStoreForTesting, isNewerVersion, formatUpdateError } from "./useAppUpdate";
 import React from "react";
 import { AppSettingsProvider } from "./useAppSettings";
+import { APP_VERSION } from "@/lib/appVersion";
+import type { UpdateInfo } from "@/vite-env";
+
+function getNextMajorVersion(version: string): string {
+  const [major = 1] = version.split(".").map((n) => parseInt(n, 10) || 0);
+  return `${major + 1}.0.0`;
+}
+
+const NEXT_VERSION = getNextMajorVersion(APP_VERSION);
 
 const mockElectronAPI = {
-  getAppVersion: vi.fn().mockResolvedValue("1.3.3"),
+  getAppVersion: vi.fn().mockResolvedValue(APP_VERSION),
   checkForUpdates: vi.fn(),
   downloadUpdate: vi.fn(),
   quitAndInstallUpdate: vi.fn(),
@@ -35,8 +44,9 @@ describe("isNewerVersion helper", () => {
 describe("useAppUpdate Hook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockElectronAPI.getAppVersion.mockResolvedValue(APP_VERSION);
     resetUpdateStoreForTesting();
-    (window as any).electronAPI = mockElectronAPI;
+    (window as unknown as { electronAPI: typeof mockElectronAPI }).electronAPI = mockElectronAPI;
   });
 
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -53,9 +63,9 @@ describe("useAppUpdate Hook", () => {
     expect(result.current.showToast).toBe(false);
   });
 
-  it("does NOT mark as available when remote version is equal to current app version (e.g. 1.3.3 vs 1.3.3)", async () => {
-    let onAvailableCb: any;
-    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+  it("does NOT mark as available when remote version is equal to current app version", async () => {
+    let onAvailableCb: ((info: UpdateInfo) => void) | undefined;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: (info: UpdateInfo) => void) => {
       onAvailableCb = cb;
       return () => {};
     });
@@ -65,7 +75,7 @@ describe("useAppUpdate Hook", () => {
     await act(async () => {
       if (onAvailableCb) {
         onAvailableCb({
-          version: "1.3.3",
+          version: APP_VERSION,
           releaseDate: "2026-10-03",
         });
       }
@@ -77,8 +87,8 @@ describe("useAppUpdate Hook", () => {
   });
 
   it("handles onUpdateAvailable event properly when remote version is newer", async () => {
-    let onAvailableCb: any;
-    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+    let onAvailableCb: ((info: UpdateInfo) => void) | undefined;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: (info: UpdateInfo) => void) => {
       onAvailableCb = cb;
       return () => {};
     });
@@ -88,7 +98,7 @@ describe("useAppUpdate Hook", () => {
     await act(async () => {
       if (onAvailableCb) {
         onAvailableCb({
-          version: "1.5.0",
+          version: NEXT_VERSION,
           releaseDate: "2026-10-03",
         });
       }
@@ -96,13 +106,13 @@ describe("useAppUpdate Hook", () => {
 
     expect(result.current.status).toBe("available");
     expect(result.current.isAvailable).toBe(true);
-    expect(result.current.updateInfo?.version).toBe("1.5.0");
+    expect(result.current.updateInfo?.version).toBe(NEXT_VERSION);
     expect(result.current.showToast).toBe(true);
   });
 
   it("handles dismissToast properly", async () => {
-    let onAvailableCb: any;
-    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+    let onAvailableCb: ((info: UpdateInfo) => void) | undefined;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: (info: UpdateInfo) => void) => {
       onAvailableCb = cb;
       return () => {};
     });
@@ -111,7 +121,7 @@ describe("useAppUpdate Hook", () => {
 
     await act(async () => {
       if (onAvailableCb) {
-        onAvailableCb({ version: "1.5.0" });
+        onAvailableCb({ version: NEXT_VERSION });
       }
     });
 
@@ -125,8 +135,8 @@ describe("useAppUpdate Hook", () => {
   });
 
   it("syncs state across multiple hook instances", async () => {
-    let onAvailableCb: any;
-    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: any) => {
+    let onAvailableCb: ((info: UpdateInfo) => void) | undefined;
+    mockElectronAPI.onUpdateAvailable.mockImplementation((cb: (info: UpdateInfo) => void) => {
       onAvailableCb = cb;
       return () => {};
     });
@@ -136,7 +146,7 @@ describe("useAppUpdate Hook", () => {
 
     await act(async () => {
       if (onAvailableCb) {
-        onAvailableCb({ version: "1.5.0" });
+        onAvailableCb({ version: NEXT_VERSION });
       }
     });
 
@@ -150,8 +160,8 @@ describe("useAppUpdate Hook", () => {
     mockElectronAPI.checkForUpdates.mockResolvedValue({
       success: true,
       isUpdateAvailable: true,
-      updateInfo: { version: "1.4.0", releaseDate: "2026-10-03" },
-      currentVersion: "1.3.3",
+      updateInfo: { version: NEXT_VERSION, releaseDate: "2026-10-03" },
+      currentVersion: APP_VERSION,
     });
 
     const { result } = renderHook(() => useAppUpdate(), { wrapper });
@@ -169,8 +179,8 @@ describe("useAppUpdate Hook", () => {
     mockElectronAPI.checkForUpdates.mockResolvedValue({
       success: true,
       isUpdateAvailable: true,
-      updateInfo: { version: "1.4.0", releaseDate: "2026-10-03" },
-      currentVersion: "1.3.3",
+      updateInfo: { version: NEXT_VERSION, releaseDate: "2026-10-03" },
+      currentVersion: APP_VERSION,
     });
 
     const { result } = renderHook(() => useAppUpdate(), { wrapper });
@@ -211,12 +221,12 @@ describe("useAppUpdate Hook", () => {
       success: true,
       isUpdateAvailable: true,
       updateInfo: {
-        version: "9.9.9",
+        version: NEXT_VERSION,
         releaseDate: "2026-10-27",
-        downloadUrl: "https://github.com/phanuwatla/luno-note/releases/download/v9.9.9/luno-note-setup-9.9.9.exe",
+        downloadUrl: `https://github.com/phanuwatla/luno-note/releases/download/v${NEXT_VERSION}/luno-note-setup-${NEXT_VERSION}.exe`,
         isFallback: true,
       },
-      currentVersion: "1.3.5",
+      currentVersion: APP_VERSION,
     });
     mockElectronAPI.downloadUpdate.mockResolvedValue({
       success: true,

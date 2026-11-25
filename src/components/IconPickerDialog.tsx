@@ -471,7 +471,7 @@ export default function IconPickerDialog({
             <button
               type="button"
               onClick={() => setActiveTab("emoji")}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer min-w-0 ${
+              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all duration-150 active:scale-[0.98] cursor-pointer min-w-0 ${
                 activeTab === "emoji"
                   ? "bg-background text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"

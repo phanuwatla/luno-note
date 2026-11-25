@@ -25,7 +25,7 @@ export function EditorCheckbox({
         e.stopPropagation();
         onChange?.();
       }}
-      className={`relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-[3px] transition-colors cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-1 ${
+      className={`relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-[3px] transition-all duration-150 active:scale-95 cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-1 ${
         isChecked || isIndeterminate
           ? "bg-primary border border-primary text-primary-foreground"
           : "bg-transparent border-[1.5px] border-muted-foreground/50 hover:border-primary"
@@ -33,7 +33,7 @@ export function EditorCheckbox({
     >
       {isChecked && (
         <svg
-          className="w-2.5 h-2.5 text-current"
+          className="w-2.5 h-2.5 text-current luno-check-pop"
           viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"

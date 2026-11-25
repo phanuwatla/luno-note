@@ -27,7 +27,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center text-center select-none",
+        "flex flex-col items-center justify-center text-center select-none luno-section-enter",
         isCompact ? "py-6 px-3 gap-1.5" : "py-12 px-6 gap-2.5",
         className,
       )}

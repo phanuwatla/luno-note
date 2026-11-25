@@ -233,11 +233,7 @@ function BreadcrumbTreeView({
               style={{ left: `${18 + i * 14}px` }}
             />
           ))}
-          {isOpen ? (
-            <ChevDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
+          <ChevRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
           {settings.showFileIcons !== false && (
             customFolderIcon ? (
               renderCustomIcon(customFolderIcon.icon, "h-3.5 w-3.5 shrink-0", { color: customFolderIcon.color })
@@ -253,7 +249,7 @@ function BreadcrumbTreeView({
           )}
         </button>
         {isOpen && (
-          <div className="relative w-full">
+          <div className="relative w-full luno-tree-reveal">
             <div className="w-full">
               {node.notes.map((n) => renderNoteItem(n, depth + 1))}
               {node.children.map((child) => renderFolderItem(child, depth + 1))}

@@ -1701,7 +1701,8 @@ export default function Index() {
     return finalFolderName;
   };
 
-  const getRelativePath = (folderPath: string, fileName: string) => (folderPath ? `${folderPath}/${fileName}` : fileName);
+  const getRelativePath = (folderPath: string, fileName: string) =>
+    (folderPath ? `${folderPath}/${fileName}` : fileName).replace(/\\/g, "/");
 
   const getMimeType = (fileName: string): string => {
     const ext = (fileName || "").toLowerCase();
@@ -1951,15 +1952,20 @@ export default function Index() {
         updatedAt?: number;
       }> = [];
 
+      const existingById = new Map<string, Note>();
       const existingByRelPath = new Map<string, Note>();
       for (const n of currentNotes) {
+        if (n.id) existingById.set(n.id, n);
         if (n.fileName) {
           existingByRelPath.set(getRelativePath(n.folderPath || "", n.fileName), n);
         }
       }
 
       for (const entry of filteredEntries) {
-        const existing = existingByRelPath.get(entry.relativePath);
+        const inFlightId = inFlightRenamesRef.current.get(entry.relativePath);
+        const existing =
+          existingByRelPath.get(entry.relativePath) ||
+          (inFlightId ? existingById.get(inFlightId) : undefined);
 
         let fileModified = 0;
         let diskFileSize = 0;
@@ -2117,7 +2123,7 @@ export default function Index() {
         const existingByPath = new Map(
           currentNotes
             .filter((n) => n.fileName)
-            .map((n) => [n.folderPath ? `${n.folderPath}/${n.fileName}` : (n.fileName as string), n] as const)
+            .map((n) => [getRelativePath(n.folderPath || "", n.fileName as string), n] as const)
         );
 
         const createdRelPath = getRelativePath(normalizedPath, desiredFileName);
@@ -2128,10 +2134,10 @@ export default function Index() {
         const newNoteId = crypto.randomUUID();
 
         const nextItems = entries.map((e: any) => {
-          const relPath = e.relativePath;
+          const relPath = (e.relativePath || "").replace(/\\/g, "/");
           const existing = existingByPath.get(relPath);
           const isNewFile = relPath === createdRelPath;
-          return mapTreeEntryToItem(e, existing, isNewFile ? newNoteId : undefined);
+          return mapTreeEntryToItem(e, existing, isNewFile && !existing ? newNoteId : undefined);
         });
 
         const nextNotes = replaceNotes(nextItems);
@@ -2338,64 +2344,105 @@ export default function Index() {
   };
 
   const activeRenameLocksRef = useRef<Set<string>>(new Set());
+  const inFlightRenamesRef = useRef<Map<string, string>>(new Map());
+  const queuedRenameByNoteIdRef = useRef<Map<string, string>>(new Map());
 
   const renameFileInFolder = async (note: Note, nextName: string) => {
-    if (!note.fileName) return;
-    if (activeRenameLocksRef.current.has(note.id)) return;
+    const currentNote = notesRef.current.find((n) => n.id === note.id) || note;
+    if (!currentNote.fileName) return;
+    if (activeRenameLocksRef.current.has(currentNote.id)) {
+      queuedRenameByNoteIdRef.current.set(currentNote.id, nextName);
+      return;
+    }
 
     const proposed = nextName.trim();
-    if (!proposed || proposed === note.fileName) return;
+    if (!proposed || proposed === currentNote.fileName) return;
 
-    activeRenameLocksRef.current.add(note.id);
-    const oldRelPath = getRelativePath(note.folderPath || "", note.fileName);
+    activeRenameLocksRef.current.add(currentNote.id);
+    const oldRelPath = getRelativePath(currentNote.folderPath || "", currentNote.fileName);
+    const tentativeSafeName = proposed.replace(/[\\/:*?"<>|]/g, "_") || currentNote.fileName;
+    const tentativeNewRelPath = getRelativePath(currentNote.folderPath || "", tentativeSafeName);
+    inFlightRenamesRef.current.set(oldRelPath, currentNote.id);
+    inFlightRenamesRef.current.set(tentativeNewRelPath, currentNote.id);
     trackDeletedRelativePath(oldRelPath);
+
+    const flushQueuedRenameIfAny = () => {
+      const queuedName = queuedRenameByNoteIdRef.current.get(currentNote.id);
+      if (queuedName !== undefined) {
+        queuedRenameByNoteIdRef.current.delete(currentNote.id);
+        const latestNote = notesRef.current.find((n) => n.id === currentNote.id) || currentNote;
+        if (latestNote.fileName && queuedName.trim() && queuedName.trim() !== latestNote.fileName) {
+          void renameFileInFolder(latestNote, queuedName);
+        }
+      }
+    };
 
     const electronAPI = window.electronAPI;
     if (electronAPI?.getSavedWorkspace && electronAPI?.renameFileOrFolder && electronAPI?.readWorkspaceTree) {
       try {
         const saved = await electronAPI.getSavedWorkspace();
         if (saved?.folderPath) {
-          const safeName = proposed.replace(/[\\/:*?"<>|]/g, "_") || note.fileName;
-          const oldFullPath = note.folderPath
-            ? `${saved.folderPath}/${note.folderPath}/${note.fileName}`
-            : `${saved.folderPath}/${note.fileName}`;
-          const newFullPath = note.folderPath
-            ? `${saved.folderPath}/${note.folderPath}/${safeName}`
+          const safeName = tentativeSafeName;
+          const newRelPath = getRelativePath(currentNote.folderPath || "", safeName);
+          inFlightRenamesRef.current.set(newRelPath, currentNote.id);
+          const oldFullPath = currentNote.folderPath
+            ? `${saved.folderPath}/${currentNote.folderPath}/${currentNote.fileName}`
+            : `${saved.folderPath}/${currentNote.fileName}`;
+          const newFullPath = currentNote.folderPath
+            ? `${saved.folderPath}/${currentNote.folderPath}/${safeName}`
             : `${saved.folderPath}/${safeName}`;
 
           const ok = await electronAPI.renameFileOrFolder({ oldFullPath, newFullPath });
           if (ok) {
+            clearDeletedRelativePath(newRelPath);
+            // Synchronously update notesRef.current immediately after disk rename so any concurrent
+            // fs.watch onWorkspaceChanged callback matches the note by its new relativePath and preserves its ID & content
+            notesRef.current = notesRef.current.map((n) =>
+              n.id === currentNote.id
+                ? { ...n, fileName: safeName, title: extractBaseTitleFromFileName(safeName) }
+                : n
+            );
+
             const { entries, folderPaths } = await electronAPI.readWorkspaceTree(saved.folderPath);
             setOpenedFolderPaths(folderPaths);
 
             const currentNotes = notesRef.current;
+            const existingById = new Map(currentNotes.map((n) => [n.id, n] as const));
             const existingByPath = new Map(
               currentNotes
                 .filter((n) => n.fileName)
-                .map((n) => [n.folderPath ? `${n.folderPath}/${n.fileName}` : (n.fileName as string), n] as const)
+                .map((n) => [getRelativePath(n.folderPath || "", n.fileName as string), n] as const)
             );
 
             const isGdrive = settings.storageMode === "gdrive" && isGoogleDriveConnected();
-            if (isGdrive && note.driveFileId) {
-              void renameDriveNote(note, safeName);
+            if (isGdrive && currentNote.driveFileId) {
+              void renameDriveNote(currentNote, safeName);
             }
 
             if (settings.fileIcons?.[oldRelPath]) {
               const existingIcon = settings.fileIcons[oldRelPath];
-              const newRelPath = getRelativePath(note.folderPath || "", safeName);
               setFileIcon(newRelPath, existingIcon.icon, existingIcon.color);
               removeFileIcon(oldRelPath);
             }
 
-            updateNote(note.id, { fileName: safeName, title: extractBaseTitleFromFileName(safeName) });
-            const newRelPath = getRelativePath(note.folderPath || "", safeName);
-            void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, null);
+            updateNote(currentNote.id, { fileName: safeName, title: extractBaseTitleFromFileName(safeName) });
+            void renameNoteVersionHistory(oldRelPath, newRelPath, currentNote.id, null);
 
             const nextItems = entries.map((e: any) => {
-              const relPath = e.relativePath;
-              const existing = existingByPath.get(relPath);
-              const isRenamed = relPath === (note.folderPath ? `${note.folderPath}/${safeName}` : safeName);
-              return mapTreeEntryToItem(e, existing, isRenamed ? note.id : undefined, isRenamed ? note.driveFileId : undefined);
+              const relPath = (e.relativePath || "").replace(/\\/g, "/");
+              const isRenamed = relPath === newRelPath;
+              const existing =
+                existingByPath.get(relPath) ||
+                (isRenamed ? existingById.get(currentNote.id) : undefined) ||
+                (inFlightRenamesRef.current.has(relPath)
+                  ? existingById.get(inFlightRenamesRef.current.get(relPath)!)
+                  : undefined);
+              return mapTreeEntryToItem(
+                e,
+                existing,
+                isRenamed ? currentNote.id : undefined,
+                isRenamed ? currentNote.driveFileId : undefined
+              );
             });
 
             replaceNotes(nextItems);
@@ -2405,40 +2452,45 @@ export default function Index() {
       } catch (error) {
         console.error("Electron rename file failed", error);
       } finally {
-        activeRenameLocksRef.current.delete(note.id);
+        activeRenameLocksRef.current.delete(currentNote.id);
+        flushQueuedRenameIfAny();
       }
     }
 
-    if (!openedRootDirHandle) return;
+    if (!openedRootDirHandle) {
+      activeRenameLocksRef.current.delete(currentNote.id);
+      return;
+    }
 
     try {
-      const sourceDir = await getDirectoryHandleByPath(note.folderPath || "");
+      const sourceDir = await getDirectoryHandleByPath(currentNote.folderPath || "");
       if (!sourceDir) return;
 
-      const safeName = proposed.replace(/[\\/:*?"<>|]/g, "_") || note.fileName;
+      const safeName = tentativeSafeName;
       const finalName = await resolveUniqueFileName(sourceDir, safeName);
-      const newRelPath = getRelativePath(note.folderPath || "", finalName);
+      const newRelPath = getRelativePath(currentNote.folderPath || "", finalName);
+      inFlightRenamesRef.current.set(newRelPath, currentNote.id);
       clearDeletedRelativePath(newRelPath);
 
-      const sourceHandle = await sourceDir.getFileHandle(note.fileName);
+      const sourceHandle = await sourceDir.getFileHandle(currentNote.fileName);
       let newHandle = sourceHandle;
 
       if (typeof (sourceHandle as unknown as { move?: (name: string) => Promise<void> }).move === "function") {
         await (sourceHandle as unknown as { move: (name: string) => Promise<void> }).move(finalName);
       } else {
         newHandle = await copyFileHandleToDirectory(sourceHandle, sourceDir, finalName);
-        await sourceDir.removeEntry(note.fileName);
+        await sourceDir.removeEntry(currentNote.fileName);
       }
 
-      await setStoredFileHandle(note.id, newHandle);
+      await setStoredFileHandle(currentNote.id, newHandle);
       notesRef.current = notesRef.current.map((n) =>
-        n.id === note.id ? { ...n, fileName: finalName, title: extractBaseTitleFromFileName(finalName) } : n
+        n.id === currentNote.id ? { ...n, fileName: finalName, title: extractBaseTitleFromFileName(finalName) } : n
       );
-      updateNote(note.id, { fileName: finalName, title: extractBaseTitleFromFileName(finalName) });
-      void renameNoteVersionHistory(oldRelPath, newRelPath, note.id, openedRootDirHandle);
+      updateNote(currentNote.id, { fileName: finalName, title: extractBaseTitleFromFileName(finalName) });
+      void renameNoteVersionHistory(oldRelPath, newRelPath, currentNote.id, openedRootDirHandle);
 
-      if (settings.storageMode === "gdrive" && isGoogleDriveConnected() && note.driveFileId) {
-        void renameDriveNote(note, finalName);
+      if (settings.storageMode === "gdrive" && isGoogleDriveConnected() && currentNote.driveFileId) {
+        void renameDriveNote(currentNote, finalName);
       }
 
       await syncFolderFromDisk(openedRootDirHandle, newRelPath);
@@ -2446,7 +2498,8 @@ export default function Index() {
       console.error("Rename file failed", error);
       clearDeletedRelativePath(oldRelPath);
     } finally {
-      activeRenameLocksRef.current.delete(note.id);
+      activeRenameLocksRef.current.delete(currentNote.id);
+      flushQueuedRenameIfAny();
     }
   };
 
@@ -4351,11 +4404,12 @@ export default function Index() {
     if (!openedRootDirHandle) return;
 
     const intervalId = window.setInterval(() => {
+      if (activeRenameLocksRef.current.size > 0) return;
       void syncFolderFromDisk(openedRootDirHandle);
     }, 2500);
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "visible" && activeRenameLocksRef.current.size === 0) {
         void syncFolderFromDisk(openedRootDirHandle);
       }
     };
@@ -4380,6 +4434,7 @@ export default function Index() {
       setOpenedFolderPaths(data.folderPaths || []);
 
       const currentNotes = notesRef.current;
+      const existingById = new Map(currentNotes.map((n) => [n.id, n] as const));
       const existingByPath = new Map(
         currentNotes
           .filter((n) => n.fileName)
@@ -4391,7 +4446,10 @@ export default function Index() {
 
       const nextItems = (data.entries || []).map((e: any) => {
         const normRelPath = (e.relativePath || "").replace(/\\/g, "/");
-        const existing = existingByPath.get(normRelPath);
+        const inFlightId = inFlightRenamesRef.current.get(normRelPath);
+        const existing =
+          existingByPath.get(normRelPath) ||
+          (inFlightId ? existingById.get(inFlightId) : undefined);
         return mapTreeEntryToItem(e, existing);
       });
 
@@ -5900,7 +5958,7 @@ export default function Index() {
     return (
       <>
         {!isRight && (
-          <div className={isMatch("home") ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+          <div className={isMatch("home") ? "flex-1 min-h-0 flex flex-col luno-view-enter" : "hidden"}>
             {isMounted("home") && (
               <HomeView
                 notes={notes}
@@ -5921,14 +5979,14 @@ export default function Index() {
             )}
           </div>
         )}
-        <div className={isMatch("templates") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("templates") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("templates") && (
             <Suspense fallback={paneSuspenseFallback}>
               <TemplatesView onCreateWithTemplate={handleCreateFromHomeTemplate} notes={notes} />
             </Suspense>
           )}
         </div>
-        <div className={isMatch("relations") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("relations") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("relations") && (
             <Suspense fallback={paneSuspenseFallback}>
               <RelationsView
@@ -5940,7 +5998,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("favorites") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("favorites") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("favorites") && (
             <Suspense fallback={paneSuspenseFallback}>
               <FavoritesTabView
@@ -5952,7 +6010,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("tags") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("tags") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("tags") && (
             <Suspense fallback={paneSuspenseFallback}>
               <TagsTabView
@@ -5966,7 +6024,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("trash") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("trash") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("trash") && (
             <Suspense fallback={paneSuspenseFallback}>
               <TrashView
@@ -5979,7 +6037,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("settings") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("settings") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("settings") && (
             <Suspense fallback={paneSuspenseFallback}>
               <SettingsTabView
@@ -5998,7 +6056,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("help") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("help") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("help") && (
             <Suspense fallback={paneSuspenseFallback}>
               <HelpTabView
@@ -6012,7 +6070,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("whats-new") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden" : "hidden"}>
+        <div className={isMatch("whats-new") ? "flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("whats-new") && (
             <Suspense fallback={paneSuspenseFallback}>
               <WhatsNewView
@@ -6024,7 +6082,7 @@ export default function Index() {
             </Suspense>
           )}
         </div>
-        <div className={isMatch("luno-ai") ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" : "hidden"}>
+        <div className={isMatch("luno-ai") ? "w-full flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden luno-view-enter" : "hidden"}>
           {isMounted("luno-ai") && (
             <Suspense fallback={paneSuspenseFallback}>
               <LunoAiView
@@ -6077,7 +6135,7 @@ export default function Index() {
         </div>
         {isRight ? (
           splitTabId?.startsWith("web:") && (
-            <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+            <div className="w-full flex-1 flex flex-col min-h-0 min-w-0 luno-view-enter">
               <Suspense fallback={paneSuspenseFallback}>
                 <WebViewerView
                   tabId={splitTabId}
@@ -6106,7 +6164,7 @@ export default function Index() {
             .map((webId) => (
               <div
                 key={webId}
-                className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0" : "hidden"}
+                className={activeTabId === webId ? "w-full flex-1 flex flex-col min-h-0 min-w-0 luno-view-enter" : "hidden"}
               >
                 <Suspense fallback={paneSuspenseFallback}>
                   <WebViewerView
@@ -6135,7 +6193,7 @@ export default function Index() {
           className={
             isSystemOrWebTab(tabId || "") || tabNote?.fileType === "web-viewer"
               ? "hidden"
-              : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden"
+              : "flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden luno-view-enter"
           }
         >
           <Editor
@@ -6182,7 +6240,7 @@ export default function Index() {
     <div className="flex h-full w-full max-h-full max-w-full overflow-hidden bg-background">
       {/* Overlay for mobile sidebar */}
       {isMobile && sidebarOpen && (
-        <div className="fixed inset-0 z-40 bg-foreground/10 backdrop-blur-[1px] md:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 z-40 bg-foreground/10 backdrop-blur-[1px] md:hidden animate-in fade-in duration-200" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Sidebar responsive */}
@@ -6275,7 +6333,7 @@ export default function Index() {
               )}
               <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
                 {!openedFolderName && !activeTabId?.startsWith("web:") && !activeTabId?.startsWith("settings") && !activeTabId?.startsWith("help") ? (
-                  <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+                  <div className="flex-1 flex flex-col min-h-0 overflow-y-auto luno-view-enter">
                     <WorkspaceLauncher
                       onOpenFolder={handleOpenFolder}
                       onCreateWorkspace={handleCreateWorkspace}
@@ -6369,7 +6427,7 @@ export default function Index() {
             )}
             <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
               {!openedFolderName && !isSystemOrWebTab(activeTabId || "") ? (
-                <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+                <div className="flex-1 flex flex-col min-h-0 overflow-y-auto luno-view-enter">
                   <WorkspaceLauncher
                     onOpenFolder={handleOpenFolder}
                     onCreateWorkspace={handleCreateWorkspace}

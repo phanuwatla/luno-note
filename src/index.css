@@ -1543,7 +1543,11 @@ aside [role="button"]:focus-visible {
    - Hover uses primary accent tint (bg-primary/15 & text-primary)
    - Focus / focus-visible states have no visible change from normal */
 [data-editor-toolbar="true"] button {
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 130ms cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-editor-toolbar="true"] button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 [data-editor-toolbar="true"] button:hover:not(:disabled) {
@@ -4122,6 +4126,19 @@ html:not([data-animations="false"]) .animate-in {
   backface-visibility: hidden;
 }
 
+/* Crisp responsive timings on Radix overlays & popovers when animations are enabled */
+html:not([data-animations="false"]) [role="menu"][data-state="open"],
+html:not([data-animations="false"]) [role="listbox"][data-state="open"],
+html:not([data-animations="false"]) [data-radix-popper-content-wrapper] [data-state="open"].animate-in {
+  animation-duration: 160ms;
+}
+
+html:not([data-animations="false"]) [role="menu"][data-state="closed"],
+html:not([data-animations="false"]) [role="listbox"][data-state="closed"],
+html:not([data-animations="false"]) [data-radix-popper-content-wrapper] [data-state="closed"].animate-out {
+  animation-duration: 120ms;
+}
+
 .transition-smooth {
   transition-property: transform, opacity, background-color, border-color, color, box-shadow;
   transition-duration: 150ms;
@@ -4136,6 +4153,147 @@ html:not([data-animations="false"]) .animate-in {
 [role="tooltip"][data-state="delayed-open"],
 [role="tooltip"][data-state="instant-open"] {
   will-change: transform, opacity;
+}
+
+/* ==========================================================================
+   Luno System-Wide Motion Keyframes & Micro-Interaction Utilities
+   All keyframes automatically clamp to 0.001ms when data-animations="false".
+   ========================================================================== */
+@keyframes lunoViewEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoSectionEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoTreeReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoTabEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoBarEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoCheckPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lunoShake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  15%, 45%, 75% {
+    transform: translateX(-6px);
+  }
+  30%, 60%, 90% {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes lunoAudioWave {
+  0%, 100% {
+    transform: scaleY(0.45);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.luno-view-enter {
+  animation: lunoViewEnter 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luno-section-enter {
+  animation: lunoSectionEnter 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luno-tree-reveal {
+  animation: lunoTreeReveal 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luno-tab-enter {
+  animation: lunoTabEnter 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luno-bar-enter {
+  animation: lunoBarEnter 165ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luno-check-pop {
+  animation: lunoCheckPop 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.luno-shake {
+  animation: lunoShake 380ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.luno-audio-wave {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lunoAudioWave 0.95s ease-in-out infinite;
+}
+
+/* Smooth menu item transitions across Radix dropdown, context, select, and command menus */
+[role="menuitem"],
+[role="menuitemcheckbox"],
+[role="menuitemradio"],
+[role="option"],
+[cmdk-item],
+[data-slash-item] {
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 /* Dynamic App Logo Accent Color Theming */

@@ -313,7 +313,7 @@ function ToggleNodeViewComponent({ editor, getPos, node, updateAttributes }: Tog
           </span>
         )}
       </summary>
-      <div className="relative pl-0 py-0">
+      <div className={`relative pl-0 py-0 ${isOpen ? "luno-tree-reveal" : ""}`}>
         {isOpen && isToggleBodyEmptySingleParagraph(node) && (
           <span
             aria-hidden="true"

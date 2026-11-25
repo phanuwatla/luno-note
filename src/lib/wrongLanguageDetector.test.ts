@@ -40,6 +40,12 @@ describe("wrongLanguageDetector", () => {
     expect(detectWrongLanguage("the")).toBeNull();
     expect(detectWrongLanguage("apple")).toBeNull();
     expect(detectWrongLanguage("note")).toBeNull();
+    expect(detectWrongLanguage("design")).toBeNull();
+    expect(detectWrongLanguage("detail")).toBeNull();
+    expect(detectWrongLanguage("music")).toBeNull();
+    expect(detectWrongLanguage("skill")).toBeNull();
+    expect(detectWrongLanguage("future")).toBeNull();
+    expect(detectWrongLanguage("heading")).toBeNull();
   });
 
   it("extracts candidates ending at cursor correctly", () => {

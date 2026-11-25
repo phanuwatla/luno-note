@@ -258,7 +258,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({
           </div>
 
           {error && (
-            <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+            <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2 luno-bar-enter">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>

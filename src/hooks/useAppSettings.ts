@@ -752,8 +752,12 @@ export interface AppSettings {
   hiddenToolbarItems: string[];
 
   // AI Assistant Settings
+  aiProvider: "gemini" | "ollama";
+  autoFallbackToOllama: boolean;
   geminiApiKey: string;
   aiModel: string;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
 
   // Cloud Storage Settings
   storageMode: "local" | "gdrive";
@@ -920,8 +924,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   toolbarItemsOrder: DEFAULT_TOOLBAR_ORDER,
   hiddenToolbarItems: DEFAULT_HIDDEN_TOOLBAR_ITEMS,
 
+  aiProvider: "gemini",
+  autoFallbackToOllama: true,
   geminiApiKey: "",
   aiModel: "auto",
+  ollamaBaseUrl: "http://localhost:11434",
+  ollamaModel: "auto",
 
   storageMode: "local",
   googleDriveClientId: "",
@@ -1065,7 +1073,17 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     hiddenToolbarItems = DEFAULT_HIDDEN_TOOLBAR_ITEMS;
   }
 
+  const aiProvider: "gemini" | "ollama" = raw?.aiProvider === "ollama" ? "ollama" : "gemini";
+  const autoFallbackToOllama = raw?.autoFallbackToOllama !== false;
   const geminiApiKey = typeof raw?.geminiApiKey === "string" ? raw.geminiApiKey.trim() : "";
+  const ollamaBaseUrl =
+    typeof raw?.ollamaBaseUrl === "string" && raw.ollamaBaseUrl.trim()
+      ? raw.ollamaBaseUrl.trim()
+      : DEFAULT_SETTINGS.ollamaBaseUrl;
+  const ollamaModel =
+    typeof raw?.ollamaModel === "string" && raw.ollamaModel.trim()
+      ? raw.ollamaModel.trim()
+      : DEFAULT_SETTINGS.ollamaModel;
   const storageMode = raw?.storageMode === "gdrive" ? "gdrive" : "local";
   const googleDriveClientId = typeof raw?.googleDriveClientId === "string" ? raw.googleDriveClientId.trim() : "";
 
@@ -1148,8 +1166,12 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     readingModeLivePreview: raw?.readingModeLivePreview !== undefined ? Boolean(raw.readingModeLivePreview) : ((raw as any)?.livePreviewInReadingMode !== undefined ? Boolean((raw as any).livePreviewInReadingMode) : DEFAULT_SETTINGS.readingModeLivePreview),
     toolbarItemsOrder,
     hiddenToolbarItems,
+    aiProvider,
+    autoFallbackToOllama,
     geminiApiKey,
     aiModel: typeof raw?.aiModel === "string" && raw.aiModel.trim() ? raw.aiModel.trim() : DEFAULT_SETTINGS.aiModel,
+    ollamaBaseUrl,
+    ollamaModel,
     storageMode,
     googleDriveClientId,
   };
@@ -1178,6 +1200,7 @@ export function sanitizeWorkspaceSettingsPayload(settings: Partial<AppSettings>)
   delete (payload as any).userName;
   delete (payload as any).geminiApiKey;
   delete (payload as any).googleDriveClientId;
+  delete (payload as any).ollamaBaseUrl;
   return payload;
 }
 
@@ -1192,10 +1215,12 @@ export function parseWorkspaceSettings(jsonString: string): Partial<AppSettings>
     delete parsed.userName;
     delete parsed.geminiApiKey;
     delete parsed.googleDriveClientId;
+    delete parsed.ollamaBaseUrl;
     const normalized = normalizeSettings(parsed);
     delete (normalized as Partial<AppSettings>).userName;
     delete (normalized as Partial<AppSettings>).geminiApiKey;
     delete (normalized as Partial<AppSettings>).googleDriveClientId;
+    delete (normalized as Partial<AppSettings>).ollamaBaseUrl;
     return normalized;
   } catch {
     return null;

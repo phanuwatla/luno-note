@@ -749,5 +749,80 @@ describe("LunoAiView Workspace Note and Folder Icons", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("streams Ollama tokens live and supports stopping mid-generation without showing an error", async () => {
+    storageMap.set(
+      "notes-app-settings",
+      JSON.stringify({
+        aiProvider: "ollama",
+        ollamaBaseUrl: "http://localhost:11434",
+        ollamaModel: "qwen2.5:1.5b",
+        language: "en",
+      })
+    );
+
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/__luno_ollama/stream") {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(encoder.encode('{"delta":"Hello "}\n'));
+          },
+        });
+        init?.signal?.addEventListener("abort", () => {
+          try {
+            streamController?.error(new DOMException("Aborted", "AbortError"));
+          } catch {
+            /* ignore */
+          }
+        });
+        return {
+          ok: true,
+          status: 200,
+          body,
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ message: { content: "" } }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const { container } = render(
+        <TooltipProvider>
+          <AppSettingsProvider>
+            <LunoAiView isSidebar={false} />
+          </AppSettingsProvider>
+        </TooltipProvider>
+      );
+
+      const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: "Say hello" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+      // First streamed token appears immediately while still generating
+      expect(await screen.findByText(/Hello/)).toBeInTheDocument();
+      const stopBtn = await screen.findByRole("button", { name: /^stop$/i });
+      expect(stopBtn).toBeInTheDocument();
+
+      // Stopping generation cleanly ends loading and preserves partial streamed content
+      await act(async () => {
+        fireEvent.click(stopBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /^send$/i })).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Hello/)).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 

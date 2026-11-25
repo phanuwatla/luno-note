@@ -2321,6 +2321,984 @@ function setupIpcHandlers() {
     });
   });
 
+  const ALLOWED_OLLAMA_ENDPOINTS = new Set(["/api/tags", "/api/chat", "/api/generate", "/api/version"]);
+
+  function parseSafeOllamaOrigin(rawBaseUrl) {
+    const candidate = typeof rawBaseUrl === "string" && rawBaseUrl.trim() ? rawBaseUrl.trim() : "http://localhost:11434";
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      if (parsed.username || parsed.password) return null;
+      const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+      if (
+        !host ||
+        host === "0.0.0.0" ||
+        host === "169.254.169.254" ||
+        host.startsWith("169.254.") ||
+        host.startsWith("fe80:") ||
+        host === "metadata.google.internal" ||
+        host.endsWith(".internal")
+      ) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  const activeOllamaStreamRequests = new Map();
+
+  function executeOllamaProxyRequest(payload, options = {}) {
+    const endpoint = typeof payload?.endpoint === "string" ? payload.endpoint.trim() : "";
+    if (!ALLOWED_OLLAMA_ENDPOINTS.has(endpoint)) {
+      return Promise.resolve({ ok: false, status: 400, error: "Invalid Ollama endpoint" });
+    }
+
+    const parsedOrigin = parseSafeOllamaOrigin(payload?.baseUrl);
+    if (!parsedOrigin) {
+      return Promise.resolve({ ok: false, status: 400, error: "Invalid or blocked Ollama server URL" });
+    }
+
+    const isPost = endpoint === "/api/chat" || endpoint === "/api/generate";
+    const method = isPost ? "POST" : "GET";
+    const isAssembledStreamChat =
+      endpoint === "/api/chat" && payload?.body && typeof payload.body === "object" && payload.body.stream !== true;
+    const forceStream = Boolean(options.onDelta && endpoint === "/api/chat");
+    const outboundBody =
+      isPost && payload?.body && typeof payload.body === "object"
+        ? isAssembledStreamChat || forceStream
+          ? { ...payload.body, stream: true }
+          : payload.body
+        : null;
+    const bodyString = outboundBody ? JSON.stringify(outboundBody) : null;
+    const rawTimeout = Number(payload?.timeoutMs);
+    const timeoutMs =
+      Number.isFinite(rawTimeout) && rawTimeout >= 1000 && rawTimeout <= 600000
+        ? rawTimeout
+        : isPost
+        ? 300000
+        : 6000;
+
+    const targetUrl = new URL(endpoint, parsedOrigin.origin);
+    const client = targetUrl.protocol === "https:" ? https : http;
+    const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+    const streamId = typeof options.requestId === "string" ? options.requestId : "";
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (resPayload) => {
+        if (settled) return;
+        settled = true;
+        if (streamId) activeOllamaStreamRequests.delete(streamId);
+        resolve(resPayload);
+      };
+
+      const headers = { Accept: "application/json" };
+      if (bodyString !== null) {
+        headers["Content-Type"] = "application/json";
+        headers["Content-Length"] = Buffer.byteLength(bodyString, "utf8");
+      }
+
+      const streamEntry = streamId ? { req: null, aborted: false } : null;
+      if (streamEntry) {
+        activeOllamaStreamRequests.set(streamId, streamEntry);
+      }
+
+      const req = client.request(
+        targetUrl,
+        { method, headers, timeout: timeoutMs },
+        (res) => {
+          const status = res.statusCode || 0;
+          // Refuse redirects to prevent SSRF redirect chains
+          if (status >= 300 && status < 400) {
+            res.resume();
+            return finish({ ok: false, status, error: "Redirects are not allowed for Ollama requests" });
+          }
+
+          if ((isAssembledStreamChat || forceStream) && status >= 200 && status < 300) {
+            let buffer = "";
+            let totalBytes = 0;
+            let assembledContent = "";
+            let lastMeta = null;
+            let streamError = null;
+
+            const handleLine = (line) => {
+              if (streamEntry?.aborted) return;
+              const trimmed = line.trim();
+              if (!trimmed) return;
+              try {
+                const obj = JSON.parse(trimmed);
+                if (obj.error) {
+                  streamError = String(obj.error);
+                  return;
+                }
+                const delta =
+                  typeof obj?.message?.content === "string"
+                    ? obj.message.content
+                    : typeof obj?.response === "string"
+                    ? obj.response
+                    : "";
+                if (delta) {
+                  assembledContent += delta;
+                  if (typeof options.onDelta === "function") {
+                    options.onDelta(delta, typeof obj?.model === "string" ? obj.model : undefined);
+                  }
+                }
+                lastMeta = obj;
+              } catch {
+                /* ignore partial JSON */
+              }
+            };
+
+            res.on("data", (chunk) => {
+              if (streamEntry?.aborted) return;
+              totalBytes += chunk.length;
+              if (totalBytes > MAX_RESPONSE_BYTES) {
+                req.destroy(new Error("Response from Ollama exceeded maximum allowed size"));
+                return;
+              }
+              buffer += chunk.toString("utf8");
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+              for (const line of lines) handleLine(line);
+            });
+
+            res.on("end", () => {
+              if (streamEntry?.aborted) {
+                return finish({ ok: false, status: 499, error: "ABORTED" });
+              }
+              if (buffer.trim()) handleLine(buffer);
+              if (streamError) {
+                return finish({ ok: false, status: 500, error: streamError });
+              }
+              finish({
+                ok: true,
+                status,
+                data: {
+                  ...(lastMeta && typeof lastMeta === "object" ? lastMeta : {}),
+                  message: { role: "assistant", content: assembledContent },
+                  done: true,
+                },
+              });
+            });
+
+            res.on("close", () => {
+              if (streamEntry?.aborted) {
+                finish({ ok: false, status: 499, error: "ABORTED" });
+              } else if (!settled) {
+                finish({ ok: false, status: 0, error: "Connection closed unexpectedly" });
+              }
+            });
+            return;
+          }
+
+          const chunks = [];
+          let totalBytes = 0;
+          res.on("data", (chunk) => {
+            totalBytes += chunk.length;
+            if (totalBytes > MAX_RESPONSE_BYTES) {
+              req.destroy(new Error("Response from Ollama exceeded maximum allowed size"));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          res.on("end", () => {
+            const rawText = Buffer.concat(chunks).toString("utf8");
+            let parsedData = null;
+            try {
+              parsedData = rawText ? JSON.parse(rawText) : null;
+            } catch {
+              parsedData = rawText;
+            }
+            if (status >= 200 && status < 300) {
+              finish({ ok: true, status, data: parsedData });
+            } else {
+              const errMsg =
+                (parsedData && typeof parsedData === "object" && parsedData.error) ||
+                (typeof parsedData === "string" && parsedData.trim()) ||
+                `HTTP ${status}`;
+              finish({ ok: false, status, error: String(errMsg), data: parsedData });
+            }
+          });
+        }
+      );
+
+      if (streamEntry) {
+        streamEntry.req = req;
+      }
+
+      req.on("timeout", () => {
+        req.destroy(new Error("ETIMEDOUT"));
+      });
+
+      req.on("error", (err) => {
+        if (streamEntry?.aborted || err?.message === "ABORTED") {
+          return finish({ ok: false, status: 499, error: "ABORTED" });
+        }
+        finish({
+          ok: false,
+          status: 0,
+          error: err?.code ? `${err.code}: ${err.message || "Connection failed"}` : err?.message || "Connection failed",
+        });
+      });
+
+      if (bodyString !== null) {
+        req.write(bodyString);
+      }
+      req.end();
+    });
+  }
+
+  ipcMain.handle("ollama-request", async (_event, payload) => {
+    return executeOllamaProxyRequest(payload);
+  });
+
+  ipcMain.handle("ollama-stream-chat", async (event, payload) => {
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId.trim() : "";
+    if (!requestId || requestId.length > 128) {
+      return { ok: false, status: 400, error: "Invalid requestId" };
+    }
+
+    const result = await executeOllamaProxyRequest(payload, {
+      requestId,
+      onDelta: (delta, model) => {
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send("ollama-chat-stream", { requestId, delta, model });
+        }
+      },
+    });
+
+    if (event.sender && !event.sender.isDestroyed()) {
+      event.sender.send("ollama-chat-stream", {
+        requestId,
+        done: true,
+        ...(result.ok ? {} : { error: result.error }),
+      });
+    }
+    return result;
+  });
+
+  ipcMain.handle("ollama-abort-chat", async (_event, payload) => {
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId.trim() : "";
+    if (!requestId) return { ok: false };
+    const entry = activeOllamaStreamRequests.get(requestId);
+    if (entry) {
+      entry.aborted = true;
+      activeOllamaStreamRequests.delete(requestId);
+      try {
+        entry.req?.destroy(new Error("ABORTED"));
+      } catch {
+        /* ignore */
+      }
+    }
+    return { ok: true };
+  });
+
+  const { spawn: spawnChild, execFile: execFileChild } = require("child_process");
+  const ALLOWED_OLLAMA_DOWNLOAD_HOSTS = new Set([
+    "ollama.com",
+    "www.ollama.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "github-releases.githubusercontent.com",
+  ]);
+  const SAFE_OLLAMA_MODEL_NAME_RE = /^[a-zA-Z0-9._/-]+(:[a-zA-Z0-9._-]+)?$/;
+
+  async function findLocalOllamaBinary() {
+    const candidates = [];
+    if (process.platform === "win32") {
+      if (process.env.LOCALAPPDATA) {
+        candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "Ollama", "ollama.exe"));
+      }
+      if (process.env.PROGRAMFILES) {
+        candidates.push(path.join(process.env.PROGRAMFILES, "Ollama", "ollama.exe"));
+      }
+    } else if (process.platform === "darwin") {
+      candidates.push(
+        "/usr/local/bin/ollama",
+        "/opt/homebrew/bin/ollama",
+        "/Applications/Ollama.app/Contents/Resources/ollama"
+      );
+    } else {
+      candidates.push("/usr/local/bin/ollama", "/usr/bin/ollama");
+    }
+
+    for (const candidatePath of candidates) {
+      try {
+        await fs.promises.access(candidatePath, fs.constants.F_OK);
+        return candidatePath;
+      } catch {
+        // continue
+      }
+    }
+
+    const locatorCmd = process.platform === "win32" ? "where.exe" : "which";
+    return new Promise((resolve) => {
+      execFileChild(
+        locatorCmd,
+        ["ollama"],
+        { timeout: 3000, windowsHide: true, shell: false },
+        (err, stdout) => {
+          if (err || !stdout) return resolve(null);
+          const firstLine = String(stdout)
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .find(Boolean);
+          resolve(firstLine || null);
+        }
+      );
+    });
+  }
+
+  function pingOllamaServer(parsedOrigin, timeoutMs = 1500) {
+    return new Promise((resolve) => {
+      const targetUrl = new URL("/api/version", parsedOrigin.origin);
+      const client = targetUrl.protocol === "https:" ? https : http;
+      const req = client.get(targetUrl, { timeout: timeoutMs }, (res) => {
+        res.resume();
+        resolve((res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300);
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on("error", () => resolve(false));
+    });
+  }
+
+  async function waitForOllamaReady(parsedOrigin, maxAttempts = 20, delayMs = 500) {
+    for (let i = 0; i < maxAttempts; i++) {
+      const ok = await pingOllamaServer(parsedOrigin);
+      if (ok) return true;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    return false;
+  }
+
+  function sendOllamaProgress(webContentsTarget, payload) {
+    try {
+      if (webContentsTarget && !webContentsTarget.isDestroyed()) {
+        webContentsTarget.send("ollama-setup-progress", payload);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function startLocalOllamaDaemon(binPath, parsedOrigin) {
+    if (await pingOllamaServer(parsedOrigin)) {
+      return true;
+    }
+    try {
+      const child = spawnChild(binPath, ["serve"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        shell: false,
+      });
+      child.on("error", () => {});
+      child.unref();
+    } catch {
+      return false;
+    }
+    return waitForOllamaReady(parsedOrigin, 20, 500);
+  }
+
+  function downloadOfficialOllamaInstaller(destPath, onProgress, maxRedirects = 5) {
+    const startUrl = "https://ollama.com/download/OllamaSetup.exe";
+    const downloadFromUrl = (targetUrl, redirectsLeft) =>
+      new Promise((resolve, reject) => {
+        let parsed;
+        try {
+          parsed = new URL(targetUrl);
+        } catch {
+          return reject(new Error("Invalid installer URL"));
+        }
+        if (parsed.protocol !== "https:" || !ALLOWED_OLLAMA_DOWNLOAD_HOSTS.has(parsed.hostname.toLowerCase())) {
+          return reject(new Error(`Blocked non-allowlisted download host: ${parsed.hostname}`));
+        }
+
+        const req = https.get(
+          targetUrl,
+          {
+            headers: {
+              "User-Agent": `Luno-Note/${app.getVersion ? app.getVersion() : "1.0.0"}`,
+            },
+            timeout: 30000,
+          },
+          (res) => {
+            const status = res.statusCode || 0;
+            if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
+              res.resume();
+              if (redirectsLeft <= 0) {
+                return reject(new Error("Too many redirects while downloading Ollama installer"));
+              }
+              const nextUrl = new URL(res.headers.location, targetUrl).toString();
+              downloadFromUrl(nextUrl, redirectsLeft - 1).then(resolve, reject);
+              return;
+            }
+
+            if (status < 200 || status >= 300) {
+              res.resume();
+              return reject(new Error(`HTTP ${status} while downloading Ollama installer`));
+            }
+
+            const totalBytes = parseInt(res.headers["content-length"] || "0", 10) || 0;
+            let receivedBytes = 0;
+            let lastReportedPercent = -1;
+            const fileStream = fs.createWriteStream(destPath);
+
+            res.on("data", (chunk) => {
+              receivedBytes += chunk.length;
+              if (totalBytes > 0) {
+                const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
+                if (pct !== lastReportedPercent) {
+                  lastReportedPercent = pct;
+                  onProgress(pct);
+                }
+              }
+            });
+
+            res.pipe(fileStream);
+
+            fileStream.on("finish", () => {
+              fileStream.close(() => resolve(true));
+            });
+
+            fileStream.on("error", (err) => {
+              req.destroy();
+              fs.promises.unlink(destPath).catch(() => {});
+              reject(err);
+            });
+          }
+        );
+
+        req.on("timeout", () => {
+          req.destroy(new Error("Installer download timed out"));
+        });
+
+        req.on("error", (err) => {
+          fs.promises.unlink(destPath).catch(() => {});
+          reject(err);
+        });
+      });
+
+    return downloadFromUrl(startUrl, maxRedirects);
+  }
+
+  ipcMain.handle("ollama-check-system", async () => {
+    const binPath = await findLocalOllamaBinary();
+    return {
+      installed: Boolean(binPath),
+      platform: process.platform,
+    };
+  });
+
+  ipcMain.handle("ollama-start-service", async (event, payload) => {
+    const parsedOrigin = parseSafeOllamaOrigin(payload?.baseUrl);
+    if (!parsedOrigin) {
+      return { ok: false, error: "INVALID_URL" };
+    }
+    if (await pingOllamaServer(parsedOrigin)) {
+      return { ok: true };
+    }
+    const binPath = await findLocalOllamaBinary();
+    if (!binPath) {
+      return { ok: false, error: "NOT_INSTALLED" };
+    }
+    sendOllamaProgress(event.sender, { stage: "starting", percent: 50 });
+    const started = await startLocalOllamaDaemon(binPath, parsedOrigin);
+    if (!started) {
+      return { ok: false, error: "START_FAILED" };
+    }
+    return { ok: true };
+  });
+
+  let activeOllamaInstallPromise = null;
+  const activeOllamaPullRequests = new Map();
+
+  ipcMain.handle("ollama-install-system", async (event, payload) => {
+    const parsedOrigin = parseSafeOllamaOrigin(payload?.baseUrl);
+    if (!parsedOrigin) {
+      return { ok: false, error: "INVALID_URL" };
+    }
+
+    if (activeOllamaInstallPromise) {
+      return activeOllamaInstallPromise;
+    }
+
+    activeOllamaInstallPromise = (async () => {
+      let binPath = await findLocalOllamaBinary();
+      if (!binPath) {
+        if (process.platform !== "win32") {
+          shell.openExternal("https://ollama.com/download");
+          return { ok: false, error: "MANUAL_INSTALL_OPENED" };
+        }
+
+        const tempInstallerPath = path.join(app.getPath("temp"), `LunoOllamaSetup-${Date.now()}.exe`);
+        try {
+          sendOllamaProgress(event.sender, { stage: "downloading", percent: 0 });
+          await downloadOfficialOllamaInstaller(tempInstallerPath, (percent) => {
+            sendOllamaProgress(event.sender, { stage: "downloading", percent });
+          });
+
+          sendOllamaProgress(event.sender, { stage: "installing", percent: 100 });
+          await new Promise((resolve, reject) => {
+            const installer = spawnChild(tempInstallerPath, ["/VERYSILENT", "/NORESTART"], {
+              windowsHide: true,
+              shell: false,
+            });
+            installer.on("error", reject);
+            installer.on("close", (code) => {
+              if (code === 0) resolve(true);
+              else reject(new Error(`Installer exited with code ${code}`));
+            });
+          });
+        } catch (err) {
+          return { ok: false, error: err?.message || "INSTALL_FAILED" };
+        } finally {
+          fs.promises.unlink(tempInstallerPath).catch(() => {});
+        }
+
+        binPath = await findLocalOllamaBinary();
+      }
+
+      sendOllamaProgress(event.sender, { stage: "starting", percent: 100 });
+      if (await pingOllamaServer(parsedOrigin)) {
+        return { ok: true };
+      }
+      if (binPath) {
+        const started = await startLocalOllamaDaemon(binPath, parsedOrigin);
+        if (started) {
+          return { ok: true };
+        }
+      }
+      const readyAfterInstaller = await waitForOllamaReady(parsedOrigin, 20, 500);
+      return readyAfterInstaller ? { ok: true } : { ok: false, error: "START_FAILED" };
+    })();
+
+    try {
+      return await activeOllamaInstallPromise;
+    } finally {
+      activeOllamaInstallPromise = null;
+    }
+  });
+
+  function isTransientOllamaPullError(errText) {
+    const lower = String(errText || "").toLowerCase();
+    return (
+      lower.includes("max retries exceeded") ||
+      lower.includes("context canceled") ||
+      lower.includes("pull_incomplete") ||
+      lower.includes("read tcp") ||
+      lower.includes("wsarecv") ||
+      lower.includes("eof") ||
+      lower.includes("timeout") ||
+      lower.includes("etimedout") ||
+      lower.includes("stalled") ||
+      lower.includes("reset") ||
+      lower.includes("connection") ||
+      lower.includes("tls") ||
+      lower.includes("temporary") ||
+      lower.includes("pull_failed")
+    );
+  }
+
+  let activeConcurrentPullStreams = 0;
+  const MAX_CONCURRENT_PULL_STREAMS = 1;
+  const pendingPullQueue = [];
+  const activeOllamaPullPromises = new Map();
+  const activeOllamaPullStates = new Map();
+
+  function broadcastOllamaProgress(fallbackSender, payload) {
+    if (payload?.model && payload.stage !== "ready") {
+      activeOllamaPullStates.set(payload.model, payload);
+    }
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      for (const win of wins) {
+        if (win && !win.isDestroyed()) {
+          sendOllamaProgress(win.webContents, payload);
+        }
+      }
+    } else if (fallbackSender) {
+      sendOllamaProgress(fallbackSender, payload);
+    }
+  }
+
+  function acquirePullSlot(pullEntry) {
+    if (pullEntry.canceled) return Promise.resolve(false);
+    if (activeConcurrentPullStreams < MAX_CONCURRENT_PULL_STREAMS) {
+      activeConcurrentPullStreams++;
+      pullEntry.slotAcquired = true;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      pullEntry.waitingResolve = resolve;
+      pendingPullQueue.push({ pullEntry, resolve });
+    });
+  }
+
+  function releasePullSlot(pullEntry) {
+    if (pullEntry) {
+      if (!pullEntry.slotAcquired || pullEntry.slotReleased) return;
+      pullEntry.slotReleased = true;
+    }
+    activeConcurrentPullStreams = Math.max(0, activeConcurrentPullStreams - 1);
+    while (pendingPullQueue.length > 0 && activeConcurrentPullStreams < MAX_CONCURRENT_PULL_STREAMS) {
+      const next = pendingPullQueue.shift();
+      if (!next) break;
+      next.pullEntry.waitingResolve = null;
+      if (next.pullEntry.canceled) {
+        next.resolve(false);
+      } else {
+        activeConcurrentPullStreams++;
+        next.pullEntry.slotAcquired = true;
+        next.resolve(true);
+      }
+    }
+  }
+
+  ipcMain.handle("ollama-get-active-pulls", async () => {
+    return Array.from(activeOllamaPullStates.values());
+  });
+
+  ipcMain.handle("ollama-pull-model", async (event, payload) => {
+    const modelName = typeof payload?.model === "string" ? payload.model.trim() : "";
+    if (!modelName || !SAFE_OLLAMA_MODEL_NAME_RE.test(modelName)) {
+      return { ok: false, error: "INVALID_MODEL_NAME" };
+    }
+    const parsedOrigin = parseSafeOllamaOrigin(payload?.baseUrl);
+    if (!parsedOrigin) {
+      return { ok: false, error: "INVALID_URL" };
+    }
+
+    const existingPromise = activeOllamaPullPromises.get(modelName);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const pullPromise = (async () => {
+      const targetUrl = new URL("/api/pull", parsedOrigin.origin);
+      const client = targetUrl.protocol === "https:" ? https : http;
+      const bodyString = JSON.stringify({ model: modelName, stream: true });
+
+      broadcastOllamaProgress(event.sender, {
+        stage: "pulling",
+        model: modelName,
+        percent: 0,
+      });
+
+      const pullEntry = {
+        req: null,
+        canceled: false,
+        slotAcquired: false,
+        slotReleased: false,
+        waitingResolve: null,
+      };
+      activeOllamaPullRequests.set(modelName, pullEntry);
+
+      const gotSlot = await acquirePullSlot(pullEntry);
+      if (!gotSlot || pullEntry.canceled) {
+        activeOllamaPullRequests.delete(modelName);
+        activeOllamaPullStates.delete(modelName);
+        return { ok: false, canceled: true, error: "CANCELED" };
+      }
+
+      let maxPercent = 0;
+      const layerTotals = new Map();
+      const layerCompleted = new Map();
+
+      const runSinglePullAttempt = () =>
+        new Promise((resolve) => {
+          if (pullEntry.canceled) {
+            return resolve({ ok: false, canceled: true, error: "CANCELED" });
+          }
+
+          let settled = false;
+          let stallTimer = null;
+          const clearStallWatchdog = () => {
+            if (stallTimer) {
+              clearTimeout(stallTimer);
+              stallTimer = null;
+            }
+          };
+          const done = (resObj) => {
+            if (settled) return;
+            settled = true;
+            clearStallWatchdog();
+            resolve(resObj);
+          };
+
+          let lastByteAdvanceAt = Date.now();
+          let lastSumCompleted = -1;
+
+          const req = client.request(
+            targetUrl,
+            {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(bodyString, "utf8"),
+              },
+              timeout: 30 * 60 * 1000,
+            },
+            (res) => {
+              const status = res.statusCode || 0;
+              if (status < 200 || status >= 300) {
+                res.resume();
+                return done({ ok: false, error: `HTTP ${status}` });
+              }
+
+              let buffer = "";
+              let pullError = null;
+              let sawSuccessStatus = false;
+
+              const processLine = (line) => {
+                if (pullEntry.canceled) return;
+                const trimmed = line.trim();
+                if (!trimmed) return;
+                try {
+                  const obj = JSON.parse(trimmed);
+                  if (obj.error) {
+                    pullError = String(obj.error);
+                    return;
+                  }
+                  const statusStr = typeof obj.status === "string" ? obj.status : "";
+                  if (statusStr === "success") {
+                    sawSuccessStatus = true;
+                  }
+                  if (statusStr.includes("verifying") || statusStr.includes("writing") || statusStr === "success") {
+                    lastByteAdvanceAt = Date.now();
+                  }
+                  if (typeof obj.total === "number" && obj.total > 0 && typeof obj.completed === "number") {
+                    const key = typeof obj.digest === "string" && obj.digest ? obj.digest : "__default__";
+                    layerTotals.set(key, obj.total);
+                    layerCompleted.set(key, Math.min(obj.total, obj.completed));
+
+                    let sumTotal = 0;
+                    let sumCompleted = 0;
+                    for (const [k, tot] of layerTotals.entries()) {
+                      sumTotal += tot;
+                      sumCompleted += layerCompleted.get(k) || 0;
+                    }
+
+                    if (sumCompleted > lastSumCompleted) {
+                      lastSumCompleted = sumCompleted;
+                      lastByteAdvanceAt = Date.now();
+                    }
+
+                    const rawPct = sumTotal > 0 ? Math.min(99, Math.round((sumCompleted / sumTotal) * 100)) : 0;
+                    const pct = Math.max(maxPercent, rawPct);
+                    if (pct > maxPercent) {
+                      maxPercent = pct;
+                      broadcastOllamaProgress(event.sender, {
+                        stage: "pulling",
+                        model: modelName,
+                        percent: pct,
+                        statusText: statusStr,
+                      });
+                    }
+                  }
+                } catch {
+                  /* ignore partial line */
+                }
+              };
+
+              res.on("data", (chunk) => {
+                if (pullEntry.canceled) return;
+                buffer += chunk.toString("utf8");
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                for (const line of lines) {
+                  processLine(line);
+                }
+              });
+
+              res.on("end", () => {
+                if (pullEntry.canceled) {
+                  return done({ ok: false, canceled: true, error: "CANCELED" });
+                }
+                if (buffer.trim()) {
+                  processLine(buffer);
+                }
+                if (pullError) {
+                  done({ ok: false, error: pullError });
+                } else if (!sawSuccessStatus) {
+                  done({ ok: false, error: "PULL_INCOMPLETE_EOF" });
+                } else {
+                  done({ ok: true, model: modelName });
+                }
+              });
+
+              res.on("close", () => {
+                if (pullEntry.canceled) {
+                  done({ ok: false, canceled: true, error: "CANCELED" });
+                } else if (!settled) {
+                  done({ ok: false, error: "PULL_INCOMPLETE_EOF" });
+                }
+              });
+            }
+          );
+
+          pullEntry.req = req;
+
+          // Stall watchdog: only reset if completely silent for 180s (above Ollama's 32s internal retry backoff)
+          const checkStall = () => {
+            if (settled || pullEntry.canceled) return;
+            if (Date.now() - lastByteAdvanceAt >= 180000) {
+              try {
+                req.destroy(new Error("STALLED_STREAM"));
+              } catch {
+                /* ignore */
+              }
+              done({ ok: false, error: "STALLED_STREAM" });
+              return;
+            }
+            stallTimer = setTimeout(checkStall, 5000);
+          };
+          stallTimer = setTimeout(checkStall, 5000);
+
+          req.on("timeout", () => {
+            req.destroy(new Error("ETIMEDOUT"));
+          });
+
+          req.on("error", (err) => {
+            if (pullEntry.canceled || err?.message === "CANCELED") {
+              done({ ok: false, canceled: true, error: "CANCELED" });
+            } else {
+              done({ ok: false, error: err?.message || "PULL_FAILED" });
+            }
+          });
+
+          req.write(bodyString);
+          req.end();
+        });
+
+      const MAX_ATTEMPTS = 60;
+      let lastResult = { ok: false, error: "PULL_FAILED" };
+      try {
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          if (pullEntry.canceled) {
+            return { ok: false, canceled: true, error: "CANCELED" };
+          }
+          if (!(await pingOllamaServer(parsedOrigin))) {
+            const binPath = await findLocalOllamaBinary();
+            if (binPath) {
+              await startLocalOllamaDaemon(binPath, parsedOrigin);
+            }
+          }
+          lastResult = await runSinglePullAttempt();
+          if (lastResult.ok) {
+            broadcastOllamaProgress(event.sender, {
+              stage: "ready",
+              model: modelName,
+              percent: 100,
+            });
+            return lastResult;
+          }
+          if (lastResult.canceled || pullEntry.canceled) {
+            return { ok: false, canceled: true, error: "CANCELED" };
+          }
+          if (!isTransientOllamaPullError(lastResult.error) || attempt === MAX_ATTEMPTS) {
+            return lastResult;
+          }
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+        return lastResult;
+      } finally {
+        releasePullSlot(pullEntry);
+        activeOllamaPullRequests.delete(modelName);
+        activeOllamaPullStates.delete(modelName);
+        activeOllamaPullPromises.delete(modelName);
+      }
+    })();
+
+    activeOllamaPullPromises.set(modelName, pullPromise);
+    return pullPromise;
+  });
+
+  ipcMain.handle("ollama-cancel-pull", async (_event, payload) => {
+    const modelName = typeof payload?.model === "string" ? payload.model.trim() : "";
+    if (!modelName) return { ok: false, error: "INVALID_MODEL_NAME" };
+    const entry = activeOllamaPullRequests.get(modelName);
+    if (entry) {
+      entry.canceled = true;
+      activeOllamaPullRequests.delete(modelName);
+      activeOllamaPullStates.delete(modelName);
+      activeOllamaPullPromises.delete(modelName);
+      if (typeof entry.waitingResolve === "function") {
+        const wake = entry.waitingResolve;
+        entry.waitingResolve = null;
+        wake(false);
+      }
+      try {
+        entry.req?.destroy(new Error("CANCELED"));
+      } catch {
+        /* ignore */
+      }
+      releasePullSlot(entry);
+    }
+    return { ok: true, canceled: true };
+  });
+
+  ipcMain.handle("ollama-delete-model", async (_event, payload) => {
+    const modelName = typeof payload?.model === "string" ? payload.model.trim() : "";
+    if (!modelName || !SAFE_OLLAMA_MODEL_NAME_RE.test(modelName)) {
+      return { ok: false, error: "INVALID_MODEL_NAME" };
+    }
+    const parsedOrigin = parseSafeOllamaOrigin(payload?.baseUrl);
+    if (!parsedOrigin) {
+      return { ok: false, error: "INVALID_URL" };
+    }
+
+    const targetUrl = new URL("/api/delete", parsedOrigin.origin);
+    const client = targetUrl.protocol === "https:" ? https : http;
+    const bodyString = JSON.stringify({ model: modelName, name: modelName });
+
+    return new Promise((resolve) => {
+      const req = client.request(
+        targetUrl,
+        {
+          method: "DELETE",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(bodyString, "utf8"),
+          },
+          timeout: 15000,
+        },
+        (res) => {
+          const status = res.statusCode || 0;
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            if (status >= 200 && status < 300) {
+              resolve({ ok: true });
+            } else {
+              const rawText = Buffer.concat(chunks).toString("utf8");
+              let errText = `HTTP ${status}`;
+              try {
+                const parsed = JSON.parse(rawText);
+                if (parsed?.error) errText = String(parsed.error);
+              } catch {
+                if (rawText.trim()) errText = rawText.trim();
+              }
+              resolve({ ok: false, error: errText });
+            }
+          });
+        }
+      );
+      req.on("timeout", () => req.destroy(new Error("ETIMEDOUT")));
+      req.on("error", (err) => resolve({ ok: false, error: err?.message || "DELETE_FAILED" }));
+      req.write(bodyString);
+      req.end();
+    });
+  });
+
   ipcMain.on("window-minimize", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) win.minimize();
@@ -3750,7 +4728,7 @@ app.whenReady().then(() => {
     try {
       app.setAboutPanelOptions({
         applicationName: "Luno Note",
-        applicationVersion: app.getVersion ? app.getVersion() : "1.4.1",
+        applicationVersion: app.getVersion ? app.getVersion() : "1.5.0",
         copyright: "Copyright © 2026 phanuwatla",
         authors: ["phanuwatla"],
         website: "https://github.com/phanuwatla",

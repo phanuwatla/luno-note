@@ -104,6 +104,35 @@ export interface GoogleDriveAuthData {
   [key: string]: unknown;
 }
 
+export interface OllamaIpcRequest {
+  baseUrl?: string;
+  endpoint: "/api/tags" | "/api/chat" | "/api/generate" | "/api/version";
+  body?: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
+export interface OllamaIpcResponse {
+  ok: boolean;
+  status: number;
+  data?: unknown;
+  error?: string;
+}
+
+export interface OllamaStreamChunkPayload {
+  requestId: string;
+  delta?: string;
+  done?: boolean;
+  error?: string;
+  model?: string;
+}
+
+export interface OllamaSetupProgressPayload {
+  stage: "downloading" | "installing" | "starting" | "pulling" | "ready";
+  percent?: number;
+  model?: string;
+  statusText?: string;
+}
+
 export interface ElectronAPI {
   isElectron?: boolean;
   // Window controls
@@ -164,6 +193,18 @@ export interface ElectronAPI {
   printContent?: (options: { html: string; title?: string }) => Promise<{ success: boolean; failureReason?: string; error?: string }>;
   exportPdf?: (options: { html: string; title?: string; defaultPath?: string }) => Promise<{ success?: boolean; canceled?: boolean; filePath?: string; error?: string }>;
   fetchTtsAudio?: (data: { text: string; lang: string }) => Promise<string | null>;
+  ollamaRequest?: (payload: OllamaIpcRequest) => Promise<OllamaIpcResponse>;
+  ollamaStreamChat?: (payload: OllamaIpcRequest & { requestId: string }) => Promise<OllamaIpcResponse>;
+  ollamaAbortChat?: (payload: { requestId: string }) => Promise<{ ok: boolean }>;
+  onOllamaChatStream?: (callback: (payload: OllamaStreamChunkPayload) => void) => () => void;
+  ollamaCheckSystem?: () => Promise<{ installed: boolean; platform: string }>;
+  ollamaStartService?: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string }>;
+  ollamaInstallSystem?: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string }>;
+  ollamaPullModel?: (payload: { baseUrl?: string; model: string }) => Promise<{ ok: boolean; model?: string; canceled?: boolean; error?: string }>;
+  ollamaGetActivePulls?: () => Promise<OllamaSetupProgressPayload[]>;
+  ollamaCancelPull?: (payload: { model: string }) => Promise<{ ok: boolean; canceled?: boolean; error?: string }>;
+  ollamaDeleteModel?: (payload: { baseUrl?: string; model: string }) => Promise<{ ok: boolean; error?: string }>;
+  onOllamaSetupProgress?: (callback: (progress: OllamaSetupProgressPayload) => void) => () => void;
   getOsUserInfo?: () => Promise<{ username?: string }>;
 
   // Clipboard

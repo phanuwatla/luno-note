@@ -1,3 +1,9 @@
+import {
+  LUNO_COMPACT_PRODUCT_IDENTITY,
+  LUNO_SECURITY_AND_IP_GUARDRAIL,
+  getRelevantLunoKnowledge,
+} from "@/lib/lunoKnowledge";
+
 export type AiActionType =
   | "improve"
   | "fix_grammar"
@@ -140,7 +146,10 @@ Prioritize: Writing experience > visual decoration.
 ---
 
 # 14. Luno Product Awareness
-Understand that Luno is primarily a Writing + Notes + Knowledge + AI workspace.
+${LUNO_COMPACT_PRODUCT_IDENTITY}
+When users ask how to use Luno Note, give clear, accurate steps with exact menu paths, tabs, and keyboard shortcuts. Never invent features that do not exist in Luno Note.
+
+${LUNO_SECURITY_AND_IP_GUARDRAIL}
 
 ---
 
@@ -242,6 +251,14 @@ const ACTION_PROMPTS: Record<AiActionType, (input: string) => string> = {
     `${SYSTEM_PREFIX}\n\nTask: Rewrite with fresh phrasing and clear structure while strictly preserving Markdown structure, checklists, and any inline HTML styling spans (<span style="...">). Output ONLY the single rewritten text.\n\nText:\n${text}`,
 };
 
+export function buildAiActionPrompt(action: AiActionType, text: string): string {
+  const promptBuilder = ACTION_PROMPTS[action];
+  if (!promptBuilder) {
+    throw new Error(`Unknown AI action: ${action}`);
+  }
+  return promptBuilder(text.trim());
+}
+
 export function cleanAiOutputText(rawText: string): string {
   if (!rawText) return "";
   let cleaned = rawText.trim();
@@ -328,6 +345,10 @@ export function formatModelName(modelName?: string): string {
   if (clean.startsWith("imagen-4.0-ultra")) return "Imagen 4.0 Ultra";
   if (clean.startsWith("imagen-4.0")) return "Imagen 4.0";
   if (clean.startsWith("imagen-3.0")) return "Imagen 3.0";
+
+  if (clean.includes(":") || (!clean.startsWith("gemini-") && !clean.startsWith("imagen-"))) {
+    return clean;
+  }
 
   return clean
     .split("-")
@@ -539,9 +560,92 @@ export async function fetchAvailableModels(apiKey: string): Promise<AvailableMod
 export interface GeminiActionResult {
   result: string;
   modelUsed: string;
+  fallbackFrom?: "gemini";
+  fallbackReason?: "quota" | "offline" | "server";
 }
 
-function parseGeminiApiError(status: number, message: string, lang: "th" | "en" = "th"): Error {
+export type GeminiErrorKind =
+  | "quota"
+  | "network"
+  | "missing_key"
+  | "invalid_key"
+  | "token_limit"
+  | "server"
+  | "unknown";
+
+export class GeminiApiError extends Error {
+  readonly kind: GeminiErrorKind;
+  readonly status?: number;
+
+  constructor(message: string, kind: GeminiErrorKind, status?: number) {
+    super(message);
+    this.name = "GeminiApiError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+export function isGeminiFallbackEligibleError(
+  err: unknown
+): { eligible: boolean; reason?: "quota" | "offline" | "server" } {
+  if (err instanceof GeminiApiError) {
+    if (err.kind === "quota") return { eligible: true, reason: "quota" };
+    if (err.kind === "network") return { eligible: true, reason: "offline" };
+    if (err.kind === "server") return { eligible: true, reason: "server" };
+    return { eligible: false };
+  }
+
+  if (err instanceof Error && (err.name === "AbortError" || err.message === "ABORTED")) {
+    return { eligible: false };
+  }
+
+  const msg = (err instanceof Error ? err.message : String(err || "")).toLowerCase();
+  if (
+    msg.includes("invalid gemini api key") ||
+    msg.includes("gemini api key ไม่ถูกต้อง") ||
+    msg.includes("api key is missing") ||
+    msg.includes("จำเป็นต้องระบุ gemini api key") ||
+    msg.includes("token limit") ||
+    msg.includes("token count exceeds")
+  ) {
+    return { eligible: false };
+  }
+
+  if (
+    msg.includes("quota exceeded") ||
+    msg.includes("โควตา gemini api") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("(429)")
+  ) {
+    return { eligible: true, reason: "quota" };
+  }
+
+  const isOfflineNavigator = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (
+    isOfflineNavigator ||
+    msg.includes("failed to fetch") ||
+    msg.includes("networkerror") ||
+    msg.includes("network error") ||
+    msg.includes("load failed") ||
+    msg.includes("internet_disconnected") ||
+    msg.includes("err_name_not_resolved") ||
+    msg.includes("econnreset") ||
+    msg.includes("enotfound") ||
+    msg.includes("etimedout") ||
+    msg.includes("failed to contact gemini api") ||
+    msg.includes("ไม่สามารถเชื่อมต่อ gemini api ได้")
+  ) {
+    return { eligible: true, reason: "offline" };
+  }
+
+  if (/gemini api error \((500|502|503|504)\)|เกิดข้อผิดพลาดจาก gemini api \((500|502|503|504)\)/.test(msg)) {
+    return { eligible: true, reason: "server" };
+  }
+
+  return { eligible: false };
+}
+
+function parseGeminiApiError(status: number, message: string, lang: "th" | "en" = "th"): GeminiApiError {
   const lowerMsg = message.toLowerCase();
 
   // 1. Token limit / Context size error
@@ -555,7 +659,7 @@ function parseGeminiApiError(status: number, message: string, lang: "th" | "en" 
       lang === "en"
         ? "Chat content or attached files exceed Gemini Token Limit. Please start a new chat or reduce attached file sizes."
         : "เนื้อหาในแชตหรือไฟล์แนบมีขนาดใหญ่เกินกว่า Token Limit ของ Gemini กรุณาเริ่มแชตใหม่หรือลดขนาดไฟล์แนบ";
-    return new Error(text);
+    return new GeminiApiError(text, "token_limit", status);
   }
 
   // 2. Quota limit / Rate limit
@@ -564,7 +668,7 @@ function parseGeminiApiError(status: number, message: string, lang: "th" | "en" 
       lang === "en"
         ? "Gemini API quota exceeded. Please wait a moment and try again, or check your Google AI account."
         : "โควตา Gemini API เต็มแล้ว กรุณารอสักครู่แล้วลองใหม่อีกครั้ง หรือตรวจสอบบัญชี Google AI";
-    return new Error(text);
+    return new GeminiApiError(text, "quota", status);
   }
 
   // 3. Invalid API key error
@@ -573,13 +677,14 @@ function parseGeminiApiError(status: number, message: string, lang: "th" | "en" 
     lowerMsg.includes("api_key") ||
     lowerMsg.includes("invalid key") ||
     lowerMsg.includes("unauthenticated") ||
+    status === 401 ||
     status === 403
   ) {
     const text =
       lang === "en"
         ? "Invalid Gemini API Key. Please check or update your key in Settings."
         : "Gemini API Key ไม่ถูกต้อง กรุณาตรวจสอบหรือเปลี่ยน Key ในหน้าตั้งค่า";
-    return new Error(text);
+    return new GeminiApiError(text, "invalid_key", status);
   }
 
   const cleanDetail = message.replace(/https?:\/\/[^\s]+/g, "").trim();
@@ -587,7 +692,8 @@ function parseGeminiApiError(status: number, message: string, lang: "th" | "en" 
     lang === "en"
       ? `Gemini API Error (${status}): ${cleanDetail || "Unable to process response."}`
       : `เกิดข้อผิดพลาดจาก Gemini API (${status}): ${cleanDetail || "ไม่สามารถประมวลผลคำตอบได้"}`;
-  return new Error(text);
+  const kind: GeminiErrorKind = status >= 500 && status <= 599 ? "server" : "unknown";
+  return new GeminiApiError(text, kind, status);
 }
 
 export async function runGeminiAction(
@@ -599,10 +705,11 @@ export async function runGeminiAction(
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
-    throw new Error(
+    throw new GeminiApiError(
       lang === "en"
         ? "Gemini API key is missing. Please add your API key in Settings."
-        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า",
+      "missing_key"
     );
   }
 
@@ -699,6 +806,13 @@ export async function runGeminiAction(
   throw lastError || new Error(lang === "en" ? "Failed to contact Gemini API." : "ไม่สามารถเชื่อมต่อ Gemini API ได้");
 }
 
+function buildGeminiSystemInstruction(currentPrompt: string, history?: GeminiChatMessage[]): string {
+  const recentTexts = (history || []).slice(-4).map((m) => m.content || "");
+  const relevant = getRelevantLunoKnowledge(currentPrompt, recentTexts, 6);
+  if (!relevant) return LUNO_AI_SYSTEM_PROMPT;
+  return `${LUNO_AI_SYSTEM_PROMPT}\n\n## Luno Note Reference\n${relevant}`;
+}
+
 export async function runGeminiPrompt(
   apiKey: string,
   promptText: string,
@@ -722,6 +836,7 @@ export async function runGeminiPrompt(
     preferredModels = getAutoModelCandidates(selectedModel);
   }
 
+  const systemText = buildGeminiSystemInstruction(promptText);
   let lastError: Error | null = null;
 
   for (let i = 0; i < preferredModels.length; i++) {
@@ -737,7 +852,7 @@ export async function runGeminiPrompt(
         },
         body: JSON.stringify({
           systemInstruction: {
-            parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
+            parts: [{ text: systemText }],
           },
           contents: [{ parts: [{ text: promptText }] }],
           generationConfig: { temperature: temp },
@@ -851,10 +966,11 @@ export async function runGeminiChatHistory(
 ): Promise<GeminiActionResult> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) {
-    throw new Error(
+    throw new GeminiApiError(
       lang === "en"
         ? "Gemini API key is missing. Please add your API key in Settings."
-        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า"
+        : "จำเป็นต้องระบุ Gemini API key กรุณาตั้งค่าในหน้าตั้งค่า",
+      "missing_key"
     );
   }
 
@@ -866,6 +982,7 @@ export async function runGeminiChatHistory(
   }
 
   const contents = buildGeminiContents(history, newPrompt, attachedFilesContext);
+  const systemText = buildGeminiSystemInstruction(newPrompt, history);
 
   let lastError: Error | null = null;
 
@@ -882,7 +999,7 @@ export async function runGeminiChatHistory(
         },
         body: JSON.stringify({
           systemInstruction: {
-            parts: [{ text: LUNO_AI_SYSTEM_PROMPT }],
+            parts: [{ text: systemText }],
           },
           contents,
           generationConfig: { temperature: temp },

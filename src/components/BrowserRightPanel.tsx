@@ -400,7 +400,7 @@ export default function BrowserRightPanel({
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-xs no-scrollbar">
         {/* TAB 1: HISTORY */}
         {activeTab === "history" && (
-          <div className="space-y-4">
+          <div className="space-y-4 luno-section-enter">
             {/* Search History Filter & Action Bar */}
             <div className="space-y-2">
               <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 border border-border/50 focus-within:border-primary focus-within:ring-0 shadow-none transition-all">
@@ -519,7 +519,7 @@ export default function BrowserRightPanel({
 
         {/* TAB 2: BOOKMARKS */}
         {activeTab === "bookmarks" && (
-          <div className="space-y-4">
+          <div className="space-y-4 luno-section-enter">
             {/* Quick Bookmark Current Page Button */}
             <button
               type="button"
@@ -630,7 +630,7 @@ export default function BrowserRightPanel({
 
         {/* TAB 3: PRIVACY & DATA */}
         {activeTab === "privacy" && (
-          <div className="space-y-5">
+          <div className="space-y-5 luno-section-enter">
             {/* SECTION 1: CLEAR BROWSING DATA */}
             <div className="space-y-3">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">

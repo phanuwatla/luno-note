@@ -887,8 +887,8 @@ export default function FloatingAudioRecorder({
                         stroke="currentColor"
                         strokeWidth="2.5"
                         strokeLinecap="round"
-                        className="text-destructive animate-pulse"
-                        style={{ animationDelay: `${i * 120}ms` }}
+                        className="text-destructive luno-audio-wave"
+                        style={{ animationDelay: `${i * 90}ms` }}
                       />
                     );
                   })}

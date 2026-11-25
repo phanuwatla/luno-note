@@ -1,7 +1,7 @@
 {
   "name": "luno-note",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Luno Note - Modern and intuitive note-taking application",
   "main": "electron/main.js",
   "author": {
@@ -11,6 +11,73 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/phanuwatla/luno-note.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "helper:build": "node scripts/build-fix-language-helper.mjs",
+    "electron:dev": "node scripts/build-fix-language-helper.mjs && concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\"",
+    "electron:build": "node scripts/build-fix-language-helper.mjs && npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.luno.note",
+    "productName": "Luno Note",
+    "copyright": "Copyright © 2026 phanuwatla",
+    "directories": {
+      "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "phanuwatla",
+      "repo": "luno-note",
+      "releaseType": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/bin/**/*",
+      "!electron/helper/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/bin/LunoFixLang.exe",
+        "to": "LunoFixLang.exe"
+      }
+    ],
+    "win": {
+      "icon": "electron/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "legalTrademarks": "Luno Note",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Luno Note",
+      "multiLanguageInstaller": true,
+      "installerLanguages": [
+        "th_TH",
+        "en_US"
+      ],
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
+      "artifactName": "${name}-setup-${version}.${ext}"
+    }
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -61,5 +128,33 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "turndown": "^7.2.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@tailwindcss/typography": "^0.5.16",
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^22.16.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.0.0",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.5",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.32.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^15.15.0",
+    "jsdom": "^20.0.3",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.38.0",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0",
+    "wait-on": "^9.1.0"
   }
 }

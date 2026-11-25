@@ -231,13 +231,13 @@ export function useNotes() {
     if (!isNewWorkspace) {
       notesRef.current.forEach((n) => {
         if (n.id) prevNotesMap.set(n.id, n);
-        const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName) : "";
+        const relPath = n.fileName ? (n.folderPath ? `${n.folderPath}/${n.fileName}` : n.fileName).replace(/\\/g, "/") : "";
         if (relPath) prevNotesMap.set(relPath, n);
       });
     }
 
     const resultNotes: Note[] = items.map((item) => {
-      const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName) : "";
+      const relPath = item.fileName ? (item.folderPath ? `${item.folderPath}/${item.fileName}` : item.fileName).replace(/\\/g, "/") : "";
       const existingNote = !isNewWorkspace ? ((item.id ? prevNotesMap.get(item.id) : undefined) || (relPath ? prevNotesMap.get(relPath) : undefined)) : undefined;
       const id = item.id ?? existingNote?.id ?? crypto.randomUUID();
 

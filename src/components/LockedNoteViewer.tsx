@@ -193,10 +193,9 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
   return (
     <div className="h-full w-full flex flex-col items-center justify-center p-6 bg-background select-none animate-in fade-in duration-200">
       <div
-        className="w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col items-center text-center transition-transform duration-200"
-        style={{
-          animation: shake ? "shake 0.4s cubic-bezier(.36,.07,.19,.97) both" : undefined,
-        }}
+        className={`w-full max-w-sm p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col items-center text-center transition-transform duration-200 ${
+          shake ? "luno-shake" : ""
+        }`}
       >
         {/* Lock Icon */}
         <div className="text-primary flex items-center justify-center mb-3">
@@ -252,7 +251,7 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
           </div>
 
           {error && (
-            <div className="w-full p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2 animate-in fade-in">
+            <div className="w-full p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2 luno-bar-enter">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -273,15 +272,6 @@ export const LockedNoteViewer: React.FC<LockedNoteViewerProps> = ({ note, onUnlo
           </Button>
         </form>
       </div>
-
-      <style>{`
-        @keyframes shake {
-          10%, 90% { transform: translate3d(-1px, 0, 0); }
-          20%, 80% { transform: translate3d(2px, 0, 0); }
-          30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
-          40%, 60% { transform: translate3d(4px, 0, 0); }
-        }
-      `}</style>
     </div>
   );
 };

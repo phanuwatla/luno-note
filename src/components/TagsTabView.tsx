@@ -675,7 +675,7 @@ export default function TagsTabView({
                       <div
                         key={note.id}
                         onClick={() => onOpenNote(note.id)}
-                        className="group flex items-center px-4 py-2.5 text-xs transition-colors cursor-pointer min-w-0 hover:bg-muted/30 text-foreground/90"
+                        className="group flex items-center px-4 py-2.5 text-xs transition-all duration-150 active:scale-[0.995] cursor-pointer min-w-0 hover:bg-muted/30 text-foreground/90"
                       >
                         {/* Star Toggle Button */}
                         <div className="w-8 flex items-center justify-center shrink-0">

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { getScrollBehavior } from "@/lib/motion";
 import {
   X,
   Clock,
@@ -428,7 +429,7 @@ function RightPanelComponent({
       if (isFirstHeading) {
         scrollContainer.scrollTo({
           top: 0,
-          behavior: "smooth",
+          behavior: getScrollBehavior(),
         });
       } else if (targetEl) {
         const containerRect = scrollContainer.getBoundingClientRect();
@@ -443,7 +444,7 @@ function RightPanelComponent({
 
         scrollContainer.scrollTo({
           top: finalScrollTop,
-          behavior: "smooth",
+          behavior: getScrollBehavior(),
         });
       }
     }
@@ -611,7 +612,7 @@ function RightPanelComponent({
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6 text-xs">
               {/* TAB 1: OUTLINE */}
               {activeTab === "outline" && (
-                <div className="space-y-2">
+                <div className="space-y-2 luno-section-enter">
                   {outlineItems.length > 0 ? (
                     outlineItems.map((item) => {
                       const levelPadding =
@@ -649,7 +650,7 @@ function RightPanelComponent({
 
               {/* TAB 2: PROPERTIES */}
               {activeTab === "properties" && (
-                <div className="space-y-2 text-xs">
+                <div className="space-y-2 text-xs luno-section-enter">
                   <div className="flex items-center justify-between py-0.5">
                     <span className="text-muted-foreground">{t("rightPanel.fileName")}</span>
                     <span className="font-medium text-foreground">{note.fileName || t("editor.untitled")}</span>
@@ -685,7 +686,7 @@ function RightPanelComponent({
 
               {/* TAB 3: BACKLINKS */}
               {activeTab === "backlinks" && (
-                <div className="space-y-2 text-xs">
+                <div className="space-y-2 text-xs luno-section-enter">
                   {backlinks.length > 0 ? (
                     backlinks.map((linkNote) => (
                       <button

@@ -64,8 +64,8 @@ For full rule details and examples, read the authoritative documents in `docs/st
    - Hidden `BrowserWindow`s (`print-content`, `export-pdf`) MUST enable `sandbox: true`, deny `setWindowOpenHandler`, and block `will-navigate`. `<webview>` and fallback `<iframe>`s must block `javascript:`/`vbscript:`, verify `file://` targets with `isPathAllowedForIpc`, and omit `allow-same-origin` on `data:`/`blob:`/`file:` iframe sandboxes.
    - Validate clipboard image payloads (`^data:image\/[a-z0-9.+-]+;base64,...`) in `write-clipboard-image` before constructing HTML clipboard markup.
    - Never store locked note plaintext in `localStorage` recovery backups (`if (!note.isLocked)`).
-   - Never persist `userName`, `geminiApiKey`, or `googleDriveClientId` in `.luno/settings.json` or Drive sync.
-   - Send Gemini API keys via `x-goog-api-key` header (never URL `?key=`).
+   - Never persist `userName`, `geminiApiKey`, `googleDriveClientId`, or `ollamaBaseUrl` in `.luno/settings.json` or Drive sync.
+   - Send Gemini API keys via `x-goog-api-key` header (never URL `?key=`). Restrict `ollama-request` IPC strictly to allowlisted endpoints (`/api/tags`, `/api/chat`, `/api/generate`, `/api/version`) with SSRF host validation and no redirect following.
    - Never auto-share uploaded Google Drive attachments (`anyone: reader`).
    - Keep PDF annotation keys (`luno-pdf-annotations:*`) and bookmark keys (`luno-pdf-bookmarks:*`) strictly disjoint.
 5. **Keyboard Shortcuts (`LN-KBD-01`)**:
@@ -105,7 +105,7 @@ Always check and reuse these canonical shared modules first:
   - `NoteCollectionPrimitives` — shared sort/filter/badge/view-mode hooks & helpers
   - `EditorCheckbox` — accessible task-style checkbox
 - **Editor Shared Modules** (`src/components/editor/`): `WorkspaceMediaPickerShell`, `TableInteractiveOverlay`, `slashItems.tsx`, `turndownService.ts`, `extensions/editorExtensions.ts`.
-- **Shared Utilities** (`src/lib/`): `htmlUtils.ts` (`escapeHtml`), `systemTabs.ts` (`isSystemTab`, `isWebViewerTab`, `isVirtualTab`), `fileIconUtils.ts` (`formatFileSize`), `dateTimeFormatter.ts`, `fixLanguageSystem.ts` (`triggerInAppFixLanguage`, `FIX_LANGUAGE_EVENT`).
+- **Shared Utilities** (`src/lib/`): `motion.ts` (`LUNO_EASE`, `LUNO_SPRING_SNAPPY`, `LUNO_SPRING_SOFT`, `areAnimationsEnabled`, `useAnimationsEnabled`, `getScrollBehavior`, `resolveTransition`), `htmlUtils.ts` (`escapeHtml`), `systemTabs.ts` (`isSystemTab`, `isWebViewerTab`, `isVirtualTab`), `fileIconUtils.ts` (`formatFileSize`), `dateTimeFormatter.ts`, `fixLanguageSystem.ts` (`triggerInAppFixLanguage`, `FIX_LANGUAGE_EVENT`), `aiProvider.ts` (`executeAiAction`, `executeAiChatHistory`, `isAiProviderConfigured`), `ollamaApi.ts` (`fetchOllamaModels`, `normalizeOllamaBaseUrl`, `warmUpOllamaModel`), `lunoKnowledge.ts` (`LUNO_COMPACT_PRODUCT_IDENTITY`, `LUNO_SECURITY_AND_IP_GUARDRAIL`, `getRelevantLunoKnowledge`).
 
 ---
 

@@ -234,7 +234,7 @@ const TabItem = React.memo(function TabItem({
           }}
           data-tab-item="true"
           data-active={isActive ? "true" : "false"}
-          className={`group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-1.5 rounded-t-xl px-2.5 py-2 text-xs transition-all duration-150 ${
+          className={`group flex flex-1 min-w-[38px] max-w-[190px] cursor-pointer items-center gap-1.5 rounded-t-xl px-2.5 py-2 text-xs transition-all duration-150 luno-tab-enter ${
             isDragging ? "opacity-40 scale-[0.98] bg-muted/60" : ""
           } ${
             isActive

@@ -221,9 +221,39 @@ export function clearSavedFoldedHeadingKeys(noteId?: string, fileName?: string):
 }
 
 /**
- * Dispatches a transaction to toggle the fold state of a heading at hPos.
+ * Dispatches a transaction to toggle the fold state of a heading at hPos or containing the toggle element.
  */
-export function handleToggleFold(view: EditorView, hPos: number) {
+export function handleToggleFold(view: EditorView, hPosOrEl: number | HTMLElement) {
+  let hPos = -1;
+  if (typeof hPosOrEl === "number") {
+    hPos = hPosOrEl;
+  } else {
+    try {
+      const domPos = view.posAtDOM(hPosOrEl, 0);
+      const $pos = view.state.doc.resolve(Math.max(0, Math.min(domPos, view.state.doc.content.size)));
+      for (let d = $pos.depth; d >= 1; d--) {
+        if ($pos.node(d).type.name === "heading") {
+          hPos = $pos.before(d);
+          break;
+        }
+      }
+      if (hPos < 0) {
+        for (const cand of [domPos, domPos - 1, domPos + 1]) {
+          if (cand >= 0 && cand <= view.state.doc.content.size) {
+            const n = view.state.doc.nodeAt(cand);
+            if (n?.type.name === "heading") {
+              hPos = cand;
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      return;
+    }
+  }
+  if (hPos < 0) return;
+
   const node = view.state.doc.nodeAt(hPos);
   if (!node || node.type.name !== "heading") return;
   if (isTitleHeading(view.state.doc, hPos, node)) return;
@@ -285,7 +315,7 @@ export function createToggleButton(
     e.preventDefault();
     e.stopPropagation();
     if (view) {
-      handleToggleFold(view, hPos);
+      handleToggleFold(view, btn.isConnected ? btn : hPos);
     }
   });
 
@@ -313,7 +343,7 @@ export function createFoldedBadge(view: EditorView | undefined, hPos: number): H
     e.preventDefault();
     e.stopPropagation();
     if (view) {
-      handleToggleFold(view, hPos);
+      handleToggleFold(view, badge.isConnected ? badge : hPos);
     }
   });
 
@@ -347,6 +377,7 @@ export function buildHeadingDecorations(
     const isFolded = foldedPositions.has(pos);
 
     // 1. Toggle button at the start of the heading content (positioned in margin via CSS)
+    // Use a position-independent key so typing above or inside headings never destroys/recreates the widget DOM element
     decorations.push(
       Decoration.widget(
         pos + 1,
@@ -355,7 +386,7 @@ export function buildHeadingDecorations(
           side: -1,
           stopEvent: () => true,
           ignoreSelection: true,
-          key: `heading-toggle-${pos}-${isFolded ? "folded" : "open"}`,
+          key: `heading-toggle-L${level}-${isFolded ? "folded" : "open"}`,
         }
       )
     );
@@ -385,7 +416,7 @@ export function buildHeadingDecorations(
             side: 1,
             stopEvent: () => true,
             ignoreSelection: true,
-            key: `heading-badge-${pos}`,
+            key: `heading-badge-L${level}`,
           }
         )
       );
@@ -487,7 +518,7 @@ export const HeadingToggle = Extension.create<HeadingToggleOptions>({
   },
 
   addProseMirrorPlugins() {
-    const extension = this;
+    const extensionOptions = this.options;
 
     return [
       new Plugin({
@@ -495,12 +526,12 @@ export const HeadingToggle = Extension.create<HeadingToggleOptions>({
         state: {
           init(_, { doc }) {
             const isEnabled =
-              typeof extension.options.enabled === "function"
-                ? extension.options.enabled()
-                : extension.options.enabled !== false;
+              typeof extensionOptions.enabled === "function"
+                ? extensionOptions.enabled()
+                : extensionOptions.enabled !== false;
 
-            const noteId = extension.options.noteId;
-            const fileName = extension.options.fileName;
+            const noteId = extensionOptions.noteId;
+            const fileName = extensionOptions.fileName;
 
             let foldedPositions = new Set<number>();
             if (isEnabled && (noteId || fileName)) {
@@ -518,11 +549,11 @@ export const HeadingToggle = Extension.create<HeadingToggleOptions>({
             };
           },
 
-          apply(tr, prevState) {
+          apply(tr, prevState, oldEditorState) {
             const isEnabled =
-              typeof extension.options.enabled === "function"
-                ? extension.options.enabled()
-                : extension.options.enabled !== false;
+              typeof extensionOptions.enabled === "function"
+                ? extensionOptions.enabled()
+                : extensionOptions.enabled !== false;
 
             let activeNoteId = prevState.activeNoteId;
             let fileName = prevState.fileName;
@@ -642,9 +673,10 @@ export const HeadingToggle = Extension.create<HeadingToggleOptions>({
                 tr.getMeta("addToHistory") === false ||
                 Boolean(tr.getMeta("isDocumentReplacement"));
 
-              const isFullDocReplacement = tr.steps.some((step: any) => {
-                const from = step.from ?? step.slice?.from;
-                const to = step.to ?? step.slice?.to;
+              const isFullDocReplacement = tr.steps.some((step) => {
+                const s = step as unknown as { from?: number; to?: number; slice?: { from?: number; to?: number } };
+                const from = s.from ?? s.slice?.from;
+                const to = s.to ?? s.slice?.to;
                 return from === 0 && typeof to === "number" && to > 0;
               });
 
@@ -665,6 +697,55 @@ export const HeadingToggle = Extension.create<HeadingToggleOptions>({
                   getFoldedHeadingKeys(tr.doc, nextFolded),
                   fileName
                 );
+              }
+
+              // Fast path: if no headings are folded and this transaction only modified inline text inside a single textblock
+              // without changing top-level block structure or heading levels, map existing decorations in-place to preserve
+              // exact WidgetType object identity and avoid unnecessary full-document rebuilds on every keystroke.
+              if (
+                !hadFolds &&
+                nextFolded.size === 0 &&
+                !isFullDocReplacement &&
+                oldEditorState?.doc &&
+                tr.doc.childCount === oldEditorState.doc.childCount &&
+                tr.steps.length === 1
+              ) {
+                const step = tr.steps[0] as unknown as { from?: number; to?: number };
+                const stepFrom = step.from;
+                const stepTo = step.to;
+                if (
+                  typeof stepFrom === "number" &&
+                  typeof stepTo === "number" &&
+                  stepFrom >= 1 &&
+                  stepTo <= oldEditorState.doc.content.size
+                ) {
+                  try {
+                    const $oldFrom = oldEditorState.doc.resolve(stepFrom);
+                    const $oldTo = oldEditorState.doc.resolve(stepTo);
+                    if (
+                      $oldFrom.depth >= 1 &&
+                      $oldFrom.sameParent($oldTo) &&
+                      $oldFrom.parent.isTextblock
+                    ) {
+                      const newFrom = Math.max(1, Math.min(stepFrom, tr.doc.content.size));
+                      const $newFrom = tr.doc.resolve(newFrom);
+                      if (
+                        $newFrom.depth === $oldFrom.depth &&
+                        $newFrom.parent.type === $oldFrom.parent.type &&
+                        $newFrom.parent.attrs?.level === $oldFrom.parent.attrs?.level
+                      ) {
+                        return {
+                          foldedPositions: nextFolded,
+                          decorations: prevState.decorations.map(tr.mapping, tr.doc),
+                          activeNoteId,
+                          fileName,
+                        };
+                      }
+                    }
+                  } catch {
+                    // Fall through to full rebuild
+                  }
+                }
               }
 
               return {

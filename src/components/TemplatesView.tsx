@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
+import { getScrollBehavior } from "@/lib/motion";
 import { useTranslation } from "@/hooks/useTranslation";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useAppSettings } from "@/hooks/useAppSettings";
@@ -459,7 +460,7 @@ export default function TemplatesView({
     setPreviewTab("rendered");
     setDeviceMode("desktop");
     if (typeof mainScrollRef.current?.scrollTo === "function") {
-      mainScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+      mainScrollRef.current.scrollTo({ top: 0, behavior: getScrollBehavior() });
     } else if (mainScrollRef.current) {
       mainScrollRef.current.scrollTop = 0;
     }
@@ -522,7 +523,7 @@ export default function TemplatesView({
       >
         {previewItem ? (
           // ==================== IN-TAB TEMPLATE PREVIEW VIEW ====================
-          <div className="flex-1 flex flex-col min-h-0 w-full">
+          <div className="flex-1 flex flex-col min-h-0 w-full luno-section-enter">
             {/* Top Breadcrumb Toolbar (Slightly larger for Template Preview) */}
             <div className="sticky top-0 z-30 flex items-center justify-between bg-background px-3.5 h-10 text-[12px] leading-tight text-muted-foreground select-none min-w-0 w-full gap-2 border-b border-border/40 shrink-0">
               {/* Left: ArrowLeft (replaces home icon) + Templates > Template Name */}
@@ -911,7 +912,7 @@ export default function TemplatesView({
         </div>
       ) : (
           // ==================== CATALOG VIEW (ALL TEMPLATES) ====================
-          <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5">
+          <div className="max-w-5xl w-full mx-auto px-6 py-5 flex-1 flex flex-col gap-5 luno-section-enter">
             {/* 1. Header Section (Matching HomeView Style) */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0 pb-1">
               <div className="space-y-0.5">

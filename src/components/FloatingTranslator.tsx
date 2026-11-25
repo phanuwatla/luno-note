@@ -515,7 +515,7 @@ export default function FloatingTranslator({
                   type="button"
                   onClick={handleSwap}
                   disabled={sourceLang === "auto"}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground disabled:opacity-30 transition-colors cursor-pointer"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground disabled:opacity-30 transition-all duration-150 active:scale-95 cursor-pointer"
                 >
                   <ArrowLeftRight className="h-3.5 w-3.5" />
                 </button>
@@ -609,7 +609,7 @@ export default function FloatingTranslator({
 
           {/* Translation Result Output (Only shown when translating or result available) */}
           {(isLoading || translatedText) && (
-            <div className="rounded-xl border border-border/50 bg-foreground/[0.04] p-2.5 min-h-[64px] flex flex-col justify-between shadow-sm">
+            <div className="rounded-xl border border-border/50 bg-foreground/[0.04] p-2.5 min-h-[64px] flex flex-col justify-between shadow-sm luno-section-enter">
               {isLoading ? (
                 <div className="flex items-center justify-center py-4 text-muted-foreground gap-2 text-xs">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />

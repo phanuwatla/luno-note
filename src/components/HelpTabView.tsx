@@ -359,7 +359,7 @@ export default function HelpTabView({
                     type="button"
                     aria-current={isActive ? "page" : undefined}
                     onClick={() => handleSelectCategory(cat.id)}
-                    className={`shrink-0 md:w-full flex items-center justify-between px-3 py-2 md:py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                    className={`shrink-0 md:w-full flex items-center justify-between px-3 py-2 md:py-2.5 rounded-xl text-xs font-medium transition-all duration-150 active:scale-[0.98] cursor-pointer ${
                       isActive
                         ? "bg-primary/10 text-primary font-semibold shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]"
@@ -379,14 +379,17 @@ export default function HelpTabView({
           <main className="flex-1 min-h-0 min-w-0 flex flex-col bg-background/50 overflow-hidden">
             {/* Category Header */}
             <div className="px-4 py-4 sm:px-6 md:px-8 md:py-5 border-b border-border/40 bg-card/20 shrink-0">
-              <div>
+              <div key={safeActiveCategory} className="luno-section-enter">
                 <h2 className="text-lg md:text-xl font-bold tracking-tight text-foreground">{currentCategory.label}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">{currentCategory.desc}</p>
               </div>
             </div>
 
             {/* Scrollable Category Body */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-6 no-scrollbar w-full overscroll-contain">
+            <div
+              key={safeActiveCategory}
+              className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-6 no-scrollbar w-full overscroll-contain luno-section-enter"
+            >
               {/* 1. FEATURES & TOOLS (Priority #1: App overview & tools) */}
               {safeActiveCategory === "features" && (
                 <div className="space-y-6">

@@ -156,6 +156,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
   googleOAuthLogout: (token) => ipcRenderer.invoke("google-oauth-logout", token),
   updateSyncState: (payload) => ipcRenderer.invoke("update-sync-state", payload),
   fetchTtsAudio: (data) => ipcRenderer.invoke("fetch-tts-audio", data),
+  ollamaRequest: (payload) => ipcRenderer.invoke("ollama-request", payload),
+  ollamaStreamChat: (payload) => ipcRenderer.invoke("ollama-stream-chat", payload),
+  ollamaAbortChat: (payload) => ipcRenderer.invoke("ollama-abort-chat", payload),
+  onOllamaChatStream: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on("ollama-chat-stream", subscription);
+    return () => ipcRenderer.removeListener("ollama-chat-stream", subscription);
+  },
+  ollamaCheckSystem: () => ipcRenderer.invoke("ollama-check-system"),
+  ollamaStartService: (payload) => ipcRenderer.invoke("ollama-start-service", payload),
+  ollamaInstallSystem: (payload) => ipcRenderer.invoke("ollama-install-system", payload),
+  ollamaPullModel: (payload) => ipcRenderer.invoke("ollama-pull-model", payload),
+  ollamaGetActivePulls: () => ipcRenderer.invoke("ollama-get-active-pulls"),
+  ollamaCancelPull: (payload) => ipcRenderer.invoke("ollama-cancel-pull", payload),
+  ollamaDeleteModel: (payload) => ipcRenderer.invoke("ollama-delete-model", payload),
+  onOllamaSetupProgress: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on("ollama-setup-progress", subscription);
+    return () => ipcRenderer.removeListener("ollama-setup-progress", subscription);
+  },
   getOsUserInfo: () => ipcRenderer.invoke("get-os-user-info"),
   onWorkspaceChanged: (callback) => {
     const subscription = (_event, data) => callback(data);

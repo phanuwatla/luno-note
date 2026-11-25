@@ -191,7 +191,7 @@ function WindowControls() {
               onClick={handleMinimize}
               style={noDragStyle}
               aria-label={minimizeLabel}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-150 active:scale-95 cursor-pointer"
             >
               <Minus className="h-3.5 w-3.5 pointer-events-none" />
               <span className="sr-only">{minimizeLabel}</span>
@@ -216,7 +216,7 @@ function WindowControls() {
                       onClick={handleMaximize}
                       style={noDragStyle}
                       aria-label={maximizeLabel}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-150 active:scale-95 cursor-pointer"
                     >
                       {isMaximized ? (
                         <Copy className="h-3 w-3 rotate-180 pointer-events-none" />
@@ -421,7 +421,7 @@ function WindowControls() {
               onClick={handleClose}
               style={noDragStyle}
               aria-label={closeLabel}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-rose-500 hover:text-white dark:hover:bg-red-600 transition-all cursor-pointer"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-rose-500 hover:text-white dark:hover:bg-red-600 transition-all duration-150 active:scale-95 cursor-pointer"
             >
               <X className="h-3.5 w-3.5 pointer-events-none" />
               <span className="sr-only">{closeLabel}</span>

@@ -60,7 +60,6 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { formatRelativeDateTime } from "@/lib/dateTimeFormatter";
 import {
-  runGeminiChatHistory,
   transcribeAudioWithGemini,
   cleanVoiceTranscription,
   generateImageWithGemini,
@@ -68,6 +67,9 @@ import {
   GeminiFreeTierImageError,
   type ImageAspectRatio,
 } from "@/lib/geminiApi";
+import { executeAiChatHistory, isAiProviderConfigured } from "@/lib/aiProvider";
+import { isAbortError, warmUpOllamaModel } from "@/lib/ollamaApi";
+import { getScrollBehavior } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -129,6 +131,7 @@ export interface MessageItem {
   content: string;
   timestamp: number;
   modelUsed?: string;
+  isFallback?: boolean;
   attachedFileNames?: string[];
   generatedImages?: GeneratedMessageImage[];
   isImageGeneration?: boolean;
@@ -702,7 +705,7 @@ export default function LunoAiView({
 }: LunoAiViewProps) {
   const { t, language } = useTranslation();
   const lang = (language as "th" | "en") || "th";
-  const { settings } = useAppSettings();
+  const { settings, updateSetting } = useAppSettings();
 
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<"smart" | "fast" | "creative">("smart");
@@ -780,6 +783,8 @@ export default function LunoAiView({
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+  const generationAbortRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const {
     markdownTooltip,
@@ -1725,9 +1730,24 @@ export default function LunoAiView({
 
   useEffect(() => {
     if (messages.length > 0) {
-      chatBottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
+      chatBottomRef.current?.scrollIntoView?.({
+        behavior: streamingAssistantId ? "auto" : getScrollBehavior(),
+      });
     }
-  }, [messages, isGenerating]);
+  }, [messages, isGenerating, streamingAssistantId]);
+
+  useEffect(() => {
+    if (settings.aiProvider === "ollama") {
+      void warmUpOllamaModel(settings.ollamaBaseUrl, settings.ollamaModel);
+    }
+  }, [settings.aiProvider, settings.ollamaBaseUrl, settings.ollamaModel]);
+
+  useEffect(() => {
+    return () => {
+      generationAbortRef.current?.abort();
+      generationAbortRef.current = null;
+    };
+  }, []);
 
   const persistGeneratedImages = async (generatedImages: GeneratedMessageImage[]) => {
     const urlUpdates: Record<string, string> = {};
@@ -1941,6 +1961,185 @@ export default function LunoAiView({
     });
   };
 
+  const handleStopGeneration = () => {
+    generationAbortRef.current?.abort();
+  };
+
+  const executeStreamingChatTurn = async (params: {
+    historyForApi: MessageItem[];
+    promptText: string;
+    attachedContext?: string;
+    fallbackErrorMessage: string;
+    onComplete?: () => void;
+  }) => {
+    const abortController = new AbortController();
+    generationAbortRef.current = abortController;
+    const assistantMsgId = (Date.now() + 1).toString();
+    const initialModelLabel =
+      settings.aiProvider === "ollama" && settings.ollamaModel && settings.ollamaModel !== "auto"
+        ? settings.ollamaModel
+        : undefined;
+
+    let latestVisibleText = "";
+    let hasInsertedBubble = false;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushPartialText = (snapshot: string) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantMsgId ? { ...m, content: snapshot } : m))
+      );
+    };
+
+    try {
+      const { result, modelUsed, fallbackFrom, fallbackReason } = await executeAiChatHistory(
+        settings,
+        params.historyForApi,
+        params.promptText,
+        params.attachedContext,
+        model,
+        lang,
+        {
+          signal: abortController.signal,
+          onToken: (visibleText) => {
+            if (abortController.signal.aborted) return;
+            latestVisibleText = visibleText;
+            if (!visibleText) return;
+
+            if (!hasInsertedBubble) {
+              hasInsertedBubble = true;
+              setStreamingAssistantId(assistantMsgId);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: assistantMsgId,
+                  role: "assistant",
+                  content: visibleText,
+                  timestamp: Date.now(),
+                  modelUsed: initialModelLabel,
+                },
+              ]);
+              return;
+            }
+
+            if (!flushTimer) {
+              flushTimer = setTimeout(() => {
+                flushTimer = null;
+                flushPartialText(latestVisibleText);
+              }, 40);
+            }
+          },
+        }
+      );
+
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      setStreamingAssistantId(null);
+
+      const isFallback = fallbackFrom === "gemini";
+      if (hasInsertedBubble) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: result, modelUsed, isFallback, timestamp: Date.now() }
+              : m
+          )
+        );
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMsgId,
+            role: "assistant",
+            content: result,
+            timestamp: Date.now(),
+            modelUsed,
+            isFallback,
+          },
+        ]);
+      }
+
+      if (isFallback) {
+        toast({
+          title: t("lunoAi.fallbackTitle"),
+          description:
+            fallbackReason === "quota"
+              ? t("lunoAi.fallbackQuotaDesc", { model: modelUsed })
+              : t("lunoAi.fallbackOfflineDesc", { model: modelUsed }),
+        });
+      } else {
+        params.onComplete?.();
+      }
+    } catch (error) {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      setStreamingAssistantId(null);
+
+      if (isAbortError(error) || abortController.signal.aborted) {
+        const cleanPartial = latestVisibleText.trimEnd();
+        if (hasInsertedBubble && cleanPartial) {
+          flushPartialText(cleanPartial);
+        } else if (hasInsertedBubble) {
+          setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+        }
+        return;
+      }
+
+      if (hasInsertedBubble) {
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+      }
+      handleAiErrorNotification(error, params.fallbackErrorMessage);
+    } finally {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+      }
+      if (generationAbortRef.current === abortController) {
+        generationAbortRef.current = null;
+      }
+    }
+  };
+
+  const renderSubmitOrStopButton = () => {
+    if (isGenerating && !isGeneratingImage) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("lunoAi.stopGenerating")}
+              onClick={handleStopGeneration}
+              className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-muted text-foreground hover:bg-muted/80 border border-border/80 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer`}
+            >
+              <Square className="h-3 w-3 fill-current shrink-0" />
+              {!isSidebar && <span>{t("lunoAi.stopGenerating")}</span>}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("lunoAi.stopGenerating")}</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            disabled={!prompt.trim() || isGenerating}
+            onClick={() => void handleSendPrompt()}
+            className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer`}
+          >
+            {!isSidebar && <span>{t("lunoAi.send")}</span>}
+            <Send className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("lunoAi.send")}</TooltipContent>
+      </Tooltip>
+    );
+  };
+
   const handleSendPrompt = async (customPrompt?: string) => {
     if (isListening) {
       stopVoiceRecording();
@@ -1949,7 +2148,16 @@ export default function LunoAiView({
     const textToSend = rawText.trim();
     if (!textToSend || isGenerating) return;
 
-    if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+    if (isImageMode) {
+      if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+        toast({
+          title: t("lunoAi.apiKeyRequiredTitle"),
+          description: t("lunoAi.imageRequiresGeminiDesc"),
+        });
+        onOpenSettings?.("ai");
+        return;
+      }
+    } else if (!isAiProviderConfigured(settings)) {
       toast({
         title: t("lunoAi.apiKeyRequiredTitle"),
         description: t("lunoAi.apiKeyRequired"),
@@ -2019,25 +2227,12 @@ export default function LunoAiView({
 
           setMessages([...historyForApi, updatedUserMessage, assistantMsg]);
         } else {
-          const { result, modelUsed } = await runGeminiChatHistory(
-            settings.geminiApiKey,
+          await executeStreamingChatTurn({
             historyForApi,
-            textToSend,
-            fileContexts,
-            model,
-            lang,
-            settings.aiModel
-          );
-
-          const assistantMsg: MessageItem = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: result,
-            timestamp: Date.now(),
-            modelUsed,
-          };
-
-          setMessages([...historyForApi, updatedUserMessage, assistantMsg]);
+            promptText: textToSend,
+            attachedContext: fileContexts,
+            fallbackErrorMessage: "Failed to generate AI response",
+          });
         }
       } catch (error) {
         handleAiErrorNotification(error, "Failed to generate AI response");
@@ -2093,25 +2288,12 @@ export default function LunoAiView({
 
           setMessages((prev) => [...prev, assistantMsg]);
         } else {
-          const { result, modelUsed } = await runGeminiChatHistory(
-            settings.geminiApiKey,
-            messages,
-            textToSend,
-            fileContexts,
-            model,
-            lang,
-            settings.aiModel
-          );
-
-          const assistantMsg: MessageItem = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: result,
-            timestamp: Date.now(),
-            modelUsed,
-          };
-
-          setMessages((prev) => [...prev, assistantMsg]);
+          await executeStreamingChatTurn({
+            historyForApi: messages,
+            promptText: textToSend,
+            attachedContext: fileContexts,
+            fallbackErrorMessage: "Failed to generate AI response",
+          });
         }
       } catch (error) {
         handleAiErrorNotification(error, "Failed to generate AI response");
@@ -2150,14 +2332,6 @@ export default function LunoAiView({
 
   const handleRegenerateResponse = async (assistantMsgId: string) => {
     if (isGenerating) return;
-    if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
-      toast({
-        title: t("lunoAi.apiKeyRequiredTitle"),
-        description: t("lunoAi.apiKeyRequired"),
-      });
-      onOpenSettings?.("ai");
-      return;
-    }
 
     const msgIndex = messages.findIndex((m) => m.id === assistantMsgId);
     if (msgIndex === -1) return;
@@ -2180,6 +2354,25 @@ export default function LunoAiView({
         (targetAssistantMsg.generatedImages && targetAssistantMsg.generatedImages.length > 0) ||
         targetUserMsg.isImageGeneration
     );
+
+    if (shouldGenerateImage) {
+      if (!settings.geminiApiKey || !settings.geminiApiKey.trim()) {
+        toast({
+          title: t("lunoAi.apiKeyRequiredTitle"),
+          description: t("lunoAi.imageRequiresGeminiDesc"),
+        });
+        onOpenSettings?.("ai");
+        return;
+      }
+    } else if (!isAiProviderConfigured(settings)) {
+      toast({
+        title: t("lunoAi.apiKeyRequiredTitle"),
+        description: t("lunoAi.apiKeyRequired"),
+      });
+      onOpenSettings?.("ai");
+      return;
+    }
+
     const aspectForRegen: ImageAspectRatio =
       targetAssistantMsg.imageAspectRatio || targetUserMsg.imageAspectRatio || imageAspectRatio;
 
@@ -2218,28 +2411,16 @@ export default function LunoAiView({
           description: t("lunoAi.imageRegenerateSuccessDesc"),
         });
       } else {
-        const { result, modelUsed } = await runGeminiChatHistory(
-          settings.geminiApiKey,
+        await executeStreamingChatTurn({
           historyForApi,
-          targetUserMsg.content,
-          undefined,
-          model,
-          lang,
-          settings.aiModel
-        );
-
-        const newAssistantMsg: MessageItem = {
-          id: Date.now().toString(),
-          role: "assistant",
-          content: result,
-          timestamp: Date.now(),
-          modelUsed,
-        };
-
-        setMessages((prev) => [...prev, newAssistantMsg]);
-        toast({
-          title: t("lunoAi.regenerateSuccessTitle"),
-          description: t("lunoAi.regenerateSuccessDesc"),
+          promptText: targetUserMsg.content,
+          fallbackErrorMessage: "Failed to regenerate AI response",
+          onComplete: () => {
+            toast({
+              title: t("lunoAi.regenerateSuccessTitle"),
+              description: t("lunoAi.regenerateSuccessDesc"),
+            });
+          },
         });
       }
     } catch (error) {
@@ -2380,7 +2561,7 @@ export default function LunoAiView({
     if (hasGeneratedImg) {
       return t("lunoAi.imageHistoryPreview");
     }
-    return "No messages";
+    return t("lunoAi.noHistory");
   };
 
   const renderImageModeControls = () => (
@@ -2859,11 +3040,46 @@ export default function LunoAiView({
                               className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-sm`}
                             >
                               {renderModelIcon(model)}
-                              {!isSidebar && <span>{modelLabels[model]}</span>}
+                              {!isSidebar && (
+                                <span>
+                                  {settings.aiProvider === "ollama"
+                                    ? `Ollama · ${modelLabels[model]}`
+                                    : modelLabels[model]}
+                                </span>
+                              )}
                               <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
+                          <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
+                            <div className="px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground select-none">
+                              {t("lunoAi.providerLabel")}
+                            </div>
+                            {(
+                              [
+                                { id: "gemini" as const, label: t("settings.aiProviderGemini") },
+                                { id: "ollama" as const, label: t("settings.aiProviderOllama") },
+                              ]
+                            ).map((prov) => {
+                              const isProvSelected = (settings.aiProvider || "gemini") === prov.id;
+                              return (
+                                <DropdownMenuItem
+                                  key={prov.id}
+                                  onClick={() => updateSetting("aiProvider", prov.id)}
+                                  className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                    isProvSelected
+                                      ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
+                                      : "text-foreground hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
+                                  }`}
+                                >
+                                  <span>{prov.label}</span>
+                                  {isProvSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                            <div className="my-1 border-t border-border/50" />
+                            <div className="px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground select-none">
+                              {t("lunoAi.styleLabel")}
+                            </div>
                             {(["smart", "fast", "creative"] as const).map((mKey) => {
                               const isSelected = model === mKey;
                               return (
@@ -2887,20 +3103,7 @@ export default function LunoAiView({
                           </DropdownMenuContent>
                         </DropdownMenu>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              disabled={!prompt.trim() || isGenerating}
-                              onClick={() => void handleSendPrompt()}
-                              className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer`}
-                            >
-                              {!isSidebar && <span>{t("lunoAi.send")}</span>}
-                              <Send className="h-3.5 w-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t("lunoAi.send")}</TooltipContent>
-                        </Tooltip>
+                        {renderSubmitOrStopButton()}
                       </div>
                     </div>
                   </div>
@@ -3189,10 +3392,11 @@ export default function LunoAiView({
                         )}
 
                         {/* Action Toolbar under AI Output (Icon-only with Tooltips) */}
+                        {msg.id !== streamingAssistantId && (
                         <div className="flex items-center gap-1 pt-1 text-xs text-muted-foreground flex-wrap">
                           <span className="text-[10.5px] opacity-60 mr-1">
                             {msg.modelUsed
-                              ? `Model: ${msg.isImageGeneration ? formatModelName(msg.modelUsed) : msg.modelUsed}`
+                              ? `Model: ${msg.isImageGeneration ? formatModelName(msg.modelUsed) : msg.modelUsed}${msg.isFallback ? ` · ${t("lunoAi.fallbackBadge")}` : ""}`
                               : "Luno AI"}
                           </span>
 
@@ -3297,12 +3501,13 @@ export default function LunoAiView({
                             </Tooltip>
                           )}
                         </div>
+                        )}
                       </div>
                     )}
                   </motion.div>
                 ))}
 
-                {isGenerating && (
+                {isGenerating && !streamingAssistantId && (
                   <motion.div
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -3570,11 +3775,46 @@ export default function LunoAiView({
                           className={`h-8 ${isSidebar ? "px-2" : "pl-2.5 pr-2"} rounded-xl bg-background hover:bg-muted text-xs font-medium text-foreground transition-all border border-border/60 flex items-center gap-1 cursor-pointer outline-none shadow-sm`}
                         >
                           {renderModelIcon(model)}
-                          {!isSidebar && <span>{modelLabels[model]}</span>}
+                          {!isSidebar && (
+                            <span>
+                              {settings.aiProvider === "ollama"
+                                ? `Ollama · ${modelLabels[model]}`
+                                : modelLabels[model]}
+                            </span>
+                          )}
                           <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
+                      <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5 shadow-lg border border-border bg-popover text-popover-foreground z-[60]">
+                        <div className="px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground select-none">
+                          {t("lunoAi.providerLabel")}
+                        </div>
+                        {(
+                          [
+                            { id: "gemini" as const, label: t("settings.aiProviderGemini") },
+                            { id: "ollama" as const, label: t("settings.aiProviderOllama") },
+                          ]
+                        ).map((prov) => {
+                          const isProvSelected = (settings.aiProvider || "gemini") === prov.id;
+                          return (
+                            <DropdownMenuItem
+                              key={prov.id}
+                              onClick={() => updateSetting("aiProvider", prov.id)}
+                              className={`flex items-center justify-between text-[13px] px-3 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                isProvSelected
+                                  ? "bg-primary/15 text-primary font-semibold data-[highlighted]:bg-primary/[0.18] hover:bg-primary/[0.18]"
+                                  : "text-foreground hover:bg-primary/[0.08] hover:text-primary focus:bg-primary/[0.08] focus:text-primary data-[highlighted]:bg-primary/[0.08] data-[highlighted]:text-primary"
+                              }`}
+                            >
+                              <span>{prov.label}</span>
+                              {isProvSelected && <Check className="h-4 w-4 text-primary shrink-0 ml-1.5" />}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                        <div className="my-1 border-t border-border/50" />
+                        <div className="px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground select-none">
+                          {t("lunoAi.styleLabel")}
+                        </div>
                         {(["smart", "fast", "creative"] as const).map((mKey) => {
                           const isSelected = model === mKey;
                           return (
@@ -3598,20 +3838,7 @@ export default function LunoAiView({
                       </DropdownMenuContent>
                     </DropdownMenu>
 
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          disabled={!prompt.trim() || isGenerating}
-                          onClick={() => void handleSendPrompt()}
-                          className={`h-8 ${isSidebar ? "px-2.5" : "px-3.5"} rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer`}
-                        >
-                          {!isSidebar && <span>{t("lunoAi.send")}</span>}
-                          <Send className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("lunoAi.send")}</TooltipContent>
-                    </Tooltip>
+                    {renderSubmitOrStopButton()}
                   </div>
                 </div>
               </div>

@@ -4,6 +4,7 @@
  */
 
 import { swapKeyboardLayout } from "./thaiKeyboardMapper";
+import { isWordMisspelled } from "./spellChecker";
 
 // Common English words & programming keywords that should NEVER be treated as wrong Thai layout
 const COMMON_ENGLISH_WORDS = new Set([
@@ -171,6 +172,9 @@ export function detectWrongLanguage(token: string): WrongLanguageSuggestion | nu
     const lower = trimmed.toLowerCase();
     // If it's a known, legitimate English word / programming keyword, DO NOT suggest converting
     if (COMMON_ENGLISH_WORDS.has(lower)) {
+      return null;
+    }
+    if (/^[a-zA-Z]+(?:'[a-zA-Z]+)*$/.test(trimmed) && !isWordMisspelled(trimmed)) {
       return null;
     }
 

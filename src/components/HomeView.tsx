@@ -546,7 +546,7 @@ export default function HomeView({
                           onOpenNote(note.id);
                         }
                       }}
-                      className="group flex items-center justify-between gap-3 p-2 rounded-xl border-[1.5px] border-transparent hover:border-border/60 hover:bg-muted/50 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all cursor-pointer outline-none"
+                      className="group flex items-center justify-between gap-3 p-2 rounded-xl border-[1.5px] border-transparent hover:border-border/60 hover:bg-muted/50 active:scale-[0.99] focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all duration-150 cursor-pointer outline-none"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getNoteIcon(note)}
@@ -623,7 +623,7 @@ export default function HomeView({
                           onOpenNote(note.id);
                         }
                       }}
-                      className="group flex items-center justify-between gap-3 p-2 rounded-xl border-[1.5px] border-transparent hover:border-border/60 hover:bg-muted/50 focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all cursor-pointer outline-none"
+                      className="group flex items-center justify-between gap-3 p-2 rounded-xl border-[1.5px] border-transparent hover:border-border/60 hover:bg-muted/50 active:scale-[0.99] focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/20 transition-all duration-150 cursor-pointer outline-none"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getNoteIcon(note)}

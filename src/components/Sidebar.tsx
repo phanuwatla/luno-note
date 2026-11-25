@@ -52,7 +52,7 @@ import {
 import { GoogleDriveIcon } from "@/components/icons/GoogleDriveIcon";
 import { SparklesIcon as Sparkles } from "@/components/icons/SparklesIcon";
 import lunoLogo from "@/assets/luno-logo.png";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -2231,11 +2231,7 @@ function SidebarComponent({
                     style={{ left: `${18 + i * 14}px` }}
                   />
                 ))}
-                {isOpen ? (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )}
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                 {settings?.showFileIcons !== false && (
                   node.path === "__opened_root__" && isCloudWorkspace ? (
                     <GoogleDriveIcon className="h-3.5 w-3.5 shrink-0" />
@@ -2256,7 +2252,7 @@ function SidebarComponent({
               </button>
             </div>
             {isOpen && (
-              <div className="relative w-full">
+              <div className="relative w-full luno-tree-reveal">
                 <div
                   onDragOver={(event) => {
                     event.preventDefault();
@@ -2633,7 +2629,7 @@ function SidebarComponent({
                           }
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "workspace"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2670,7 +2666,7 @@ function SidebarComponent({
                           }, 50);
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "search"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2697,7 +2693,7 @@ function SidebarComponent({
                           if (!sidebarOpen) onOpenSidebar?.();
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "templates"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2724,7 +2720,7 @@ function SidebarComponent({
                           if (!sidebarOpen) onOpenSidebar?.();
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "luno-ai"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2751,7 +2747,7 @@ function SidebarComponent({
                           if (!sidebarOpen) onOpenSidebar?.();
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "favorites"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2778,7 +2774,7 @@ function SidebarComponent({
                           if (!sidebarOpen) onOpenSidebar?.();
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "tags"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2805,7 +2801,7 @@ function SidebarComponent({
                           if (!sidebarOpen) onOpenSidebar?.();
                         }
                       }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                         sidebarOpen && activeSection === "trash"
                           ? "bg-primary/10 text-primary font-semibold"
                           : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -2870,7 +2866,8 @@ function SidebarComponent({
             {/* 2. Workspace / Search / Favorites / Tags / Trash Panel (Rendered when sidebarOpen is true) */}
             {sidebarOpen && (
               <div
-                className="flex flex-col h-full overflow-hidden animate-in fade-in duration-150"
+                key={activeSection}
+                className="flex flex-col h-full overflow-hidden luno-section-enter"
                 style={{ width: `${explorerWidth}px`, minWidth: `${explorerWidth}px` }}
               >
                 {activeSection === "workspace" ? (
@@ -3184,11 +3181,7 @@ function SidebarComponent({
                                   } font-medium transition-colors rounded-lg outline-none select-none text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40`}
                                   style={{ paddingLeft: "12px" }}
                                 >
-                                  {isOpen ? (
-                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                  ) : (
-                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                  )}
+                                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                                   <LayoutTemplate className="h-3.5 w-3.5 shrink-0 text-primary" />
                                   <span className="truncate">{label}</span>
                                   <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">
@@ -3196,7 +3189,7 @@ function SidebarComponent({
                                   </span>
                                 </button>
                                 {isOpen && (
-                                  <div className="relative w-full space-y-0.5 mt-0.5">
+                                  <div className="relative w-full space-y-0.5 mt-0.5 luno-tree-reveal">
                                     {catItems.map((template) => {
                                       const templateTitle = isTh ? template.titleTh : template.titleEn;
                                       const templateDesc = isTh ? template.descTh : template.descEn;
@@ -3589,11 +3582,7 @@ function SidebarComponent({
                                   } font-medium transition-colors rounded-lg outline-none select-none text-foreground font-semibold hover:text-foreground hover:bg-sidebar-accent/40`}
                                   style={{ paddingLeft: "12px" }}
                                 >
-                                  {isOpen ? (
-                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                  ) : (
-                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                  )}
+                                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                                   <Tag className="h-3.5 w-3.5 shrink-0 text-primary" />
                                   <span className="truncate">{tag}</span>
                                   <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">
@@ -3601,7 +3590,7 @@ function SidebarComponent({
                                   </span>
                                 </button>
                                 {isOpen && (
-                                  <div className="relative w-full">
+                                  <div className="relative w-full luno-tree-reveal">
                                     {sortedTagNotes.length === 0 ? (
                                       <p className="text-[11px] text-muted-foreground py-1" style={{ paddingLeft: "40px" }}>
                                         {t("sidebar.noNotes")}
@@ -3948,7 +3937,7 @@ function SidebarComponent({
                       onSelect("home");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "home"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -3971,7 +3960,7 @@ function SidebarComponent({
                       onSelect("templates");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "templates"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -3994,7 +3983,7 @@ function SidebarComponent({
                       onSelect("luno-ai");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "luno-ai"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -4017,7 +4006,7 @@ function SidebarComponent({
                       onSelect("favorites");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "favorites"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -4040,7 +4029,7 @@ function SidebarComponent({
                       onSelect("tags");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "tags"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
@@ -4063,7 +4052,7 @@ function SidebarComponent({
                       onSelect("trash");
                       if (isMobile) onClose?.();
                     }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors shrink-0 ${
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 active:scale-95 shrink-0 ${
                       activeNoteId === "trash"
                         ? "bg-primary/10 text-primary font-semibold"
                         : "text-muted-foreground hover:bg-primary/10 hover:text-primary"

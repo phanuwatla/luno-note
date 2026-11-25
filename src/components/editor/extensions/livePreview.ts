@@ -3420,6 +3420,7 @@ export const LivePreview = Extension.create<LivePreviewOptions>({
                 !isPointer &&
                 oldState.selection.empty &&
                 oldState.selection.from < targetBlock.blockPos &&
+                oldState.selection.from >= targetBlock.blockPos - 2 &&
                 (newState.selection.from === targetBlock.blockPos + 1 ||
                   (targetBlock.context === "media" &&
                     newState.selection.from === targetBlock.blockPos));

@@ -10,7 +10,6 @@ import {
   ExternalLink,
   X,
   ChevronRight,
-  ChevronDown,
   Settings,
   HelpCircle,
   Clock,
@@ -74,9 +73,145 @@ interface ReleaseVersion {
 
 const RELEASES: ReleaseVersion[] = [
   {
-    version: "1.4.1",
+    version: "1.5.0",
     releaseDate: "2026",
     isLatest: true,
+    tagline: {
+      en: "Dual AI Engine with Local Ollama Support, Live Token Streaming, Auto-Fallback, System-Wide Motion Design & Typing Stability",
+      th: "รองรับ AI บนเครื่องด้วย Ollama 100% ออฟไลน์, สตรีมข้อความสดพร้อมปุ่มหยุด, สลับสำรองอัตโนมัติ, ระบบ Motion ทั่วทั้งแอป และปรับปรุงความเสถียรการพิมพ์",
+    },
+    highlights: [
+      {
+        title: {
+          en: "100% Offline Local AI via Ollama & One-Click Setup",
+          th: "AI บนเครื่อง 100% ออฟไลน์ด้วย Ollama พร้อมติดตั้งในคลิกเดียว",
+        },
+        description: {
+          en: "Run Luno AI chat and all 10 inline Editor AI writing tools completely locally using Ollama without internet or cloud API keys. Includes one-click Ollama installation & service startup, live progress downloads for recommended models (Qwen 2.5, Gemma 3, Llama 3.2), cancel/uninstall management, and silent model warm-up.",
+          th: "ใช้งานแชท Luno AI และเครื่องมือช่วยเขียนในเอดิเตอร์ทั้ง 10 คำสั่งแบบออฟไลน์บนเครื่องของคุณผ่าน Ollama โดยไม่ต้องพึ่งคีย์ Cloud มาพร้อมระบบติดตั้ง Ollama และเปิดบริการในคลิกเดียว ดาวน์โหลดโมเดลแนะนำ (Qwen 2.5, Gemma 3, Llama 3.2) พร้อมแถบความคืบหน้า ยกเลิก/ถอนการติดตั้ง และอุ่นโมเดลเบื้องหลัง",
+        },
+        icon: Sparkles,
+        badge: { en: "Local AI", th: "AI บนเครื่อง", variant: "default" },
+      },
+      {
+        title: {
+          en: "Live Streaming Chat, Stop Control & Gemini→Ollama Auto-Fallback",
+          th: "สตรีมคำตอบสด ปุ่มหยุดสร้างข้อความ และสลับสำรองอัตโนมัติ",
+        },
+        description: {
+          en: "Watch Ollama responses stream live token-by-token (with automatic hidden reasoning stripping) and halt generation anytime with the Stop button. When using Gemini, Luno Note can automatically fall back to your local Ollama model on quota limits, offline drops, or transient server errors.",
+          th: "เห็นคำตอบจาก Ollama ไหลแบบสตรีมทีละคำแบบเรียลไทม์พร้อมกรองแท็กคิดในใจอัตโนมัติ และกดหยุดการสร้างข้อความได้ทุกเมื่อ หากตั้งค่าใช้ Gemini แล้วยอดโควตาเต็มหรืออินเทอร์เน็ตขาด ระบบสามารถสลับมาใช้โมเดล Ollama บนเครื่องให้อัตโนมัติเป็นการชั่วคราว",
+        },
+        icon: RefreshCw,
+        badge: { en: "Smart Fallback", th: "สลับสำรองอัตโนมัติ", variant: "default" },
+      },
+      {
+        title: {
+          en: "Built-in Luno Product Knowledge & Confidentiality Guardrails",
+          th: "ความรู้การใช้งาน Luno Note ในตัวและระบบป้องกันความปลอดภัย",
+        },
+        description: {
+          en: "Both Gemini and Ollama assistants understand Luno Note's features, menus, and shortcuts on demand to guide your workflow accurately—while enforcing strict privacy and confidentiality guardrails.",
+          th: "ทั้ง Gemini และ Ollama เข้าใจฟีเจอร์ เมนู และคีย์ลัดของ Luno Note อย่างแม่นยำพร้อมแนะนำขั้นตอนการใช้งานได้ทันที ควบคู่กับมาตรการป้องกันความเป็นส่วนตัวและความลับของระบบอย่างเข้มงวด",
+        },
+        icon: ShieldCheck,
+        badge: { en: "Luno AI", th: "ผู้ช่วย AI", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Unified System-Wide Motion Engine & Tactile Micro-Interactions",
+          th: "ระบบแอนิเมชันและจังหวะตอบสนองที่เป็นหนึ่งเดียวทั้งโปรแกรม",
+        },
+        description: {
+          en: "Smooth, GPU-composited transitions across views, sidebars, tabs, trees, switches, checkboxes, and dialogs with crisp tactile press feedback—while honoring the Toggle Animations accessibility setting down to 0.001ms across every component.",
+          th: "การเปลี่ยนผ่านหน้าจอ แถบข้าง แท็บ รายการต้นไม้ สวิตช์ และกล่องโต้ตอบที่นุ่มนวลและตอบสนองฉับไวด้วย GPU Compositing พร้อมเคารพการตั้งค่าปิด-เปิดแอนิเมชัน (Reduce Motion) อย่างสมบูรณ์ทั้งระบบ",
+        },
+        icon: Zap,
+        badge: { en: "UX Polish", th: "ความลื่นไหล UX", variant: "secondary" },
+      },
+      {
+        title: {
+          en: "Heading Typing Stability, Spell-Check Polish & Safer File Renaming",
+          th: "ปรับปรุงความเสถียรการพิมพ์ในหัวข้อ ตัวตรวจคำสะกด และการเปลี่ยนชื่อไฟล์",
+        },
+        description: {
+          en: "Fixed cursor-jump issues when typing inside collapsible headings (H1–H6), deferred active-word spell underlines while typing, eliminated English false positives in Wrong-Language detection, and hardened file rename queues against sync races.",
+          th: "แก้ไขปัญหาเคอร์เซอร์กระโดดขณะพิมพ์ในหัวข้อที่พับได้ (H1–H6) ชะลอเส้นใต้คำสะกดของคำที่กำลังพิมพ์ ลดการแจ้งเตือนผิดภาษาของคำภาษาอังกฤษที่ถูกต้อง และป้องกันปัญหา Race Condition ระหว่างเปลี่ยนชื่อไฟล์",
+        },
+        icon: CheckCircle2,
+        badge: { en: "Stability", th: "ความเสถียร", variant: "outline" },
+      },
+    ],
+    changes: [
+      {
+        category: { en: "Dual AI Provider & Ollama Integration", th: "ระบบ AI คู่ขนานและ Ollama บนเครื่อง" },
+        items: [
+          {
+            en: "Unified AI Provider switcher (Gemini Cloud / Ollama Local) directly in Luno AI chat header and Settings → AI Assistant.",
+            th: "สลับผู้ให้บริการ AI ระหว่าง Gemini (Cloud) และ Ollama (บนเครื่อง) ได้ทั้งจากหน้าแชต Luno AI และหน้า ตั้งค่า → ผู้ช่วย AI",
+          },
+          {
+            en: "Full Ollama execution support across multi-turn chat and all 10 inline Editor AI actions (with automatic small-model selection in Fast style).",
+            th: "รองรับการทำงานผ่าน Ollama ทั้งในแชต Luno AI และคำสั่งช่วยเขียนในเอดิเตอร์ทั้ง 10 แบบ (พร้อมเลือกโมเดลขนาดเล็กให้อัตโนมัติในโหมดรวดเร็ว)",
+          },
+          {
+            en: "One-click model setup in Settings: checks system Ollama binary, installs Windows runtime automatically, starts daemon, pulls models with serialized queue, progress tracking, resume retries, Cancel, and Uninstall.",
+            th: "ติดตั้งโมเดลบนเครื่องในคลิกเดียว: ตรวจสอบและติดตั้ง Ollama อัตโนมัติ เปิดบริการเบื้องหลัง ดาวน์โหลดโมเดลพร้อมแถบสถานะ ลองใหม่เมื่อเน็ตสะดุด กดยกเลิก หรือถอนการติดตั้งได้ทันที",
+          },
+          {
+            en: "Real-time NDJSON streaming chat responses with Stop button and background model warm-up.",
+            th: "แสดงคำตอบแบบสตรีมเรียลไทม์พร้อมปุ่มหยุดกลางคันและอุ่นโมเดลล่วงหน้าเพื่อลดเวลารอ",
+          },
+          {
+            en: "Auto-fallback toggle temporarily answers with local Ollama when Gemini hits quota limits, loses network connectivity, or returns 5xx errors.",
+            th: "สวิตช์สลับไปใช้ Ollama ชั่วคราวอัตโนมัติเมื่อโควตา Gemini เต็ม ขาดการเชื่อมต่ออินเทอร์เน็ต หรือเซิร์ฟเวอร์ขัดข้อง",
+          },
+          {
+            en: "Strict SSRF protection blocking non-HTTP schemes, credentials in URLs, redirects, and cloud metadata endpoints on custom Ollama URLs.",
+            th: "ตรวจสอบความปลอดภัย URL ของเซิร์ฟเวอร์ Ollama ป้องกันการเปลี่ยนเส้นทาง (SSRF) และบล็อกที่อยู่ Metadata ของระบบคลาวด์",
+          },
+        ],
+      },
+      {
+        category: { en: "Motion System & UI Polish", th: "ระบบแอนิเมชันและอินเทอร์เฟซ" },
+        items: [
+          {
+            en: "Introduced shared motion design tokens and hooks (useAnimationsEnabled, getScrollBehavior, resolveTransition) synchronized across views and Framer Motion panels.",
+            th: "เพิ่มมาตรฐานเอนจิน Motion กลางและฮุก (useAnimationsEnabled, getScrollBehavior) เพื่อให้แอนิเมชันและการเลื่อนหน้าจอสอดคล้องทั้งแอป",
+          },
+          {
+            en: "Refined tactile press feedback, rotating folder chevrons, spring switch thumbs, and smooth tree/panel reveal keyframes.",
+            th: "เพิ่มแอนิเมชันจังหวะกดปุ่ม ลูกศรโฟลเดอร์หมุนนุ่มนวล สวิตช์แบบสปริง และการเปิดแถบ/รายการอย่างเป็นธรรมชาติ",
+          },
+        ],
+      },
+      {
+        category: { en: "Editor Stability & File Operations", th: "ความเสถียรของเอดิเตอร์และไฟล์" },
+        items: [
+          {
+            en: "Preserved WidgetType DOM identity inside HeadingToggle and added a typing fast-path so typing in H1–H6 headings never resets cursor position.",
+            th: "รักษาตัวตน DOM ของปุ่มพับหัวข้อและเพิ่ม Fast-path ทำให้การพิมพ์ในหัวข้อ H1–H6 ลื่นไหลโดยเคอร์เซอร์ไม่เด้งกลับ",
+          },
+          {
+            en: "Deferred active-word SpellCheck underlines while typing until moving away or blurring, reducing visual flicker.",
+            th: "ชะลอการขีดเส้นใต้ตรวจคำสะกดเฉพาะคำที่กำลังพิมพ์อยู่จนกว่าจะพิมพ์เสร็จหรือย้ายเคอร์เซอร์ ลดการกระพริบทางสายตา",
+          },
+          {
+            en: "Integrated Hunspell validation in Wrong-Language detector so valid English words (design, detail, music, etc.) are never misflagged.",
+            th: "ผสานการตรวจคำภาษาอังกฤษกับพจนานุกรมในระบบตรวจจับพิมพ์ผิดภาษา เพื่อไม่ให้แนะนำเปลี่ยนภาษาบนคำศัพท์ภาษาอังกฤษที่ถูกต้อง",
+          },
+          {
+            en: "Hardened concurrent file renames, H1 auto-rename async guards, and cross-platform slash normalization across Workspace sync.",
+            th: "ป้องกันปัญหาการเปลี่ยนชื่อไฟล์ซ้อนกันและการอัปเดตชื่อไฟล์จากหัวข้อ H1 รวมถึงปรับรูปแบบ Path Separator ให้สอดคล้องกันทั้งระบบ",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    version: "1.4.1",
+    releaseDate: "2026",
+    isLatest: false,
     tagline: {
       en: "System-wide Fix Language (Thai/English mistyping converter), AI Vision Image Attachments, Interactive Table Overlay & Media Polish",
       th: "ระบบสลับแก้ภาษาไทย-อังกฤษทั้งระบบ (System Fix Language), แนบรูปภาพถามตอบกับ Luno AI, แถบเครื่องมือตารางอินเตอร์แอคทีฟ และปรับปรุงระบบสื่อมัลติมีเดีย",
@@ -2047,16 +2182,12 @@ export default function WhatsNewView({
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground shrink-0 ml-2">
                       <span className="text-[11px]">{rel.releaseDate}</span>
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
+                      <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
                     </div>
                   </button>
 
                   {isExpanded && (
-                    <div className="p-4 pt-0 border-t border-border/40 bg-card/40 space-y-3 mt-1">
+                    <div className="p-4 pt-0 border-t border-border/40 bg-card/40 space-y-3 mt-1 luno-tree-reveal">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-3">
                         {rel.highlights.map((feat, idx) => (
                           <div key={idx} className="text-xs p-3 rounded-xl bg-background border border-border/50 space-y-1">

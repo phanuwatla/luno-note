@@ -210,7 +210,9 @@ export function expandThaiAnomalyCluster(
 function collectSpellCheckDecorationsForNode(
   node: any,
   pos: number,
-  decorations: Decoration[]
+  decorations: Decoration[],
+  activeTypingPos?: number,
+  onDeferredWord?: (from: number, to: number) => void
 ): boolean {
   if (
     node.type.name === "codeBlock" ||
@@ -261,6 +263,14 @@ function collectSpellCheckDecorationsForNode(
     const isInsideExcludedRange = (fromIdx: number, toIdx: number) =>
       excludedRanges.some((r) => fromIdx < r.end && toIdx > r.start);
 
+    const shouldDeferActiveWord = (from: number, to: number): boolean => {
+      if (typeof activeTypingPos === "number" && activeTypingPos >= from && activeTypingPos <= to) {
+        onDeferredWord?.(from, to);
+        return true;
+      }
+      return false;
+    };
+
     const thaiAnomalyRegex = THAI_STRUCTURAL_ANOMALY_REGEX;
     const latinSpellRegex = /(?<![A-Za-z0-9_])[A-Za-z]+(?:['\u2019][A-Za-z]+)*(?![A-Za-z0-9_])/g;
 
@@ -275,11 +285,14 @@ function collectSpellCheckDecorationsForNode(
         const to = pos + err.end;
         if (from >= 0 && to <= pos + text.length && from < to) {
           decoratedRanges.push({ start: err.start, end: err.end });
+          if (shouldDeferActiveWord(from, to)) continue;
           decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": err.word,
-            })
+            Decoration.inline(
+              from,
+              to,
+              { class: "luno-spell-error" },
+              { "data-spell-word": err.word }
+            )
           );
         }
       }
@@ -302,11 +315,14 @@ function collectSpellCheckDecorationsForNode(
         const from = pos + expanded.start;
         const to = pos + expanded.end;
         if (from >= 0 && to <= pos + text.length && from < to) {
+          if (shouldDeferActiveWord(from, to)) continue;
           decorations.push(
-            Decoration.inline(from, to, {
-              class: "luno-spell-error",
-              "data-spell-word": word,
-            })
+            Decoration.inline(
+              from,
+              to,
+              { class: "luno-spell-error" },
+              { "data-spell-word": word }
+            )
           );
         }
       }
@@ -323,11 +339,14 @@ function collectSpellCheckDecorationsForNode(
           const from = pos + match.index;
           const to = from + word.length;
           if (from >= 0 && to <= pos + text.length && from < to) {
+            if (shouldDeferActiveWord(from, to)) continue;
             decorations.push(
-              Decoration.inline(from, to, {
-                class: "luno-spell-error",
-                "data-spell-word": word,
-              })
+              Decoration.inline(
+                from,
+                to,
+                { class: "luno-spell-error" },
+                { "data-spell-word": word }
+              )
             );
           }
         }
@@ -359,6 +378,14 @@ export const SpellCheckDecoration = Extension.create({
 
   addProseMirrorPlugins() {
     const extension = this;
+    let deferredSpellRange: {
+      blockStart: number;
+      blockEnd: number;
+      wordFrom: number;
+      wordTo: number;
+    } | null = null;
+    let wasSpellCheckEnabled = false;
+
     const isSpellCheckActive = (meta?: { enabled?: boolean }) => {
       if (typeof meta?.enabled === "boolean") {
         extension.options.enabled = meta.enabled;
@@ -370,23 +397,114 @@ export const SpellCheckDecoration = Extension.create({
       return Boolean(extension.options.enabled);
     };
 
+    const recomputeRange = (doc: any, set: DecorationSet, blockStart: number, blockEnd: number): DecorationSet => {
+      const docSize = doc.content.size;
+      if (docSize === 0) return DecorationSet.empty;
+      const safeStart = Math.max(1, Math.min(blockStart, docSize));
+      const $from = doc.resolve(safeStart);
+      const depth = Math.max(0, Math.min($from.depth, 1));
+      if (depth < 1) return set;
+      const start = $from.start(depth);
+      const end = $from.end(depth);
+      let nextSet = set.remove(set.find(start, end));
+      const newDecos: Decoration[] = [];
+      const parentNode = $from.node(depth);
+      parentNode.descendants((child: any, childPos: number) => {
+        collectSpellCheckDecorationsForNode(child, start + childPos, newDecos);
+      });
+      if (newDecos.length > 0) {
+        nextSet = nextSet.add(doc, newDecos);
+      }
+      return nextSet;
+    };
+
     return [
       new Plugin({
         key: spellCheckPluginKey,
         state: {
           init(_, { doc }) {
-            return isSpellCheckActive() ? createSpellCheckDecorations(doc, true) : DecorationSet.empty;
+            deferredSpellRange = null;
+            wasSpellCheckEnabled = isSpellCheckActive();
+            return wasSpellCheckEnabled ? createSpellCheckDecorations(doc, true) : DecorationSet.empty;
           },
           apply(tr, oldState) {
             const meta = tr.getMeta(spellCheckPluginKey);
-            if (!isSpellCheckActive(meta)) return DecorationSet.empty;
-            if (meta?.recompute || oldState === DecorationSet.empty) {
+            if (!isSpellCheckActive(meta)) {
+              wasSpellCheckEnabled = false;
+              deferredSpellRange = null;
+              return DecorationSet.empty;
+            }
+            const justEnabled = !wasSpellCheckEnabled;
+            wasSpellCheckEnabled = true;
+            if (meta?.recompute || justEnabled) {
+              deferredSpellRange = null;
               return createSpellCheckDecorations(tr.doc, true);
             }
-            if (!tr.docChanged || tr.steps.length === 0) return oldState;
+            if (meta?.flushDeferred && deferredSpellRange) {
+              const pending = deferredSpellRange;
+              deferredSpellRange = null;
+              try {
+                return recomputeRange(tr.doc, oldState, pending.blockStart, pending.blockEnd);
+              } catch {
+                return oldState;
+              }
+            }
+            if (!tr.docChanged || tr.steps.length === 0) {
+              if (tr.selectionSet && deferredSpellRange) {
+                const head = tr.selection.from;
+                if (!tr.selection.empty || head < deferredSpellRange.wordFrom || head > deferredSpellRange.wordTo) {
+                  const pending = deferredSpellRange;
+                  deferredSpellRange = null;
+                  try {
+                    return recomputeRange(tr.doc, oldState, pending.blockStart, pending.blockEnd);
+                  } catch {
+                    return oldState;
+                  }
+                }
+              }
+              return oldState;
+            }
 
             try {
+              let isSingleTypingEdit = false;
+              if (
+                tr.selection.empty &&
+                !tr.getMeta("isSync") &&
+                !tr.getMeta("paste") &&
+                !tr.getMeta("isLivePreviewToggle") &&
+                tr.getMeta("uiEvent") !== "paste" &&
+                tr.getMeta("uiEvent") !== "drop" &&
+                tr.steps.length === 1
+              ) {
+                let totalInserted = 0;
+                let totalDeleted = 0;
+                tr.steps[0].getMap().forEach((oldStart, oldEnd, newStart, newEnd) => {
+                  totalDeleted += Math.max(0, oldEnd - oldStart);
+                  totalInserted += Math.max(0, newEnd - newStart);
+                });
+                if (
+                  (totalInserted >= 1 && totalInserted <= 3 && totalDeleted <= 3) ||
+                  (totalInserted === 0 && totalDeleted >= 1 && totalDeleted <= 2)
+                ) {
+                  isSingleTypingEdit = true;
+                }
+              }
+
+              const activeTypingPos = isSingleTypingEdit ? tr.selection.from : undefined;
+              let nextDeferred: {
+                blockStart: number;
+                blockEnd: number;
+                wordFrom: number;
+                wordTo: number;
+              } | null = null;
+
               let set = oldState.map(tr.mapping, tr.doc);
+              if (deferredSpellRange) {
+                const mappedBlockStart = tr.mapping.map(deferredSpellRange.blockStart);
+                const mappedBlockEnd = tr.mapping.map(deferredSpellRange.blockEnd);
+                set = recomputeRange(tr.doc, set, mappedBlockStart, mappedBlockEnd);
+              }
+
               for (const step of tr.steps) {
                 step.getMap().forEach((_oldStart, _oldEnd, newStart, newEnd) => {
                   const docSize = tr.doc.content.size;
@@ -409,7 +527,20 @@ export const SpellCheckDecoration = Extension.create({
                     const parentNode = $from.node(depth);
                     parentNode.descendants((child: any, childPos: number) => {
                       const absPos = start + childPos;
-                      collectSpellCheckDecorationsForNode(child, absPos, newDecos);
+                      collectSpellCheckDecorationsForNode(
+                        child,
+                        absPos,
+                        newDecos,
+                        activeTypingPos,
+                        (wordFrom, wordTo) => {
+                          nextDeferred = {
+                            blockStart: start,
+                            blockEnd: end,
+                            wordFrom,
+                            wordTo,
+                          };
+                        }
+                      );
                     });
                     if (newDecos.length > 0) {
                       set = set.add(tr.doc, newDecos);
@@ -417,8 +548,10 @@ export const SpellCheckDecoration = Extension.create({
                   }
                 });
               }
+              deferredSpellRange = nextDeferred;
               return set;
             } catch {
+              deferredSpellRange = null;
               return oldState.map(tr.mapping, tr.doc);
             }
           },
@@ -427,6 +560,19 @@ export const SpellCheckDecoration = Extension.create({
           decorations(state) {
             if (!isSpellCheckActive()) return DecorationSet.empty;
             return spellCheckPluginKey.getState(state) || DecorationSet.empty;
+          },
+          handleDOMEvents: {
+            blur(view) {
+              if (deferredSpellRange && isSpellCheckActive()) {
+                view.dispatch(
+                  view.state.tr
+                    .setMeta("addToHistory", false)
+                    .setMeta("isSync", true)
+                    .setMeta(spellCheckPluginKey, { flushDeferred: true })
+                );
+              }
+              return false;
+            },
           },
         },
       }),
@@ -794,7 +940,12 @@ export const WrongLanguageSuggestion = Extension.create<WrongLanguageSuggestionO
 
                   return span;
                 },
-                { side: 1, key: "luno-ghost-suggestion" }
+                {
+                  side: 1,
+                  ignoreSelection: true,
+                  stopEvent: () => true,
+                  key: `luno-ghost-suggestion-${replacement}`,
+                }
               );
 
               return DecorationSet.create(state.doc, [widget]);

@@ -1,7 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 import { Editor as TiptapEditor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { CustomParagraph, noteEditorStateMap, closedNoteIds, SpellCheckDecoration, spellCheckPluginKey, setGlobalSpellCheckEnabled, expandThaiAnomalyCluster } from "@/components/Editor";
+import {
+  CustomParagraph,
+  noteEditorStateMap,
+  closedNoteIds,
+  SpellCheckDecoration,
+  spellCheckPluginKey,
+  setGlobalSpellCheckEnabled,
+  expandThaiAnomalyCluster,
+  HeadingToggle,
+  headingTogglePluginKey,
+} from "@/components/Editor";
+import {
+  HashtagDecoration,
+  WrongLanguageSuggestion,
+  LivePreview,
+} from "@/components/editor/extensions/editorExtensions";
 
 describe("Editor Fast Typing & Rapid Input Stability", () => {
   it("processes rapid successive typing transactions without dropping characters", () => {
@@ -348,6 +363,124 @@ describe("Editor Fast Typing & Rapid Input Stability", () => {
     noteEditorStateMap.delete("note-spell-toggle-test");
     editorA.destroy();
     editorB.destroy();
+  });
+
+  it("never resets cursor to the front when typing 3-4+ Thai or English characters in Headings (H1-H6) with SpellCheck, HeadingToggle, WrongLanguageSuggestion, and LivePreview active", () => {
+    setGlobalSpellCheckEnabled(true);
+
+    const editor = new TiptapEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+        HashtagDecoration,
+        SpellCheckDecoration.configure({ enabled: true }),
+        WrongLanguageSuggestion.configure({ enabled: true }),
+        HeadingToggle.configure({ enabled: true }),
+        LivePreview.configure({ enabled: true, hasTitleH1: true }),
+      ],
+      content: "<h1></h1><h2></h2><h3></h3><p></p>",
+    });
+
+    // 1. Type character-by-character in Document Title H1 (pos 1)
+    editor.commands.setTextSelection(1);
+    const titleSequence = "หัวข้อการทดสอบระบบ";
+    for (let i = 0; i < titleSequence.length; i++) {
+      const prevFrom = editor.state.selection.from;
+      editor.view.dispatch(editor.state.tr.insertText(titleSequence[i], prevFrom, prevFrom));
+      expect(editor.state.selection.from).toBe(prevFrom + 1);
+      expect(editor.state.doc.firstChild?.textContent).toBe(titleSequence.slice(0, i + 1));
+    }
+
+    // 2. Type character-by-character in Body H2 (with HeadingToggle widget at start of H2 + LivePreview + SpellCheck)
+    let h2Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "heading" && node.attrs.level === 2) {
+        h2Pos = pos;
+        return false;
+      }
+      return true;
+    });
+    expect(h2Pos).toBeGreaterThan(0);
+
+    editor.commands.setTextSelection(h2Pos + 1);
+    const h2Sequence = "สวัสดีครับ speling หัวข้อย่อย";
+    for (let i = 0; i < h2Sequence.length; i++) {
+      const prevFrom = editor.state.selection.from;
+      editor.view.dispatch(editor.state.tr.insertText(h2Sequence[i], prevFrom, prevFrom));
+      expect(editor.state.selection.from).toBe(prevFrom + 1);
+    }
+
+    // While cursor is at the very end of the last word, any previous completed misspelled word ("speling") is underlined
+    const decosAfterSpace = spellCheckPluginKey.getState(editor.state).find();
+    expect(decosAfterSpace.some((d: any) => d.spec?.["data-spell-word"] === "speling")).toBe(true);
+
+    // 3. Verify HeadingToggle preserves WidgetType identity across single-character inline typing in H3
+    let h3Pos = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "heading" && node.attrs.level === 3) {
+        h3Pos = pos;
+        return false;
+      }
+      return true;
+    });
+    expect(h3Pos).toBeGreaterThan(0);
+    editor.commands.setTextSelection(h3Pos + 1);
+
+    const h3Text = "Heading Three Test";
+    let firstWidgetType: any = null;
+    for (let i = 0; i < h3Text.length; i++) {
+      const prevFrom = editor.state.selection.from;
+      editor.view.dispatch(editor.state.tr.insertText(h3Text[i], prevFrom, prevFrom));
+      expect(editor.state.selection.from).toBe(prevFrom + 1);
+
+      const htState = headingTogglePluginKey.getState(editor.state);
+      const widgets = htState?.decorations.find() || [];
+      const h3Widget = widgets.find((w: any) => w.spec?.key === "heading-toggle-L3-open");
+      expect(h3Widget).toBeDefined();
+      if (!firstWidgetType) {
+        firstWidgetType = (h3Widget as any).type;
+      } else {
+        expect((h3Widget as any).type).toBe(firstWidgetType);
+      }
+    }
+
+    setGlobalSpellCheckEnabled(null);
+    editor.destroy();
+  });
+
+  it("defers spellcheck inline decoration on the active word being typed and applies it once cursor leaves the word", () => {
+    setGlobalSpellCheckEnabled(true);
+
+    const editor = new TiptapEditor({
+      extensions: [
+        StarterKit.configure({ paragraph: false }),
+        CustomParagraph,
+        SpellCheckDecoration.configure({ enabled: true }),
+        HeadingToggle.configure({ enabled: true }),
+      ],
+      content: "<h1>Title</h1><h2></h2><p></p>",
+    });
+
+    // Place cursor inside H2 (pos 8)
+    editor.commands.setTextSelection(8);
+    const typoWord = "speling";
+    for (let i = 0; i < typoWord.length; i++) {
+      const pos = editor.state.selection.from;
+      editor.view.dispatch(editor.state.tr.insertText(typoWord[i], pos, pos));
+      // While typing character-by-character (including at 3-4 characters), active word under cursor is NOT wrapped in .luno-spell-error
+      const activeDecos = spellCheckPluginKey.getState(editor.state).find();
+      expect(activeDecos.length).toBe(0);
+    }
+
+    // Once user types Space or moves cursor outside the word, the completed misspelled word is decorated
+    const endPos = editor.state.selection.from;
+    editor.view.dispatch(editor.state.tr.insertText(" ", endPos, endPos));
+    const decosAfterWord = spellCheckPluginKey.getState(editor.state).find();
+    expect(decosAfterWord.length).toBe(1);
+    expect(decosAfterWord[0].spec?.["data-spell-word"]).toBe("speling");
+
+    setGlobalSpellCheckEnabled(null);
+    editor.destroy();
   });
 });
 

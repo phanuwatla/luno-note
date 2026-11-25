@@ -95,11 +95,13 @@ describe("Security & Data Integrity Regression Guards", () => {
       userName: "Alice",
       geminiApiKey: "AIza-secret-key",
       googleDriveClientId: "client-id-secret",
+      ollamaBaseUrl: "http://192.168.1.50:11434",
     } as any);
 
     expect((payload as any).userName).toBeUndefined();
     expect((payload as any).geminiApiKey).toBeUndefined();
     expect((payload as any).googleDriveClientId).toBeUndefined();
+    expect((payload as any).ollamaBaseUrl).toBeUndefined();
     expect(payload.theme).toBe("emerald");
   });
 
@@ -166,5 +168,23 @@ describe("Security & Data Integrity Regression Guards", () => {
     const mainTsxPath = path.resolve(process.cwd(), "src/main.tsx");
     const mainTsx = fs.readFileSync(mainTsxPath, "utf8");
     expect(mainTsx).not.toContain("mammoth.browser.min.js");
+  });
+
+  it("LN-TEST-01: package.json retains required development, test, and Electron build scripts", () => {
+    const pkgPath = path.resolve(process.cwd(), "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+
+    expect(pkg.scripts).toBeDefined();
+    expect(pkg.scripts.dev).toBe("vite");
+    expect(pkg.scripts.build).toBe("vite build");
+    expect(pkg.scripts.test).toBe("vitest run");
+    expect(pkg.scripts["helper:build"]).toContain("scripts/build-fix-language-helper.mjs");
+    expect(pkg.scripts["electron:dev"]).toContain("concurrently");
+    expect(pkg.scripts["electron:dev"]).toContain("electron .");
+    expect(pkg.scripts["electron:build"]).toContain("electron-builder");
+    expect(pkg.build?.appId).toBe("com.luno.note");
+    expect(pkg.devDependencies?.electron).toBeDefined();
+    expect(pkg.devDependencies?.vite).toBeDefined();
+    expect(pkg.devDependencies?.vitest).toBeDefined();
   });
 });
