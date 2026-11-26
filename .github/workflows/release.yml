@@ -20,11 +20,17 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Type Check
+        run: npx tsc --noEmit
+
+      - name: Build Native Fix-Language Helper
+        run: npm run helper:build
 
       - name: Build Web App
         env:
@@ -44,8 +50,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f release-notes.md ]; then
-            gh release edit ${{ github.ref_name }} --draft=false --title "Luno Note ${{ github.ref_name }}" --notes-file release-notes.md || true
+            TAG="${{ github.ref_name }}"
+            TAG="${TAG:-v$(node -p 'require("./package.json").version')}"
+            export TAG
+            node -e '
+              const fs = require("fs");
+              const tag = process.env.TAG || "";
+              const raw = fs.readFileSync("release-notes.md", "utf8");
+              const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const re = new RegExp(`## Release Notes - Luno Note ${escaped}[\\s\\S]*?(?=\\r?\\n---\\r?\\n|$)`);
+              const match = raw.match(re);
+              const section = match ? match[0].trim() : raw.split(/\r?\n---\r?\n/)[0].trim();
+              fs.writeFileSync(".release-notes-extracted.md", section + "\n");
+            '
+            gh release edit "$TAG" --draft=false --title "Luno Note $TAG" --notes-file .release-notes-extracted.md || true
+            rm -f .release-notes-extracted.md
           else
-            gh release edit ${{ github.ref_name }} --draft=false || true
+            gh release edit "${{ github.ref_name }}" --draft=false || true
           fi
         shell: bash
